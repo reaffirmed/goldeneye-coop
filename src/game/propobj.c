@@ -10390,6 +10390,16 @@ void objHit(ShotData *shotdata, BulletHit *hit)
 #endif
 
     bullet_spark_create(&pos, 1, 26.0f, rootprop->stan->room);
+#ifndef TARGET_N64
+    if (hit->countsAsPenetration != 0)
+    {
+        coopLookShotObj(hit->prop, &pos, rootprop->stan->room, hit->hit.texturenum, FALSE);
+    }
+    else
+    {
+        coopLookShotObj(hit->prop, &pos, rootprop->stan->room, -1, TRUE);
+    }
+#endif
 
     if ((objIsHealthy(obj) && objIsMortal(obj)) && (hit->countsAsPenetration != 0))
     {

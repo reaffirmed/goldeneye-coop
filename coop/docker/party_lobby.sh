@@ -18,5 +18,8 @@ for i in $(seq 1 $N); do
     sleep 2
 done
 prev=0
-for t in ${SHOTS:-30 70}; do sleep $((t - prev)); prev=$t; for i in $(seq 1 $N); do DISPLAY=:$i import -window root /out/p${i}_$t.png; done; done
+# BURST=<t>:<n> instead takes n back-to-back shots of p1 at t (p1_<t>_<k>.png),
+# to catch a muzzle flash or tracer
+for t in ${SHOTS:-30 70}; do sleep $((t - prev)); prev=$t; for i in $(seq 1 $N); do DISPLAY=:$i import -window root /out/p${i}_$t.png; done
+    if [ "${BURST%%:*}" = "$t" ]; then for k in $(seq 1 ${BURST##*:}); do DISPLAY=:1 import -window root /out/p1_${t}_$k.png; done; fi; done
 while pgrep -x ProjectMidas >/dev/null; do sleep 1; done; pkill Xvfb; exit 0

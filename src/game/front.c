@@ -8834,15 +8834,16 @@ extern int atoi(const char *);
 extern void portConLogf(const char *fmt, ...);
 
 enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLROW_CANCEL,
-       CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE, CLROW_FRIENDLYFIRE };
-#define COOP_LOBBY_ROWS     20
+       CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE, CLROW_FRIENDLYFIRE,
+       CLROW_CHARACTER };
+#define COOP_LOBBY_ROWS     22
 #define COOP_LOBBY_X        PORT_SHEET_LABEL_X
 #define COOP_LOBBY_VALUE_X  0xFA
 #define COOP_LOBBY_Y0       PORT_SHEET_ROW_Y0
 #define COOP_LOBBY_PITCH    PORT_SHEET_ROW_PITCH
 #define COOP_LOBBY_LABEL_W  (COOP_LOBBY_VALUE_X - COOP_LOBBY_X - 6)
 #define COOP_LOBBY_COL_OK   0x006000FF  /* Ready: dark green ink */
-struct CoopLobbyRow { s32 kind; s32 arg; s32 dim; s32 colour; char label[48]; char value[24]; };
+struct CoopLobbyRow { s32 kind; s32 arg; s32 dim; s32 colour; s32 indent; char label[48]; char value[24]; };
 static struct CoopLobbyRow coop_lobby_rows[COOP_LOBBY_ROWS];
 static s32 coop_lobby_nrows;
 static s32 coop_lobby_hot = -1;
@@ -8891,6 +8892,7 @@ static struct CoopLobbyRow *coopLobbyAdd(s32 kind, s32 arg, const char *label, c
     r->arg = arg;
     r->dim = FALSE;
     r->colour = 0xFF;
+    r->indent = 0;
     snprintf(r->label, sizeof(r->label), "%s", label);
     snprintf(r->value, sizeof(r->value), "%s", value);
     return r;
@@ -8920,6 +8922,13 @@ static void coopLobbyBuild(void)
     {
         coopLobbyAdd(CLROW_HOST, 0, "Host a Game\n", "");
         coopLobbyAdd(CLROW_JOINANY, 0, "Join a Friend's Game\n", "");
+        coopCharacterName(coopCharacter(), name, sizeof(name));
+        coopLobbyAdd(CLROW_HEAD, 0, "Your Character\n", "");
+        r = coopLobbyAdd(CLROW_CHARACTER, 0, name, "Change\n");
+        if (r != NULL)
+        {
+            r->indent = 0xC;
+        }
         coopLobbyAdd(CLROW_HEAD, 0, "Friends Online\n", "");
         for (i = 0; i < coop_lobby_nfriends && coop_lobby_nrows < COOP_LOBBY_ROWS; i++)
         {
@@ -8960,6 +8969,18 @@ static void coopLobbyBuild(void)
             if (r != NULL && i != 0 && coopLobbyPlayerReady(i))
             {
                 r->colour = COOP_LOBBY_COL_OK;
+            }
+            /* under each name, who they play as; ours is ours to change */
+            coopCharacterName(coopPlayerCharacter(i), name, sizeof(name));
+            r = coopLobbyAdd((i == coopLobbySelfPlayer()) ? CLROW_CHARACTER : CLROW_TEXT, 0, name,
+                             (i == coopLobbySelfPlayer()) ? "Change\n" : "");
+            if (r != NULL)
+            {
+                r->indent = 0xC;
+                if (i != coopLobbySelfPlayer())
+                {
+                    r->colour = PORT_SHEET_COL_DIM;
+                }
             }
         }
     }
@@ -9113,6 +9134,9 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
             break;
         case CLROW_DIFFICULTY:
             coopSetSetting(COOPSET_DIFFICULTY, (coopSetting(COOPSET_DIFFICULTY) + 1) % coopDifficultyCount());
+            break;
+        case CLROW_CHARACTER:
+            coopSetCharacter(coopCharacterStep(coopCharacter(), 1));
             break;
         case CLROW_FRIENDLYFIRE:
             coopSetSetting(COOPSET_FRIENDLYFIRE, !coopSetting(COOPSET_FRIENDLYFIRE));
@@ -9298,7 +9322,14 @@ void interface_menu1D_cooplobby(void)
                 break;
             }
         }
-        if (coop_lobby_hot >= 0 && joyGetButtonsPressedThisFrame(PLAYER_1, START_BUTTON|Z_TRIG|A_BUTTON))
+        if (coop_lobby_hot >= 0 && coop_lobby_rows[coop_lobby_hot].kind == CLROW_CHARACTER
+            && joyGetButtonsPressedThisFrame(PLAYER_1, L_TRIG|R_TRIG|L_JPAD|R_JPAD))
+        {   /* the character row: L / R (or the d-pad) step back and forth, A forward */
+            sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE_SFX, 0);
+            coopSetCharacter(coopCharacterStep(coopCharacter(),
+                                               joyGetButtonsPressedThisFrame(PLAYER_1, L_TRIG|L_JPAD) ? -1 : 1));
+        }
+        else if (coop_lobby_hot >= 0 && joyGetButtonsPressedThisFrame(PLAYER_1, START_BUTTON|Z_TRIG|A_BUTTON))
         {
             sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE_SFX, 0);
             coopLobbyDo(&coop_lobby_rows[coop_lobby_hot]);
@@ -9345,7 +9376,7 @@ Gfx *constructor_menu1D_cooplobby(Gfx *DL)
     {
         const struct CoopLobbyRow *r = &coop_lobby_rows[i];
         const char *label = portSheetFitText(r->label, COOP_LOBBY_LABEL_W);
-        s32 lx = COOP_LOBBY_X + ((r->kind == CLROW_HEAD) ? 0 : 8);
+        s32 lx = COOP_LOBBY_X + ((r->kind == CLROW_HEAD) ? 0 : 8) + r->indent;
         s32 colour = r->dim ? PORT_SHEET_COL_DIM : r->colour;
 
         if (r->kind == CLROW_HEAD)

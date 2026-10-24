@@ -940,6 +940,9 @@ void chraiDefaultWeaponFireHandler(s32 hand)
     s32 k;
     s32 i;
     u8 rooms[2];
+#ifndef TARGET_N64
+    s16 coopimpact = -1;    /* co-op: the bullet hole's type, for the partners' games */
+#endif
 
     hitbgstan = 0;
     hittile = 0;
@@ -970,6 +973,10 @@ void chraiDefaultWeaponFireHandler(s32 hand)
     shotdata.dir.z = shotdata.viewDir.z;
 
     mtx4RotateVecInPlace(currentPlayerGetViewToWorldMtxf(), &shotdata.dir);
+
+#ifndef TARGET_N64
+    coopLookShotBegin(hand, shotdata.weapon, &shotdata.gunpos, &shotdata.dir); /* co-op: partners see this shot */
+#endif
 
     dest.x = (shotdata.dir.x * M_U16_MAX_VALUE_F) + shotdata.gunpos.x;
     dest.y = (shotdata.dir.y * M_U16_MAX_VALUE_F) + shotdata.gunpos.y;
@@ -1255,6 +1262,9 @@ void chraiDefaultWeaponFireHandler(s32 hand)
                 {
                     pad = randomGetNext() % impact_sounds->thing2_len;
                     explosionCreateBulletImpact(&visiblehitpos, &bghit.normal, impact_sounds->thing2[pad], bestroom, 0, -1, 0);
+#ifndef TARGET_N64
+                    coopimpact = impact_sounds->thing2[pad];
+#endif
                 }
 
                 if (check_if_imageID_is_light(bghit.texturenum))
@@ -1275,6 +1285,9 @@ void chraiDefaultWeaponFireHandler(s32 hand)
 
         if (finalpos != 0)
         {
+#ifndef TARGET_N64
+            coopLookShotBg(finalpos, gotbghit ? &bghit.normal : NULL, coopimpact, bestroom, besttexture, createSpark);
+#endif
             if (createSpark)
             {
                 recall_joy2_hits_edit_flag(shotdata.weapon, finalpos, besttexture);
@@ -1307,6 +1320,9 @@ void chraiDefaultWeaponFireHandler(s32 hand)
             }
         }
     }
+#ifndef TARGET_N64
+    coopLookShotEnd();
+#endif
 }
 
 

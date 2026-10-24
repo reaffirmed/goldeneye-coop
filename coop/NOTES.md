@@ -242,3 +242,40 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscen
   chest every 2 s; GE_COOP_FRIENDLYFIRE=0|1. Verified with two copies: Off,
   23 shots each way, no damage, no crash; On, the partner dies, respawns, no
   crash.
+
+## Partners' guns, shots and characters (2026-10-24, COOP_VERSION 5)
+
+- src/game/coop_look.c. CoopStatePkt carries a CoopLook: both hands'
+  weapons, the muzzle flash bits (hands[h].field_87D), crouch, speeds, aim
+  pitch/yaw (field_2A08/2A0C), the character and a ring of the last 4 shots
+  with a sequence number.
+- Puppet pose: a port of bondview2.c playerTick's remote MP Bond block
+  (firing_animation_groups, chrlvUpdateAimendbackShoulders,
+  act_bondmulti.unk2c = firingtable). Guns: chrGiveWeapon with
+  getPropForHeldItem, removed with chrSetWeaponFlag4 and given back next tick.
+  A dead puppet plays a Bond death anim, unarmed.
+- Shots: chraiDefaultWeaponFireHandler calls coopLookShotBegin (miss at 3000
+  along the dir), then Bg/Chr/Obj hooks (chrprop.c, chr.c, propobj.c) record
+  what it hit; End pushes it. The watching game plays gun sound
+  (sub_GAME_7F02BFE4), tracer (CapBeamLengthAndDecideIfRendered from the
+  muzzle), and by kind: bullet hole + sound + spark, flesh sound + puff (not
+  when the hit is our own Bond), object/glass. Nothing is damaged. The bullet
+  loop skips HIT_GUN on a partner's gun (coopPropIsPartner).
+- Characters: 0 "Mission Bond", 1+k = mp_chr_setup[k]. Lobby rows under each
+  name (CLROW_CHARACTER for ours; A/Z forward, L/R step), "Your Character"
+  on the idle screen. Saved in coop_character.txt; hello and roster carry it;
+  puppets rebuild when body/head change.
+- Name tags (coop_hud.c): 0.55 scale at 3 m to 0.32 at 30 m via the new
+  gfx_pc G_NOOP tag 0x5A (scale for the next 0x58 bracket); hidden under
+  1.5 m, fade in by 3 m, fade to alpha 0x60 between 40 and 70 m.
+- Bug found on the way: fabsf with no prototype under -ffreestanding -w is
+  an int call, so each call left a value on the x87 stack; after 8, tanf in
+  lvlRender gave NaN, fovy went NaN and the whole view drew in fog colour.
+  Any float libm call in game code needs a prototype (the build hides the
+  warning; compile with -Wimplicit-function-declaration to check).
+- Harness: GE_COOP_CHAR=<mp index> (not saved), GE_COOP_TESTFIRE=<item>:<s>[:<len>]
+  (draws and holds fire, pulsed), GE_COOP_TESTLOOK=<s> (step 4 m from the
+  partner and face them), party_lobby.sh BURST=<t>:<n>. Mission ticks run
+  slower than wall time under Xvfb, so give the shots time. Verified: host
+  sees Natalya with PP7 then KF7, muzzle flash and wall sparks from her
+  shots; 3 and 4 player lobbies list each character.

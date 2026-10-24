@@ -160,4 +160,74 @@ const char *coopStatsName(s32 col);
 void coopCampaignMissionEnd(void);
 s32  coopCampaignNext(s32 *stage, s32 *difficulty, char *label, s32 labelcap);
 
+/* how partners look (coop_look.c): the character they picked in the lobby,
+ * the guns in their hands with the multiplayer body animations, and their
+ * shots (muzzle flash, gun sound, tracer, impact) on everyone else's game.
+ * Each game describes its own Bond in a CoopLook carried by every STATE. */
+#define COOP_SHOTS_KEPT 4   /* the newest shots in each STATE: 4 ticks of loss before one is missed */
+enum { COOPSHOT_MISS, COOPSHOT_BG, COOPSHOT_CHR, COOPSHOT_OBJ };
+#define COOPSHOT_LEFT   0x80    /* CoopShot.kind: the left hand's gun */
+#define COOPSHOTF_SPARK 1       /* CoopShot.flags: a spark and ricochet where it hit */
+#define COOPSHOTF_GLASS 2       /* the glass did not break: the glass sound */
+typedef struct
+{
+    f32 pos[3];     /* where the bullet stopped, on the surface */
+    s8 normal[3];   /* that surface's (x 127), for the bullet hole */
+    u8 kind;        /* COOPSHOT_*, | COOPSHOT_LEFT */
+    s16 room;
+    s16 arg;        /* BG / OBJ: the texture, -1 none; CHR: the chrnum hit */
+    s16 impact;     /* BG: the bullet hole's impact type, -1 none */
+    s8 weapon;
+    u8 flags;       /* COOPSHOTF_* */
+} CoopShot;
+
+typedef struct
+{
+    s8 weapon[2];       /* each hand's ITEM_IDS (right, left), ITEM_UNARMED when empty */
+    u8 flash;           /* the muzzle flash shows: bit 0 right, bit 1 left */
+    u8 crouch;          /* playerGetCrouchPos: 0 squat, 1 crouched, 2 standing */
+    f32 speedforwards;  /* the player's own movement, for the MP body animations */
+    f32 speedsideways;
+    f32 speedtheta;
+    f32 aimpitch;       /* the gun's aim up and down (field_2A08), radians */
+    f32 aimyaw;         /* and across (field_2A0C) */
+    u8 headanim;        /* the player's run flag (headanim): run animation past 0.4 */
+    u8 shotseq;         /* the number of shot[0], the newest; shot[i] is shotseq - i */
+    u8 character;       /* the lobby's pick (coopCharacter) */
+    u8 pad;
+    CoopShot shot[COOP_SHOTS_KEPT];
+} CoopLook;
+
+/* what a puppet shows: guns given, shots played, the MP animation state */
+typedef struct
+{
+    s8 held[2];         /* the item each hand's gun is, ITEM_UNARMED none */
+    u8 shotseq;         /* the newest shot already played */
+    u8 seqvalid;
+    s32 anim;           /* the animation set (as bondview2.c players_cur_animation) */
+    f32 rate;
+    f32 lean;           /* the sidestep lean (bondview2.c field_1280) */
+} CoopLookPuppet;
+
+void coopLookFill(CoopLook *out);
+void coopLookReset(CoopLookPuppet *lp);
+void coopLookPuppetTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look, s32 dead, s32 self);
+void coopLookShotBegin(s32 hand, s32 weapon, coord3d *from, coord3d *dir); /* chrprop.c chraiDefaultWeaponFireHandler */
+void coopLookShotBg(coord3d *pos, coord3d *normal, s32 impact, s32 room, s32 texture, s32 spark);
+void coopLookShotChr(PropRecord *prop, coord3d *pos);           /* chr.c chrHandleBulletHit */
+void coopLookShotObj(PropRecord *prop, coord3d *pos, s32 room, s32 texture, s32 glass); /* propobj.c objHit */
+void coopLookShotEnd(void);
+s32  coopPropIsPartner(PropRecord *prop);
+void coopLookTestTick(s32 missionticks);   /* harness: GE_COOP_TESTFIRE, GE_COOP_TESTLOOK */
+u16  coopLookTestButtons(u16 buttons);
+
+/* the lobby's character pick: 0 the mission's own Bond, else 1 + an
+ * mp_chr_setup index (the multiplayer roster) */
+s32  coopCharacter(void);
+void coopSetCharacter(s32 c);
+s32  coopCharacterStep(s32 c, s32 dir);     /* the next (dir 1) or previous (-1) in the MP pickers' order */
+void coopCharacterName(s32 c, char *out, s32 cap);  /* with "\n" */
+s32  coopCharacterBody(s32 c, s32 *head);   /* the body and head, -1 for the mission's Bond */
+s32  coopPlayerCharacter(s32 p);            /* player p's pick, as the lobby knows it */
+
 #endif

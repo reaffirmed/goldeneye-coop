@@ -457,6 +457,9 @@ static bool s_RectGlyphBorder = false;
  * as on a 640x480 canvas. 0x58FFFFFF ends the bracket. */
 static bool s_GeHudScale = false;
 static float s_GeHudPivotX = 0.f, s_GeHudPivotY = 0.f;
+/* coop_hud.c: G_NOOP tag 0x5A sets the NEXT bracket's scale (low 16 bits, x/256);
+ * the bracket's end puts it back to the half size of hud_scale */
+static float s_GeHudScaleK = 0.5f;
 /* bondwalk2.c portRectPreciseTag: G_NOOP tag 0x59 gives the NEXT rect sub-quarter
  * edge fractions (1/64 of a U10.2 unit: ulx, uly, lrx, lry) and no lr round-up,
  * so the crosshair is not snapped to the 10.2 grid. */
@@ -5763,10 +5766,10 @@ static void gfx_draw_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lr
         lryf += s_GeRectFrac[3];
     }
     if (s_GeHudScale) {
-        ulxf = s_GeHudPivotX + (ulxf - s_GeHudPivotX) * 0.5f;
-        ulyf = s_GeHudPivotY + (ulyf - s_GeHudPivotY) * 0.5f;
-        lrxf = s_GeHudPivotX + (lrxf - s_GeHudPivotX) * 0.5f;
-        lryf = s_GeHudPivotY + (lryf - s_GeHudPivotY) * 0.5f;
+        ulxf = s_GeHudPivotX + (ulxf - s_GeHudPivotX) * s_GeHudScaleK;
+        ulyf = s_GeHudPivotY + (ulyf - s_GeHudPivotY) * s_GeHudScaleK;
+        lrxf = s_GeHudPivotX + (lrxf - s_GeHudPivotX) * s_GeHudScaleK;
+        lryf = s_GeHudPivotY + (lryf - s_GeHudPivotY) * s_GeHudScaleK;
     }
 
     ulxf = ulxf / (4.0f * HALF_SCREEN_WIDTH) - 1.0f;
@@ -7242,6 +7245,12 @@ static void gfx_run_dl(Gfx* cmd) {
                     s_GeHudScale = (cmd->words.w1 & 0x00FFFFFFu) != 0x00FFFFFFu;
                     s_GeHudPivotX = (float) ((cmd->words.w1 >> 12) & 0xFFFu);
                     s_GeHudPivotY = (float) (cmd->words.w1 & 0xFFFu);
+                    if (!s_GeHudScale) {
+                        s_GeHudScaleK = 0.5f;
+                    }
+                } else if ((cmd->words.w1 >> 24) == 0x5Au) {
+                    /* the next HUD bracket's own scale (coop_hud.c name tags) */
+                    s_GeHudScaleK = (float) (cmd->words.w1 & 0xFFFFu) * (1.0f / 256.0f);
                 } else if ((cmd->words.w1 >> 24) == 0x59u) {
                     /* the next rect's edge fractions (bondwalk2.c portRectPreciseTag) */
                     for (int i = 0; i < 4; i++) {
@@ -7829,6 +7838,7 @@ extern "C" void gfx_run(Gfx* commands) {
     ++num_dls;
     gfx_sp_reset();
     s_GeHudScale = false;   /* a bracket never outlives its frame */
+    s_GeHudScaleK = 0.5f;
     s_GeRectFracPending = false;
 
     // puts("New frame");

@@ -70,7 +70,7 @@ PropRecord *chrSpawnAtCoord(s32 bodynum, s32 headnum, coord3d *pos, StandTile *s
 extern void portConLogf(const char *fmt, ...);
 
 #define COOP_MAGIC   0x50434547u /* "GECP" */
-#define COOP_VERSION 4 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players */
+#define COOP_VERSION 5 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters */
 
 enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7 };
 
@@ -93,6 +93,7 @@ typedef struct
     u8 player;      /* whose Bond (the host stamps a joiner's before relaying it) */
     u8 pad;
     u16 calm;       /* ticks since the sender was last in a fight (capped) */
+    CoopLook look;  /* guns, movement, shots and character (coop_look.c) */
 } CoopStatePkt;
 
 #define COOP_ALL 0xFF   /* CoopEvent.to: everyone */
@@ -105,7 +106,7 @@ typedef struct
     u8 present;
     u8 ready;
     u8 inlobby;
-    u8 pad;
+    u8 character;   /* the lobby's character pick (coopCharacter) */
 } CoopRosterEnt;
 
 /* Where each game is, both ways once a second, menus included: the joiner
@@ -121,7 +122,7 @@ typedef struct
     u8 ready;           /* the lobby screen's Ready */
     u8 inlobby;         /* on the lobby screen */
     u8 downrule;        /* host: the lobby's down rule */
-    u8 pad;
+    u8 character;       /* the sender's character pick (coopCharacter) */
     u32 session;        /* as in CoopEventsPkt */
     u8 settings[COOPSET_MAX];   /* host: the lobby's other settings (coopSetting) */
     u32 missionticks;   /* how long the sender has been in this mission */
@@ -257,6 +258,7 @@ typedef struct
     s32 puppetAnim;
     s32 puppetGhost;
     s32 resync;         /* host: it restarted; resend doors when it is back in */
+    CoopLookPuppet look;    /* the puppet's guns, animation and shots played (coop_look.c) */
 } CoopRemote;
 static CoopRemote sR[COOP_MAX_PLAYERS];
 
@@ -301,7 +303,6 @@ static u8 sChrFireSeen[COOP_MAX_CHRS][2]; /* host: firecount at the last snapsho
 static u8 sChrFiring[COOP_MAX_CHRS];      /* client: GSF_FIRE_* from the last snapshot */
 static u32 sLastSnapTick;
 
-enum { PANIM_IDLE, PANIM_WALK, PANIM_RUN };
 
 static s32 coopInMission(void);
 static void coopApplyGuard(CoopGuardEnt *e);
@@ -330,6 +331,13 @@ static void coopPuppetRemove(CoopRemote *r);
 
 static s32 coopLocalBody(void)
 {
+    s32 head;
+    s32 body = coopCharacterBody(coopCharacter(), &head);
+
+    if (body >= 0)
+    {
+        return body;    /* the lobby's pick */
+    }
     switch (g_CurrentPlayer->bondtype)
     {
         case CUFF_BOILER: return BODY_Special_Operations_Uniform;
@@ -445,6 +453,8 @@ static void coopSendState(void)
     p.yaw = bondviewGetPlayerYawRadians();
     p.bodynum = coopLocalBody();
     p.headnum = HEAD_Male_Brosnan_Default;
+    coopCharacterBody(coopCharacter(), &p.headnum);
+    coopLookFill(&p.look);
     p.dead = g_CurrentPlayer->bonddead;
     p.health = g_CurrentPlayer->bondhealth;
     p.armour = g_CurrentPlayer->bondarmour;
@@ -713,46 +723,6 @@ static StandTile *coopFindStan(coord3d *pos, StandTile *from, coord3d *frompos)
     return stanFindTileBelowPos(pos, NULL, NULL);
 }
 
-static void coopPuppetSetAnim(CoopRemote *r, ChrRecord *chr, s32 which, f32 speed)
-{
-    struct ModelAnimation *anim;
-    f32 rate;
-
-    switch (which)
-    {
-        case PANIM_RUN:
-            anim = (struct ModelAnimation *) &ptr_animation_table->data[PTR_ANIM_running];
-            rate = speed / D_80030988;
-            break;
-        case PANIM_WALK:
-            anim = (struct ModelAnimation *) &ptr_animation_table->data[PTR_ANIM_walking_unarmed];
-            rate = speed / D_80030990;
-            break;
-        default:
-            anim = (struct ModelAnimation *) &ptr_animation_table->data[PTR_ANIM_idle_unarmed];
-            rate = 0.25f;
-            break;
-    }
-    if (rate > 1.0f)
-    {
-        rate = 1.0f;
-    }
-
-    if (which != r->puppetAnim)
-    {
-        modelSetAnimation(chr->model, anim, 0, 0.0f, rate, 16.0f);
-        if (which == PANIM_IDLE)
-        {
-            modelSetAnimLooping(chr->model, 0, 16.0f);
-        }
-        r->puppetAnim = which;
-    }
-    else
-    {
-        modelSetAnimSpeed(chr->model, rate, 0.0f);
-    }
-}
-
 static void coopPuppetSpawn(CoopRemote *r)
 {
     coord3d pos;
@@ -792,7 +762,8 @@ static void coopPuppetSpawn(CoopRemote *r)
     r->puppetPrev = pos;
     r->puppetAnim = -1;
     r->puppetGhost = 1;
-    coopPuppetSetAnim(r, prop->chr, PANIM_IDLE, 0.0f);
+    coopLookReset(&r->look);
+    coopLookPuppetTick(&r->look, prop->chr, &r->st.look, r->st.dead, COOP_PUPPET_CHRNUM + coopSelf());
     portConLogf("ge: coop: puppet for player %d spawned at %.0f %.0f %.0f\n", r->st.player + 1, pos.f[0], pos.f[1], pos.f[2]);
     hudmsgBottomShow("A partner is here.\n");
 }
@@ -802,7 +773,6 @@ static void coopPuppetUpdate(CoopRemote *r)
     ChrRecord *chr = r->puppet->chr;
     coord3d pos;
     StandTile *stan;
-    f32 dx, dz, speed;
 
     pos.f[0] = r->st.pos[0];
     pos.f[1] = r->st.pos[1];
@@ -813,10 +783,6 @@ static void coopPuppetUpdate(CoopRemote *r)
     {
         return;
     }
-
-    dx = pos.f[0] - r->puppetPrev.f[0];
-    dz = pos.f[2] - r->puppetPrev.f[2];
-    speed = sqrtf(dx * dx + dz * dz) / (g_ClockTimer > 0 ? (f32) g_ClockTimer : 1.0f);
     r->puppetPrev = pos;
 
     r->puppet->stan = stan;
@@ -826,18 +792,8 @@ static void coopPuppetUpdate(CoopRemote *r)
     sub_GAME_7F01FC10(chr->model, &r->puppet->pos, &r->puppet->pos, &chr->ground);
     chrDetectRooms(chr);
 
-    if (speed > 4.0f)
-    {
-        coopPuppetSetAnim(r, chr, PANIM_RUN, speed);
-    }
-    else if (speed > 0.5f)
-    {
-        coopPuppetSetAnim(r, chr, PANIM_WALK, speed);
-    }
-    else
-    {
-        coopPuppetSetAnim(r, chr, PANIM_IDLE, 0.0f);
-    }
+    /* the guns in their hands, the MP body animations, their shots (coop_look.c) */
+    coopLookPuppetTick(&r->look, chr, &r->st.look, r->st.dead, COOP_PUPPET_CHRNUM + coopSelf());
 }
 
 /* Both Bonds start on the same pad, so the puppet stays non-solid until the
@@ -856,6 +812,15 @@ static void coopPuppetUpdateGhost(CoopRemote *r)
     else if (d2 > 90.0f * 90.0f)
     {
         r->puppetGhost = 0;
+    }
+    /* our camera inside their body (both start on one pad): don't draw it */
+    if (d2 < 45.0f * 45.0f)
+    {
+        r->puppet->chr->chrflags |= CHRFLAG_HIDDEN;
+    }
+    else
+    {
+        r->puppet->chr->chrflags &= ~CHRFLAG_HIDDEN;
     }
 }
 
@@ -1018,6 +983,10 @@ static void coopRemotesTick(void)
         else if (r->puppet->chr == NULL)
         {
             r->puppet = NULL; /* freed under us (stage cleanup); respawn */
+        }
+        else if (r->puppet->chr->bodynum != r->st.bodynum || r->puppet->chr->headnum != r->st.headnum)
+        {
+            coopPuppetRemove(r);    /* they picked another character: built again next tick */
         }
         else
         {
@@ -1224,6 +1193,10 @@ static void coopHarnessTick(void)
         {
             coopGiveTestPress();
         }
+    }
+    if (coopPartnerHere() && coopInMission())
+    {
+        coopLookTestTick((s32) sMissionTicks);   /* GE_COOP_TESTFIRE, GE_COOP_TESTLOOK (coop_look.c) */
     }
     if (coopNetIsHost() && coopPartnerHere())
     {   /* GE_COOP_TESTSPAWN=<chrnum>: once, at 15 s, spawn a copy of that chr next to Bond (harness only) */
@@ -2941,6 +2914,7 @@ static void coopSendHello(void)
     p.session = coopSelfSession();
     p.inlobby = (u8) sOnLobbyScreen;
     p.downrule = (u8) sDownRule;
+    p.character = (u8) coopCharacter();
     memcpy(p.settings, sSettings, sizeof(p.settings));
     p.missionticks = coopInMission() ? sMissionTicks : 0;
     if (!coopNetIsHost())
@@ -2961,6 +2935,7 @@ static void coopSendHello(void)
         snprintf(e->name, sizeof(e->name), "%s", coopPlayerName(i));
         e->ready = (i == 0) ? (u8) sLobbyReady : sChan[i - 1].hello.ready;
         e->inlobby = (i == 0) ? (u8) sOnLobbyScreen : sChan[i - 1].hello.inlobby;
+        e->character = (i == 0) ? (u8) coopCharacter() : sChan[i - 1].hello.character;
     }
     for (c = 0; c < COOP_NET_MAX_PEERS; c++)
     {
@@ -3257,6 +3232,29 @@ const char *coopPlayerName(s32 p)
     }
     snprintf(fallback[p], sizeof(fallback[p]), "Player %d", p + 1);
     return fallback[p];
+}
+
+/* player p's character pick: ours, a joiner's from its hello (host), the
+ * host's roster (joiner) */
+s32 coopPlayerCharacter(s32 p)
+{
+    s32 c;
+
+    if (p < 0 || p >= COOP_MAX_PLAYERS)
+    {
+        return 0;
+    }
+    if (p == coopSelf())
+    {
+        return coopCharacter();
+    }
+    c = coopChanOfPlayer(p);
+    return (c >= 0 && coopNetIsHost()) ? sChan[c].hello.character : sHostHello.roster[p].character;
+}
+
+s32 coopPropIsPartner(PropRecord *prop)
+{
+    return coopIsPuppet(prop);
 }
 
 /* a player's SteamID (0 off Steam or not known) */

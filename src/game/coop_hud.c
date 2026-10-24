@@ -133,6 +133,28 @@ static Gfx *coopHudBar(Gfx *gdl, s32 x, s32 y, s32 w, f32 frac, u32 colour)
     return gdl;
 }
 
+/* The name tags' size and ink: the text is drawn at full size about the
+ * point over the head and scaled there (gfx_pc.cpp's 0x5A / 0x58 tags), from
+ * COOP_TAG_NEAR_SCALE at COOP_TAG_NEAR and closer to COOP_TAG_FAR_SCALE at
+ * COOP_TAG_FAR and beyond. Right beside us the tag fades out (it would cover
+ * them); far off it fades to COOP_TAG_FAR_ALPHA but stays, to find them by. */
+#define COOP_TAG_NEAR        300.0f     /* 3 m */
+#define COOP_TAG_FAR         3000.0f    /* 30 m */
+#define COOP_TAG_NEAR_SCALE  0.55f
+#define COOP_TAG_FAR_SCALE   0.32f
+#define COOP_TAG_HIDE        150.0f     /* closer than this: no tag */
+#define COOP_TAG_FADE_IN     300.0f     /* full ink from here */
+#define COOP_TAG_FADE_FROM   4000.0f    /* and faint from here out */
+#define COOP_TAG_FADE_TO     7000.0f
+#define COOP_TAG_FAR_ALPHA   0x60
+
+static u32 coopHudWithAlpha(u32 colour, f32 a)
+{
+    u32 alpha = (u32) ((f32) (colour & 0xFF) * a + 0.5f);
+
+    return (colour & ~0xFFu) | (alpha > 0xFF ? 0xFF : alpha);
+}
+
 /* the partner's name and distance over their head, when they are in front of us */
 static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
 {
@@ -142,8 +164,9 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
     char name[40];
     char text[56];
     f32 dx, dy, dz, dist;
+    f32 k, scale, alpha;
     s32 th = 0, tw = 0;
-    s32 x, y;
+    s32 x, y, px, py;
 
     if (self == NULL || (p->dead && !p->revivable))
     {
@@ -156,7 +179,7 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
     dy = v.f[1] - self->pos.f[1];
     dz = v.f[2] - self->pos.f[2];
     dist = sqrtf(dx * dx + dy * dy + dz * dz);
-    if (dist < 150.0f && !p->dead)
+    if (dist < COOP_TAG_HIDE && !p->dead)
     {
         return gdl;   /* right beside us (or inside us, just after a respawn) */
     }
@@ -167,6 +190,27 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
     }
     transform3Dto2DCoords(&v, &s);
     s.f[0] = bondviewAimPinX(s.f[0]);
+
+    k = (dist - COOP_TAG_NEAR) / (COOP_TAG_FAR - COOP_TAG_NEAR);
+    k = (k < 0.0f) ? 0.0f : (k > 1.0f) ? 1.0f : k;
+    scale = COOP_TAG_NEAR_SCALE + (COOP_TAG_FAR_SCALE - COOP_TAG_NEAR_SCALE) * k;
+    alpha = 1.0f;
+    if (!p->dead && dist < COOP_TAG_FADE_IN)
+    {
+        alpha = (dist - COOP_TAG_HIDE) / (COOP_TAG_FADE_IN - COOP_TAG_HIDE);
+    }
+    else if (dist > COOP_TAG_FADE_FROM)
+    {
+        f32 f = (dist - COOP_TAG_FADE_FROM) / (COOP_TAG_FADE_TO - COOP_TAG_FADE_FROM);
+
+        f = (f > 1.0f) ? 1.0f : f;
+        alpha = 1.0f - f * (1.0f - COOP_TAG_FAR_ALPHA / 255.0f);
+    }
+    if (p->dead)
+    {
+        alpha = 1.0f;   /* a partner to revive: always plain to see */
+    }
+
     coopHudText(name, sizeof(name), p->name);
     name[strlen(name) - 1] = '\0';
     if (p->dead)
@@ -178,15 +222,29 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
         snprintf(text, sizeof(text), "%s %dM\n", name, (int) (dist / 100.0f + 0.5f));
     }
     textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
-    x = (s32) s.f[0] - tw / 2;
-    y = (s32) s.f[1] - th;
-    if (x < viGetViewLeft() + 2 || x + tw > viGetViewLeft() + viGetViewWidth() - 2
-        || y < viGetViewTop() + 2 || y + th > viGetViewTop() + viGetViewHeight() - 2)
+    /* laid out at full size with its bottom centre on the pivot, then scaled about it */
+    px = (s32) s.f[0];
+    py = (s32) s.f[1];
+    x = px - tw / 2;
+    y = py - th;
+    if (px - (s32) (tw * scale) / 2 < viGetViewLeft() + 2 || px + (s32) (tw * scale) / 2 > viGetViewLeft() + viGetViewWidth() - 2
+        || py - (s32) (th * scale) < viGetViewTop() + 2 || py > viGetViewTop() + viGetViewHeight() - 2)
     {
         return gdl;
     }
     gdl = microcode_constructor(gdl);
-    gdl = coopHudPrint(gdl, x, y, text, p->dead ? COOP_HUD_COL_FAIL : coopHudPlayerColour(p->player));
+    {
+        s32 x4 = px * 4, y4 = py * 4;
+
+        x4 = (x4 < 0) ? 0 : (x4 > 0xFFE) ? 0xFFE : x4;
+        y4 = (y4 < 0) ? 0 : (y4 > 0xFFE) ? 0xFFE : y4;
+        gDPNoOpTag(gdl++, 0x5A000000u | (u32) (scale * 256.0f + 0.5f));
+        gDPNoOpTag(gdl++, 0x58000000u | ((u32) x4 << 12) | (u32) y4);
+    }
+    gdl = textRenderOutlined(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic,
+                             coopHudWithAlpha(p->dead ? COOP_HUD_COL_FAIL : coopHudPlayerColour(p->player), alpha),
+                             coopHudWithAlpha(COOP_HUD_COL_SHADOW, alpha), (s32) viGetX(), viGetY(), 0, 0);
+    gDPNoOpTag(gdl++, 0x58FFFFFFu);
     return combiner_bayer_lod_perspective(gdl);
 }
 

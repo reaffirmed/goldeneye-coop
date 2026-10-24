@@ -19,6 +19,14 @@ Playing
 2. The host picks "Host a Game". Your online Steam friends are listed under
    "Invite a Friend"; pick one to invite them (or use "Steam Invite Window").
    Invite up to three friends.
+   Under "Your Character" (and under your name once you are in a lobby)
+   pick who you play as: the multiplayer cast (Bond in each outfit,
+   Natalya, Trevelyan, Xenia, Ourumov, Boris, Valentin, Mishkin, Jaws,
+   Mayday, Oddjob, Baron Samedi, the guards, scientists and the rest), or
+   "Mission Bond", Bond in the mission's own outfit. A / fire steps forward,
+   L / R (or left / right on the d-pad) step back and forth. The others see
+   your pick under your name, and you look like it on their screens. Your
+   pick is kept for next time.
 3. Each friend either accepts the Steam invite, or picks the host's name
    (marked "Join") on their own CO-OP screen, then picks "Ready Up".
 4. The host can set the rules in the lobby before starting:
@@ -53,8 +61,16 @@ Rules
   running): 1 melee, 2 pistols, 3 rifles, 4 heavy, 5 explosives, 6 mission
   items such as the covert modem, keys and the camera. Press the key again to
   move down the list and fire to take the highlighted one.
+- You see what your partners hold: their gun is in their hands (both, with
+  a pair), and they move like multiplayer Bonds, aiming up and down where
+  they look, crouching and sidestepping. When they shoot you see the muzzle
+  flash and the tracers, hear the gun, and see the bullets hit: sparks,
+  bullet holes and hit sounds on walls, puffs on whoever they hit. Only
+  what you see is copied; damage works as before.
 - Each player has a colour (yellow, cyan, pink, green) on name tags, the
   radar and the partner status at the side of the screen.
+- Name tags over partners are small, shrink with distance, fade out when a
+  partner is right beside you, and fade (but stay) when they are far away.
 
 If something goes wrong
 -----------------------
@@ -66,3 +82,4 @@ Known gaps in this build
 - Cutscene cameras follow the host's script; tell me if one looks wrong.
 - With four players the stats page cuts names to about five letters.
 - Three and four players are tested on a fake Steam only so far.
+- Everyone needs this build: it cannot play with the earlier co-op builds.
