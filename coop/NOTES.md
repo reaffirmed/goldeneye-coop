@@ -37,3 +37,22 @@ Working notes for online story co-op (Steam, Spacewar AppID 480), following the 
 - `GE_HEADLESS=ON` does not link on 1.0.2b (missing port* symbols from video/input). The GE_VIDEO Linux build links and runs.
 - `coop/docker/Dockerfile.run` adds Xvfb + 32-bit Mesa on top of the build image. `coop/docker/smoke.sh` boots Dam via GE_STAGE and screenshots the virtual display. Dam reached gameplay at ~58 fps with software GL.
 - `GE_SHOT` is listed in the env help but not implemented in this tree; screenshots come from `import -window root`.
+
+## Provenance: GoldenEye 007 Plus
+
+The owner approved (2026-10-24) porting code from GoldenEye 007 Plus
+(github.com/Joshua-1248/GoldenEye-007-Plus, an N64 mod of the same decomp with 1-4
+player split-screen campaign co-op) where it helps, improving it where possible.
+GE+ has no blanket license for its own changes, so this fork stays private.
+Every ported piece is listed here with its source file; rewritten pieces say so.
+
+| Piece | Source in GE+ | Ported or rewritten |
+| --- | --- | --- |
+| (none yet) | | |
+
+## Milestone 1 results (2026-10-24)
+
+- Two copies connected over UDP on localhost; each spawns the other's puppet Bond.
+- Verified in screenshots both ways (host sees the joiner's Bond after it walks ahead; joiner sees the host's).
+- Fixed: both Bonds start on one pad and blocked each other; the puppet is non-solid until 90 units apart.
+- Open: the first-person gun and HUD were missing in some two-copy runs; under investigation.
