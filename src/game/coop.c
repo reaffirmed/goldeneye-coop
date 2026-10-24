@@ -16,6 +16,7 @@
 #include <ultra64.h>
 #include <math.h>
 #include <string.h>
+#include <stdlib.h>
 #include <bondaicommands.h>
 #include <bondgame.h>
 #include <bondconstants.h>
@@ -38,7 +39,7 @@ extern void portConLogf(const char *fmt, ...);
 #define COOP_MAGIC   0x50434547u /* "GECP" */
 #define COOP_VERSION 1
 
-enum { COOPPKT_STATE = 1, COOPPKT_HIT = 2 };
+enum { COOPPKT_STATE = 1, COOPPKT_HIT = 2, COOPPKT_GUARDS = 3, COOPPKT_SHOTCHR = 4 };
 
 typedef struct
 {
@@ -63,6 +64,46 @@ typedef struct
     f32 damage;
     f32 angle;
 } CoopHitPkt;
+
+/* host -> client guard snapshot, one entry per chr */
+enum { GSF_HIDDEN = 1, GSF_FLIP = 2, GSF_LOOP = 4 };
+
+typedef struct
+{
+    s16 chrnum;
+    u8 flags;
+    u8 pad;
+    f32 pos[3];
+    f32 yaw;
+    s32 animoff;    /* byte offset into ptr_animation_table, -1 none */
+    f32 frame;
+    f32 speed;
+} CoopGuardEnt;
+
+#define COOP_GUARDS_PER_PKT 32
+
+typedef struct
+{
+    u32 magic;
+    u16 version;
+    u16 type;
+    u32 snap;       /* snapshot id; one snapshot spans several packets */
+    u16 first;      /* index of the first entry in the snapshot */
+    u16 count;
+    CoopGuardEnt ent[COOP_GUARDS_PER_PKT];
+} CoopGuardsPkt;
+
+/* client -> host: the client's Bond shot a guard */
+typedef struct
+{
+    u32 magic;
+    u16 version;
+    u16 type;
+    s16 chrnum;
+    s16 hitpart;
+    s32 weaponid;
+    f32 vector[3];
+} CoopShotChrPkt;
 
 static s32 sEnabled = -1;
 static u32 sTick;
@@ -92,7 +133,20 @@ static ChrRecord *sTickChr;         /* guard whose tick has the puppet as Bond *
 PropRecord *g_CoopPropOverride;     /* read by getCurrentPlayerProp() */
 static u32 sHitSeq;
 
+/* client guard mirroring */
+static u32 sGuardSnap;
+static u32 sChrLastSync[COOP_MAX_CHRS]; /* sTick of the last snapshot entry */
+static u32 sLastSnapTick;
+
 enum { PANIM_IDLE, PANIM_WALK, PANIM_RUN };
+
+static s32 coopInMission(void);
+static void coopApplyGuard(CoopGuardEnt *e);
+static void coopHostApplyShot(CoopShotChrPkt *p);
+static StandTile *coopFindStan(coord3d *pos, StandTile *from, coord3d *frompos);
+static s32 coopIsMirroringClient(void);
+static void coopSendGuards(void);
+static void coopReapGuards(void);
 
 static s32 coopLocalBody(void)
 {
@@ -141,7 +195,7 @@ static void coopSendState(void)
 
 static void coopPollNet(void)
 {
-    u8 buf[512];
+    u8 buf[1500];
     s32 n;
 
     while ((n = coopNetRecv(buf, sizeof(buf))) > 0)
@@ -160,6 +214,34 @@ static void coopPollNet(void)
             {
                 portConLogf("ge: coop: hit from host guard #%u: %.3f\n", h->seq, h->damage);
                 bondviewCallRecordDamageKills(h->damage, h->angle, -1, 1);
+            }
+            continue;
+        }
+        if (p->type == COOPPKT_GUARDS && !coopNetIsHost())
+        {
+            CoopGuardsPkt *g = (CoopGuardsPkt *) buf;
+            s32 hdr = (s32) ((u8 *) &g->ent[0] - (u8 *) g);
+            s32 k;
+
+            if (n < hdr || g->count > COOP_GUARDS_PER_PKT || n < hdr + g->count * (s32) sizeof(CoopGuardEnt))
+            {
+                continue;
+            }
+            if (coopInMission() && sRemoteValid && sRemote.stage == bossGetStageNum())
+            {
+                for (k = 0; k < g->count; k++)
+                {
+                    coopApplyGuard(&g->ent[k]);
+                }
+                sLastSnapTick = sTick;
+            }
+            continue;
+        }
+        if (p->type == COOPPKT_SHOTCHR && coopNetIsHost() && n >= (s32) sizeof(CoopShotChrPkt))
+        {
+            if (coopInMission())
+            {
+                coopHostApplyShot((CoopShotChrPkt *) buf);
             }
             continue;
         }
@@ -350,6 +432,11 @@ void coopStageStart(void)
         sChrTarget[i].laststimulus60 = -1;
         sChrTarget[i].target = -1;
     }
+    for (i = 0; i < COOP_MAX_CHRS; i++)
+    {
+        sChrLastSync[i] = 0;
+    }
+    sLastSnapTick = 0;
     sTickChr = NULL;
     g_CoopPropOverride = NULL;
     sPuppet = NULL;
@@ -378,6 +465,34 @@ void coopTick(void)
     }
 
     coopSendState();
+
+    {   /* GE_COOP_TRACE=<chrnum>: log one chr on both sides to compare */
+        static s32 trace = -2;
+        if (trace == -2)
+        {
+            const char *e = getenv("GE_COOP_TRACE");
+            trace = (e != NULL) ? atoi(e) : -1;
+        }
+        if (trace >= 0 && (sTick % 60) == 0)
+        {
+            ChrRecord *c = chrFindByLiteralId(trace);
+            if (c != NULL && c->prop != NULL)
+            {
+                portConLogf("ge: coop: trace chr %d pos %.0f %.0f %.0f act %d anim %d frame %.1f\n", trace,
+                            c->prop->pos.f[0], c->prop->pos.f[1], c->prop->pos.f[2], c->actiontype,
+                            (s32) ((u8 *) objecthandlerGetModelAnim(c->model) - (u8 *) ptr_animation_table), c->model->animframe1);
+            }
+        }
+    }
+
+    if (coopNetIsHost() && coopNetHasPeer() && sRemoteValid && sRemote.stage == bossGetStageNum() && (sTick % 3) == 0)
+    {
+        coopSendGuards();
+    }
+    if (coopIsMirroringClient())
+    {
+        coopReapGuards();
+    }
 
     if (!sRemoteValid || sRemote.stage != bossGetStageNum())
     {
@@ -539,14 +654,28 @@ static s32 coopChrTarget(ChrRecord *chr)
     return next;
 }
 
-void coopChrTickBegin(ChrRecord *chr)
+static s32 coopIsMirroringClient(void)
+{
+    return sEnabled && !coopNetIsHost() && sRemoteValid && sLastSnapTick != 0
+        && sRemote.stage == bossGetStageNum();
+}
+
+s32 coopChrTickBegin(ChrRecord *chr)
 {
     sTickChr = NULL;
     g_CoopPropOverride = NULL;
 
-    if (!sEnabled || !coopNetIsHost() || sPuppet == NULL || chr->prop == sPuppet)
+    if (!sEnabled || chr->prop == sPuppet)
     {
-        return;
+        return 1;
+    }
+    if (!coopNetIsHost())
+    {
+        return !coopIsMirroringClient();
+    }
+    if (sPuppet == NULL)
+    {
+        return 1;
     }
     if (coopChrTarget(chr) == COOPTGT_REMOTE)
     {
@@ -564,6 +693,7 @@ void coopChrTickBegin(ChrRecord *chr)
         sTickChr = chr;
         g_CoopPropOverride = sPuppet;
     }
+    return 1;
 }
 
 void coopChrTickEnd(void)
@@ -662,4 +792,220 @@ s32 coopTargetRecordDamage(f32 damage, f32 angle)
     coopNetSend(&h, sizeof(h));
     portConLogf("ge: coop: guard %d hit the peer #%u: %.3f\n", sTickChr ? sTickChr->chrnum : -1, h.seq, damage);
     return 1;
+}
+
+
+/* ---- guard mirroring (host sends, client applies) ----------------------- */
+
+static void coopSendGuards(void)
+{
+    CoopGuardsPkt pkt;
+    s32 i;
+    s32 index = 0;
+    s32 hdr = (s32) ((u8 *) &pkt.ent[0] - (u8 *) &pkt);
+
+    sGuardSnap++;
+    memset(&pkt, 0, hdr);
+    pkt.magic = COOP_MAGIC;
+    pkt.version = COOP_VERSION;
+    pkt.type = COOPPKT_GUARDS;
+    pkt.snap = sGuardSnap;
+
+    for (i = 0; i < g_NumChrSlots; i++)
+    {
+        ChrRecord *chr = &g_ChrSlots[i];
+        CoopGuardEnt *e;
+        ModelAnimation *anim;
+
+        if (chr->model == NULL || chr->prop == NULL || chr->prop == sPuppet)
+        {
+            continue;
+        }
+
+        if (pkt.count == 0)
+        {
+            pkt.first = (u16) index;
+        }
+        e = &pkt.ent[pkt.count++];
+        index++;
+
+        e->chrnum = chr->chrnum;
+        e->flags = 0;
+        if (chr->chrflags & CHRFLAG_HIDDEN)
+        {
+            e->flags |= GSF_HIDDEN;
+        }
+        if (objecthandlerGetModelGunhand(chr->model))
+        {
+            e->flags |= GSF_FLIP;
+        }
+        if (chr->model->animlooping)
+        {
+            e->flags |= GSF_LOOP;
+        }
+        e->pos[0] = chr->prop->pos.f[0];
+        e->pos[1] = chr->prop->pos.f[1];
+        e->pos[2] = chr->prop->pos.f[2];
+        e->yaw = getsubroty(chr->model);
+        anim = objecthandlerGetModelAnim(chr->model);
+        e->animoff = (anim != NULL) ? (s32) ((u8 *) anim - (u8 *) ptr_animation_table) : -1;
+        e->frame = chr->model->animframe1;
+        e->speed = chr->model->speed;
+
+        if (pkt.count == COOP_GUARDS_PER_PKT)
+        {
+            coopNetSend(&pkt, hdr + pkt.count * (s32) sizeof(CoopGuardEnt));
+            pkt.count = 0;
+        }
+    }
+    if (pkt.count > 0)
+    {
+        coopNetSend(&pkt, hdr + pkt.count * (s32) sizeof(CoopGuardEnt));
+    }
+}
+
+static void coopApplyGuard(CoopGuardEnt *e)
+{
+    ChrRecord *chr = chrFindByLiteralId(e->chrnum);
+    PropRecord *prop;
+    coord3d pos;
+    StandTile *stan;
+    s32 slot;
+
+    if (chr == NULL || chr->prop == NULL || chr->prop == sPuppet)
+    {
+        return; /* TODO: chrs the host spawned that this side has not */
+    }
+    prop = chr->prop;
+    slot = chr - g_ChrSlots;
+    if (slot >= 0 && slot < COOP_MAX_CHRS)
+    {
+        sChrLastSync[slot] = sTick;
+    }
+
+    if (e->flags & GSF_HIDDEN)
+    {
+        chr->chrflags |= CHRFLAG_HIDDEN;
+    }
+    else
+    {
+        chr->chrflags &= ~CHRFLAG_HIDDEN;
+    }
+
+    pos.f[0] = e->pos[0];
+    pos.f[1] = e->pos[1];
+    pos.f[2] = e->pos[2];
+    stan = coopFindStan(&pos, prop->stan, &prop->pos);
+    if (stan != NULL)
+    {
+        prop->stan = stan;
+        prop->pos = pos;
+        setsuboffset(chr->model, &pos);
+        chrDetectRooms(chr);
+    }
+    setsubroty(chr->model, e->yaw);
+    chr->chrflags |= CHRFLAG_INIT;
+
+    if (e->animoff >= 0)
+    {
+        ModelAnimation *anim = (ModelAnimation *) ((u8 *) ptr_animation_table + e->animoff);
+        s32 flip = (e->flags & GSF_FLIP) != 0;
+
+        if (objecthandlerGetModelAnim(chr->model) != anim || (objecthandlerGetModelGunhand(chr->model) != 0) != flip)
+        {
+            modelSetAnimation(chr->model, anim, flip, e->frame, e->speed, 8.0f);
+            if (e->flags & GSF_LOOP)
+            {
+                modelSetAnimLooping(chr->model, 0, 8.0f);
+            }
+        }
+        else
+        {
+            f32 d = chr->model->animframe1 - e->frame;
+
+            if (d > 6.0f || d < -6.0f)
+            {
+                modelSetAnimation(chr->model, anim, flip, e->frame, e->speed, 0.0f);
+                if (e->flags & GSF_LOOP)
+                {
+                    modelSetAnimLooping(chr->model, 0, 0.0f);
+                }
+            }
+            else if (chr->model->speed != e->speed)
+            {
+                modelSetAnimSpeed(chr->model, e->speed, 0.0f);
+            }
+        }
+    }
+}
+
+/* Chrs the host freed stop showing up in snapshots; free ours after 2 s. */
+static void coopReapGuards(void)
+{
+    s32 i;
+
+    if (sTick - sLastSnapTick > 30)
+    {
+        return; /* snapshots stalled: don't read silence as removal */
+    }
+    for (i = 0; i < g_NumChrSlots && i < COOP_MAX_CHRS; i++)
+    {
+        ChrRecord *chr = &g_ChrSlots[i];
+
+        if (chr->model == NULL || chr->prop == NULL || chr->prop == sPuppet)
+        {
+            continue;
+        }
+        if (sChrLastSync[i] == 0)
+        {
+            sChrLastSync[i] = sTick; /* start the clock when we first see it */
+        }
+        else if (sTick - sChrLastSync[i] > 120 && !(chr->hidden & CHRHIDDEN_REMOVE))
+        {
+            portConLogf("ge: coop: chr %d gone on the host, removing\n", chr->chrnum);
+            chr->hidden |= CHRHIDDEN_REMOVE;
+        }
+    }
+}
+
+s32 coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid)
+{
+    CoopShotChrPkt p;
+
+    if (!coopIsMirroringClient() || chr == NULL || chr->prop == sPuppet)
+    {
+        return 0;
+    }
+    memset(&p, 0, sizeof(p));
+    p.magic = COOP_MAGIC;
+    p.version = COOP_VERSION;
+    p.type = COOPPKT_SHOTCHR;
+    p.chrnum = chr->chrnum;
+    p.hitpart = (s16) hitpart;
+    p.weaponid = weaponid;
+    p.vector[0] = vector->f[0];
+    p.vector[1] = vector->f[1];
+    p.vector[2] = vector->f[2];
+    coopNetSend(&p, sizeof(p));
+    portConLogf("ge: coop: shot guard %d (part %d, weapon %d), sent to host\n", chr->chrnum, hitpart, weaponid);
+    return 1;
+}
+
+/* Host: apply a client's shot as if the remote player fired it. */
+static void coopHostApplyShot(CoopShotChrPkt *p)
+{
+    ChrRecord *chr = chrFindByLiteralId(p->chrnum);
+    coord3d vec;
+
+    if (chr == NULL || chr->prop == NULL || sPuppet == NULL)
+    {
+        return;
+    }
+    vec.f[0] = p->vector[0];
+    vec.f[1] = p->vector[1];
+    vec.f[2] = p->vector[2];
+    g_CoopPropOverride = sPuppet; /* the stimulus belongs to the peer */
+    handles_shot_actors(chr, p->hitpart, &vec, p->weaponid, TRUE);
+    g_CoopPropOverride = NULL;
+    portConLogf("ge: coop: peer shot guard %d (part %d)\n", p->chrnum, p->hitpart);
 }

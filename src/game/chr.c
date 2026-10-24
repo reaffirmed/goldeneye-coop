@@ -2436,8 +2436,10 @@ s32 chrTick(PropRecord *prop)
         else
         {
 #ifndef TARGET_N64
-            coopChrTickBegin(chr);
-            chrlvActionTick(chr);
+            if (coopChrTickBegin(chr)) /* co-op client: the host runs guard AI */
+            {
+                chrlvActionTick(chr);
+            }
             coopChrTickEnd();
 #else
             chrlvActionTick(chr);
@@ -2884,8 +2886,10 @@ after_position_update:
         }
 
 #ifndef TARGET_N64
-        coopChrTickBegin(chr);
-        chrlvTriggerFireWeapon(chr);
+        if (coopChrTickBegin(chr))
+        {
+            chrlvTriggerFireWeapon(chr);
+        }
         coopChrTickEnd();
 #else
         chrlvTriggerFireWeapon(chr);

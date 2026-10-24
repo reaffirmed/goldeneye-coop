@@ -2492,6 +2492,14 @@ bool handles_shot_actors(ChrRecord *self, s32 hitpart, coord3d *vector, s32 weap
     PropRecord *myprop = self->prop; //sp60
     s32 padd;
 
+#ifndef TARGET_N64
+    /* co-op client: the host owns guard health; send it the shot */
+    if (isPlayer && coopClientForwardShot(self, hitpart, vector, weaponid))
+    {
+        return TRUE;
+    }
+#endif
+
     // Handle hat shots.
     if (hitpart == HIT_HAT && self->handle_positiondata_hat)
     {

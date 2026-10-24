@@ -8,7 +8,7 @@ void coopTick(void);
 s32  coopPropIsGhost(PropRecord *prop);
 
 extern PropRecord *g_CoopPropOverride;
-void coopChrTickBegin(ChrRecord *chr);
+s32  coopChrTickBegin(ChrRecord *chr); /* 0: skip (client mirrors the host) */
 void coopChrTickEnd(void);
 void coopChrStimulus(ChrRecord *chr);
 s32  coopTargetIsRemote(void);
@@ -17,5 +17,6 @@ f32  coopTargetDuckingHeight(void);
 s32  coopTargetDamageShowTime(void);
 s32  coopTargetIsDead(void);
 s32  coopTargetRecordDamage(f32 damage, f32 angle);
+s32  coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid);
 
 #endif
