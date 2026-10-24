@@ -421,6 +421,31 @@ static Gfx *coopHudRespawn(Gfx *gdl, s32 eta)
     return combiner_bayer_lod_perspective(gdl);
 }
 
+/* whose eyes we look out of while we are down, centred near the top */
+static Gfx *coopHudSpectating(Gfx *gdl, s32 who)
+{
+    char name[40];
+    char text[72];
+    s32 th = 0, tw = 0;
+    s32 x, y;
+    s32 p, others = 0;
+
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        others += (p != who && p != coopExtSelf() && coopLobbyPlayerHere(p));
+    }
+    coopHudText(name, sizeof(name), coopPlayerName(who));   /* with "\n" */
+    coopHudFit(name, viGetViewWidth() / 2);
+    name[strlen(name) - 1] = '\0';
+    snprintf(text, sizeof(text), others ? "WATCHING %s - FIRE FOR NEXT\n" : "WATCHING %s\n", name);
+    textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+    x = viGetViewLeft() + (viGetViewWidth() - tw) / 2;
+    y = viGetViewTop() + 0x18;
+    gdl = microcode_constructor(gdl);
+    gdl = coopHudPrint(gdl, x, y, text, COOP_HUD_COL_TAG);
+    return combiner_bayer_lod_perspective(gdl);
+}
+
 /* the mission's objectives, right-aligned in the top-right corner */
 static Gfx *coopHudObjectives(Gfx *gdl, s32 below)
 {
@@ -547,13 +572,20 @@ Gfx *coopHudRender(Gfx *gdl)
     {
         for (i = 0; coopHudPartnerAt(i, &p); i++)
         {
-            gdl = coopHudNameTag(gdl, &p);
+            if (p.player != coopSpectateTarget())
+            {
+                gdl = coopHudNameTag(gdl, &p);   /* not over the head we look out of */
+            }
             if (!weapmenuIsOpen())
             {
                 gdl = coopHudPartnerStatus(gdl, &p, i);   /* the menu draws there */
             }
         }
         gdl = coopHudRadar(gdl);
+    }
+    if (coopSpectateTarget() >= 0)
+    {
+        gdl = coopHudSpectating(gdl, coopSpectateTarget());
     }
     eta = coopHudRespawnEta();
     if (eta >= 0 || coopHudBledOut())

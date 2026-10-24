@@ -11744,6 +11744,9 @@ Gfx *bondviewRenderDebugBondView(Gfx *gdl)
         cam_up.z = collision->applied_view2.z;
     }
 
+#ifndef TARGET_N64
+    coopSpectateCamera(&cam_pos, &cam_look, &cam_up);   /* down in co-op: a partner's view */
+#endif
     bondviewUpdateCameraMatrices(&cam_pos, &cam_look, &cam_up);
     sub_GAME_7F068190(&zeropos, &vec);
 
@@ -13552,6 +13555,14 @@ s32 get_obj_collision_flag(void) {
  */
 u8 bondviewGetCurrentPlayersRoom(void)
 {
+#ifndef TARGET_N64
+    u8 spectating;
+
+    if (coopSpectateRoom(&spectating))
+    {
+        return spectating;
+    }
+#endif
     if ((g_CurrentPlayer->cameramode == 1) && (g_CurrentPlayer->cameratile != 0))
     {
         return g_CurrentPlayer->cameratile->room;
@@ -13568,6 +13579,12 @@ u8 bondviewGetCurrentPlayersRoom(void)
  */
 coord3d *bondviewGetCurrentPlayersPosition(void)
 {
+#ifndef TARGET_N64
+    if (coopSpectatePos(0) != NULL)
+    {
+        return coopSpectatePos(0);
+    }
+#endif
     if (g_CurrentPlayer->cameramode == 1)
     {
         return &g_CurrentPlayer->pos;
@@ -13580,6 +13597,12 @@ coord3d *bondviewGetCurrentPlayersPosition(void)
 
 coord3d * bondviewGetCurrentPlayersPosition3(void)
 {
+#ifndef TARGET_N64
+    if (coopSpectatePos(1) != NULL)
+    {
+        return coopSpectatePos(1);
+    }
+#endif
 
     if (g_CurrentPlayer->cameramode == 1)
     {

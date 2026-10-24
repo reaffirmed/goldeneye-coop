@@ -163,6 +163,14 @@ s32  coopCampaignNext(s32 *stage, s32 *difficulty, char *label, s32 labelcap);  
 void coopCampaignTick(void);
 void coopCampaignApply(const u8 *raw, s32 from);
 
+/* watching a partner while we are down (coop_spectate.c) */
+void coopSpectateTick(void);
+void coopSpectateStop(void);
+s32  coopSpectateTarget(void);
+s32  coopSpectateCamera(struct coord3d *pos, struct coord3d *look, struct coord3d *up);
+s32  coopSpectateRoom(u8 *room);
+struct coord3d *coopSpectatePos(s32 three);
+
 /* how partners look (coop_look.c): the character they picked in the lobby,
  * the guns in their hands with the multiplayer body animations, and their
  * shots (muzzle flash, gun sound, tracer, impact) on everyone else's game.
