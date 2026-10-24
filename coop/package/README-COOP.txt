@@ -38,7 +38,4 @@ Press ~ (tilde) in game to open the console. The co-op lines start with
 
 Known gaps in this build
 ------------------------
-- Intro and ending cutscenes play only on the host's screen.
-- Level exits that check where Bond is (e.g. the Dam bungee jump) only work
-  for the host.
-- Grenades and mines thrown by the joiner don't damage anything yet.
+- Cutscene cameras follow the host's script; tell me if one looks wrong.
