@@ -822,8 +822,9 @@ static void coopPuppetUpdateGhost(CoopRemote *r)
     {
         r->puppetGhost = 0;
     }
-    /* our camera inside their body (both start on one pad): don't draw it */
-    if (d2 < 45.0f * 45.0f)
+    /* our camera inside their body (both start on one pad, or we watch
+     * them while we are down): don't draw it */
+    if (d2 < 45.0f * 45.0f || coopSpectateTarget() == r->st.player)
     {
         r->puppet->chr->chrflags |= CHRFLAG_HIDDEN;
     }
@@ -2730,6 +2731,7 @@ s32 coopDeadTick(void)
     partner = coopRespawnPartner(&calm);
     if (sEnabled <= 0 || !coopNetHasPeer() || partner < 0)
     {
+        coopSpectateStop();
         return 0; /* nobody left standing: the mission fails as usual */
     }
     if (sDeadSince == 0)
@@ -2778,6 +2780,7 @@ s32 coopDeadTick(void)
                 coopStatsNote(COOPSTAT_REVIVED);
                 sLastHealth = g_CurrentPlayer->bondhealth;
                 sDeadSince = 0;
+                coopSpectateStop();
                 return 1;
             }
         }
@@ -2794,6 +2797,7 @@ s32 coopDeadTick(void)
             hudmsgBottomShow("You bled out. You are out until the mission ends.\n");
             portConLogf("ge: coop: bled out\n");
         }
+        coopSpectateTick();
         return 1;   /* no timer: down until revived, or out */
     }
 
@@ -2808,7 +2812,10 @@ s32 coopDeadTick(void)
         coopStatsNote(COOPSTAT_RESPAWNS);
         sLastHealth = g_CurrentPlayer->bondhealth;
         sDeadSince = 0;
+        coopSpectateStop();
+        return 1;
     }
+    coopSpectateTick();
     return 1;
 }
 
