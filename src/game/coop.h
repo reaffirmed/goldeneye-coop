@@ -48,6 +48,23 @@ s32  coopHudDownRule(void);
 s32  coopHudReviveHold(void);
 s32  coopHudBledOut(void);
 
+/* Lobby settings the host picks and the joiner's game copies (coopSetting).
+ * Append only: 0 must stay each one's default. */
+enum
+{
+    COOPSET_DIFFICULTY,     /* co-op difficulty: 0 normal (coop_difficulty.c) */
+    COOPSET_SPARE1,
+    COOPSET_SPARE2,
+    COOPSET_SPARE3,
+    COOPSET_SPARE4,
+    COOPSET_SPARE5,
+    COOPSET_SPARE6,
+    COOPSET_SPARE7,
+    COOPSET_MAX = 8
+};
+s32  coopSetting(s32 which);
+void coopSetSetting(s32 which, s32 value);
+
 /* what happens when a player goes down (the host picks in the lobby) */
 enum { COOPDOWN_BOTH, COOPDOWN_TIMER, COOPDOWN_REVIVE };
 s32  coopDownRule(void);

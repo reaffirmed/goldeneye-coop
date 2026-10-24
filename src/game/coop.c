@@ -100,6 +100,7 @@ typedef struct
     u8 downrule;        /* host: the lobby's down rule */
     u8 pad;
     u32 session;        /* as in CoopEventsPkt */
+    u8 settings[COOPSET_MAX];   /* host: the lobby's other settings (coopSetting) */
     u32 missionticks;   /* how long the sender has been in this mission */
 } CoopHelloPkt;
 
@@ -200,6 +201,7 @@ static u32 sMissionSerial;      /* host: missions started */
 static u32 sFollowedMission;    /* joiner: last host mission we launched into */
 static s32 sLobbyReady;         /* our Ready on the lobby screen */
 static s32 sDownRule = COOPDOWN_BOTH; /* the host's down rule (lobby): COOPDOWN_BOTH, _TIMER or _REVIVE */
+static u8 sSettings[COOPSET_MAX];     /* the host's other lobby settings; the joiner copies them from HELLO */
 static u32 sSelfSession;        /* ours, new each run and each lobby session */
 static u32 sPeerSession;        /* the partner's, 0 until heard */
 static u32 sMissionTicks;       /* ticks in this mission */
@@ -468,6 +470,7 @@ static void coopPollNet(void)
             if (!coopNetIsHost() && sHostHello.downrule <= COOPDOWN_REVIVE)
             {
                 sDownRule = sHostHello.downrule;   /* the host's lobby decides */
+                memcpy(sSettings, sHostHello.settings, sizeof(sSettings));
             }
             sHelloTick = sTick;
             if (!sHelloSeen)
@@ -2242,6 +2245,21 @@ static s32 sBledOut;
 #define COOP_REVIVE_HOLD   45      /* ...for 3/4 s */
 #define COOP_BLEED_OUT     3600    /* revive only: 60 s down and you are out of this mission */
 
+/* A lobby setting (COOPSET_*): the host sets them on the lobby screen, the
+ * joiner's game takes the host's from each hello. 0 is every setting's default. */
+s32 coopSetting(s32 which)
+{
+    return (which >= 0 && which < COOPSET_MAX) ? sSettings[which] : 0;
+}
+
+void coopSetSetting(s32 which, s32 value)
+{
+    if (which >= 0 && which < COOPSET_MAX && (coopLobbyIsHost() || sEnabled <= 0))
+    {
+        sSettings[which] = (u8) value;
+    }
+}
+
 s32 coopDownRule(void)
 {
     return sDownRule;
@@ -2441,6 +2459,7 @@ static void coopSendHello(void)
     p.session = coopSelfSession();
     p.inlobby = (u8) sOnLobbyScreen;
     p.downrule = (u8) sDownRule;
+    memcpy(p.settings, sSettings, sizeof(p.settings));
     p.missionticks = coopInMission() ? sMissionTicks : 0;
     coopNetSend(&p, sizeof(p));
 }
