@@ -766,6 +766,11 @@ const char *coopSteamSelfName(void)
     return sReady ? pGetFriendPersonaName(sFriends, sSelf) : "";
 }
 
+unsigned long long coopSteamSelfId(void)
+{
+    return sReady ? (unsigned long long) sSelf : 0;
+}
+
 const char *coopSteamPeerName(void)
 {
     return coopSteamPeerNameAt(0);

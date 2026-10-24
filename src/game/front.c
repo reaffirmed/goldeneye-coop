@@ -8835,7 +8835,7 @@ extern void portConLogf(const char *fmt, ...);
 
 enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLROW_CANCEL,
        CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE };
-#define COOP_LOBBY_ROWS     16
+#define COOP_LOBBY_ROWS     18
 #define COOP_LOBBY_X        PORT_SHEET_LABEL_X
 #define COOP_LOBBY_VALUE_X  0xFA
 #define COOP_LOBBY_Y0       PORT_SHEET_ROW_Y0
@@ -8906,7 +8906,7 @@ static void coopLobbyBuild(void)
     const s32 state = coopLobbyState();
     struct CoopLobbyRow *r;
     char name[48];
-    s32 i;
+    s32 i, k;
 
     coop_lobby_nrows = 0;
     if (state == COOPLOBBY_OFF)
@@ -8945,24 +8945,29 @@ static void coopLobbyBuild(void)
         return;
     }
 
-    /* in a lobby: the two players, host first */
+    /* in a lobby: the players, host first */
     coopLobbyAdd(CLROW_HEAD, 0, "Players\n", "");
-    if (coopLobbyIsHost())
+    if (coopLobbyIsHost() || coopLobbyHasPartner())
     {
-        coopLobbyCopyName(name, sizeof(name), coopLobbySelfName());
-        coopLobbyAdd(CLROW_TEXT, 0, name, "Host\n");
-        if (coopLobbyHasPartner())
+        for (i = 0; i < COOP_MAX_PLAYERS; i++)
         {
-            coopLobbyCopyName(name, sizeof(name), coopLobbyPartnerName());
-            r = coopLobbyAdd(CLROW_TEXT, 0, name, coopLobbyPartnerReady() ? "Ready\n" : "Not Ready\n");
-            if (r != NULL && coopLobbyPartnerReady())
+            if (!coopLobbyPlayerHere(i))
+            {
+                continue;
+            }
+            coopLobbyCopyName(name, sizeof(name), coopPlayerName(i));
+            r = coopLobbyAdd(CLROW_TEXT, 0, name, (i == 0) ? "Host\n" : coopLobbyPlayerReady(i) ? "Ready\n" : "Not Ready\n");
+            if (r != NULL && i != 0 && coopLobbyPlayerReady(i))
             {
                 r->colour = COOP_LOBBY_COL_OK;
             }
         }
-        else
+    }
+    if (coopLobbyIsHost())
+    {
+        if (!coopLobbyHasPartner())
         {
-            r = coopLobbyAdd(CLROW_TEXT, 0, "Waiting for a friend...\n", "");
+            r = coopLobbyAdd(CLROW_TEXT, 0, "Waiting for friends...\n", "");
             if (r != NULL)
             {
                 r->colour = PORT_SHEET_COL_DIM;
@@ -9011,20 +9016,9 @@ static void coopLobbyBuild(void)
     }
     else
     {
-        if (coopLobbyHasPartner())
-        {
-            coopLobbyCopyName(name, sizeof(name), coopLobbyPartnerName());
-            coopLobbyAdd(CLROW_TEXT, 0, name, "Host\n");
-        }
-        else
+        if (!coopLobbyHasPartner())
         {
             coopLobbyAdd(CLROW_TEXT, 0, "Connecting to the host...\n", "");
-        }
-        coopLobbyCopyName(name, sizeof(name), coopLobbySelfName());
-        r = coopLobbyAdd(CLROW_TEXT, 0, name, coopLobbySelfReady() ? "Ready\n" : "Not Ready\n");
-        if (r != NULL && coopLobbySelfReady())
-        {
-            r->colour = COOP_LOBBY_COL_OK;
         }
         coopLobbyAdd(CLROW_READY, 0, coopLobbySelfReady() ? "Cancel Ready\n" : "Ready Up\n", "");
         coopLobbyAdd(CLROW_TEXT, 0, "The host picks the mission.\n", "");
@@ -9047,12 +9041,20 @@ static void coopLobbyBuild(void)
         coopLobbyAdd(coopLobbyIsHost() ? CLROW_DIFFICULTY : CLROW_TEXT, 0, "Guards\n", diff);
     }
 
-    if (coopLobbyIsHost() && coopLobbyIsSteam() && !coopLobbyHasPartner())
+    for (i = 0, k = 0; i < COOP_MAX_PLAYERS; i++)
+    {
+        k += coopLobbyPlayerHere(i);
+    }
+    if (coopLobbyIsHost() && coopLobbyIsSteam() && k < COOP_MAX_PLAYERS)
     {
         coopLobbyAdd(CLROW_HEAD, 0, "Invite a Friend\n", "");
         coopLobbyAdd(CLROW_OVERLAY, 0, "Steam Invite Window\n", "");
         for (i = 0; i < coop_lobby_nfriends && coop_lobby_nrows < COOP_LOBBY_ROWS; i++)
         {
+            if (coopLobbyFriendIsPartner(i))
+            {
+                continue;   /* already here */
+            }
             coopLobbyCopyName(name, sizeof(name), coopLobbyFriendName(i));
             coopLobbyAdd(CLROW_INVITE, i, name,
                          (i < (s32) sizeof(coop_lobby_invited) && coop_lobby_invited[i]) ? "Invited\n" : "Invite\n");
@@ -9193,6 +9195,17 @@ static void coopLobbyHarness(void)
     }
     if ((coop_lobby_auto == 'h' || coop_lobby_auto == 'i') && state == COOPLOBBY_HOSTING && coopLobbyPartnerReady())
     {
+        const char *want = getenv("GE_COOP_LOBBY_PLAYERS");   /* wait for this many players in all */
+        s32 k, here = 0;
+
+        for (k = 0; k < COOP_MAX_PLAYERS; k++)
+        {
+            here += coopLobbyPlayerHere(k);
+        }
+        if (want != NULL && here < atoi(want))
+        {
+            return;
+        }
         static s32 readyAt = -1;
         const char *d = getenv("GE_COOP_LOBBY_DELAY");
 
@@ -9375,9 +9388,21 @@ static s32 coopLobbyAfterMission(void)
 /* The co-op debrief (menu0D after a co-op mission, won or failed): both
  * players side by side in place of the solo hit table. Numbers the partner's
  * game has not sent yet show as "-". */
-#define COOP_DEBRIEF_COL1   0xA0
-#define COOP_DEBRIEF_COL2   0x108
-#define COOP_DEBRIEF_NAME_W (COOP_DEBRIEF_COL2 - COOP_DEBRIEF_COL1 - 8)
+/* the players' columns: two as wide as before, up to four narrower */
+static s32 coopDebriefPitch(s32 ncols)
+{
+    return (ncols <= 2) ? 0x68 : (PORT_SHEET_RULE_R - 0x8C) / ncols;
+}
+
+static s32 coopDebriefColX(s32 col, s32 ncols)
+{
+    return ((ncols <= 2) ? 0xA0 : 0x8C) + col * coopDebriefPitch(ncols);
+}
+
+static s32 coopDebriefNameW(s32 ncols)
+{
+    return coopDebriefPitch(ncols) - 6;
+}
 
 static void coopDebriefValue(char *out, s32 player, s32 row)
 {
@@ -9404,7 +9429,7 @@ static void coopDebriefValue(char *out, s32 player, s32 row)
         }
         case 3: v = coopStatsGet(player, COOPSTAT_HEAD); break;
         case 4: v = coopStatsGet(player, COOPSTAT_DEATHS); break;
-        default: v = coopStatsGet(!player, COOPSTAT_REVIVED); break;  /* revives given: the other one got back up */
+        default: v = coopStatsGet(player, COOPSTAT_REVIVED); break;   /* times a partner got them back up */
     }
     if (v < 0)
     {
@@ -9418,16 +9443,17 @@ static void coopDebriefValue(char *out, s32 player, s32 row)
 
 static Gfx *coopDebriefStats(Gfx *DL, s32 y0, s32 pitch)
 {
-    static const char *const labels[] = { "Kills:\n", "Shots:\n", "Accuracy:\n", "Head hits:\n", "Deaths:\n", "Revives:\n" };
+    static const char *const labels[] = { "Kills:\n", "Shots:\n", "Accuracy:\n", "Head hits:\n", "Deaths:\n", "Revived:\n" };
     char buf[48];
     s32 x, y, i, p;
+    const s32 ncols = coopStatsColumns();
 
-    for (p = 0; p < 2; p++)
+    for (p = 0; p < ncols; p++)
     {
         coopLobbyCopyName(buf, sizeof(buf), coopStatsName(p));
-        x = p ? COOP_DEBRIEF_COL2 : COOP_DEBRIEF_COL1;
+        x = coopDebriefColX(p, ncols);
         y = y0;
-        DL = frontPrintText(DL, &x, &y, (char *) portSheetFitText(buf, COOP_DEBRIEF_NAME_W), ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+        DL = frontPrintText(DL, &x, &y, (char *) portSheetFitText(buf, coopDebriefNameW(ncols)), ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
     }
     DL = microcode_constructor_related_to_menus(DL, 0x37 - 2, y0 + pitch - 1, PORT_SHEET_RULE_R, y0 + pitch, PORT_SHEET_COL_RULE);
     DL = microcode_constructor(DL);
@@ -9437,10 +9463,10 @@ static Gfx *coopDebriefStats(Gfx *DL, s32 y0, s32 pitch)
         x = 0x37;
         y = y0 + (i + 1) * pitch + 2;
         DL = frontPrintText(DL, &x, &y, (char *) labels[i], ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
-        for (p = 0; p < 2; p++)
+        for (p = 0; p < ncols; p++)
         {
             coopDebriefValue(buf, p, i);
-            x = p ? COOP_DEBRIEF_COL2 : COOP_DEBRIEF_COL1;
+            x = coopDebriefColX(p, ncols);
             y = y0 + (i + 1) * pitch + 2;
             DL = frontPrintText(DL, &x, &y, buf, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
         }
@@ -17850,10 +17876,11 @@ void interface_menu0D_missioncomplete()
 
 #ifndef TARGET_N64
     if (coop_lobby_auto > 0 && coopSessionActive())
-    {   /* the lobby harness: on to the lobby after a few seconds */
+    {   /* the lobby harness: on to the lobby after a few seconds (GE_COOP_LOBBY_HOLD ticks) */
         static s32 waited;
+        const char *hold = getenv("GE_COOP_LOBBY_HOLD");
 
-        if (++waited > 240)
+        if (++waited > ((hold != NULL) ? atoi(hold) : 240))
         {
             waited = 0;
             tab_next_selected = TRUE;

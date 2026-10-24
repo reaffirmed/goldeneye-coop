@@ -44,7 +44,15 @@ extern s32 portObjectivesHudShown(void);    /* video.c: [display] objectives_hud
 #define COOP_HUD_COL_DONE   0x60FF60D0
 #define COOP_HUD_COL_FAIL   0xFF4040FF
 #define COOP_HUD_COL_SHADOW 0x000000A0
-#define COOP_HUD_COL_TAG    0xFFFF80FF  /* the partner's yellow, as their radar dot */
+#define COOP_HUD_COL_TAG    0xFFFF80FF  /* the first partner's yellow, as their radar dot */
+
+/* each player's colour (by player number) for their tag and radar dot, alpha 0xFF */
+static u32 coopHudPlayerColour(s32 player)
+{
+    static const u32 colours[COOP_MAX_PLAYERS] = { 0xFFFF80FF, 0x80E0FFFF, 0xFF90E0FF, 0x90FF90FF };
+
+    return colours[(player >= 0 && player < COOP_MAX_PLAYERS) ? player : 0];
+}
 
 /* the radar's centre, as radar.c lays it out for one player */
 #define COOP_RADAR_TOP   0x1a
@@ -178,18 +186,21 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
         return gdl;
     }
     gdl = microcode_constructor(gdl);
-    gdl = coopHudPrint(gdl, x, y, text, p->dead ? COOP_HUD_COL_FAIL : COOP_HUD_COL_TAG);
+    gdl = coopHudPrint(gdl, x, y, text, p->dead ? COOP_HUD_COL_FAIL : coopHudPlayerColour(p->player));
     return combiner_bayer_lod_perspective(gdl);
 }
 
-/* the multiplayer radar with one yellow dot */
-static Gfx *coopHudRadar(Gfx *gdl, CoopHudPartner *p)
+/* the multiplayer radar with a dot per partner */
+static Gfx *coopHudRadar(Gfx *gdl)
 {
+    CoopHudPartner pp;
+    CoopHudPartner *p = &pp;
+    s32 i;
     PropRecord *self = g_CurrentPlayer->prop;
     s32 left = (viGetViewLeft() + viGetViewWidth()) - COOP_RADAR_RIGHT;
     s32 top = viGetViewTop() + COOP_RADAR_TOP;
     f32 dx, dz, ang, r;
-    s32 colour = 0xFFFF00A0;
+    s32 colour;
     s32 px, py;
 
     if (self == NULL || g_CurrentPlayer->bonddead)
@@ -208,8 +219,13 @@ static Gfx *coopHudRadar(Gfx *gdl, CoopHudPartner *p)
     gdl = microcode_constructor_related_to_menus(gdl, left - 0x10, top - 0x10, left + 0x10, top + 0x10, 0x00000080);
     gdl = microcode_constructor_related_to_menus(gdl, left - 2, top - 2, left + 2, top + 2, 0x40);
     gdl = microcode_constructor_related_to_menus(gdl, left - 1, top - 1, left + 1, top + 1, -0x60);
-    if (!p->dead || p->revivable)
+    for (i = 0; coopHudPartnerAt(i, p); i++)
     {
+        if (p->dead && !p->revivable)
+        {
+            continue;
+        }
+        colour = (coopHudPlayerColour(p->player) & ~0xFF) | 0xE0;
         if (p->dead)
         {
             colour = 0xFF3030E0;   /* down where they fell: go and get them */
@@ -237,12 +253,12 @@ static Gfx *coopHudRadar(Gfx *gdl, CoopHudPartner *p)
 }
 
 /* the partner's name with health and armour bars, top left */
-static Gfx *coopHudPartnerStatus(Gfx *gdl, CoopHudPartner *p)
+static Gfx *coopHudPartnerStatus(Gfx *gdl, CoopHudPartner *p, s32 row)
 {
     char name[40];
     char text[48];
     s32 x = viGetViewLeft() + 0x14;
-    s32 y = viGetViewTop() + 0x0E;
+    s32 y = viGetViewTop() + 0x0E + row * 0x18;   /* a block per partner, down the left */
 
     if (hudAnchorsToEdges())
     {
@@ -461,6 +477,7 @@ Gfx *coopHudRender(Gfx *gdl)
     CoopHudPartner p;
     s32 partner;
     s32 eta;
+    s32 i;
 
     if (getPlayerCount() != 1 || g_CurrentPlayer->watch_animation_state != 0)
     {
@@ -470,12 +487,15 @@ Gfx *coopHudRender(Gfx *gdl)
     partner = coopHudPartner(&p);
     if (partner)
     {
-        gdl = coopHudNameTag(gdl, &p);
-        gdl = coopHudRadar(gdl, &p);
-        if (!weapmenuIsOpen())
+        for (i = 0; coopHudPartnerAt(i, &p); i++)
         {
-            gdl = coopHudPartnerStatus(gdl, &p);   /* the menu draws there */
+            gdl = coopHudNameTag(gdl, &p);
+            if (!weapmenuIsOpen())
+            {
+                gdl = coopHudPartnerStatus(gdl, &p, i);   /* the menu draws there */
+            }
         }
+        gdl = coopHudRadar(gdl);
     }
     eta = coopHudRespawnEta();
     if (eta >= 0 || coopHudBledOut())

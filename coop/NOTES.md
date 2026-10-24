@@ -177,3 +177,41 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscen
   gun with 100 more rounds. Verified both ways in Dam: host PP7 46 of 93 to
   the joiner (93 -> 139); joiner KF7 35 of 70 plus the gun to the host (no
   KF7 before, 0 -> 35); too far gives "Get closer" and moves nothing.
+
+## When Down: revive / timer (2026-10-24)
+
+- Lobby row "When Down" (host's, copied in HELLO): Revive or Timer (default),
+  Revive only, Timer only. Revive: a living partner stands over your death
+  spot; the downed screen shows "BEING REVIVED" with a bar, the partner's HUD
+  "DOWN - REVIVE THEM". Timer: back beside the calmest living partner after 4
+  out-of-combat seconds, 20 s at most. Revive only bleeds out, then OUT until
+  the mission ends; everyone down fails it.
+- Harness: GE_COOP_DOWNRULE=0|1|2, GE_COOP_TESTDIE=<mission ticks>.
+
+## 3 to 4 players (2026-10-24, COOP_VERSION 4)
+
+- Star: the host is player 0, joiners are 1..3 (host's transport slot + 1).
+  Joiners talk only to the host. The host relays each joiner's STATE to the
+  others (stamping `player`) and forwards events by CoopEvent.to (a player
+  or COOP_ALL), stamping `from`. HIT goes to the victim; SHOTCHR, EXPLODE and
+  a joiner's OBJDMG to the host; door, pickup, mission end, AI commands,
+  stats and the host's OBJDMG to all; GIVE/GIVEBACK to one player.
+- One reliable channel per transport peer (coop.c CoopChan), one remote per
+  player (CoopRemote sR[4], puppet chrnum 30000 + player). HELLO from the host
+  carries `youare` and a roster of all four slots (id, name, ready, in lobby).
+- Guards pick targets over all players in turn; level scripts that check Bond
+  loop over living partners (coopAltBondBegin(k) in chrai.c).
+- Transport: COOP_NET_MAX_PEERS 3, coopNetSendTo/RecvFrom/PeerConnected per
+  peer; the Steam lobby holds 4. Mock: GE_MOCK_FRIEND takes a comma list.
+- HUD: per-player colour (yellow, cyan, pink, green) on name tags, radar
+  dots and stacked partner status blocks. Stats page draws one column per
+  player (names cut to about 5 letters with 4). Campaign record has a line
+  per partner; Continue uses the least progress among those present.
+- Lobby: player list, invites shown while under 4. Select Mission needs all
+  partners Ready.
+- Test: coop/docker/party_lobby.sh PLAYERS=2..4 (HOSTENV, P2ENV..P4ENV,
+  ALLENV, SHOTS, RUNSECS; GE_COOP_LOBBY_PLAYERS=n makes the host wait for n).
+  Verified with the mock, 3 and 4 copies: all follow the host into Dam,
+  puppets for every partner, guards hit joiners, give from player 4 to 3
+  through the host, revive, same stats page on every game. Real Steam not
+  yet tested with more than one account.

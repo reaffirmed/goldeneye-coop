@@ -663,7 +663,7 @@ void explosionInflictDamage(PropRecord *arg0, f32 horiz_range, f32 vert_range)
                         {
 #ifndef TARGET_N64
                             /* co-op stats: the partner's blast, the partner's kill */
-                            extern void coopStatsBlameBegin(s32 partner);
+                            extern void coopStatsBlameBegin(s32 player);
                             extern void coopStatsBlameEnd(void);
                             extern s32 coopStatsExplosionIsPartner(void *explosion);
                             coopStatsBlameBegin(coopStatsExplosionIsPartner(temp_s2));

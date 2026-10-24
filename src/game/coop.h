@@ -24,12 +24,14 @@ void coopPickedUp(ObjectRecord *obj, s32 kept);
 s32  coopPeerHolds(ObjectRecord *obj);
 void coopMissionComplete(void);
 s32  coopFrontTick(void);
-s32  coopAltBondBegin(void); /* 1: "Bond" is now the partner, call coopAltBondEnd */
+s32  coopAltBondBegin(s32 k); /* 1: "Bond" is now the k-th living partner (from 0), call coopAltBondEnd */
 void coopAltBondEnd(void);
 void coopAiCommand(u8 *list, s32 offset, ChrRecord *self);
 s32  coopDeadTick(void); /* 1: co-op owns this death (waiting or respawned) */
 void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon);
 s32  coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid);
+
+#define COOP_MAX_PLAYERS 4   /* the host and up to three joiners */
 
 /* the HUD (coop_hud.c) */
 typedef struct
@@ -41,8 +43,10 @@ typedef struct
     s32 respawn;        /* ticks, -1 = not waiting */
     s32 revivable;      /* down, and walking over them brings them back */
     const char *name;
+    s32 player;         /* their player number, 0 the host */
 } CoopHudPartner;
-s32  coopHudPartner(CoopHudPartner *out);
+s32  coopHudPartner(CoopHudPartner *out);           /* the first partner */
+s32  coopHudPartnerAt(s32 i, CoopHudPartner *out);  /* the i-th, from 0 */
 s32  coopHudRespawnEta(void);
 s32  coopHudDownRule(void);
 s32  coopHudReviveHold(void);   /* ticks of COOP_REVIVE_HOLD */
@@ -93,9 +97,9 @@ typedef struct
     u8 pad[3];
 } CoopGive;
 void coopGivePress(void);       /* the give_partner key (bondview2.c) */
-void coopGiveSend(s32 answer, CoopGive *give);
-void coopGiveReceive(CoopGive *give);
-void coopGiveReturned(CoopGive *give);
+void coopGiveSend(s32 answer, s32 to, CoopGive *give);
+void coopGiveReceive(CoopGive *give, s32 from);
+void coopGiveReturned(CoopGive *give, s32 from);
 void coopGiveTestDraw(s32 weapon);
 void coopGiveTestPress(void);
 
@@ -118,7 +122,12 @@ s32  coopLobbyPartnerOnScreen(void);
 s32  coopLobbySelfReady(void);
 void coopLobbySetReady(s32 ready);
 const char *coopLobbySelfName(void);
-const char *coopLobbyPartnerName(void);
+const char *coopLobbyPartnerName(void);     /* the first partner's */
+s32  coopLobbyPlayerHere(s32 p);            /* player p (0 the host, up to COOP_MAX_PLAYERS) is in the session */
+s32  coopLobbyPlayerReady(s32 p);
+s32  coopLobbySelfPlayer(void);
+const char *coopPlayerName(s32 p);
+unsigned long long coopPlayerId(s32 p);     /* SteamID, 0 off Steam */
 void coopLobbyHost(void);
 void coopLobbyJoinAny(void);
 void coopLobbyJoinFriend(s32 i);
@@ -138,14 +147,15 @@ void coopStatsMissionTick(s32 partnerhere);
 void coopStatsFrontTick(void);
 void coopStatsDown(void);
 void coopStatsNote(s32 stat);
-void coopStatsBlameBegin(s32 partner); /* host: kills and hits until End are the partner's */
+void coopStatsBlameBegin(s32 player); /* host: kills and hits until End are that player's (1..3) */
 void coopStatsBlameEnd(void);
 void coopStatsExplosionMade(void *explosion);
 s32  coopStatsExplosionIsPartner(void *explosion);
-void coopStatsApply(const void *payload);
+void coopStatsApply(const void *payload, s32 from);
 s32  coopStatsShown(void);              /* 1: the debrief shows the co-op columns */
-s32  coopStatsGet(s32 player, s32 stat); /* player 0 us, 1 the partner; -1 not in yet */
-const char *coopStatsName(s32 player);
+s32  coopStatsColumns(void);            /* the debrief's columns (players), up to COOP_MAX_PLAYERS */
+s32  coopStatsGet(s32 col, s32 stat);    /* -1 not in yet */
+const char *coopStatsName(s32 col);
 void coopCampaignMissionEnd(void);
 s32  coopCampaignNext(s32 *stage, s32 *difficulty, char *label, s32 labelcap);
 

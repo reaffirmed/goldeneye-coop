@@ -41,6 +41,7 @@ void coopSteamShutdown(void);
 /* the lobby screen (front.c through src/game/coop.c) */
 int  coopSteamLobbyState(void);         /* 0 none, 1 creating or looking, 2 in a lobby */
 const char *coopSteamSelfName(void);
+unsigned long long coopSteamSelfId(void);
 const char *coopSteamPeerName(void);
 const char *coopSteamPeerNameAt(int peer);
 unsigned long long coopSteamPeerIdAt(int peer);

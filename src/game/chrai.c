@@ -34,6 +34,10 @@
 #include <snd.h>
 #include <ultra64.h>
 
+#ifndef TARGET_N64
+static s32 coopk;  /* the partner a level script check is asking about (coopAltBondBegin) */
+#endif
+
 // hack? used to match as called with 2 args, but decompiled code takes 1
 extern s32 objectiveGetStatus_WEAK(s32 objectiveNum, s32);
 
@@ -2111,7 +2115,7 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     f32                                           value = ntohs(ai->DISTANCE) * 10.0f;
                     s32                                           near  = value > chrGetDistanceFromBondToPad(ChrEntityp, pad);
 #ifndef TARGET_N64
-                    if (!near && coopAltBondBegin()) /* co-op: either player counts */
+                    for (coopk = 0; !near && coopAltBondBegin(coopk); coopk++) /* co-op: either player counts */
                     {
                         near = value > chrGetDistanceFromBondToPad(ChrEntityp, pad);
                         coopAltBondEnd();
@@ -2134,7 +2138,7 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     f32                                              value = ntohs(ai->DISTANCE) * 10.0f;
                     s32                                              far   = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
 #ifndef TARGET_N64
-                    if (far && coopAltBondBegin()) /* co-op: both players must be away */
+                    for (coopk = 0; far && coopAltBondBegin(coopk); coopk++) /* co-op: both players must be away */
                     {
                         far = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
                         coopAltBondEnd();
@@ -2170,7 +2174,7 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     u16                          pad_id = ntohs(ai->PAD);
                     s32                          inroom = check_if_actor_is_at_preset(ChrEntityp, pad_id);
 #ifndef TARGET_N64
-                    if (!inroom && coopAltBondBegin()) /* co-op: either player counts */
+                    for (coopk = 0; !inroom && coopAltBondBegin(coopk); coopk++) /* co-op: either player counts */
                     {
                         inroom = check_if_actor_is_at_preset(ChrEntityp, pad_id);
                         coopAltBondEnd();
@@ -4117,7 +4121,7 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     f32                         bondpos = (s16)ntohs(ai->Y_POS);
                     s32                         below   = getCurrentPlayerProp()->pos.y < bondpos;
 #ifndef TARGET_N64
-                    if (!below && coopAltBondBegin()) /* co-op: either player counts */
+                    for (coopk = 0; !below && coopAltBondBegin(coopk); coopk++) /* co-op: either player counts */
                     {
                         below = getCurrentPlayerProp()->pos.y < bondpos;
                         coopAltBondEnd();

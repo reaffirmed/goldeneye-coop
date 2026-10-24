@@ -35,13 +35,13 @@ extern const char *portRootPath(const char *name);
 /* ---- mission stats --------------------------------------------------------- */
 
 /* COOPEV_STATS payload (at most 28 bytes, see CoopEvent in coop.c) */
+enum { COOPSTATMSG_OWN, COOPSTATMSG_GUARDS };
 typedef struct
 {
     s16 stage;
-    u8 fromhost;
-    u8 pad;
-    u16 own[COOPSTAT_COUNT];    /* the sender's column (a joiner's kills and head hits mean nothing) */
-    u16 yours[3];               /* host: the receiver's kills, hits on guards, head hits */
+    u8 kind;        /* COOPSTATMSG_OWN: the sender's column; _GUARDS: the host's count of `about`'s kills, hits, head hits */
+    u8 about;       /* _GUARDS: whose */
+    u16 v[COOPSTAT_COUNT];
 } CoopStatsMsg;
 
 typedef struct
@@ -50,18 +50,20 @@ typedef struct
 } CoopStatsCol;
 
 static s32 sStage = -1;         /* the mission the table is for */
-static s32 sCoop;               /* the partner was in it with us */
+static s32 sCoop;               /* a partner was in it with us */
 static s32 sLive;               /* in the mission; the final column is not sent yet */
 static s32 sDown;               /* this death is counted */
-static CoopStatsCol sSelf;      /* deaths, revived, respawns while live; everything once final */
-static CoopStatsCol sPartner;   /* from the partner's event; host: kills, hits, head from blame */
-static s32 sPartnerIn;          /* the partner's final column arrived */
-static s32 sHostIn;             /* joiner: the host's numbers for our kills arrived */
-static s32 sYours[3];           /* joiner: kills, hits on guards, head hits, from the host */
-static char sNames[2][32];
+static s32 sWas[COOP_MAX_PLAYERS];          /* by player number: was in the mission */
+static CoopStatsCol sOwn[COOP_MAX_PLAYERS]; /* each player's own column (ours: deaths, revived, respawns while live) */
+static s32 sOwnIn[COOP_MAX_PLAYERS];
+static CoopStatsCol sGuards[COOP_MAX_PLAYERS]; /* the host's count of each joiner's kills, hits and head hits on guards */
+static s32 sGuardsIn[COOP_MAX_PLAYERS];
+static char sNames[COOP_MAX_PLAYERS][32];
+static s32 sOrder[COOP_MAX_PLAYERS];        /* the debrief's columns: player numbers */
+static s32 sNumCols;
 
-/* host: the partner's shot or blast is being applied */
-static s32 sBlame;
+/* host: a joiner's shot or blast is being applied */
+static s32 sBlame;              /* its player number, 0 none */
 static s32 sBlameKills;
 static s32 sBlameShots[7];
 
@@ -94,26 +96,43 @@ void coopStatsMissionStart(void)
     sCoop = 0;
     sLive = 1;
     sDown = 0;
-    sPartnerIn = 0;
-    sHostIn = 0;
     sBlame = 0;
-    memset(&sSelf, 0, sizeof(sSelf));
-    memset(&sPartner, 0, sizeof(sPartner));
-    memset(sYours, 0, sizeof(sYours));
+    memset(sWas, 0, sizeof(sWas));
+    memset(sOwn, 0, sizeof(sOwn));
+    memset(sOwnIn, 0, sizeof(sOwnIn));
+    memset(sGuards, 0, sizeof(sGuards));
+    memset(sGuardsIn, 0, sizeof(sGuardsIn));
+    memset(sNames, 0, sizeof(sNames));
 }
 
-/* every mission tick (coopTick); partnerhere: the partner is in this stage */
+/* every mission tick (coopTick); partnerhere: a partner is in this stage */
 void coopStatsMissionTick(s32 partnerhere)
 {
+    CoopHudPartner p;
+    s32 i;
+
     if (!sLive)
     {
         return;
     }
-    if (partnerhere && !sCoop)
+    if (partnerhere)
     {
-        sCoop = 1;
-        coopStatsCopyName(sNames[0], sizeof(sNames[0]), coopLobbySelfName());
-        coopStatsCopyName(sNames[1], sizeof(sNames[1]), coopLobbyPartnerName());
+        const s32 self = coopLobbySelfPlayer();
+
+        if (!sCoop)
+        {
+            sCoop = 1;
+            sWas[self] = 1;
+            coopStatsCopyName(sNames[self], sizeof(sNames[self]), coopLobbySelfName());
+        }
+        for (i = 0; coopHudPartnerAt(i, &p); i++)
+        {
+            if (!sWas[p.player])
+            {
+                sWas[p.player] = 1;
+                coopStatsCopyName(sNames[p.player], sizeof(sNames[p.player]), p.name);
+            }
+        }
     }
     if (!g_CurrentPlayer->bonddead)
     {
@@ -127,7 +146,7 @@ void coopStatsDown(void)
     if (sLive && !sDown)
     {
         sDown = 1;
-        sSelf.v[COOPSTAT_DEATHS]++;
+        sOwn[coopLobbySelfPlayer()].v[COOPSTAT_DEATHS]++;
     }
 }
 
@@ -135,25 +154,26 @@ void coopStatsNote(s32 stat)
 {
     if (sLive && stat >= 0 && stat < COOPSTAT_COUNT)
     {
-        sSelf.v[stat]++;
+        sOwn[coopLobbySelfPlayer()].v[stat]++;
     }
 }
 
 /* Host: what the code between Begin and End adds to our kills and hit
- * registers was the partner's doing. Calls do not nest. */
-void coopStatsBlameBegin(s32 partner)
+ * registers was that joiner's doing. Calls do not nest. */
+void coopStatsBlameBegin(s32 player)
 {
-    if (!partner || sBlame || !sLive || g_playerPerm == NULL)
+    if (player <= 0 || player >= COOP_MAX_PLAYERS || sBlame || !sLive || g_playerPerm == NULL)
     {
         return;
     }
-    sBlame = 1;
+    sBlame = player;
     sBlameKills = g_playerPerm->kill_count;
     memcpy(sBlameShots, g_playerPerm->shot_count, sizeof(sBlameShots));
 }
 
 void coopStatsBlameEnd(void)
 {
+    CoopStatsCol *g;
     s32 i;
     s32 hits = 0;
 
@@ -161,21 +181,23 @@ void coopStatsBlameEnd(void)
     {
         return;
     }
+    g = &sGuards[sBlame];
     sBlame = 0;
-    sPartner.v[COOPSTAT_KILLS] += g_playerPerm->kill_count - sBlameKills;
+    g->v[COOPSTAT_KILLS] += g_playerPerm->kill_count - sBlameKills;
     g_playerPerm->kill_count = sBlameKills;
     for (i = SHOT_REGISTER_HEAD; i <= SHOT_REGISTER_OBJECT; i++)
     {
         hits += g_playerPerm->shot_count[i] - sBlameShots[i];
     }
-    sPartner.v[COOPSTAT_HITS] += hits;
-    sPartner.v[COOPSTAT_HEAD] += g_playerPerm->shot_count[SHOT_REGISTER_HEAD] - sBlameShots[SHOT_REGISTER_HEAD];
+    g->v[COOPSTAT_HITS] += hits;
+    g->v[COOPSTAT_HEAD] += g_playerPerm->shot_count[SHOT_REGISTER_HEAD] - sBlameShots[SHOT_REGISTER_HEAD];
     memcpy(g_playerPerm->shot_count, sBlameShots, sizeof(sBlameShots));
 }
 
-/* explosion.c: the blasts coopApplyExplosion sets off for the partner */
+/* explosion.c: the blasts coopApplyExplosion sets off for a joiner */
 #define COOP_STATS_BOOMS 8
 static void *sPartnerBooms[COOP_STATS_BOOMS];
+static s32 sPartnerBoomBy[COOP_STATS_BOOMS];
 
 void coopStatsExplosionMade(void *explosion)
 {
@@ -192,17 +214,18 @@ void coopStatsExplosionMade(void *explosion)
     {
         return;
     }
-    for (i = 0; i < COOP_STATS_BOOMS; i++)
+    for (i = 0; i < COOP_STATS_BOOMS && sPartnerBooms[i] != NULL; i++)
     {
-        if (sPartnerBooms[i] == NULL)
-        {
-            sPartnerBooms[i] = explosion;
-            return;
-        }
     }
-    sPartnerBooms[0] = explosion;
+    if (i == COOP_STATS_BOOMS)
+    {
+        i = 0;
+    }
+    sPartnerBooms[i] = explosion;
+    sPartnerBoomBy[i] = coopApplyingPartnerExplosion();
 }
 
+/* whose blast this is: a joiner's player number, 0 ours */
 s32 coopStatsExplosionIsPartner(void *explosion)
 {
     s32 i;
@@ -211,7 +234,7 @@ s32 coopStatsExplosionIsPartner(void *explosion)
     {
         if (sPartnerBooms[i] == explosion)
         {
-            return 1;
+            return sPartnerBoomBy[i];
         }
     }
     return 0;
@@ -233,11 +256,28 @@ static u16 coopStatsU16(s32 v)
     return (u16) ((v < 0) ? 0 : (v > 0xFFFF) ? 0xFFFF : v);
 }
 
-/* every frontend tick (coopFrontTick): the mission is over, send our column */
-void coopStatsFrontTick(void)
+static void coopStatsSend(s32 kind, s32 about, CoopStatsCol *col)
 {
     CoopStatsMsg m;
     s32 i;
+
+    memset(&m, 0, sizeof(m));
+    m.stage = (s16) sStage;
+    m.kind = (u8) kind;
+    m.about = (u8) about;
+    for (i = 0; i < COOPSTAT_COUNT; i++)
+    {
+        m.v[i] = coopStatsU16(col->v[i]);
+    }
+    coopSendStatsEvent(&m, sizeof(m));
+}
+
+/* every frontend tick (coopFrontTick): the mission is over, send our column */
+void coopStatsFrontTick(void)
+{
+    const s32 self = coopLobbySelfPlayer();
+    CoopStatsCol *own = &sOwn[self];
+    s32 p;
 
     if (!sLive)
     {
@@ -250,108 +290,120 @@ void coopStatsFrontTick(void)
     {
         return;
     }
-    sSelf.v[COOPSTAT_SHOTS] = g_playerPerm->shot_count[SHOT_REGISTER_TOTAL];
-    sSelf.v[COOPSTAT_HITS] = coopStatsLocalHits();
-    sSelf.v[COOPSTAT_HEAD] = g_playerPerm->shot_count[SHOT_REGISTER_HEAD];
-    sSelf.v[COOPSTAT_KILLS] = coopNetIsHost() ? g_playerPerm->kill_count : 0;
-
-    memset(&m, 0, sizeof(m));
-    m.stage = (s16) sStage;
-    m.fromhost = (u8) (coopNetIsHost() != 0);
-    for (i = 0; i < COOPSTAT_COUNT; i++)
-    {
-        m.own[i] = coopStatsU16(sSelf.v[i]);
-    }
-    if (coopNetIsHost())
-    {
-        m.yours[0] = coopStatsU16(sPartner.v[COOPSTAT_KILLS]);
-        m.yours[1] = coopStatsU16(sPartner.v[COOPSTAT_HITS]);
-        m.yours[2] = coopStatsU16(sPartner.v[COOPSTAT_HEAD]);
-    }
-    coopSendStatsEvent(&m, sizeof(m));
+    own->v[COOPSTAT_SHOTS] = g_playerPerm->shot_count[SHOT_REGISTER_TOTAL];
+    own->v[COOPSTAT_HITS] = coopStatsLocalHits();
+    own->v[COOPSTAT_HEAD] = g_playerPerm->shot_count[SHOT_REGISTER_HEAD];
+    own->v[COOPSTAT_KILLS] = coopNetIsHost() ? g_playerPerm->kill_count : 0;
+    sOwnIn[self] = 1;
+    coopStatsSend(COOPSTATMSG_OWN, self, own);
     portConLogf("ge: coop: stats sent: kills %d shots %d hits %d head %d deaths %d revived %d respawns %d%s\n",
-                sSelf.v[COOPSTAT_KILLS], sSelf.v[COOPSTAT_SHOTS], sSelf.v[COOPSTAT_HITS], sSelf.v[COOPSTAT_HEAD],
-                sSelf.v[COOPSTAT_DEATHS], sSelf.v[COOPSTAT_REVIVED], sSelf.v[COOPSTAT_RESPAWNS],
+                own->v[COOPSTAT_KILLS], own->v[COOPSTAT_SHOTS], own->v[COOPSTAT_HITS], own->v[COOPSTAT_HEAD],
+                own->v[COOPSTAT_DEATHS], own->v[COOPSTAT_REVIVED], own->v[COOPSTAT_RESPAWNS],
                 coopNetIsHost() ? "" : " (kills from the host)");
     if (coopNetIsHost())
     {
-        portConLogf("ge: coop: stats: partner's kills %d hits %d head %d (from its shots here)\n",
-                    sPartner.v[COOPSTAT_KILLS], sPartner.v[COOPSTAT_HITS], sPartner.v[COOPSTAT_HEAD]);
+        for (p = 1; p < COOP_MAX_PLAYERS; p++)
+        {
+            if (sWas[p])
+            {
+                sGuardsIn[p] = 1;
+                coopStatsSend(COOPSTATMSG_GUARDS, p, &sGuards[p]);
+                portConLogf("ge: coop: stats: player %d's kills %d hits %d head %d (from its shots here)\n", p + 1,
+                            sGuards[p].v[COOPSTAT_KILLS], sGuards[p].v[COOPSTAT_HITS], sGuards[p].v[COOPSTAT_HEAD]);
+            }
+        }
     }
 }
 
-/* COOPEV_STATS from the partner */
-void coopStatsApply(const void *payload)
+/* COOPEV_STATS from player `from` */
+void coopStatsApply(const void *payload, s32 from)
 {
     CoopStatsMsg m;
     s32 i;
 
     memcpy(&m, payload, sizeof(m));
-    if (m.stage != sStage || !sCoop)
+    if (m.stage != sStage || !sCoop || from < 0 || from >= COOP_MAX_PLAYERS)
     {
+        return;
+    }
+    if (m.kind == COOPSTATMSG_GUARDS)
+    {
+        if (from != 0 || m.about >= COOP_MAX_PLAYERS)
+        {
+            return;   /* only the host counts guards */
+        }
+        for (i = 0; i < COOPSTAT_COUNT; i++)
+        {
+            sGuards[m.about].v[i] = m.v[i];
+        }
+        sGuardsIn[m.about] = 1;
         return;
     }
     for (i = 0; i < COOPSTAT_COUNT; i++)
     {
-        if (!m.fromhost && (i == COOPSTAT_KILLS || i == COOPSTAT_HEAD))
-        {
-            continue;   /* the host counted those (blame) */
-        }
-        if (!m.fromhost && i == COOPSTAT_HITS)
-        {
-            sPartner.v[i] += m.own[i];  /* its own hits (objects) on top of its hits on our guards */
-            continue;
-        }
-        sPartner.v[i] = m.own[i];
+        sOwn[from].v[i] = m.v[i];
     }
-    sPartnerIn = 1;
-    if (m.fromhost)
-    {
-        sYours[0] = m.yours[0];
-        sYours[1] = m.yours[1];
-        sYours[2] = m.yours[2];
-        sHostIn = 1;
-    }
-    portConLogf("ge: coop: stats from the partner: kills %d shots %d hits %d head %d deaths %d revived %d respawns %d\n",
-                sPartner.v[COOPSTAT_KILLS], sPartner.v[COOPSTAT_SHOTS], sPartner.v[COOPSTAT_HITS], sPartner.v[COOPSTAT_HEAD],
-                sPartner.v[COOPSTAT_DEATHS], sPartner.v[COOPSTAT_REVIVED], sPartner.v[COOPSTAT_RESPAWNS]);
+    sOwnIn[from] = 1;
+    sWas[from] = 1;
+    portConLogf("ge: coop: stats from player %d: kills %d shots %d hits %d head %d deaths %d revived %d respawns %d\n",
+                from + 1, m.v[COOPSTAT_KILLS], m.v[COOPSTAT_SHOTS], m.v[COOPSTAT_HITS], m.v[COOPSTAT_HEAD],
+                m.v[COOPSTAT_DEATHS], m.v[COOPSTAT_REVIVED], m.v[COOPSTAT_RESPAWNS]);
 }
 
-/* 1: the debrief on screen is for a co-op mission (draw the two columns) */
+/* 1: the debrief on screen is for a co-op mission (draw the columns) */
 s32 coopStatsShown(void)
 {
     return sCoop && !sLive;   /* the next mission's start clears sCoop */
 }
 
-/* player 0 us, 1 the partner; -1 while that number has not come in */
-s32 coopStatsGet(s32 player, s32 stat)
+/* the debrief's columns: every player who was in the mission, by number */
+s32 coopStatsColumns(void)
 {
-    if (!coopStatsShown() || stat < 0 || stat >= COOPSTAT_COUNT)
+    s32 p;
+
+    sNumCols = 0;
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        if (sWas[p])
+        {
+            sOrder[sNumCols++] = p;
+        }
+    }
+    return sNumCols;
+}
+
+/* column col (coopStatsColumns); -1 while that number has not come in */
+s32 coopStatsGet(s32 col, s32 stat)
+{
+    s32 p;
+
+    if (!coopStatsShown() || stat < 0 || stat >= COOPSTAT_COUNT || col < 0 || col >= sNumCols)
     {
         return -1;
     }
-    if (player != 0)
+    p = sOrder[col];
+    if (!sOwnIn[p])
     {
-        return sPartnerIn ? sPartner.v[stat] : -1;
+        return -1;
     }
-    if (coopNetIsHost())
+    if (p == 0)
     {
-        return sSelf.v[stat];
+        return sOwn[p].v[stat];   /* the host counted its own guards */
     }
     switch (stat)
-    {   /* joiner: our hits on guards and kills were counted on the host */
-        case COOPSTAT_KILLS: return sHostIn ? sYours[0] : -1;
-        case COOPSTAT_HITS:  return sHostIn ? sSelf.v[stat] + sYours[1] : -1;
-        case COOPSTAT_HEAD:  return sHostIn ? sSelf.v[stat] + sYours[2] : -1;
-        default:             return sSelf.v[stat];
+    {   /* a joiner's hits on guards and kills were counted on the host */
+        case COOPSTAT_KILLS: return sGuardsIn[p] ? sGuards[p].v[stat] : -1;
+        case COOPSTAT_HITS:
+        case COOPSTAT_HEAD:  return sGuardsIn[p] ? sOwn[p].v[stat] + sGuards[p].v[stat] : -1;
+        default:             return sOwn[p].v[stat];
     }
 }
 
-const char *coopStatsName(s32 player)
+const char *coopStatsName(s32 col)
 {
-    const char *n = sNames[player != 0];
+    s32 p = (col >= 0 && col < sNumCols) ? sOrder[col] : 0;
 
-    return (n[0] != '\0') ? n : (player != 0 ? "Partner" : "You");
+    return (sNames[p][0] != '\0') ? sNames[p] : "Player";
 }
 
 
@@ -467,13 +519,13 @@ static void coopCampaignSave(void)
     fclose(f);
 }
 
-/* the current partner's key; 0 when there is no partner */
-static s32 coopCampaignKey(char *key, s32 cap)
+/* partner p's key; 0 when p is not one */
+static s32 coopCampaignKey(s32 p, char *key, s32 cap)
 {
-    unsigned long long id = coopLobbyIsSteam() ? coopSteamPeerId() : 0;
+    unsigned long long id = coopPlayerId(p);
     s32 i;
 
-    if (!coopSessionActive())
+    if (!coopSessionActive() || p == coopLobbySelfPlayer() || !coopLobbyPlayerHere(p))
     {
         return 0;
     }
@@ -482,7 +534,7 @@ static s32 coopCampaignKey(char *key, s32 cap)
         snprintf(key, cap, "steam:%llu", id);
         return 1;
     }
-    snprintf(key, cap, "name:%s", coopLobbyPartnerName());
+    snprintf(key, cap, "name:%s", coopPlayerName(p));
     for (i = 0; key[i] != '\0'; i++)
     {
         if ((u8) key[i] <= ' ' || (u8) key[i] >= 0x7F)
@@ -521,18 +573,17 @@ static s32 coopCampaignStageOf(s32 mission)
     return -1;
 }
 
-/* A co-op mission ended in a win (coopMissionComplete, both games): remember
- * it for this partner. GE_COOP_TESTWIN=1 counts any end as a win (harness only). */
+/* A co-op mission ended in a win (coopMissionComplete, every game): remember
+ * it for each partner. GE_COOP_TESTWIN=1 counts any end as a win (harness only). */
 void coopCampaignMissionEnd(void)
 {
     char key[40];
     s32 mission = coopCampaignMissionOf(bossGetStageNum());
     s32 diff = lvlGetSelectedDifficulty();
-    s32 i;
-    CoopCampaignEnt *e = NULL;
+    s32 i, p;
+    s32 saved = 0;
 
-    if (!sCoop || mission < 0 || mission >= COOP_MISSIONS || diff < DIFFICULTY_AGENT || diff >= DIFFICULTY_MAX
-        || !coopCampaignKey(key, sizeof(key)))
+    if (!sCoop || mission < 0 || mission >= COOP_MISSIONS || diff < DIFFICULTY_AGENT || diff >= DIFFICULTY_MAX)
     {
         return;
     }
@@ -541,33 +592,47 @@ void coopCampaignMissionEnd(void)
         return;
     }
     coopCampaignLoad();
-    for (i = 0; i < sCampaignCount; i++)
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
     {
-        if (strcmp(sCampaign[i].key, key) == 0 && sCampaign[i].mission == mission)
+        CoopCampaignEnt *e = NULL;
+
+        if (!sWas[p] || !coopCampaignKey(p, key, sizeof(key)))
         {
-            e = &sCampaign[i];
-            break;
+            continue;
         }
-    }
-    if (e == NULL)
-    {
-        if (sCampaignCount >= COOP_CAMPAIGN_MAX)
+        for (i = 0; i < sCampaignCount; i++)
         {
-            return;
+            if (strcmp(sCampaign[i].key, key) == 0 && sCampaign[i].mission == mission)
+            {
+                e = &sCampaign[i];
+                break;
+            }
         }
-        e = &sCampaign[sCampaignCount++];
-        memset(e, 0, sizeof(*e));
-        strncpy(e->key, key, sizeof(e->key) - 1);
-        e->mission = (s8) mission;
-        e->difficulty = (s8) diff;
+        if (e == NULL)
+        {
+            if (sCampaignCount >= COOP_CAMPAIGN_MAX)
+            {
+                continue;
+            }
+            e = &sCampaign[sCampaignCount++];
+            memset(e, 0, sizeof(*e));
+            strncpy(e->key, key, sizeof(e->key) - 1);
+            e->mission = (s8) mission;
+            e->difficulty = (s8) diff;
+        }
+        else if (diff > e->difficulty && diff != DIFFICULTY_007)
+        {
+            e->difficulty = (s8) diff;
+        }
+        coopStatsCopyName(e->name, sizeof(e->name), coopPlayerName(p));
+        saved = 1;
+        portConLogf("ge: coop: campaign: %s (%s) done with %s [%s]\n", sMissionNames[mission], sDiffNames[diff], e->name, key);
     }
-    else if (diff > e->difficulty && diff != DIFFICULTY_007)
+    if (!saved)
     {
-        e->difficulty = (s8) diff;
+        return;
     }
-    coopStatsCopyName(e->name, sizeof(e->name), coopLobbyPartnerName());
     coopCampaignSave();
-    portConLogf("ge: coop: campaign: %s (%s) done with %s [%s]\n", sMissionNames[mission], sDiffNames[diff], e->name, key);
     {
         s32 stage, d;
         char label[48];
@@ -579,32 +644,44 @@ void coopCampaignMissionEnd(void)
     }
 }
 
-/* The mission after the furthest one finished with the current partner, at
- * the difficulty it was finished on. 1 and stage (LEVELID_*), difficulty and
- * a label like "Continue: Facility (Agent)"; 0 with no partner, nothing
- * finished together, or the last mission done. */
+/* The mission after the furthest one finished with every partner here (the
+ * least far partner sets it), at the difficulty it was finished on. 1 and
+ * stage (LEVELID_*), difficulty and a label like "Continue: Facility (Agent)";
+ * 0 with no partner, nothing finished together, or the last mission done. */
 s32 coopCampaignNext(s32 *stage, s32 *difficulty, char *label, s32 labelcap)
 {
     char key[40];
-    s32 i;
-    s32 best = -1;
+    s32 i, p;
+    s32 best = COOP_MISSIONS;   /* the group's: the least far partner's */
     s32 diff = DIFFICULTY_AGENT;
+    s32 partners = 0;
     s32 next;
 
-    if (!coopCampaignKey(key, sizeof(key)))
-    {
-        return 0;
-    }
     coopCampaignLoad();
-    for (i = 0; i < sCampaignCount; i++)
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
     {
-        if (strcmp(sCampaign[i].key, key) == 0 && sCampaign[i].mission > best)
+        s32 pbest = -1, pdiff = DIFFICULTY_AGENT;
+
+        if (!coopCampaignKey(p, key, sizeof(key)))
         {
-            best = sCampaign[i].mission;
-            diff = sCampaign[i].difficulty;
+            continue;
+        }
+        partners++;
+        for (i = 0; i < sCampaignCount; i++)
+        {
+            if (strcmp(sCampaign[i].key, key) == 0 && sCampaign[i].mission > pbest)
+            {
+                pbest = sCampaign[i].mission;
+                pdiff = sCampaign[i].difficulty;
+            }
+        }
+        if (pbest < best)
+        {
+            best = pbest;
+            diff = pdiff;
         }
     }
-    if (best < 0 || best + 1 >= COOP_MISSIONS)
+    if (partners == 0 || best < 0 || best + 1 >= COOP_MISSIONS)
     {
         return 0;
     }
