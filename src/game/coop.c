@@ -151,6 +151,8 @@ typedef struct
  * carries all unacked events plus an ack of what we have received. */
 enum { COOPEV_HIT = 1, COOPEV_SHOTCHR = 2, COOPEV_DOOR = 3, COOPEV_OBJDMG = 4, COOPEV_PICKUP = 5, COOPEV_MISSIONEND = 6, COOPEV_EXPLODE = 7, COOPEV_AICMD = 8,
        COOPEV_STATS = 9, COOPEV_GIVE = 10, COOPEV_GIVEBACK = 11 };
+/* 20..31 (COOPEV_EXT_FIRST..LAST in coop.h) belong to coop_ext.c's features:
+ * chat, objective credit, team times, cross-save */
 
 typedef struct
 {
@@ -895,6 +897,10 @@ void coopTick(void)
 
     sTick++;
     coopPollNet();
+    if (bossGetStageNum() != LEVELID_TITLE)
+    {
+        coopExtTick(coopInMission());   /* chat, spectating, objective credit, ... (coop_ext.c); the menus' is coopFrontTick's */
+    }
     coopFlushEvents();
     coopSendHello();
 
@@ -2151,6 +2157,12 @@ static void coopApplyEvent(CoopEvent *ev)
         case COOPEV_GIVEBACK:
             coopGiveReturned(&ev->u.give, ev->from);
             break;
+        default:
+            if (ev->kind >= COOPEV_EXT_FIRST && ev->kind <= COOPEV_EXT_LAST)
+            {
+                coopExtApply(ev->kind, ev->u.raw, ev->from);
+            }
+            break;
     }
 }
 
@@ -2975,6 +2987,7 @@ s32 coopFrontTick(void)
     }
     sTick++;
     coopPollNet();
+    coopExtTick(0);         /* chat, objective credit, ... (coop_ext.c) */
     coopStatsFrontTick();   /* back from a mission: send our stats column */
     coopFlushEvents();
     coopSendHello();
@@ -3548,4 +3561,67 @@ static void coopApplyAiCommand(CoopEvent *ev)
     chr->ailist = savedlist;
     chr->aioffset = savedofs;
     portConLogf("ge: coop: host script command %d\n", list[0]);
+}
+
+/* ---- the feature batch (coop_ext.c and friends) ------------------------------
+ * Chat, spectating, objective credit, team times and cross-save keep their
+ * own files and reach the session through these. */
+
+/* a reliable event of an EXT kind, to player `to` or COOP_ALL */
+void coopExtSend(s32 kind, s32 to, const void *payload, s32 len)
+{
+    CoopEvent ev;
+
+    if (sEnabled <= 0 || kind < COOPEV_EXT_FIRST || kind > COOPEV_EXT_LAST)
+    {
+        return;
+    }
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = (u8) kind;
+    memcpy(ev.u.raw, payload, (len < (s32) sizeof(ev.u.raw)) ? len : (s32) sizeof(ev.u.raw));
+    coopQueueEventTo(&ev, to);
+}
+
+s32 coopExtSelf(void)
+{
+    return (sEnabled > 0) ? coopSelf() : 0;
+}
+
+s32 coopExtIsHost(void)
+{
+    return sEnabled > 0 && coopNetIsHost();
+}
+
+u32 coopExtMissionTicks(void)
+{
+    return sMissionTicks;
+}
+
+/* another player in this mission with us: where they are and look */
+s32 coopExtRemoteView(s32 p, CoopExtView *out)
+{
+    CoopRemote *r;
+
+    if (sEnabled <= 0 || !coopRemoteHere(p))
+    {
+        return 0;
+    }
+    r = &sR[p];
+    out->pos.f[0] = r->st.pos[0];
+    out->pos.f[1] = r->st.pos[1];
+    out->pos.f[2] = r->st.pos[2];
+    out->yaw = r->st.yaw;
+    out->pitch = r->st.look.aimpitch;
+    out->dead = r->st.dead;
+    out->prop = (r->puppet != NULL && r->puppet->chr != NULL) ? r->puppet : NULL;
+    out->stan = (out->prop != NULL) ? out->prop->stan : NULL;
+    out->weapon = r->st.look.weapon[0];
+    out->health = r->st.health;
+    return 1;
+}
+
+/* the host's hello: how long it has been in this mission (joiner) */
+u32 coopExtHostMissionTicks(void)
+{
+    return (sEnabled > 0 && !coopNetIsHost()) ? sHostHello.missionticks : sMissionTicks;
 }

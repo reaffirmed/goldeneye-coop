@@ -149,7 +149,7 @@ enum
      * +20 classic_toggle (Classic Mode bindable on a pad, as Tab is on the keyboard),
      * +21 / +22 watch_up / watch_down (unbound: a pad's D-pad or Move already
      * steps the watch lists) */
-    PM_PORT_LAST = PM_PORT_FIRST + 30,   /* +23 objective_list, +24..+28 weapon_slot_1..5, +29 give_partner, +30 weapon_slot_6 */
+    PM_PORT_LAST = PM_PORT_FIRST + 31,   /* +23 objective_list, +24..+28 weapon_slot_1..5, +29 give_partner, +30 weapon_slot_6, +31 chat */
     PM_COUNT
 };
 #define PM_PORT_COUNT (PM_PORT_LAST - PM_PORT_FIRST + 1)
@@ -175,6 +175,7 @@ static const char *sPadMapNames[PM_COUNT] =
     "weapon_slot_1", "weapon_slot_2", "weapon_slot_3", "weapon_slot_4", "weapon_slot_5",
     "give_partner",
     "weapon_slot_6",
+    "chat",
 };
 /* The raw (unmapped DInput) fallback layout of portInputPadMerge expressed as
  * map tokens, so the launcher, first-rebind seed and bind rows can describe it.

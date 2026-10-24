@@ -564,6 +564,7 @@ Gfx *coopHudRender(Gfx *gdl)
     {
         gdl = coopHudObjectives(gdl, partner ? COOP_RADAR_TOP + 0x16 : 0x10);
     }
+    gdl = coopFeedRender(gdl);   /* chat lines and toasts (coop_chat.c) */
     gdl = weapmenuRender(gdl);
     return gdl;
 }

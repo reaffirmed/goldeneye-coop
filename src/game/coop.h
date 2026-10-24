@@ -230,4 +230,48 @@ void coopCharacterName(s32 c, char *out, s32 cap);  /* with "\n" */
 s32  coopCharacterBody(s32 c, s32 *head);   /* the body and head, -1 for the mission's Bond */
 s32  coopPlayerCharacter(s32 p);            /* player p's pick, as the lobby knows it */
 
+/* ---- the feature batch: chat, spectating, objective credit, team times,
+ * cross-save (coop_ext.c dispatches; coop.c carries the events) ---------- */
+#define COOPEV_EXT_FIRST 20
+#define COOPEV_EXT_LAST  31
+enum
+{
+    COOPEV_CHAT = 20,       /* a part of a chat line (coop_chat.c) */
+    COOPEV_OBJCLAIM = 21,   /* joiner -> host: I saw an objective complete first */
+    COOPEV_OBJDONE = 22,    /* host -> all: objective done, and who gets the credit */
+    COOPEV_TEAMTIME = 23,   /* host -> all: the team's time for the mission just won */
+    COOPEV_CAMPAIGN = 24    /* host -> joiner: a line of the host's campaign record */
+};
+typedef struct
+{
+    coord3d pos;        /* their eyes */
+    f32 yaw;            /* radians, model convention (as CoopStatePkt) */
+    f32 pitch;          /* the gun's aim up and down, radians */
+    s32 dead;
+    PropRecord *prop;   /* their puppet, NULL before it is built */
+    StandTile *stan;
+    s32 weapon;         /* right hand ITEM_IDS */
+    f32 health;
+} CoopExtView;
+void coopExtSend(s32 kind, s32 to, const void *payload, s32 len);
+s32  coopExtSelf(void);
+s32  coopExtIsHost(void);
+u32  coopExtMissionTicks(void);
+u32  coopExtHostMissionTicks(void);
+s32  coopExtRemoteView(s32 p, CoopExtView *out);
+void coopExtTick(s32 inmission);
+void coopExtApply(s32 kind, const u8 *raw, s32 from);
+
+/* chat (coop_chat.c): the chat key opens a line, Return sends it to everyone,
+ * Escape drops it; lines and toasts fade out over the HUD and the lobby */
+void coopChatPress(void);
+s32  coopChatTyping(void);
+s32  coopChatEatEscape(void);   /* 1: this Escape was the chat's, not the pause's */
+void coopChatTick(s32 inmission);
+void coopChatApply(const u8 *raw, s32 from);
+void coopFeedToast(const char *text, s32 player);   /* centred, in the player's colour; -1 white */
+Gfx *coopFeedRender(Gfx *gdl);                       /* in play (coop_hud.c) */
+s32  coopFeedLines(s32 maxlines, char lines[][80], s32 *players);  /* the newest chat lines as typed, for the lobby */
+void coopChatTypedLine(char *out, s32 cap);         /* the line being typed */
+
 #endif
