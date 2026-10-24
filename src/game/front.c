@@ -8835,7 +8835,7 @@ extern void portConLogf(const char *fmt, ...);
 
 enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLROW_CANCEL,
        CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE, CLROW_FRIENDLYFIRE,
-       CLROW_CHARACTER, CLROW_CHAT, CLROW_PUBLIC, CLROW_PASSWORD, CLROW_JOINPUBLIC };
+       CLROW_CHARACTER, CLROW_CHAT, CLROW_PUBLIC, CLROW_PASSWORD, CLROW_JOINPUBLIC, CLROW_LAYOUT, CLROW_OPTION };
 #define COOP_LOBBY_ROWS     40
 #define COOP_LOBBY_VISIBLE  19  /* rows that fit on the paper; more scroll (coop_lobby_scroll) */
 #define COOP_LOBBY_CHAT_LINES 3
@@ -8941,6 +8941,58 @@ static void coopLobbyAddHostOptions(void)
     }
 }
 
+/* your own controls, in the lobby too: the first controller's layout preset
+ * and the Port Options a co-op player reaches for first (Field of View,
+ * Mouse Look, mouse speed). Each click steps the value on and round; it
+ * applies at once and saves, as on the options sheets. */
+static const char *const coop_lobby_opts[][2] = {
+    { "hfov_wide", "Field of View\n" },
+    { "mouse", "Mouse Look\n" },
+    { "mouse_sens_x", "Mouse Speed\n" },
+};
+
+static void coopLobbyAddControls(void)
+{
+    struct CoopLobbyRow *r;
+    char value[24];
+    s32 i;
+
+    coopLobbyAdd(CLROW_HEAD, 0, "Your Controls\n", "");
+    if (portInputDeviceCount() > 1 && portInputLayoutCount() > 0)
+    {
+        const char *shown = portInputLayoutShown(1);
+
+        snprintf(value, sizeof(value), "%.20s\n", (shown != NULL && shown[0] != '\0') ? shown : "Default");
+        coopLobbyAdd(CLROW_LAYOUT, 0, "Controller Layout\n", value);
+    }
+    else
+    {
+        r = coopLobbyAdd(CLROW_TEXT, 0, "Controller Layout\n", "No Controller\n");
+        if (r != NULL)
+        {
+            r->colour = PORT_SHEET_COL_DIM;
+        }
+    }
+    for (i = 0; i < (s32) (sizeof(coop_lobby_opts) / sizeof(coop_lobby_opts[0])); i++)
+    {
+        const s32 opt = portOptFind(coop_lobby_opts[i][0]);
+
+        if (opt < 0)
+        {
+            continue;
+        }
+        if (strcmp(coop_lobby_opts[i][0], "mouse") == 0)
+        {
+            snprintf(value, sizeof(value), "%s", portOptGet(opt) ? "On\n" : "Off\n");
+        }
+        else
+        {
+            snprintf(value, sizeof(value), "%s", portOptValueText(opt));
+        }
+        coopLobbyAdd(CLROW_OPTION, i, coop_lobby_opts[i][1], value);
+    }
+}
+
 static void coopLobbyBuild(void)
 {
     const s32 state = coopLobbyState();
@@ -8976,6 +9028,7 @@ static void coopLobbyBuild(void)
         {
             r->indent = 0xC;
         }
+        coopLobbyAddControls();
         coopLobbyAdd(CLROW_HEAD, 0, "Public Games\n", "");
         k = coopBrowseCount();
         for (i = 0; i < k && coop_lobby_nrows < COOP_LOBBY_ROWS - 4; i++)
@@ -9220,6 +9273,7 @@ static void coopLobbyBuild(void)
     {
         coopLobbyAddHostOptions();
     }
+    coopLobbyAddControls();
 
     for (i = 0, k = 0; i < COOP_MAX_PLAYERS; i++)
     {
@@ -9310,6 +9364,43 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
         case CLROW_JOINPUBLIC:
             coopBrowseJoin(r->arg);
             break;
+        case CLROW_LAYOUT:
+        {   /* the first controller: the next shipped or saved layout */
+            const char *shown = portInputLayoutShown(1);
+            const s32 n = portInputLayoutCount();
+            s32 i, cur = -1;
+
+            for (i = 0; shown != NULL && i < n; i++)
+            {
+                if (strcmp(portInputLayoutName(i), shown) == 0)
+                {
+                    cur = i;
+                    break;
+                }
+            }
+            if (n > 0)
+            {
+                portInputLayoutApply(1, (cur + 1) % n);
+            }
+            break;
+        }
+        case CLROW_OPTION:
+        {
+            const s32 opt = portOptFind(coop_lobby_opts[r->arg][0]);
+
+            if (opt >= 0)
+            {
+                const s32 y = (strcmp(coop_lobby_opts[r->arg][0], "mouse_sens_x") == 0) ? portOptFind("mouse_sens_y") : -1;
+                const s32 tied = (y >= 0 && portOptGet(y) == portOptGet(opt));
+
+                portOptStep(opt, 1);
+                if (tied)
+                {
+                    portOptStep(y, 1);  /* up and down kept with it, unless the player set them apart */
+                }
+            }
+            break;
+        }
         default:
             break;
     }
