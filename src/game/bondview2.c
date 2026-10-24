@@ -12239,6 +12239,64 @@ s32 portMpSpawnWithWeapon(void)
 }
 #endif
 
+#ifndef TARGET_N64
+/* Co-op: bring the dead solo player back at the given spot with full health,
+ * keeping inventory and ammo (mission items included). Called by coop.c. */
+void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon)
+{
+    coord3d start_pos;
+    f32 stan_height;
+
+    g_CurrentPlayer->bonddead = 0;
+    g_CurrentPlayer->deathanimfinished = 0;
+    g_CurrentPlayer->redbloodfinished = 0;
+    g_CurrentPlayer->startnewbonddie = 1;
+    g_CurrentPlayer->bondhealth = 1.0f;
+    g_CurrentPlayer->healthdamagetype = 7;
+    g_CurrentPlayer->damagetype = 7;
+    g_CurrentPlayer->gunammooff = 0;
+    g_CurrentPlayer->gunsightmode = 2;
+    hudmsgsSetOn(-1);
+    bondviewClearUpperTextDisplayFlag(-1);
+
+    stan_height = bondviewYPositionRelated(stan, pos->f[0], pos->f[2]);
+    start_pos.f[0] = pos->f[0];
+    start_pos.f[1] = g_CurrentPlayer->eyeheight + stan_height;
+    start_pos.f[2] = pos->f[2];
+    g_CurrentPlayer->field_70 = stan_height;
+    g_CurrentPlayer->stanHeight = stan_height;
+#if defined(VERSION_EU)
+    g_CurrentPlayer->field_6C = (f32) (stan_height / 0.2004f);
+#else
+    g_CurrentPlayer->field_6C = (f32) (stan_height / 0.17000002f);
+#endif
+    g_CurrentPlayer->vv_theta = (f32) ((yaw * 360.0f) / 6.2831855f);
+    change_player_pos_to_target(&g_CurrentPlayer->field_488, &start_pos, stan);
+    g_CurrentPlayer->field_488.theta_transform.x = -sinf(yaw);
+    g_CurrentPlayer->field_488.theta_transform.y = 0.0f;
+    g_CurrentPlayer->field_488.theta_transform.z = cosf(yaw);
+    g_CurrentPlayer->prop->pos.x = g_CurrentPlayer->bondprevpos.x = start_pos.f[0];
+    g_CurrentPlayer->prop->pos.y = g_CurrentPlayer->bondprevpos.y = start_pos.f[1];
+    g_CurrentPlayer->prop->pos.z = g_CurrentPlayer->bondprevpos.z = start_pos.f[2];
+    g_CurrentPlayer->prop->stan = stan;
+#if defined(VERSION_EU)
+    g_CurrentPlayer->field_3B8.x = (f32) (g_CurrentPlayer->field_488.pos.x / 0.118799984f);
+    g_CurrentPlayer->field_3B8.y = (f32) (g_CurrentPlayer->field_488.pos.y / 0.118799984f);
+    g_CurrentPlayer->field_3B8.z = (f32) (g_CurrentPlayer->field_488.pos.z / 0.118799984f);
+#else
+    g_CurrentPlayer->field_3B8.x = (f32) (g_CurrentPlayer->field_488.pos.x / 0.100000024f);
+    g_CurrentPlayer->field_3B8.y = (f32) (g_CurrentPlayer->field_488.pos.y / 0.100000024f);
+    g_CurrentPlayer->field_3B8.z = (f32) (g_CurrentPlayer->field_488.pos.z / 0.100000024f);
+#endif
+    g_CurrentPlayer->field_78 = 0.0f;
+    g_CurrentPlayer->field_7C = -0.0001f;
+    g_CurrentPlayer->field_80 = 0.0f;
+    currentPlayerEquipWeaponWrapper(GUNRIGHT, weapon);
+    currentPlayerSetFadeFrac(60.0f, 0.0f);
+    currentPlayerStartChrFade(120.0f, 1.0f);
+}
+#endif
+
 void mp_respawn_handler(void)
 {
     coord3d start_pos = ZeroCoordSpawnPos;
@@ -12921,6 +12979,9 @@ blood_frame_held:;
                 {
                     if (getPlayerCount() == 1)
                     {
+#ifndef TARGET_N64
+                        if (!coopDeadTick()) /* co-op: wait to respawn by the partner */
+#endif
                         bondviewSetCameraMode(CAMERAMODE_DEATH_CAM_SP);
                     }
                     else

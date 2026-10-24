@@ -23,6 +23,8 @@ s32  coopSkipExplosionDamage(ChrRecord *chr);
 void coopPickedUp(ObjectRecord *obj, s32 kept);
 s32  coopPeerHolds(ObjectRecord *obj);
 void coopMissionComplete(void);
+s32  coopDeadTick(void); /* 1: co-op owns this death (waiting or respawned) */
+void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon);
 s32  coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid);
 
 #endif

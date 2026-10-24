@@ -44,6 +44,8 @@ s32 chrGetNumFree(void);
 s32 sizepropdef(PropDefHeaderRecord *pdef);
 bool objIsMortal(ObjectRecord *obj);
 void alarmActivate(void);
+ITEM_IDS getCurrentPlayerWeaponId(GUNHAND hand);
+void hudmsgBottomShow(char *mess);
 TICKOP propPickupByPlayer(PropRecord *prop, bool showstring);
 void objFreePermanently(ObjectRecord *obj, bool freeprop);
 void alarmDeactivate(void);
@@ -88,7 +90,7 @@ typedef struct
     u32 photobits;
     u8 keycopied;
     u8 alarm;
-    u8 pad[2];
+    u16 calm;           /* ticks since the sender was last in a fight (capped) */
 } CoopWorldPkt;
 
 /* Reliable, in-order events (hits, shots, doors, ...). Every EVENTS packet
@@ -162,6 +164,13 @@ static s32 sEnabled = -1;
 #define COOP_MAX_PEERHELD 32
 static s32 sPeerHeld[COOP_MAX_PEERHELD];
 static s32 sNumPeerHeld;
+static u32 sRemoteCalm;     /* the partner's calm at sRemoteCalmTick */
+static u32 sRemoteCalmTick;
+static u32 sLastHurtTick;   /* local Bond lost health */
+static u32 sLastFightTick;  /* host: a guard was attacking someone */
+static f32 sLastHealth;
+static s32 sLastWeapon = ITEM_UNARMED;
+static u32 sDeadSince;      /* sTick our Bond's death fade finished, 0 alive */
 static s32 sDefsBytes;  /* size of the stage's setup prop defs */
 static void *sDefsBase;
 static u32 sTick;
@@ -217,6 +226,8 @@ static void coopApplyObjDamage(CoopEvent *ev);
 static void coopSendWorld(void);
 static void coopApplyPickup(CoopEvent *ev);
 static void coopApplyMissionEnd(CoopEvent *ev);
+static s32 coopLocalCalm(void);
+static void coopTrackCombat(void);
 static void coopApplyWorld(CoopWorldPkt *p);
 static s32 coopSetupOfs(void *rec);
 static StandTile *coopFindStan(coord3d *pos, StandTile *from, coord3d *frompos);
@@ -546,6 +557,10 @@ void coopStageStart(void)
     }
     sLastSnapTick = 0;
     sNumPeerHeld = 0;
+    sLastHurtTick = sLastFightTick = sDeadSince = 0;
+    sRemoteCalm = sRemoteCalmTick = 0;
+    sLastHealth = 1.0f;
+    sLastWeapon = ITEM_UNARMED;
     sTickChr = NULL;
     g_CoopPropOverride = NULL;
     sPuppet = NULL;
@@ -575,6 +590,7 @@ void coopTick(void)
     }
 
     coopSendState();
+    coopTrackCombat();
     if ((sTick % 30) == 0 && sRemoteValid && sRemote.stage == bossGetStageNum())
     {
         coopSendWorld();
@@ -653,6 +669,19 @@ void coopTick(void)
 
 static void coopHarnessTick(void)
 {
+    {   /* GE_COOP_TESTDIE=1: kill our Bond at 15 s (harness only) */
+        static s32 testdie = -1;
+        if (testdie == -1)
+        {
+            testdie = getenv("GE_COOP_TESTDIE") != NULL;
+        }
+        if (testdie && sTick >= 900 && sRemoteValid && !g_CurrentPlayer->bonddead)
+        {
+            testdie = 0;
+            portConLogf("ge: coop: testdie\n");
+            bondviewCallRecordDamageKills(10.0f, 0.0f, -1, 1);
+        }
+    }
     {   /* GE_COOP_TESTEND=1: complete the mission at 20 s (harness only) */
         static s32 testend = -1;
         if (testend == -1)
@@ -1734,6 +1763,7 @@ static void coopSendWorld(void)
     }
     p.keycopied = g_CurrentPlayer->copiedgoldeneye != 0;
     p.alarm = alarmIsActive() != 0;
+    p.calm = (u16) coopLocalCalm();
     coopNetSend(&p, sizeof(p));
 }
 
@@ -1784,6 +1814,8 @@ static void coopApplyWorld(CoopWorldPkt *p)
             ph->flag = 1;
         }
     }
+    sRemoteCalm = p->calm;
+    sRemoteCalmTick = sTick;
     if (p->keycopied && !g_CurrentPlayer->copiedgoldeneye)
     {
         g_CurrentPlayer->copiedgoldeneye = 1;
@@ -1906,4 +1938,100 @@ static void coopApplyMissionEnd(CoopEvent *ev)
     sApplyingRemoteEnd = 1;
     bossReturnTitleStage();
     sApplyingRemoteEnd = 0;
+}
+
+
+/* ---- death and respawn -----------------------------------------------------
+ * A dead player comes back beside the partner once the partner has been out
+ * of combat for a few seconds, or after 20 s regardless. With no living
+ * partner to come back to, the death is the normal mission failure. */
+
+#define COOP_CALM_CAP        3600
+#define COOP_RESPAWN_MIN     180   /* 3 s after the death fade */
+#define COOP_RESPAWN_CALM    240   /* partner out of combat for 4 s */
+#define COOP_RESPAWN_MAX     1200  /* 20 s */
+
+static void coopTrackCombat(void)
+{
+    s32 i;
+
+    if (g_CurrentPlayer->bonddead)
+    {
+        return;
+    }
+    if (g_CurrentPlayer->bondhealth < sLastHealth)
+    {
+        sLastHurtTick = sTick;
+    }
+    sLastHealth = g_CurrentPlayer->bondhealth;
+    if (getCurrentPlayerWeaponId(GUNRIGHT) > ITEM_UNARMED)
+    {
+        sLastWeapon = getCurrentPlayerWeaponId(GUNRIGHT);
+    }
+    sDeadSince = 0;
+
+    if (coopNetIsHost() && (sTick % 10) == 0)
+    {
+        for (i = 0; i < g_NumChrSlots; i++)
+        {
+            ChrRecord *chr = &g_ChrSlots[i];
+
+            if (chr->model != NULL && chr->prop != NULL && chr->prop != sPuppet
+                && (chr->actiontype == ACT_ATTACK || chr->actiontype == ACT_ATTACKWALK || chr->actiontype == ACT_ATTACKROLL))
+            {
+                sLastFightTick = sTick;
+                break;
+            }
+        }
+    }
+}
+
+static s32 coopLocalCalm(void)
+{
+    u32 last = sLastHurtTick;
+    u32 calm;
+
+    if (coopNetIsHost() && (s32) (sLastFightTick - last) > 0)
+    {
+        last = sLastFightTick; /* guards only fight on the host */
+    }
+    calm = (last == 0) ? COOP_CALM_CAP : sTick - last;
+    return (calm > COOP_CALM_CAP) ? COOP_CALM_CAP : (s32) calm;
+}
+
+s32 coopDeadTick(void)
+{
+    u32 dead, calm;
+
+    if (sEnabled <= 0 || !coopNetHasPeer() || !sRemoteValid || sRemote.stage != bossGetStageNum()
+        || sRemote.dead || sPuppet == NULL || sPuppet->stan == NULL)
+    {
+        return 0; /* nobody left standing: the mission fails as usual */
+    }
+    if (sDeadSince == 0)
+    {
+        sDeadSince = sTick;
+        hudmsgBottomShow("Waiting for your partner to get clear...\n");
+        portConLogf("ge: coop: dead, waiting to respawn\n");
+    }
+    dead = sTick - sDeadSince;
+    calm = sRemoteCalm + (sTick - sRemoteCalmTick);
+    if (coopNetIsHost())
+    {   /* the partner is fighting our guards: we see that first-hand */
+        u32 fight = (sLastFightTick == 0) ? COOP_CALM_CAP : sTick - sLastFightTick;
+        if (fight < calm)
+        {
+            calm = fight;
+        }
+    }
+    if ((dead >= COOP_RESPAWN_MIN && calm >= COOP_RESPAWN_CALM) || dead >= COOP_RESPAWN_MAX)
+    {
+        portConLogf("ge: coop: respawning by the partner after %.1f s (partner calm %.1f s)\n",
+                    dead / 60.0f, calm / 60.0f);
+        sPuppetGhost = 1; /* we arrive inside the partner */
+        coopRespawnPlayerAt(&sPuppet->pos, sPuppet->stan, 6.2831855f - sRemote.yaw, sLastWeapon); /* view yaw runs the other way */
+        sLastHealth = g_CurrentPlayer->bondhealth;
+        sDeadSince = 0;
+    }
+    return 1;
 }
