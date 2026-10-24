@@ -39,6 +39,8 @@
 void doorSetOpenState(DoorRecord *door, s32 newstate);
 bool doorIsClosed(DoorRecord *door);
 s32 chrGetNumFree(void);
+void chrSetFiring(ChrRecord *self, s32 hand, s32 firing);
+void sub_GAME_7F02BFE4(ChrRecord *self, s32 arg1, s32 arg2);
 PropRecord *chrSpawnAtCoord(s32 bodynum, s32 headnum, coord3d *pos, StandTile *stan, f32 angle, AIListRecord *ailist, s32 spawnflags);
 
 extern void portConLogf(const char *fmt, ...);
@@ -95,7 +97,7 @@ typedef struct
 } CoopEventsPkt;
 
 /* host -> client guard snapshot, one entry per chr */
-enum { GSF_HIDDEN = 1, GSF_FLIP = 2, GSF_LOOP = 4 };
+enum { GSF_HIDDEN = 1, GSF_FLIP = 2, GSF_LOOP = 4, GSF_FIRE_R = 8, GSF_FIRE_L = 16 };
 
 typedef struct
 {
@@ -164,6 +166,8 @@ static s32 sAckDirty;
 /* client guard mirroring */
 static u32 sGuardSnap;
 static u32 sChrLastSync[COOP_MAX_CHRS]; /* sTick of the last snapshot entry */
+static u8 sChrFireSeen[COOP_MAX_CHRS][2]; /* host: firecount at the last snapshot */
+static u8 sChrFiring[COOP_MAX_CHRS];      /* client: GSF_FIRE_* from the last snapshot */
 static u32 sLastSnapTick;
 
 enum { PANIM_IDLE, PANIM_WALK, PANIM_RUN };
@@ -178,6 +182,7 @@ static StandTile *coopFindStan(coord3d *pos, StandTile *from, coord3d *frompos);
 static s32 coopIsMirroringClient(void);
 static void coopSendGuards(void);
 static void coopReapGuards(void);
+static void coopClientGunfire(void);
 
 static s32 coopLocalBody(void)
 {
@@ -475,6 +480,8 @@ void coopStageStart(void)
     for (i = 0; i < COOP_MAX_CHRS; i++)
     {
         sChrLastSync[i] = 0;
+        sChrFireSeen[i][0] = sChrFireSeen[i][1] = 0;
+        sChrFiring[i] = 0;
     }
     sLastSnapTick = 0;
     sTickChr = NULL;
@@ -533,6 +540,7 @@ void coopTick(void)
     if (coopIsMirroringClient())
     {
         coopReapGuards();
+        coopClientGunfire();
         {   /* GE_COOP_TESTSHOT=<chrnum>: a chest shot every 2 s (harness only) */
             static s32 testchr = -2;
             if (testchr == -2)
@@ -950,6 +958,19 @@ static void coopSendGuards(void)
 
         e->chrnum = chr->chrnum;
         e->flags = 0;
+        if (i < COOP_MAX_CHRS)
+        {   /* firecount ticks on every fire tick, shot or not */
+            if (chr->firecount[GUNRIGHT] != sChrFireSeen[i][GUNRIGHT])
+            {
+                e->flags |= GSF_FIRE_R;
+            }
+            if (chr->firecount[GUNLEFT] != sChrFireSeen[i][GUNLEFT])
+            {
+                e->flags |= GSF_FIRE_L;
+            }
+            sChrFireSeen[i][GUNRIGHT] = chr->firecount[GUNRIGHT];
+            sChrFireSeen[i][GUNLEFT] = chr->firecount[GUNLEFT];
+        }
         e->body = (u8) chr->bodynum;
         e->head = (u8) chr->headnum;
         {
@@ -1075,6 +1096,7 @@ static void coopApplyGuard(CoopGuardEnt *e)
     if (slot >= 0 && slot < COOP_MAX_CHRS)
     {
         sChrLastSync[slot] = sTick;
+        sChrFiring[slot] = e->flags & (GSF_FIRE_R | GSF_FIRE_L);
     }
 
     if (e->flags & GSF_HIDDEN)
@@ -1128,6 +1150,42 @@ static void coopApplyGuard(CoopGuardEnt *e)
             else if (chr->model->speed != e->speed)
             {
                 modelSetAnimSpeed(chr->model, e->speed, 0.0f);
+            }
+        }
+    }
+}
+
+/* Client: muzzle flash and gun sound for guards the host says are firing.
+ * Damage is the host's business; this is only what the player sees and hears. */
+static void coopClientGunfire(void)
+{
+    s32 i, h;
+
+    for (i = 0; i < g_NumChrSlots && i < COOP_MAX_CHRS; i++)
+    {
+        ChrRecord *chr = &g_ChrSlots[i];
+
+        if (chr->model == NULL || chr->prop == NULL || chr->prop == sPuppet)
+        {
+            continue;
+        }
+        chr->hidden &= ~CHRHIDDEN_FIRE_TRACER;
+        for (h = GUNRIGHT; h <= GUNLEFT; h++)
+        {
+            s32 firing = (sChrFiring[i] & (h == GUNRIGHT ? GSF_FIRE_R : GSF_FIRE_L)) != 0;
+
+            if (chrGetEquippedWeaponProp(chr, h) == NULL)
+            {
+                continue;
+            }
+            chrSetFiring(chr, h, firing);
+            if (firing)
+            {
+                if ((sTick % 60) == 0)
+                {
+                    portConLogf("ge: coop: chr %d firing (mirrored)\n", chr->chrnum);
+                }
+                sub_GAME_7F02BFE4(chr, h, 1);
             }
         }
     }
