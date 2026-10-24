@@ -73,6 +73,7 @@ extern void portConLogf(const char *fmt, ...);
 #define COOP_VERSION 5 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters */
 
 enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7 };
+/* 10 and 11 (COOPPKT_EXT_FIRST..LAST in coop.h) are coop_ext.c's features' own packets */
 
 typedef struct
 {
@@ -712,6 +713,10 @@ static void coopPollNet(void)
         if (p->type == COOPPKT_STATE && n >= (s32) sizeof(CoopStatePkt))
         {
             coopRecvState(c, p);
+        }
+        if (p->type >= COOPPKT_EXT_FIRST && p->type <= COOPPKT_EXT_LAST)
+        {
+            coopExtPacket(buf, n, coopPlayerOfChan(c));
         }
     }
 }
@@ -2550,11 +2555,13 @@ void coopMissionComplete(void)
 {
     CoopEvent ev;
 
+    coopTeamTimeFreeze();     /* the team's time as the mission ends (coop_teamtime.c) */
     coopCampaignMissionEnd(); /* a win together goes in coop_campaign.txt */
     if (sEnabled <= 0 || sApplyingRemoteEnd || !coopNetHasPeer() || !coopPartnerHere())
     {
         return;
     }
+    coopTeamTimeSend();     /* host: the team's time first, so it is in before the debrief (coop_teamtime.c) */
     memset(&ev, 0, sizeof(ev));
     ev.kind = COOPEV_MISSIONEND;
     ev.u.end.stage = bossGetStageNum();
@@ -2575,6 +2582,7 @@ static void coopApplyMissionEnd(CoopEvent *ev)
         objectiveregisters1 = (s32) ev->u.end.stageflags;
     }
     portConLogf("ge: coop: peer completed the mission\n");
+    coopTeamTimeSend();     /* host: a joiner finished it; it debriefed on its own estimate, this corrects it */
     sApplyingRemoteEnd = 1;
     bossReturnTitleStage();
     sApplyingRemoteEnd = 0;
@@ -3650,4 +3658,26 @@ s32 coopExtRemoteView(s32 p, CoopExtView *out)
 u32 coopExtHostMissionTicks(void)
 {
     return (sEnabled > 0 && !coopNetIsHost()) ? sHostHello.missionticks : sMissionTicks;
+}
+
+/* a packet of an EXT type to player `to` (a joiner can reach only the host),
+ * or every peer with COOP_ALL */
+void coopExtSendPacket(void *pkt, s32 len, s32 to)
+{
+    u32 *hdr = (u32 *) pkt;
+    s32 c;
+
+    if (sEnabled <= 0 || len < 8)
+    {
+        return;
+    }
+    hdr[0] = COOP_MAGIC;
+    ((u16 *) pkt)[2] = COOP_VERSION;
+    for (c = 0; c < COOP_NET_MAX_PEERS; c++)
+    {
+        if (coopNetPeerConnected(c) && (to == COOP_ALL || coopPlayerOfChan(c) == to))
+        {
+            coopNetSendTo(c, pkt, len);
+        }
+    }
 }

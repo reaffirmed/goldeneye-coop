@@ -11,6 +11,22 @@ void coopExtTick(s32 inmission)
 {
     coopChatTick(inmission);
     coopObjTick(inmission);
+    coopTeamTimeTick(inmission);
+}
+
+void coopExtPacket(const void *pkt, s32 len, s32 from)
+{
+    const u16 *h = (const u16 *) pkt;
+
+    switch (h[3])
+    {
+        case COOPPKT_TEAMTIME:
+            if (len >= 20)   /* the header and a CoopTeamTimeMsg */
+            {
+                coopTeamTimeApply((const u8 *) pkt + 8, from);
+            }
+            break;
+    }
 }
 
 void coopExtApply(s32 kind, const u8 *raw, s32 from)
@@ -22,6 +38,9 @@ void coopExtApply(s32 kind, const u8 *raw, s32 from)
             break;
         case COOPEV_OBJDONE:
             coopObjApply(kind, raw, from);
+            break;
+        case COOPEV_TEAMTIME:
+            coopTeamTimeApply(raw, from);
             break;
     }
 }
