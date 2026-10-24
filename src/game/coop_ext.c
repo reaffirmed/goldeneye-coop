@@ -12,6 +12,10 @@ void coopExtTick(s32 inmission)
     coopChatTick(inmission);
     coopObjTick(inmission);
     coopTeamTimeTick(inmission);
+    if (!inmission)
+    {
+        coopCampaignTick();
+    }
 }
 
 void coopExtPacket(const void *pkt, s32 len, s32 from)
@@ -41,6 +45,9 @@ void coopExtApply(s32 kind, const u8 *raw, s32 from)
             break;
         case COOPEV_TEAMTIME:
             coopTeamTimeApply(raw, from);
+            break;
+        case COOPEV_CAMPAIGN:
+            coopCampaignApply(raw, from);
             break;
     }
 }
