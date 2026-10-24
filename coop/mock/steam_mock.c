@@ -3,7 +3,7 @@
  * accounts). It exports the flat-API subset port/src/coop_steam.c uses.
  *
  *   GE_MOCK_STEAMID=<id>   this copy's SteamID
- *   GE_MOCK_FRIEND=<id>    the one friend this copy has
+ *   GE_MOCK_FRIEND=<id>[,<id>...]  this copy's friends (up to 4)
  *   GE_MOCK_DIR=<dir>      shared folder for lobby files (default /tmp/gecoop-mock)
  *
  * Messages travel over localhost UDP, port 30000 + id % 10000, each prefixed
@@ -28,7 +28,9 @@ typedef unsigned char sbool;
 
 #define API __attribute__((visibility("default")))
 
-static u64 sSelf, sFriend;
+static u64 sSelf;
+static u64 sFriend[4];
+static int sNumFriends;
 static char sDir[256];
 static int sSock = -1;
 static u64 sNextCall = 1000;
@@ -181,7 +183,17 @@ API int SteamAPI_InitFlat(char *err)
     e = getenv("GE_MOCK_STEAMID");
     sSelf = e ? strtoull(e, NULL, 10) : 76561190000000001ULL;
     e = getenv("GE_MOCK_FRIEND");
-    sFriend = e ? strtoull(e, NULL, 10) : 0;
+    while (e != NULL && *e != '\0' && sNumFriends < 4)
+    {
+        char *end;
+
+        sFriend[sNumFriends] = strtoull(e, &end, 10);
+        if (sFriend[sNumFriends] != 0)
+        {
+            sNumFriends++;
+        }
+        e = (*end == ',') ? end + 1 : NULL;
+    }
     e = getenv("GE_MOCK_DIR");
     snprintf(sDir, sizeof(sDir), "%s", e ? e : "/tmp/gecoop-mock");
     mkdir(sDir, 0777);
@@ -323,7 +335,16 @@ API const char *SteamAPI_ISteamMatchmaking_GetLobbyData(void *self, u64 l, const
 static u64 ownerOf(u64 lobby)
 {
     /* mock ids keep the owner's low 48 bits; the high bits are the usual 7656119... */
-    return (sFriend & 0xFFFFFFFFFFFFULL) == (lobby & 0xFFFFFFFFFFFFULL) ? sFriend : sSelf;
+    int i;
+
+    for (i = 0; i < sNumFriends; i++)
+    {
+        if ((sFriend[i] & 0xFFFFFFFFFFFFULL) == (lobby & 0xFFFFFFFFFFFFULL))
+        {
+            return sFriend[i];
+        }
+    }
+    return sSelf;
 }
 
 API u64 SteamAPI_ISteamMatchmaking_GetLobbyOwner(void *self, u64 lobby) { (void) self; return ownerOf(lobby); }
@@ -376,8 +397,8 @@ API sbool SteamAPI_ISteamFriends_SetRichPresence(void *self, const char *k, cons
 
 API void SteamAPI_ISteamFriends_ClearRichPresence(void *self) { (void) self; }
 API void SteamAPI_ISteamFriends_ActivateGameOverlayInviteDialog(void *self, u64 l) { (void) self; (void) l; log_("invite overlay"); }
-API int SteamAPI_ISteamFriends_GetFriendCount(void *self, int flags) { (void) self; (void) flags; return sFriend ? 1 : 0; }
-API u64 SteamAPI_ISteamFriends_GetFriendByIndex(void *self, int i, int flags) { (void) self; (void) i; (void) flags; return sFriend; }
+API int SteamAPI_ISteamFriends_GetFriendCount(void *self, int flags) { (void) self; (void) flags; return sNumFriends; }
+API u64 SteamAPI_ISteamFriends_GetFriendByIndex(void *self, int i, int flags) { (void) self; (void) flags; return (i >= 0 && i < sNumFriends) ? sFriend[i] : 0; }
 
 API sbool SteamAPI_ISteamFriends_GetFriendGamePlayed(void *self, u64 user, unsigned char *info)
 {
@@ -417,10 +438,10 @@ API sbool SteamAPI_ISteamMatchmaking_InviteUserToLobby(void *self, u64 lobby, u6
 
 API const char *SteamAPI_ISteamFriends_GetFriendPersonaName(void *self, u64 user)
 {
-    static char name[2][32];
+    static char name[8][32];
     static int k;
     (void) self;
-    k ^= 1;
+    k = (k + 1) & 7;
     snprintf(name[k], sizeof(name[k]), "mock%llu", user % 1000);
     return name[k];
 }
@@ -475,17 +496,22 @@ API int SteamAPI_ISteamNetworkingMessages_SendMessageToUser(void *self, const un
 API int SteamAPI_ISteamNetworkingMessages_ReceiveMessagesOnChannel(void *self, int ch, void **out, int max)
 {
     (void) self; (void) ch;
+    int i;
+
     poll_();
-    while (max > 0 && sInHead != sInTail)
+    while (sInHead != sInTail && sIn[sInHead % 64].size < 0)
     {
-        In *m = &sIn[sInHead % 64];
+        sInHead++;   /* taken out of order earlier */
+    }
+    for (i = sInHead; max > 0 && i != sInTail; i++)
+    {
+        In *m = &sIn[i % 64];
         unsigned char *msg;
 
-        if (!accepted(m->from))
+        if (m->size < 0 || !accepted(m->from))
         {
-            return 0; /* held until the session is accepted */
+            continue; /* held until the session is accepted */
         }
-        sInHead++;
         msg = calloc(1, 12 + 136 + m->size);
         {
             void *data = msg + 12 + 136;
@@ -495,6 +521,7 @@ API int SteamAPI_ISteamNetworkingMessages_ReceiveMessagesOnChannel(void *self, i
             SteamAPI_SteamNetworkingIdentity_SetSteamID64(msg + 12, m->from);
         }
         out[0] = msg;
+        m->size = -1;
         return 1;
     }
     return 0;

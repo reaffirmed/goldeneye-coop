@@ -13,7 +13,10 @@
  * Join:  GE_COOP=steam:join:<lobbyid>, "+connect_lobby <id>" from Steam, an
  *        accepted invite, or, with no id, the first friend found hosting.
  *
- * Game packets go to the other player's SteamID through
+ * Up to four players: the host talks to each joiner, a joiner only to the
+ * host (the game relays what the joiners need of each other).
+ *
+ * Game packets go to the other players' SteamIDs through
  * ISteamNetworkingMessages (unreliable, no Nagle, channel 0); the game does
  * its own acks for what must arrive (src/game/coop.c).
  */
@@ -106,8 +109,10 @@ static int sPipe;
 static int sIsHost;
 static u64s sSelf;
 static u64s sLobby;
-static u64s sPeer;          /* the other player's SteamID, 0 until known */
-static unsigned char sPeerIdent[IDENTITY_SIZE];
+/* the other players: a joiner has only the host, in slot 0; a host fills
+ * the slots as joiners turn up. 0 = a free slot. */
+static u64s sPeers[COOP_NET_MAX_PEERS];
+static unsigned char sPeerIdent[COOP_NET_MAX_PEERS][IDENTITY_SIZE];
 static u64s sCreateCall, sJoinCall;
 static int sJoinWanted;     /* joiner: still looking for a lobby */
 static unsigned int sPolls;
@@ -229,11 +234,63 @@ static void writeAppId(void)
     }
 }
 
-static void setPeer(u64s id)
+static int peerSlot(u64s id)
 {
-    sPeer = id;
-    memset(sPeerIdent, 0, sizeof(sPeerIdent));
-    pIdentSetSteamID64(sPeerIdent, id);
+    int i;
+
+    for (i = 0; i < COOP_NET_MAX_PEERS; i++)
+    {
+        if (id != 0 && sPeers[i] == id)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* the slot that now holds id (slot < 0: its own or the first free one), -1 when all are taken */
+static int setPeer(int slot, u64s id)
+{
+    int i;
+
+    if (slot < 0)
+    {
+        slot = peerSlot(id);
+    }
+    for (i = 0; slot < 0 && i < COOP_NET_MAX_PEERS; i++)
+    {
+        if (sPeers[i] == 0)
+        {
+            slot = i;
+        }
+    }
+    if (slot < 0)
+    {
+        return -1;
+    }
+    sPeers[slot] = id;
+    memset(sPeerIdent[slot], 0, IDENTITY_SIZE);
+    pIdentSetSteamID64(sPeerIdent[slot], id);
+    return slot;
+}
+
+static void dropPeer(int slot)
+{
+    if (slot >= 0 && slot < COOP_NET_MAX_PEERS && sPeers[slot] != 0)
+    {
+        pCloseSessionWithUser(sNM, sPeerIdent[slot]);
+        sPeers[slot] = 0;
+    }
+}
+
+static void dropAllPeers(void)
+{
+    int i;
+
+    for (i = 0; i < COOP_NET_MAX_PEERS; i++)
+    {
+        dropPeer(i);
+    }
 }
 
 static int isLobbyMember(u64s id)
@@ -349,9 +406,10 @@ static void onLobbyEnter(const unsigned char *p)
         return;
     }
     sLobby = lobby;
-    setPeer(pGetLobbyOwner(sMM, lobby));
+    dropAllPeers();
+    setPeer(0, pGetLobbyOwner(sMM, lobby));
     pSetRichPresence(sFriends, "status", "Playing GoldenEye co-op");
-    portConLogf("ge: steam: in lobby %llu, host %s\n", lobby, pGetFriendPersonaName(sFriends, sPeer));
+    portConLogf("ge: steam: in lobby %llu, host %s\n", lobby, pGetFriendPersonaName(sFriends, sPeers[0]));
 }
 
 static void onChatUpdate(const unsigned char *p)
@@ -360,13 +418,14 @@ static void onChatUpdate(const unsigned char *p)
     u64s who = rd64(p + 8);
     unsigned int change = rd32(p + 24);
 
-    if (lobby != sLobby || who != sPeer || !(change & (0x2 | 0x4 | 0x8 | 0x10)))
+    int slot = peerSlot(who);
+
+    if (lobby != sLobby || slot < 0 || !(change & (0x2 | 0x4 | 0x8 | 0x10)))
     {
         return;
     }
     portConLogf("ge: steam: %s left\n", pGetFriendPersonaName(sFriends, who));
-    pCloseSessionWithUser(sNM, sPeerIdent);
-    sPeer = 0;
+    dropPeer(slot);
     if (!sIsHost)
     {
         sLobby = 0;
@@ -378,14 +437,15 @@ static void onSessionRequest(const unsigned char *p)
 {
     u64s from = pIdentGetSteamID64((void *) p);
 
-    if ((sIsHost && sPeer == 0 && isLobbyMember(from)) || from == sPeer)
+    if (peerSlot(from) >= 0)
     {
         pAcceptSessionWithUser(sNM, p);
-        if (sPeer == 0)
-        {
-            setPeer(from);
-            portConLogf("ge: steam: %s joined\n", pGetFriendPersonaName(sFriends, from));
-        }
+        return;
+    }
+    if (sIsHost && isLobbyMember(from) && setPeer(-1, from) >= 0)
+    {
+        pAcceptSessionWithUser(sNM, p);
+        portConLogf("ge: steam: %s joined\n", pGetFriendPersonaName(sFriends, from));
         return;
     }
     {   /* once per sender: a host keeps knocking until we are in its lobby */
@@ -431,7 +491,7 @@ static void handle(int id, const unsigned char *p)
             onSessionRequest(p);
             break;
         case CB_NetMsgSessionFailed:
-            if (pIdentGetSteamID64((void *) p) == sPeer && sPeer != 0)
+            if (peerSlot(pIdentGetSteamID64((void *) p)) >= 0)
             {
                 portConLogf("ge: steam: connection to the other player failed\n");
             }
@@ -535,7 +595,7 @@ int coopSteamInit(const char *spec)
     }
     sIsHost = 0;
     sJoinWanted = 0;
-    sPeer = 0;
+    memset(sPeers, 0, sizeof(sPeers));
     sLobby = 0;
     sOverlay = 0;
     sJoinCall = 0;
@@ -564,7 +624,7 @@ int coopSteamInit(const char *spec)
     {
         sIsHost = 1;
         sOverlay = strcmp(spec, "steam:host") != 0;
-        sCreateCall = pCreateLobby(sMM, 1 /* friends only */, 2);
+        sCreateCall = pCreateLobby(sMM, 1 /* friends only */, COOP_NET_MAX_PEERS + 1);
         portConLogf("ge: steam: creating a lobby\n");
     }
     return 1;
@@ -577,19 +637,47 @@ int coopSteamIsHost(void)
 
 int coopSteamHasPeer(void)
 {
-    return sPeer != 0;
+    return coopSteamPeerConnected(0) || coopSteamPeerConnected(1) || coopSteamPeerConnected(2);
+}
+
+int coopSteamPeerConnected(int peer)
+{
+    return peer >= 0 && peer < COOP_NET_MAX_PEERS && sPeers[peer] != 0;
+}
+
+void coopSteamDropPeer(int peer)
+{
+    if (sReady)
+    {
+        dropPeer(peer);
+    }
+}
+
+void coopSteamSendTo(int peer, const void *buf, int len)
+{
+    if (!coopSteamPeerConnected(peer))
+    {
+        return;
+    }
+    pSendMessageToUser(sNM, sPeerIdent[peer], buf, (unsigned int) len, SEND_UNRELIABLE_NONAGLE, 0);
 }
 
 void coopSteamSend(const void *buf, int len)
 {
-    if (sPeer == 0)
+    int i;
+
+    for (i = 0; i < COOP_NET_MAX_PEERS; i++)
     {
-        return;
+        coopSteamSendTo(i, buf, len);
     }
-    pSendMessageToUser(sNM, sPeerIdent, buf, (unsigned int) len, SEND_UNRELIABLE_NONAGLE, 0);
 }
 
 int coopSteamRecv(void *buf, int cap)
+{
+    return coopSteamRecvFrom(buf, cap, NULL);
+}
+
+int coopSteamRecvFrom(void *buf, int cap, int *peer)
 {
     void *msgs[1];
 
@@ -622,11 +710,14 @@ int coopSteamRecv(void *buf, int cap)
             portConLogf("ge: steam: message sender read at offset %d\n", sSenderOfs);
         }
         from = pIdentGetSteamID64((void *) (m + sSenderOfs));
-
-        if (from == sPeer && size > 0 && size <= cap)
+        if (peerSlot(from) >= 0 && size > 0 && size <= cap)
         {
             memcpy(buf, data, (size_t) size);
             pMessageRelease(msgs[0]);
+            if (peer != NULL)
+            {
+                *peer = peerSlot(from);
+            }
             return size;
         }
         pMessageRelease(msgs[0]); /* someone else, or too big: drop */
@@ -642,16 +733,13 @@ void coopSteamShutdown(void)
     {
         return;
     }
-    if (sPeer != 0)
-    {
-        pCloseSessionWithUser(sNM, sPeerIdent);
-    }
+    dropAllPeers();
     if (sLobby != 0)
     {
         pLeaveLobby(sMM, sLobby);
     }
     pClearRichPresence(sFriends);
-    sPeer = sLobby = 0;
+    sLobby = 0;
     sJoinCall = 0;
     sIsHost = 0;
     sJoinWanted = 0;
@@ -680,7 +768,17 @@ const char *coopSteamSelfName(void)
 
 const char *coopSteamPeerName(void)
 {
-    return (sReady && sPeer != 0) ? pGetFriendPersonaName(sFriends, sPeer) : "";
+    return coopSteamPeerNameAt(0);
+}
+
+const char *coopSteamPeerNameAt(int peer)
+{
+    return (sReady && coopSteamPeerConnected(peer)) ? pGetFriendPersonaName(sFriends, sPeers[peer]) : "";
+}
+
+unsigned long long coopSteamPeerIdAt(int peer)
+{
+    return (sReady && coopSteamPeerConnected(peer)) ? (unsigned long long) sPeers[peer] : 0;
 }
 
 /* Online friends, those hosting first. Returns how many. */
@@ -740,7 +838,7 @@ int coopSteamFriendHosting(int i)
 
 int coopSteamFriendIsPeer(int i)
 {
-    return i >= 0 && i < sNumFriends && sPeer != 0 && sFriendList[i].id == sPeer;
+    return i >= 0 && i < sNumFriends && peerSlot(sFriendList[i].id) >= 0;
 }
 
 void coopSteamFriendInvite(int i)

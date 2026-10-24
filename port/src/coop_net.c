@@ -6,10 +6,12 @@
  *                            when no id is given)
  * steam:idle                 Steam up for the lobby screen's friend list,
  *                            no lobby yet (the screen hosts or joins)
- * GE_COOP=host:<port>        plain UDP: listen on <port>, reply to whoever writes first
+ * GE_COOP=host:<port>        plain UDP: listen on <port>; the first three
+ *                            addresses to write take the peer slots
  * GE_COOP=join:<ip>:<port>   plain UDP: send to the host at <ip>:<port>
  *
- * Non-blocking, one peer. Packets are game-defined (see src/game/coop.c).
+ * Non-blocking, up to three peers (see coop_net.h). Packets are
+ * game-defined (see src/game/coop.c).
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,8 +41,8 @@ extern void portConLogf(const char *fmt, ...);
 static SOCKET sSock = INVALID_SOCKET;
 static int sSteam; /* the Steam backend is in use */
 static int sIsHost;
-static int sHasPeer;
-static struct sockaddr_in sPeer;
+static int sHasPeer[COOP_NET_MAX_PEERS];
+static struct sockaddr_in sPeer[COOP_NET_MAX_PEERS];
 
 int coopNetInit(void)
 {
@@ -80,9 +82,9 @@ int coopNetStart(const char *e)
 #endif
 
     memset(&bindaddr, 0, sizeof(bindaddr));
-    memset(&sPeer, 0, sizeof(sPeer));
+    memset(sPeer, 0, sizeof(sPeer));
     bindaddr.sin_family = AF_INET;
-    sPeer.sin_family = AF_INET;
+    sPeer[0].sin_family = AF_INET;
 
     if (strncmp(e, "host:", 5) == 0)
     {
@@ -111,9 +113,9 @@ int coopNetStart(const char *e)
         ip[n] = '\0';
         port = atoi(colon + 1);
         sIsHost = 0;
-        sHasPeer = 1;
-        sPeer.sin_addr.s_addr = inet_addr(ip);
-        sPeer.sin_port = htons((unsigned short) port);
+        sHasPeer[0] = 1;
+        sPeer[0].sin_addr.s_addr = inet_addr(ip);
+        sPeer[0].sin_port = htons((unsigned short) port);
         bindaddr.sin_addr.s_addr = htonl(INADDR_ANY);
         bindaddr.sin_port = 0;
     }
@@ -154,51 +156,154 @@ int coopNetIsHost(void)
     return sSteam ? coopSteamIsHost() : sIsHost;
 }
 
+int coopNetPeerConnected(int peer)
+{
+    if (sSteam)
+    {
+        return coopSteamPeerConnected(peer);
+    }
+    return peer >= 0 && peer < COOP_NET_MAX_PEERS && sHasPeer[peer];
+}
+
 int coopNetHasPeer(void)
 {
-    return sSteam ? coopSteamHasPeer() : sHasPeer;
+    int i;
+
+    for (i = 0; i < COOP_NET_MAX_PEERS; i++)
+    {
+        if (coopNetPeerConnected(i))
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void coopNetDropPeer(int peer)
+{
+    if (sSteam)
+    {
+        coopSteamDropPeer(peer);
+    }
+    else if (sIsHost && peer >= 0 && peer < COOP_NET_MAX_PEERS && sHasPeer[peer])
+    {   /* a joiner keeps the host: it has nobody else to talk to */
+        portConLogf("ge: coop: peer %d dropped\n", peer);
+        sHasPeer[peer] = 0;
+    }
+}
+
+const char *coopNetPeerName(int peer)
+{
+    static char name[COOP_NET_MAX_PEERS][24];
+
+    if (sSteam)
+    {
+        return coopSteamPeerNameAt(peer);
+    }
+    if (!coopNetPeerConnected(peer))
+    {
+        return "";
+    }
+    snprintf(name[peer], sizeof(name[peer]), "%s:%d", inet_ntoa(sPeer[peer].sin_addr), ntohs(sPeer[peer].sin_port));
+    return name[peer];
+}
+
+unsigned long long coopNetPeerId(int peer)
+{
+    if (sSteam)
+    {
+        return coopSteamPeerIdAt(peer);
+    }
+    if (!coopNetPeerConnected(peer))
+    {
+        return 0;
+    }
+    return ((unsigned long long) ntohl(sPeer[peer].sin_addr.s_addr) << 16) | ntohs(sPeer[peer].sin_port);
+}
+
+void coopNetSendTo(int peer, const void *buf, int len)
+{
+    if (sSteam)
+    {
+        coopSteamSendTo(peer, buf, len);
+        return;
+    }
+    if (sSock == INVALID_SOCKET || !coopNetPeerConnected(peer))
+    {
+        return;
+    }
+    sendto(sSock, (const char *) buf, len, 0, (struct sockaddr *) &sPeer[peer], sizeof(sPeer[peer]));
 }
 
 void coopNetSend(const void *buf, int len)
 {
-    if (sSteam)
+    int i;
+
+    for (i = 0; i < COOP_NET_MAX_PEERS; i++)
     {
-        coopSteamSend(buf, len);
-        return;
+        coopNetSendTo(i, buf, len);
     }
-    if (sSock == INVALID_SOCKET || !sHasPeer)
-    {
-        return;
-    }
-    sendto(sSock, (const char *) buf, len, 0, (struct sockaddr *) &sPeer, sizeof(sPeer));
 }
 
 int coopNetRecv(void *buf, int cap)
 {
+    return coopNetRecvFrom(buf, cap, NULL);
+}
+
+int coopNetRecvFrom(void *buf, int cap, int *peer)
+{
     struct sockaddr_in from;
-    socklen_t fromlen = sizeof(from);
-    int n;
+    socklen_t fromlen;
+    int n, i, slot;
 
     if (sSteam)
     {
-        return coopSteamRecv(buf, cap);
+        return coopSteamRecvFrom(buf, cap, peer);
     }
     if (sSock == INVALID_SOCKET)
     {
         return 0;
     }
-    n = (int) recvfrom(sSock, (char *) buf, cap, 0, (struct sockaddr *) &from, &fromlen);
-    if (n <= 0)
+    for (;;)
     {
-        return 0;
+        fromlen = sizeof(from);
+        n = (int) recvfrom(sSock, (char *) buf, cap, 0, (struct sockaddr *) &from, &fromlen);
+        if (n <= 0)
+        {
+            return 0;
+        }
+        slot = -1;
+        for (i = 0; i < COOP_NET_MAX_PEERS; i++)
+        {
+            if (sHasPeer[i] && sPeer[i].sin_addr.s_addr == from.sin_addr.s_addr && sPeer[i].sin_port == from.sin_port)
+            {
+                slot = i;
+                break;
+            }
+        }
+        if (slot < 0 && sIsHost)
+        {
+            for (i = 0; i < COOP_NET_MAX_PEERS && slot < 0; i++)
+            {
+                if (!sHasPeer[i])
+                {
+                    slot = i;
+                    sPeer[i] = from;
+                    sHasPeer[i] = 1;
+                    portConLogf("ge: coop: peer %s:%d connected (slot %d)\n", inet_ntoa(from.sin_addr), ntohs(from.sin_port), i);
+                }
+            }
+        }
+        if (slot < 0)
+        {
+            continue;   /* a stranger, or the host is full */
+        }
+        if (peer != NULL)
+        {
+            *peer = slot;
+        }
+        return n;
     }
-    if (sIsHost && !sHasPeer)
-    {
-        sPeer = from;
-        sHasPeer = 1;
-        portConLogf("ge: coop: peer %s:%d connected\n", inet_ntoa(from.sin_addr), ntohs(from.sin_port));
-    }
-    return n;
 }
 
 void coopNetShutdown(void)
@@ -213,7 +318,7 @@ void coopNetShutdown(void)
         COOP_CLOSE(sSock);
         sSock = INVALID_SOCKET;
     }
-    sHasPeer = 0;
+    memset(sHasPeer, 0, sizeof(sHasPeer));
     sIsHost = 0;
 }
 
