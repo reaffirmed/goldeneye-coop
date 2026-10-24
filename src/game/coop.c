@@ -34,9 +34,12 @@
 #include "coop.h"
 #include "coop_net.h"
 #include "propobj.h"
+#include "objecthandler.h"
 
 void doorSetOpenState(DoorRecord *door, s32 newstate);
 bool doorIsClosed(DoorRecord *door);
+s32 chrGetNumFree(void);
+PropRecord *chrSpawnAtCoord(s32 bodynum, s32 headnum, coord3d *pos, StandTile *stan, f32 angle, AIListRecord *ailist, s32 spawnflags);
 
 extern void portConLogf(const char *fmt, ...);
 
@@ -77,6 +80,7 @@ typedef struct
 } CoopEvent;
 
 #define COOP_EVENTS_PER_PKT 32
+#define COOP_PUPPET_CHRNUM  30000
 #define COOP_EVENT_RING     256
 
 typedef struct
@@ -97,7 +101,10 @@ typedef struct
 {
     s16 chrnum;
     u8 flags;
-    u8 pad;
+    u8 body;
+    u8 head;
+    s8 gunitem;     /* right hand ITEM_IDS, 0 none */
+    s16 gunmodel;   /* PROP_ model of that gun */
     f32 pos[3];
     f32 yaw;
     s32 animoff;    /* byte offset into ptr_animation_table, -1 none */
@@ -377,6 +384,7 @@ static void coopPuppetSpawn(void)
     prop->chr->bodynum = sRemote.bodynum;
     prop->chr->headnum = head;
     prop->chr->actiontype = ACT_BONDMULTI; /* not dispatched by chrlvActionTick */
+    prop->chr->chrnum = COOP_PUPPET_CHRNUM; /* out of the way of the spawn numbers */
     prop->chr->sleep = 0;
 
     sPuppet = prop;
@@ -544,6 +552,34 @@ void coopTick(void)
         }
     }
 
+    if (coopNetIsHost() && sRemoteValid && sRemote.stage == bossGetStageNum())
+    {   /* GE_COOP_TESTSPAWN=<chrnum>: once, at 15 s, spawn a copy of that chr next to Bond (harness only) */
+        static s32 testspawn = -2;
+        if (testspawn == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTSPAWN");
+            testspawn = (e != NULL) ? atoi(e) : -1;
+        }
+        if (testspawn >= 0 && sTick >= 900 && coopInMission())
+        {
+            static s32 done;
+            if (done++) { testspawn = -1; }
+        }
+        if (testspawn >= 0 && sTick >= 900 && coopInMission())
+        {
+            ChrRecord *src = chrFindByLiteralId(testspawn);
+            PropRecord *bond = getCurrentPlayerProp();
+            if (src != NULL && bond != NULL)
+            {
+                PropRecord *np = chrSpawnAtCoord(src->bodynum, src->headnum, &src->prop->pos, src->prop->stan, 0.0f, src->ailist, 0x10);
+                if (np != NULL)
+                {
+                    chrGiveWeapon(np->chr, PROP_CHRKALASH, ITEM_AK47, 0);
+                }
+                portConLogf("ge: coop: testspawn -> chr %d (free %d)\n", np ? np->chr->chrnum : -1, chrGetNumFree());
+            }
+        }
+    }
     if (sRemoteValid && sRemote.stage == bossGetStageNum())
     {   /* GE_COOP_TESTDOOR=1: toggle the door nearest Bond every 10 s (harness only) */
         static s32 testdoor = -1;
@@ -914,6 +950,16 @@ static void coopSendGuards(void)
 
         e->chrnum = chr->chrnum;
         e->flags = 0;
+        e->body = (u8) chr->bodynum;
+        e->head = (u8) chr->headnum;
+        {
+            PropRecord *gun = chrGetEquippedWeaponProp(chr, GUNRIGHT);
+            if (gun != NULL && gun->weapon != NULL)
+            {
+                e->gunitem = gun->weapon->weaponnum;
+                e->gunmodel = gun->weapon->obj;
+            }
+        }
         if (chr->chrflags & CHRFLAG_HIDDEN)
         {
             e->flags |= GSF_HIDDEN;
@@ -947,6 +993,67 @@ static void coopSendGuards(void)
     }
 }
 
+/* Client: a chr the host has and we don't (spawned mid-mission, a clone,
+ * a reinforcement). Make a local stand-in with the same chrnum; the host's
+ * snapshots drive it from here on. */
+static s32 sMirrorSpawnsThisTick;
+static u32 sMirrorSpawnTick;
+
+static ChrRecord *coopMirrorSpawn(CoopGuardEnt *e)
+{
+    coord3d pos;
+    StandTile *stan;
+    Model *header;
+    PropRecord *prop;
+    ChrRecord *chr;
+
+    if (e->flags & GSF_HIDDEN)
+    {
+        return NULL; /* script chrs that never show; nothing to see */
+    }
+    if (sMirrorSpawnTick != sTick)
+    {
+        sMirrorSpawnTick = sTick;
+        sMirrorSpawnsThisTick = 0;
+    }
+    if (sMirrorSpawnsThisTick >= 4 || chrGetNumFree() < 3)
+    {
+        return NULL; /* try again on the next snapshot */
+    }
+    pos.f[0] = e->pos[0];
+    pos.f[1] = e->pos[1];
+    pos.f[2] = e->pos[2];
+    stan = stanFindTileBelowPos(&pos, NULL, NULL);
+    if (stan == NULL)
+    {
+        return NULL;
+    }
+    header = retrieve_header_for_body_and_head(e->body, e->head, 0);
+    if (header == NULL)
+    {
+        return NULL;
+    }
+    prop = chrAllocate(header, &pos, e->yaw, stan, (s32) ailistFindById(GAILIST_DEAD_AI));
+    if (prop == NULL)
+    {
+        return NULL;
+    }
+    sMirrorSpawnsThisTick++;
+    chrpropActivateThisFrame(prop);
+    chrpropEnable(prop);
+    chr = prop->chr;
+    chr->chrnum = e->chrnum;
+    chr->bodynum = e->body;
+    chr->headnum = e->head;
+    if (e->gunitem > 0)
+    {
+        chrGiveWeapon(chr, e->gunmodel, e->gunitem, 0);
+    }
+    portConLogf("ge: coop: mirrored host chr %d (body %d, gun %d) at %.0f %.0f %.0f\n",
+        e->chrnum, e->body, e->gunitem, pos.f[0], pos.f[1], pos.f[2]);
+    return chr;
+}
+
 static void coopApplyGuard(CoopGuardEnt *e)
 {
     ChrRecord *chr = chrFindByLiteralId(e->chrnum);
@@ -955,9 +1062,13 @@ static void coopApplyGuard(CoopGuardEnt *e)
     StandTile *stan;
     s32 slot;
 
+    if (chr == NULL)
+    {
+        chr = coopMirrorSpawn(e);
+    }
     if (chr == NULL || chr->prop == NULL || chr->prop == sPuppet)
     {
-        return; /* TODO: chrs the host spawned that this side has not */
+        return;
     }
     prop = chr->prop;
     slot = chr - g_ChrSlots;
