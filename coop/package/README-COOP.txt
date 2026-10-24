@@ -48,6 +48,10 @@ Rules
   you come back next to a partner once they have been out of combat for 4
   seconds, and after 20 seconds at most. If everyone is down at the same
   time, the mission fails.
+- Keys 1 to 6 open the weapon menu at the top of the screen (the game keeps
+  running): 1 melee, 2 pistols, 3 rifles, 4 heavy, 5 explosives, 6 mission
+  items such as the covert modem, keys and the camera. Press the key again to
+  move down the list and fire to take the highlighted one.
 - Each player has a colour (yellow, cyan, pink, green) on name tags, the
   radar and the partner status at the side of the screen.
 

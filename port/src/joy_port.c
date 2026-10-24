@@ -127,6 +127,8 @@ enum {
     /* Appended for the co-op build: give ammo (and the gun) in hand to the
      * partner (coop_give.c). */
     PORTACT_GIVE_PARTNER,
+    /* Appended for the co-op build: the weapon menu's mission item slot. */
+    PORTACT_WEAPON_SLOT6,
     PORTACT_COUNT
 };
 
@@ -184,6 +186,7 @@ static const struct {
     [PORTACT_WEAPON_SLOT4]     = { "weapon_slot_4",    "4",        1 },
     [PORTACT_WEAPON_SLOT5]     = { "weapon_slot_5",    "5",        1 },
     [PORTACT_GIVE_PARTNER]     = { "give_partner",     "G",        1 },
+    [PORTACT_WEAPON_SLOT6]     = { "weapon_slot_6",    "6",        1 },
 };
 
 /* [input] detonate_use_reload (default ON): with remote mines in the right
@@ -743,7 +746,7 @@ s32 portJoyPortObjectiveListPressed(void)
     return pad >= 0 && portJoyPortTake(pad, PORTACT_OBJECTIVE_LIST);
 }
 
-/** weapon_menu.c: 1..5 for a fresh weapon_slot_N press, 0 for none.
+/** weapon_menu.c: 1..6 for a fresh weapon_slot_N press, 0 for none.
  * Consumes every slot's latch, so a press never fires later. */
 s32 portJoyPortWeaponSlotPressed(void)
 {
@@ -761,6 +764,10 @@ s32 portJoyPortWeaponSlotPressed(void)
         {
             slot = i + 1;
         }
+    }
+    if (portJoyPortTake(pad, PORTACT_WEAPON_SLOT6) && slot == 0)
+    {
+        slot = 6;
     }
     return joyPortPermitted() ? slot : 0;
 }

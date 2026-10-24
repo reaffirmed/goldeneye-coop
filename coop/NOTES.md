@@ -215,3 +215,16 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscen
   puppets for every partner, guards hit joiners, give from player 4 to 3
   through the host, revive, same stats page on every game. Real Steam not
   yet tested with more than one account.
+
+## Weapon menu: mission items (2026-10-24)
+
+- Slot 6 in src/game/weapon_menu.c lists the watch inventory's items from
+  ITEM_BOMBCASE up (gadgets, keys, documents), read through
+  bondinvGetTextbyInvIndex so prop-held items are included, and named with
+  the level's own text (bondinvGetNameByIndex: "COVERT MODEM", not "BUG").
+  Taking one uses gunRequestHandWeaponChange like a gun, which ends in the same
+  currentPlayerUnEquipWeaponWrapper the watch calls.
+- Key: weapon_slot_6 (default 6; PORTACT_WEAPON_SLOT6 and pad map +30,
+  appended), bind row "Mission Items".
+- Harness: GE_WEAPMENU_TEST=items. Verified on Dam 00 Agent (GE_DIFF=2):
+  slot 6 shows Covert Modem, fire puts it in hand.

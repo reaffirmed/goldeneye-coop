@@ -1,8 +1,9 @@
 /**
  * Weapon menu (port only), the way Half-Life picks weapons.
  *
- * Weapons sit in five slots: 1 melee, 2 pistols, 3 SMGs and rifles, 4 heavy,
- * 5 explosives. A weapon_slot_N key opens the menu on that slot, and pressing
+ * Weapons sit in six slots: 1 melee, 2 pistols, 3 SMGs and rifles, 4 heavy,
+ * 5 explosives, 6 mission items (the watch inventory's gadgets, keys and
+ * documents, taken into the hand as the watch would). A weapon_slot_N key opens the menu on that slot, and pressing
  * it again steps through the slot; next / previous weapon step through every
  * slot. Fire takes the highlighted weapon, and the menu closes by itself,
  * changing nothing, after three seconds without a press. The game keeps
@@ -32,11 +33,14 @@
 extern Gfx *portHudScaleBegin(Gfx *gdl, f32 x, f32 y);
 extern Gfx *portHudScaleEnd(Gfx *gdl);
 extern s32 portWeaponMenuOn(void);                  /* video.c [display] weapon_menu; weak 0 headless */
-extern s32 portJoyPortWeaponSlotPressed(void);      /* joy_port.c: 1..5 or 0 */
+extern s32 portJoyPortWeaponSlotPressed(void);      /* joy_port.c: 1..6 or 0 */
 extern void gunRequestHandWeaponChange(enum GUNHAND hand, s32 nextWeapon, s32 cycleDirection);
 extern u16 *get_ptr_short_watch_text_for_item(ITEM_IDS item);
+extern s32 bondinvGetTextbyInvIndex(s32 index);
+extern u16 *bondinvGetNameByIndex(s32 index);
 
-#define WM_SLOTS        5
+#define WM_SLOTS        6
+#define WM_ITEMS        5   /* the mission item slot */
 #define WM_PER_SLOT     16
 #define WM_TIMEOUT      180   /* ticks without a press before the menu closes */
 
@@ -59,8 +63,9 @@ extern char *getenv(const char *);
 extern void portConLogf(const char *fmt, ...);
 
 /* GE_WEAPMENU_TEST=1 (harness only): from 5 s in, slot 1, fire, next weapon,
- * fire, slot 2 twice, then leave it to time out. Returns a slot or step to
- * inject as {slot, step}. */
+ * fire, slot 2 twice, then leave it to time out. GE_WEAPMENU_TEST=items: slot
+ * 6, fire, slot 6 (the next item), fire. Returns a slot or step to inject as
+ * {slot, step}. */
 static void wmHarness(s32 *slot, s32 *step)
 {
     static s32 on = -1;
@@ -68,14 +73,26 @@ static void wmHarness(s32 *slot, s32 *step)
 
     if (on < 0)
     {
-        on = getenv("GE_WEAPMENU_TEST") != NULL;
+        const char *v = getenv("GE_WEAPMENU_TEST");
+
+        on = (v == NULL) ? 0 : (strcmp(v, "items") == 0 ? 2 : 1);
     }
     if (!on)
     {
         return;
     }
     t++;
-    switch (t)
+    if (on == 2)
+    {
+        switch (t)
+        {
+            case 300: case 600: *slot = 6; break;
+            case 420: case 720: sTestFire = TRUE; break;
+            case 900: portConLogf("ge: weapmenu test holding %d\n", getCurrentPlayerWeaponId(GUNRIGHT)); break;
+            default: break;
+        }
+    }
+    else switch (t)
     {
         case 300: *slot = 1; break;
         case 420: sTestFire = TRUE; break;
@@ -111,7 +128,11 @@ static s32 wmSlotOf(s32 item)
         case ITEM_WATCHLASER:
             return 4;
         default:
-            return -1;   /* the tank's shells, the detonator, gadgets: not on the menu */
+            if (item >= ITEM_BOMBCASE && item < ITEM_SUIT_LF_HAND)
+            {
+                return WM_ITEMS;
+            }
+            return -1;   /* the tank's shells, the detonator: not on the menu */
     }
 }
 
@@ -166,6 +187,16 @@ static void wmCollect(void)
         if (item == first)
         {
             break;
+        }
+    }
+    /* mission items by the watch's own list, which names prop-held ones too */
+    for (i = 0; i < bondinvCountTotalItemsInInv(); i++)
+    {
+        const s32 id = bondinvGetTextbyInvIndex(i);
+
+        if (id >= ITEM_BOMBCASE)
+        {
+            wmAdd(id, ITEM_UNARMED);
         }
     }
     if (g_CurrentPlayer->equipallguns)
@@ -360,6 +391,18 @@ static void wmName(char *out, s32 cap, const WmEntry *e)
     const char *n = (const char *) get_ptr_short_watch_text_for_item(e->right);
     s32 k = 0;
     s32 i;
+
+    if (e->right >= ITEM_BOMBCASE)
+    {   /* the watch's name for it: the level's own text ("COVERT MODEM", not "BUG") */
+        for (i = 0; i < bondinvCountTotalItemsInInv(); i++)
+        {
+            if (bondinvGetTextbyInvIndex(i) == e->right)
+            {
+                n = (const char *) bondinvGetNameByIndex(i);
+                break;
+            }
+        }
+    }
 
     if (e->left != ITEM_UNARMED && k < cap - 4)
     {
