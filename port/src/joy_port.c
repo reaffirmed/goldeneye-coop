@@ -129,6 +129,8 @@ enum {
     PORTACT_GIVE_PARTNER,
     /* Appended for the co-op build: the weapon menu's mission item slot. */
     PORTACT_WEAPON_SLOT6,
+    /* Appended for the co-op build: open the chat line (coop_chat.c). */
+    PORTACT_CHAT,
     PORTACT_COUNT
 };
 
@@ -187,6 +189,7 @@ static const struct {
     [PORTACT_WEAPON_SLOT5]     = { "weapon_slot_5",    "5",        1 },
     [PORTACT_GIVE_PARTNER]     = { "give_partner",     "G",        1 },
     [PORTACT_WEAPON_SLOT6]     = { "weapon_slot_6",    "6",        1 },
+    [PORTACT_CHAT]             = { "chat",             "T",        1 },
 };
 
 /* [input] detonate_use_reload (default ON): with remote mines in the right
@@ -778,6 +781,14 @@ s32 portJoyPortGivePartnerPressed(void)
     s32 pad = joyPortPad();
 
     return pad >= 0 && portJoyPortTake(pad, PORTACT_GIVE_PARTNER) && joyPortPermitted();
+}
+
+/** coop_chat.c: a fresh chat press for this tick's player. */
+s32 portJoyPortChatPressed(void)
+{
+    s32 pad = joyPortPad();
+
+    return pad >= 0 && portJoyPortTake(pad, PORTACT_CHAT) && joyPortPermitted();
 }
 
 /** MoveBond: 1 while Bond should move at half speed. */

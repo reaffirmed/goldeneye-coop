@@ -8835,15 +8835,17 @@ extern void portConLogf(const char *fmt, ...);
 
 enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLROW_CANCEL,
        CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE, CLROW_FRIENDLYFIRE,
-       CLROW_CHARACTER };
-#define COOP_LOBBY_ROWS     22
+       CLROW_CHARACTER, CLROW_CHAT };
+#define COOP_LOBBY_ROWS     40
+#define COOP_LOBBY_VISIBLE  19  /* rows that fit on the paper; more scroll (coop_lobby_scroll) */
+#define COOP_LOBBY_CHAT_LINES 3
 #define COOP_LOBBY_X        PORT_SHEET_LABEL_X
 #define COOP_LOBBY_VALUE_X  0xFA
 #define COOP_LOBBY_Y0       PORT_SHEET_ROW_Y0
 #define COOP_LOBBY_PITCH    PORT_SHEET_ROW_PITCH
 #define COOP_LOBBY_LABEL_W  (COOP_LOBBY_VALUE_X - COOP_LOBBY_X - 6)
 #define COOP_LOBBY_COL_OK   0x006000FF  /* Ready: dark green ink */
-struct CoopLobbyRow { s32 kind; s32 arg; s32 dim; s32 colour; s32 indent; char label[48]; char value[24]; };
+struct CoopLobbyRow { s32 kind; s32 arg; s32 dim; s32 colour; s32 indent; s32 wide; char label[80]; char value[24]; };
 static struct CoopLobbyRow coop_lobby_rows[COOP_LOBBY_ROWS];
 static s32 coop_lobby_nrows;
 static s32 coop_lobby_hot = -1;
@@ -8852,6 +8854,7 @@ static s32 coop_lobby_nfriends;
 static s32 coop_lobby_ticks;
 static s32 coop_lobby_auto;         /* GE_COOP_LOBBY harness: 'h'ost or 'j'oin */
 static u8 coop_lobby_invited[48];
+static s32 coop_lobby_scroll;       /* the first row shown */
 
 /* Steam names can hold anything; the menu font has ASCII */
 static void coopLobbyCopyName(char *out, s32 cap, const char *name)
@@ -8893,6 +8896,7 @@ static struct CoopLobbyRow *coopLobbyAdd(s32 kind, s32 arg, const char *label, c
     r->dim = FALSE;
     r->colour = 0xFF;
     r->indent = 0;
+    r->wide = FALSE;
     snprintf(r->label, sizeof(r->label), "%s", label);
     snprintf(r->value, sizeof(r->value), "%s", value);
     return r;
@@ -8901,6 +8905,14 @@ static struct CoopLobbyRow *coopLobbyAdd(s32 kind, s32 arg, const char *label, c
 static s32 coopLobbyActionable(const struct CoopLobbyRow *r)
 {
     return r->kind != CLROW_TEXT && r->kind != CLROW_HEAD && !r->dim;
+}
+
+/* each player's chat ink on the paper: darker takes on the HUD's colours */
+static s32 coopLobbyChatColour(s32 player)
+{
+    static const s32 inks[COOP_MAX_PLAYERS] = { 0x806000FF, 0x00608CFF, 0x902070FF, 0x206820FF };
+
+    return (player >= 0 && player < COOP_MAX_PLAYERS) ? inks[player] : 0xFF;
 }
 
 static void coopLobbyBuild(void)
@@ -9046,6 +9058,46 @@ static void coopLobbyBuild(void)
     }
     coopLobbyAdd(CLROW_LEAVE, 0, "Leave Lobby\n", "");
 
+    /* chat: the newest lines, and a row (or the chat key) to type one (coop_chat.c) */
+    if (coopLobbyHasPartner())
+    {
+        char lines[COOP_LOBBY_CHAT_LINES + 1][80];
+        s32 who[COOP_LOBBY_CHAT_LINES + 1];
+        s32 n = coopFeedLines(COOP_LOBBY_CHAT_LINES, lines, who);
+
+        coopLobbyAdd(CLROW_HEAD, 0, "Chat\n", "");
+        for (i = 0; i < n; i++)
+        {
+            if (who[i] == -2)
+            {
+                continue;   /* the line being typed is the Chat row's */
+            }
+            coopLobbyCopyName(name, sizeof(name), lines[i]);
+            r = coopLobbyAdd(CLROW_TEXT, 0, name, "");
+            if (r != NULL)
+            {
+                r->wide = TRUE;
+                r->colour = coopLobbyChatColour(who[i]);
+            }
+        }
+        if (coopChatTyping())
+        {
+            char typed[80];
+
+            coopChatTypedLine(typed, sizeof(typed));
+            snprintf(name, sizeof(name), "Say: %s_\n", typed);
+            r = coopLobbyAdd(CLROW_TEXT, 0, name, "");
+            if (r != NULL)
+            {
+                r->wide = TRUE;
+            }
+        }
+        else
+        {
+            coopLobbyAdd(CLROW_CHAT, 0, "Type a Message\n", "T\n");
+        }
+    }
+
     /* the host's rules; the joiner sees them as the host sets them */
     coopLobbyAdd(CLROW_HEAD, 0, "Rules\n", "");
     {
@@ -9141,6 +9193,9 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
         case CLROW_FRIENDLYFIRE:
             coopSetSetting(COOPSET_FRIENDLYFIRE, !coopSetting(COOPSET_FRIENDLYFIRE));
             break;
+        case CLROW_CHAT:
+            coopChatPress();
+            break;
         default:
             break;
     }
@@ -9155,6 +9210,7 @@ void init_menu1D_cooplobby(void)
     tab_start_highlight = FALSE;
     coop_lobby_hot = -1;
     coop_lobby_ticks = 0;
+    coop_lobby_scroll = 0;
     selected_folder_num = (selected_folder_num >= FOLDER1) ? selected_folder_num : FOLDER1;
     coop_lobby_ok = coopLobbyOpen();
     coop_lobby_nfriends = coopLobbyFriends();
@@ -9296,6 +9352,36 @@ void interface_menu1D_cooplobby(void)
         return;   /* the harness started a mission */
     }
 
+    {   /* the chat key types a line here too (coop_chat.c) */
+        extern s32 portJoyPortChatPressed(void);   /* joy_port.c */
+
+        if (portJoyPortChatPressed() && coopLobbyHasPartner())
+        {
+            coopChatPress();
+        }
+    }
+    if (coopChatTyping())
+    {   /* the keys are the chat line's; the rows wait */
+        frontUpdateControlStickPosition();
+        return;
+    }
+    if (coop_lobby_scroll > coop_lobby_nrows - COOP_LOBBY_VISIBLE)
+    {
+        coop_lobby_scroll = (coop_lobby_nrows > COOP_LOBBY_VISIBLE) ? coop_lobby_nrows - COOP_LOBBY_VISIBLE : 0;
+    }
+    if ((coop_lobby_ticks % 6) == 0 && cursor_h_pos >= (f32) (COOP_LOBBY_X - 8) && cursor_h_pos < (f32) PORT_SHEET_HELP_X1)
+    {   /* more rows than the paper holds: the cursor at the top or bottom edge scrolls */
+        if (cursor_v_pos >= (f32) (COOP_LOBBY_Y0 + (COOP_LOBBY_VISIBLE - 1) * COOP_LOBBY_PITCH + 8)
+            && coop_lobby_scroll + COOP_LOBBY_VISIBLE < coop_lobby_nrows)
+        {
+            coop_lobby_scroll++;
+        }
+        else if (cursor_v_pos < (f32) (COOP_LOBBY_Y0 - 6) && coop_lobby_scroll > 0)
+        {
+            coop_lobby_scroll--;
+        }
+    }
+
     coop_lobby_hot = -1;
     if (frontCheckCursorOnPreviousTab())
     {
@@ -9309,9 +9395,9 @@ void interface_menu1D_cooplobby(void)
     else if (coop_lobby_ticks > 10   /* a press still down from the last screen is not for these rows */
              && cursor_h_pos >= (f32) (COOP_LOBBY_X - 8) && cursor_h_pos < (f32) PORT_SHEET_HELP_X1)
     {
-        for (i = 0; i < coop_lobby_nrows; i++)
+        for (i = coop_lobby_scroll; i < coop_lobby_nrows && i < coop_lobby_scroll + COOP_LOBBY_VISIBLE; i++)
         {
-            const f32 y = (f32) (COOP_LOBBY_Y0 + i * COOP_LOBBY_PITCH);
+            const f32 y = (f32) (COOP_LOBBY_Y0 + (i - coop_lobby_scroll) * COOP_LOBBY_PITCH);
 
             if (cursor_v_pos >= y - 3.0f && cursor_v_pos < y - 3.0f + (f32) COOP_LOBBY_PITCH)
             {
@@ -9372,21 +9458,34 @@ Gfx *constructor_menu1D_cooplobby(Gfx *DL)
     y = PORT_SHEET_TITLE_Y;
     DL = frontPrintText(DL, &x, &y, "CO-OP LOBBY\n", ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
 
-    for (i = 0; i < coop_lobby_nrows; i++)
+    for (i = coop_lobby_scroll; i < coop_lobby_nrows && i < coop_lobby_scroll + COOP_LOBBY_VISIBLE; i++)
     {
         const struct CoopLobbyRow *r = &coop_lobby_rows[i];
-        const char *label = portSheetFitText(r->label, COOP_LOBBY_LABEL_W);
+        const s32 slot = i - coop_lobby_scroll;
         s32 lx = COOP_LOBBY_X + ((r->kind == CLROW_HEAD) ? 0 : 8) + r->indent;
+        const char *label = portSheetFitText(r->label, r->wide ? PORT_SHEET_RULE_R - lx : COOP_LOBBY_LABEL_W);
         s32 colour = r->dim ? PORT_SHEET_COL_DIM : r->colour;
 
+        if ((slot == 0 && coop_lobby_scroll > 0) || (slot == COOP_LOBBY_VISIBLE - 1 && i + 1 < coop_lobby_nrows))
+        {   /* more above or below: a small mark at the right */
+            s32 mx = PORT_SHEET_RULE_R - 0x10;
+            s32 my = COOP_LOBBY_Y0 + slot * COOP_LOBBY_PITCH;
+
+            DL = frontPrintText(DL, &mx, &my, (slot == 0) ? "...\n" : "more\n", ptrFontZurichBoldChars, ptrFontZurichBold,
+                                PORT_SHEET_COL_DIM, viGetX(), viGetY(), 0, 0);
+            if (slot != 0)
+            {
+                continue;
+            }
+        }
         if (r->kind == CLROW_HEAD)
         {   /* a heading with a pencil rule under it, like the Control sheet's */
-            const s32 ry = COOP_LOBBY_Y0 + i * COOP_LOBBY_PITCH + 0xF;
+            const s32 ry = COOP_LOBBY_Y0 + slot * COOP_LOBBY_PITCH + 0xF;
 
             DL = microcode_constructor_related_to_menus(DL, COOP_LOBBY_X - 2, ry, PORT_SHEET_RULE_R, ry + 1, PORT_SHEET_COL_RULE);
             DL = microcode_constructor(DL);
         }
-        y = COOP_LOBBY_Y0 + i * COOP_LOBBY_PITCH;
+        y = COOP_LOBBY_Y0 + slot * COOP_LOBBY_PITCH;
         if (i == coop_lobby_hot)
         {
             textMeasure(&th, &tw, (char *) label, ptrFontZurichBoldChars, ptrFontZurichBold, 0);
@@ -9397,7 +9496,7 @@ Gfx *constructor_menu1D_cooplobby(Gfx *DL)
         if (r->value[0] != '\0')
         {
             x = COOP_LOBBY_VALUE_X;
-            y = COOP_LOBBY_Y0 + i * COOP_LOBBY_PITCH;
+            y = COOP_LOBBY_Y0 + slot * COOP_LOBBY_PITCH;
             DL = frontPrintText(DL, &x, &y, (char *) r->value, ptrFontZurichBoldChars, ptrFontZurichBold,
                                 (r->colour == COOP_LOBBY_COL_OK) ? COOP_LOBBY_COL_OK : (r->dim ? PORT_SHEET_COL_DIM : 0xFF),
                                 viGetX(), viGetY(), 0, 0);

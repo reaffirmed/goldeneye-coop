@@ -6637,7 +6637,11 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         extern s32 get_is_ramrom_flag(void);
         extern void portRamromEscapeExit(const char *reason); /* ramromreplay.c */
 
-        if (get_cur_playernum() == 0 && portEscPressed())
+        if (get_cur_playernum() == 0 && coopChatEatEscape())
+        {
+            portEscPressed();   /* the chat line's Escape, not the pause's (coop_chat.c) */
+        }
+        else if (get_cur_playernum() == 0 && portEscPressed())
         {
             if (get_is_ramrom_flag() != 0)
             {   /* demo playback: Escape is a PC key the replay's "any real
@@ -8889,6 +8893,7 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         extern s32 portJoyPortObjectiveListPressed(void);
         extern void portObjectivesHudToggle(void);
         extern s32 portJoyPortGivePartnerPressed(void);
+        extern s32 portJoyPortChatPressed(void);
         s32 step = portJoyPortWeaponStep();
 
         step = weapmenuInput(step);   /* the weapon menu and its slot keys (weapon_menu.c) */
@@ -8899,6 +8904,10 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         if (portJoyPortGivePartnerPressed())
         {
             coopGivePress();   /* co-op: ammo and the gun in hand to the partner (coop_give.c) */
+        }
+        if (portJoyPortChatPressed())
+        {
+            coopChatPress();   /* co-op: the chat line (coop_chat.c) */
         }
         if (step < 0)
         {
