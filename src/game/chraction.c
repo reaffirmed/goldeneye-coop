@@ -33,6 +33,20 @@
 #include "frametiming.h" /* portTickCadence - see the guard accuracy note in chrlvUpdateShotbondsum */
 #ifndef TARGET_N64
 #include "cheat.h" /* cheatIsActive(CHEAT_PORT_ENEMY_FF) - chrlvFireWeaponRelated */
+#ifndef TARGET_N64
+#include "coop.h"
+#endif
+
+#ifndef TARGET_N64
+/* co-op: "Bond" for the guard being ticked may be the peer's puppet */
+#define PORT_COOP_TANKFLAGS(f)       coopGuardTankFlags(f)
+#define PORT_COOP_DUCKHEIGHT()       coopTargetDuckingHeight()
+#define PORT_COOP_DAMAGESHOWTIME()   coopTargetDamageShowTime()
+#else
+#define PORT_COOP_TANKFLAGS(f)       bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, f)
+#define PORT_COOP_DUCKHEIGHT()       bondviewGetPlayerDuckingHeightRelated(g_CurrentPlayer)
+#define PORT_COOP_DAMAGESHOWTIME()   bondviewGetIfCurrentPlayerDamageShowTime()
+#endif
 #endif
 
 #ifndef TARGET_N64
@@ -2544,6 +2558,12 @@ bool handles_shot_actors(ChrRecord *self, s32 hitpart, coord3d *vector, s32 weap
 
     self->numarghs++;
     self->chrflags |= CHRFLAG_WAS_HIT;
+#ifndef TARGET_N64
+    if (isPlayer)
+    {
+        coopChrStimulus(self); /* co-op: a direct hit says who to fight */
+    }
+#endif
 
     // If the chr is invincible, make them flinch then we're done
     if (self->chrflags & CHRFLAG_INVINCIBLE)
@@ -3958,6 +3978,9 @@ void set_actor_on_path(ChrRecord *self, struct patrol_path *path)
 
 void setSeenBondTimeToNow(ChrRecord *self)
 {
+#ifndef TARGET_N64
+  coopChrStimulus(self);
+#endif
   self->seen_bond_time = g_GlobalTimer;
   return;
 }
@@ -3995,7 +4018,7 @@ s32 chrlvAttackRelated7F0292A8(ChrRecord *self, coord3d *arg1, StandTile *arg2)
 
         if ((flags & 1) != 0)
         {
-            bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, 0);
+            PORT_COOP_TANKFLAGS(0);
 
             if (bondviewGetVisibleToGuardsFlag() != 0)
             {
@@ -4006,7 +4029,7 @@ s32 chrlvAttackRelated7F0292A8(ChrRecord *self, coord3d *arg1, StandTile *arg2)
                 }
             }
 
-            bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, 1);
+            PORT_COOP_TANKFLAGS(1);
         }
         else if ((flags & 4) != 0)
         {
@@ -4050,7 +4073,7 @@ bool chrCanSeeBond(ChrRecord *self)
         myheight = self->chrheight - 20.0f;
 
         chrSetMoving(self, FALSE);
-        bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, 0);
+        PORT_COOP_TANKFLAGS(0);
 
         mystan = myprop->stan;
 
@@ -4104,7 +4127,7 @@ bool chrCanSeeBond(ChrRecord *self)
 #endif
 
         chrSetMoving(self, TRUE);
-        bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, 1);
+        PORT_COOP_TANKFLAGS(1);
     }
 
     return pass;
@@ -4182,7 +4205,7 @@ s32 chrlvCurrentPlayerCall7F0B0E24(ChrRecord *self)
     bond_prop = getCurrentPlayerProp();
     ret = 0;
 
-    bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, 0);
+    PORT_COOP_TANKFLAGS(0);
 
     bond_stan = bond_prop->stan;
 
@@ -4202,7 +4225,7 @@ s32 chrlvCurrentPlayerCall7F0B0E24(ChrRecord *self)
         ret = 1;
     }
 
-    bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, 1);
+    PORT_COOP_TANKFLAGS(1);
 
     return ret;
 }
@@ -4328,6 +4351,9 @@ void chrlvSetTargetToPlayer(ChrRecord *self)
 {
     PropRecord *temp_v0;
 
+#ifndef TARGET_N64
+    coopChrStimulus(self);
+#endif
     temp_v0 = getCurrentPlayerProp();
     self->lastseetarget60 = g_GlobalTimer;
     self->lastknowntargetpos.f[0] = temp_v0->pos.f[0];
@@ -4348,6 +4374,9 @@ void chrlvAlertGuardToPlayerPosition(ChrRecord *self)
 {
     PropRecord *temp_v0;
 
+#ifndef TARGET_N64
+    coopChrStimulus(self);
+#endif
     temp_v0 = getCurrentPlayerProp();
     self->hidden |= CHRHIDDEN_ALERT_GUARD_RELATED;
     self->lastheartarget60 = g_GlobalTimer;
@@ -6097,7 +6126,7 @@ s32 chrlvUpdateAimendsideback(ChrRecord *self, struct weapon_firing_animation_ta
 
         if (attack_type & TARGET_BOND > 0)
         {
-            ducking_height = bondviewGetPlayerDuckingHeightRelated(g_CurrentPlayer);
+            ducking_height = PORT_COOP_DUCKHEIGHT();
             if ((self->chrflags & CHRSTART_FORCENOBLOOD) != 0)
             {
                 if (((dx * dx) + (dy * dy) + (dz * dz)) < 160000.0f)
@@ -6597,7 +6626,7 @@ void chrlvUpdateShotbondsum(ChrRecord *self, s32 *arg1, s32 *arg2, ITEM_IDS item
     *arg1 = phi_v1;
     *arg2 = 0;
 
-    if ((bondviewGetIfCurrentPlayerDamageShowTime() == 0) && (phi_v1 != 0))
+    if ((PORT_COOP_DAMAGESHOWTIME() == 0) && (phi_v1 != 0))
     {
         temp_f0_3 = sqrtf(dxdydz_square);
 
@@ -6680,11 +6709,14 @@ void chrlvUpdateShotbondsum(ChrRecord *self, s32 *arg1, s32 *arg2, ITEM_IDS item
                 t2 *= 3.0f;
             }
 
+#ifndef TARGET_N64
+            if (!coopTargetRecordDamage(t2, subroty)) /* co-op: the peer's hit goes to the peer */
+#endif
             bondviewCallRecordDamageKills(t2, subroty, -1, 1);
 
             self->shotbondsum = 0.0f;
 
-            if (bondviewGetIfCurrentPlayerDamageShowTime() != 0)
+            if (PORT_COOP_DAMAGESHOWTIME() != 0)
             {
                 *arg2 = 1;
             }

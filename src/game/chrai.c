@@ -941,6 +941,9 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                                                                      */                                                    \
             CODE
     #include "aicommands.def"
+#ifndef TARGET_N64
+#include "coop.h"
+#endif
 #else
                 case AI_GotoNext:
                 {
@@ -4379,7 +4382,11 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 case AI_IFBondIsDead:
                 {
                     AiIFBondIsDeadRecord *ai = AiListp + Offset;
+#ifndef TARGET_N64
+                    if (coopTargetIsDead())
+#else
                     if (g_CurrentPlayer->bonddead)
+#endif
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }

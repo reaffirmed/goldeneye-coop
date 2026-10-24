@@ -48,7 +48,9 @@ Every ported piece is listed here with its source file; rewritten pieces say so.
 
 | Piece | Source in GE+ | Ported or rewritten |
 | --- | --- | --- |
-| (none yet) | | |
+| Guard target state machine (acquire, commit on stimulus, release after 10 s, passive-only scanning, no ping-pong while fresh) | src/game/chr.c chrCoopGetTargetPlayer / chrCoopSetTargetPlayer | Ported, cut to two targets (local Bond, remote puppet) |
+| Stimulus hook points (seen, set target, alerted, shot by player) | src/game/chraction.c setSeenBondTimeToNow, chrlvSetTargetToPlayer, chrlvAlertGuardToPlayerPosition, handles_shot_actors | Same hook points; our code |
+| "Swap Bond around the guard's action and fire ticks" | src/game/chr.c chrTick (set_cur_player around chrlvActionTick and chrlvTriggerFireWeapon) | Rewritten: we swap getCurrentPlayerProp() to the puppet instead of switching player structs |
 
 ## Milestone 1 results (2026-10-24)
 
@@ -56,3 +58,10 @@ Every ported piece is listed here with its source file; rewritten pieces say so.
 - Verified in screenshots both ways (host sees the joiner's Bond after it walks ahead; joiner sees the host's).
 - Fixed: both Bonds start on one pad and blocked each other; the puppet is non-solid until 90 units apart.
 - Open: the first-person gun and HUD were missing in some two-copy runs; under investigation.
+
+## Milestone 2 results (2026-10-24, host side)
+
+- Host guards pick the remote player as "Bond" and the retail AI chases and shoots the puppet.
+- Damage a host guard deals to the puppet is sent as a hit packet and applied to the joiner's Bond (log: "guard 6 hit the peer #1" on host, "hit from host guard #1" on joiner).
+- Not done yet: the joiner still runs its own guards, so it is attacked by two sets. Milestone 3 turns the joiner's guards into puppets of the host's.
+- Hit packets are unreliable UDP for now; lost hits are lost damage. Needs acks before release.

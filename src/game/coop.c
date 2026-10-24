@@ -4,7 +4,14 @@
  * Each field tick this sends the local Bond's position and facing to the peer,
  * and moves a puppet chr to the peer's last reported state. The puppet runs the
  * dead AI list and an action type the tick dispatcher ignores, so only this file
- * moves it. Guard targeting and world sync build on this later.
+ * moves it.
+ *
+ * Guard targeting (host): each guard keeps a target, the local Bond or the
+ * puppet. While a guard targeting the puppet runs its action and fire ticks,
+ * getCurrentPlayerProp() returns the puppet, so the retail "Bond" AI sees,
+ * chases and shoots the remote player; damage it deals goes to the peer as a
+ * hit packet. The acquire/commit/release rules are ported from GoldenEye 007
+ * Plus (src/game/chr.c chrCoopGetTargetPlayer), cut down to two targets.
  */
 #include <ultra64.h>
 #include <math.h>
@@ -31,7 +38,7 @@ extern void portConLogf(const char *fmt, ...);
 #define COOP_MAGIC   0x50434547u /* "GECP" */
 #define COOP_VERSION 1
 
-enum { COOPPKT_STATE = 1 };
+enum { COOPPKT_STATE = 1, COOPPKT_HIT = 2 };
 
 typedef struct
 {
@@ -47,6 +54,16 @@ typedef struct
     s32 dead;
 } CoopStatePkt;
 
+typedef struct
+{
+    u32 magic;
+    u16 version;
+    u16 type;
+    u32 seq;
+    f32 damage;
+    f32 angle;
+} CoopHitPkt;
+
 static s32 sEnabled = -1;
 static u32 sTick;
 
@@ -58,6 +75,22 @@ static PropRecord *sPuppet;
 static coord3d sPuppetPrev;
 static s32 sPuppetAnim = -1;
 static s32 sPuppetGhost;
+
+/* host guard targeting */
+enum { COOPTGT_LOCAL = 0, COOPTGT_REMOTE = 1, COOPTGT_COUNT };
+
+typedef struct
+{
+    s32 lastupdate60;
+    s32 laststimulus60;
+    s8 target;
+} CoopChrTarget;
+
+#define COOP_MAX_CHRS 256
+static CoopChrTarget sChrTarget[COOP_MAX_CHRS];
+static ChrRecord *sTickChr;         /* guard whose tick has the puppet as Bond */
+PropRecord *g_CoopPropOverride;     /* read by getCurrentPlayerProp() */
+static u32 sHitSeq;
 
 enum { PANIM_IDLE, PANIM_WALK, PANIM_RUN };
 
@@ -117,6 +150,17 @@ static void coopPollNet(void)
 
         if (n < (s32) sizeof(u32) * 2 || p->magic != COOP_MAGIC || p->version != COOP_VERSION)
         {
+            continue;
+        }
+        if (p->type == COOPPKT_HIT && n >= (s32) sizeof(CoopHitPkt))
+        {
+            CoopHitPkt *h = (CoopHitPkt *) buf;
+
+            if (coopInMission() && !g_CurrentPlayer->bonddead)
+            {
+                portConLogf("ge: coop: hit from host guard #%u: %.3f\n", h->seq, h->damage);
+                bondviewCallRecordDamageKills(h->damage, h->angle, -1, 1);
+            }
             continue;
         }
         if (p->type == COOPPKT_STATE && n >= (s32) sizeof(CoopStatePkt))
@@ -298,6 +342,16 @@ s32 coopPropIsGhost(PropRecord *prop)
 
 void coopStageStart(void)
 {
+    s32 i;
+
+    for (i = 0; i < COOP_MAX_CHRS; i++)
+    {
+        sChrTarget[i].lastupdate60 = -1;
+        sChrTarget[i].laststimulus60 = -1;
+        sChrTarget[i].target = -1;
+    }
+    sTickChr = NULL;
+    g_CoopPropOverride = NULL;
     sPuppet = NULL;
     sPuppetGhost = 0;
     sPuppetAnim = -1;
@@ -350,4 +404,262 @@ void coopTick(void)
                         c->chrflags, c->hidden, sPuppet->flags, sPuppetAnim, sPuppetGhost);
         }
     }
+}
+
+
+/* ---- host guard targeting ---------------------------------------------- */
+
+static s32 coopTargetable(s32 t)
+{
+    if (t == COOPTGT_LOCAL)
+    {
+        return !g_CurrentPlayer->bonddead;
+    }
+    return t == COOPTGT_REMOTE && sPuppet != NULL && sPuppet->chr != NULL
+        && sRemoteValid && !sRemote.dead;
+}
+
+static PropRecord *coopTargetProp(s32 t)
+{
+    return (t == COOPTGT_REMOTE) ? sPuppet : g_CurrentPlayer->prop;
+}
+
+static CoopChrTarget *coopChrState(ChrRecord *chr)
+{
+    s32 slot;
+
+    if (g_ChrSlots == NULL || chr == NULL)
+    {
+        return NULL;
+    }
+    slot = chr - g_ChrSlots;
+    if (slot < 0 || slot >= g_NumChrSlots || slot >= COOP_MAX_CHRS)
+    {
+        return NULL;
+    }
+    return &sChrTarget[slot];
+}
+
+static s32 coopNearestTarget(ChrRecord *chr)
+{
+    s32 best = -1;
+    f32 bestd2 = 1.0e30f;
+    s32 t;
+
+    for (t = 0; t < COOPTGT_COUNT; t++)
+    {
+        PropRecord *p;
+        f32 dx, dy, dz, d2;
+
+        if (!coopTargetable(t))
+        {
+            continue;
+        }
+        p = coopTargetProp(t);
+        dx = p->pos.f[0] - chr->prop->pos.f[0];
+        dy = p->pos.f[1] - chr->prop->pos.f[1];
+        dz = p->pos.f[2] - chr->prop->pos.f[2];
+        d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < bestd2)
+        {
+            bestd2 = d2;
+            best = t;
+        }
+    }
+    return best;
+}
+
+/* Passive guards may rotate candidates; once a player-relative action runs,
+ * changing Bond under it makes the retail AI list contradict itself. */
+static s32 coopActionAllowsScan(ChrRecord *chr)
+{
+    switch (chr->actiontype)
+    {
+        case ACT_INIT:
+        case ACT_STAND:
+        case ACT_PATROL:
+            return TRUE;
+        default:
+            return FALSE;
+    }
+}
+
+/* Acquire -> commit -> release (from GE+): a passive guard scans players a
+ * few times a second, a real stimulus commits it, and it lets go only after
+ * ten seconds without one and back in a passive action. A dead target is
+ * dropped at once. */
+static s32 coopChrTarget(ChrRecord *chr)
+{
+    CoopChrTarget *st = coopChrState(chr);
+    s32 next;
+
+    if (st == NULL || !coopTargetable(COOPTGT_REMOTE))
+    {
+        return COOPTGT_LOCAL;
+    }
+
+    if (st->target >= 0 && coopTargetable(st->target))
+    {
+        if (st->laststimulus60 >= 0)
+        {
+            if (g_GlobalTimer - st->laststimulus60 < CHRLV_10_SEC_TIMER || !coopActionAllowsScan(chr))
+            {
+                return st->target;
+            }
+            st->laststimulus60 = -1;
+            st->lastupdate60 = g_GlobalTimer;
+        }
+        else if (!coopActionAllowsScan(chr))
+        {
+            return st->target;
+        }
+
+        if (g_GlobalTimer - st->lastupdate60 < 12)
+        {
+            return st->target;
+        }
+
+        next = (st->target + 1) % COOPTGT_COUNT;
+        if (coopTargetable(next))
+        {
+            st->target = next;
+            st->lastupdate60 = g_GlobalTimer;
+        }
+        return st->target;
+    }
+
+    next = coopNearestTarget(chr);
+    if (next < 0)
+    {
+        next = COOPTGT_LOCAL;
+    }
+    st->target = next;
+    st->lastupdate60 = g_GlobalTimer;
+    st->laststimulus60 = -1;
+    return next;
+}
+
+void coopChrTickBegin(ChrRecord *chr)
+{
+    sTickChr = NULL;
+    g_CoopPropOverride = NULL;
+
+    if (!sEnabled || !coopNetIsHost() || sPuppet == NULL || chr->prop == sPuppet)
+    {
+        return;
+    }
+    if (coopChrTarget(chr) == COOPTGT_REMOTE)
+    {
+        static ChrRecord *logged[8];
+        s32 k;
+
+        for (k = 0; k < 8 && logged[k] != NULL && logged[k] != chr; k++)
+        {
+        }
+        if (k < 8 && logged[k] == NULL)
+        {
+            logged[k] = chr;
+            portConLogf("ge: coop: guard %d now targets the peer\n", chr->chrnum);
+        }
+        sTickChr = chr;
+        g_CoopPropOverride = sPuppet;
+    }
+}
+
+void coopChrTickEnd(void)
+{
+    sTickChr = NULL;
+    g_CoopPropOverride = NULL;
+}
+
+/* A real stimulus (seen, heard, shot by) commits the guard to whichever
+ * player is "Bond" right now. Ownership doesn't ping-pong while the current
+ * target is still fresh. */
+void coopChrStimulus(ChrRecord *chr)
+{
+    CoopChrTarget *st;
+    s32 t = (g_CoopPropOverride != NULL) ? COOPTGT_REMOTE : COOPTGT_LOCAL;
+
+    if (!sEnabled || !coopNetIsHost() || chr == NULL || chr->prop == sPuppet)
+    {
+        return;
+    }
+    st = coopChrState(chr);
+    if (st == NULL)
+    {
+        return;
+    }
+    if (st->target != t && st->target >= 0 && coopTargetable(st->target)
+        && st->laststimulus60 >= 0 && g_GlobalTimer - st->laststimulus60 < CHRLV_SEEN_RECENT_CHECK)
+    {
+        return;
+    }
+    st->target = t;
+    st->lastupdate60 = g_GlobalTimer;
+    st->laststimulus60 = g_GlobalTimer;
+}
+
+s32 coopTargetIsRemote(void)
+{
+    return g_CoopPropOverride != NULL;
+}
+
+/* bondviewUpdateGuardTankFlagsRelated for whichever Bond the guard is on:
+ * takes the target out of the line-of-sight test against itself. */
+void coopGuardTankFlags(s32 flag)
+{
+    if (g_CoopPropOverride != NULL)
+    {
+        chrSetMoving(g_CoopPropOverride->chr, flag);
+        return;
+    }
+    bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, flag);
+}
+
+f32 coopTargetDuckingHeight(void)
+{
+    if (g_CoopPropOverride != NULL)
+    {
+        return g_CoopPropOverride->chr->chrheight * 0.5f;
+    }
+    return bondviewGetPlayerDuckingHeightRelated(g_CurrentPlayer);
+}
+
+s32 coopTargetDamageShowTime(void)
+{
+    if (g_CoopPropOverride != NULL)
+    {
+        return 0;
+    }
+    return bondviewGetIfCurrentPlayerDamageShowTime();
+}
+
+s32 coopTargetIsDead(void)
+{
+    if (g_CoopPropOverride != NULL)
+    {
+        return sRemote.dead;
+    }
+    return g_CurrentPlayer->bonddead;
+}
+
+/* Damage a guard dealt to "Bond". Returns 1 when it belonged to the peer. */
+s32 coopTargetRecordDamage(f32 damage, f32 angle)
+{
+    CoopHitPkt h;
+
+    if (g_CoopPropOverride == NULL)
+    {
+        return 0;
+    }
+    memset(&h, 0, sizeof(h));
+    h.magic = COOP_MAGIC;
+    h.version = COOP_VERSION;
+    h.type = COOPPKT_HIT;
+    h.seq = ++sHitSeq;
+    h.damage = damage;
+    h.angle = angle;
+    coopNetSend(&h, sizeof(h));
+    portConLogf("ge: coop: guard %d hit the peer #%u: %.3f\n", sTickChr ? sTickChr->chrnum : -1, h.seq, damage);
+    return 1;
 }

@@ -12187,6 +12187,9 @@ Gfx *bondviewRenderGaugeBars(Gfx *gdl)
 
 #ifndef TARGET_N64
 #include "mp_weapon.h"
+#ifndef TARGET_N64
+#include "coop.h"
+#endif
 
 /**
  * SPAWN WITH WEAPON (Multiplayer Options): gives the CURRENT player slot 1's
@@ -13047,6 +13050,12 @@ f32 bondviewGetPlayerDuckingHeightRelated(struct player *player)
 
 
 PropRecord* getCurrentPlayerProp(void) {
+#ifndef TARGET_N64
+    if (g_CoopPropOverride != NULL)
+    {
+        return g_CoopPropOverride; /* co-op: a guard tick aimed at the peer */
+    }
+#endif
     return g_CurrentPlayer->prop;
 }
 

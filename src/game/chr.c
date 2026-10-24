@@ -42,6 +42,9 @@
  * the uneven 60-in-144 field pattern. Identical whenever the delta is a
  * whole number (tickhz=60, demo playback). */
 #include "frametiming.h"
+#ifndef TARGET_N64
+#include "coop.h"
+#endif
 typedef f32 chranimticks_t;
 #define chrModelTickAnim(m, t, u) modelTickAnimF(m, t, u)
 #else
@@ -2432,7 +2435,13 @@ s32 chrTick(PropRecord *prop)
         }
         else
         {
+#ifndef TARGET_N64
+            coopChrTickBegin(chr);
             chrlvActionTick(chr);
+            coopChrTickEnd();
+#else
+            chrlvActionTick(chr);
+#endif
 
             if (chr->model == NULL)
             {
@@ -2874,7 +2883,13 @@ after_position_update:
             chr->hidden &= ~CHRHIDDEN_DROP_HELD_ITEMS;
         }
 
+#ifndef TARGET_N64
+        coopChrTickBegin(chr);
         chrlvTriggerFireWeapon(chr);
+        coopChrTickEnd();
+#else
+        chrlvTriggerFireWeapon(chr);
+#endif
     }
 
     return TICKOP_NONE;
