@@ -66,6 +66,14 @@ enum
 s32  coopSetting(s32 which);
 void coopSetSetting(s32 which, s32 value);
 
+/* co-op difficulty (coop_difficulty.c): COOPSET_DIFFICULTY's modes */
+s32  coopDifficultyCount(void);
+const char *coopDifficultyName(s32 mode);
+f32  coopDifficultyHealthMul(void);
+s32  coopDifficultyExtraSlots(void);
+void coopDifficultyStageStart(void);
+void coopDifficultyTick(void);
+
 /* what happens when a player goes down (the host picks in the lobby) */
 enum { COOPDOWN_BOTH, COOPDOWN_TIMER, COOPDOWN_REVIVE };
 s32  coopDownRule(void);

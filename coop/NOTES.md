@@ -118,3 +118,21 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscen
   host|invite|join|wait, GE_COOP_LOBBY_DELAY). Verified with the mock: join
   from list, invite + accept, Ready, start Dam, mission end back to the
   lobby, second mission started from the lobby. Real Steam not yet tested.
+
+## Co-op difficulty (2026-10-24)
+
+- Lobby setting COOPSET_DIFFICULTY (host's, copied in HELLO): 0 Normal, 1 Hard,
+  2 Brutal. Only with a partner connected; solo and Normal are unchanged.
+  Logic in src/game/coop_difficulty.c; coopDifficultyCount/Name for the lobby row.
+- Hard: guard health x1.5, damage x1.15, aim x1.15, 1 extra guard per 4 armed
+  soldiers (max 6). Brutal: x2, x1.3, x1.3, 1 per 2 (max 12).
+- Health goes through get_007_health_mod (chrAllocate and scripted set-health);
+  damage and aim scale g_AiDamageModifier/g_AiAccuracyModifier after
+  lvlSetMultipliersForDifficulty each tick. Host only (it owns the guards).
+- Extra guards: copies of generic soldiers beside their source, 2 s after both
+  players are in, standard guard AI, chrnums 20000+. Both games add chr slots and
+  anim/model spare slots (the stock 10 anim spares ran out after 9 copies).
+- Harness: GE_COOP_DIFFICULTY=<mode> on the host. Verified on Dam with the mock:
+  12 (Brutal) / 6 (Hard) extras on the host, all mirrored on the joiner; a PPK
+  chest shot from the joiner kills in 1 on Normal, 2 on Brutal; a guard's hit on
+  the partner 0.062 on Normal, 0.081 on Brutal (x1.3).

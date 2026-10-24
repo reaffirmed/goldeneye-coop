@@ -712,6 +712,7 @@ void coopStageStart(void)
     sPuppetGhost = 0;
     sPuppetAnim = -1;
     sRemoteValid = 0;
+    coopDifficultyStageStart();
 }
 
 void coopTick(void)
@@ -2478,6 +2479,19 @@ static void coopSendHello(void)
 /* Called every frontend tick (front.c). Returns 1 when it started a mission. */
 s32 coopFrontTick(void)
 {
+    {   /* GE_COOP_DIFFICULTY=<mode>: once, at startup, the lobby's co-op difficulty (harness only; the joiner takes the host's from HELLO) */
+        static s32 testdiff = -1;
+        if (testdiff == -1)
+        {
+            const char *e = getenv("GE_COOP_DIFFICULTY");
+            testdiff = 0;
+            if (e != NULL)
+            {
+                sSettings[COOPSET_DIFFICULTY] = (u8) atoi(e);
+                portConLogf("ge: coop: GE_COOP_DIFFICULTY=%d (%s)\n", atoi(e), coopDifficultyName(atoi(e)));
+            }
+        }
+    }
     if (sEnabled < 0)
     {
         sEnabled = coopNetInit();

@@ -3,6 +3,9 @@
 #include "file2.h"
 #include "front.h"
 #ifndef TARGET_N64
+#include "coop.h"
+#endif
+#ifndef TARGET_N64
 #include <stdio.h> /* stderr - mission-end diagnostics */
 #endif
 
@@ -16,10 +19,15 @@ f32 get_007_reaction_speed(void)
 
 f32 get_007_health_mod(void)
 {
+#ifndef TARGET_N64
+    f32 coop = coopDifficultyHealthMul(); /* co-op difficulty: tougher guards */
+#else
+    f32 coop = 1.f;
+#endif
     if (lvlGetSelectedDifficulty() == DIFFICULTY_007) {
-        return slider_007_mode_health;
+        return slider_007_mode_health * coop;
     }
-    return 1.f;
+    return coop;
 }
 
 f32 get_007_damage_mod(void)

@@ -4,6 +4,9 @@
 #include "initunk_005520.h"
 #include "objecthandler.h"
 #include "memp.h"
+#ifndef TARGET_N64
+#include "coop.h"
+#endif
 
 #define MODEL_SPARE_SLOTS          30
 #define ANIM_MODEL_SPARE_SLOTS     10
@@ -34,6 +37,9 @@ void modelmgrAllocateModelSlots(s32 numobjs)
     s32 i;
 
     g_MaxModelSlots = numobjs + MODEL_SPARE_SLOTS;
+#ifndef TARGET_N64
+    g_MaxModelSlots += coopDifficultyExtraSlots(); /* co-op difficulty: the extra guards' guns */
+#endif
     
     g_ModelSlots = mempAllocBytesInBank(g_MaxModelSlots * sizeof(struct ModelSlot), MEMPOOL_STAGE);
 
@@ -63,6 +69,9 @@ void modelmgrAllocateAnimModelSlots(s32 numanimated)
     s32 i;
 
     g_MaxAnimModelSlots = numanimated + ANIM_MODEL_SPARE_SLOTS;
+#ifndef TARGET_N64
+    g_MaxAnimModelSlots += coopDifficultyExtraSlots(); /* co-op difficulty: the extra guards */
+#endif
 
     // mips2c says: g_AnimModelSlots = mempAllocBytesInBank(temp_t6 * 0xC0, 4);
     // however, the pointer is incremented by 0xbc in the loop below.
