@@ -63,7 +63,7 @@ PropRecord *chrSpawnAtCoord(s32 bodynum, s32 headnum, coord3d *pos, StandTile *s
 extern void portConLogf(const char *fmt, ...);
 
 #define COOP_MAGIC   0x50434547u /* "GECP" */
-#define COOP_VERSION 1
+#define COOP_VERSION 2 /* 2: lobby fields in HELLO, health in STATE */
 
 enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7 };
 
@@ -79,6 +79,9 @@ typedef struct
     s32 bodynum;
     s32 headnum;
     s32 dead;
+    f32 health;     /* 0..1 */
+    f32 armour;     /* 0..1 */
+    s32 respawn;    /* dead and waiting: ticks to the respawn at the latest, else -1 */
 } CoopStatePkt;
 
 /* Where each game is, both ways once a second, menus included: the joiner
@@ -288,6 +291,8 @@ static s32 coopInMission(void)
     return bond != NULL && bond->stan != NULL && g_CameraMode == CAMERAMODE_FP;
 }
 
+static s32 coopRespawnEta(void);
+
 static void coopSendState(void)
 {
     CoopStatePkt p;
@@ -306,6 +311,9 @@ static void coopSendState(void)
     p.bodynum = coopLocalBody();
     p.headnum = HEAD_Male_Brosnan_Default;
     p.dead = g_CurrentPlayer->bonddead;
+    p.health = g_CurrentPlayer->bondhealth;
+    p.armour = g_CurrentPlayer->bondarmour;
+    p.respawn = coopRespawnEta();
     coopNetSend(&p, sizeof(p));
 
     if ((sTick % 300) == 1)
@@ -827,6 +835,26 @@ static void coopHarnessTick(void)
         }
     }
 
+    if (sRemoteValid && sRemote.stage == bossGetStageNum() && coopInMission())
+    {   /* GE_COOP_TESTGOTO=<chrnum>: once, 5 s into the mission, stand where that chr stands (harness only) */
+        static s32 testgoto = -2;
+        static s32 inmission;
+        if (testgoto == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTGOTO");
+            testgoto = (e != NULL) ? atoi(e) : -1;
+        }
+        if (testgoto >= 0 && ++inmission == 300)
+        {
+            ChrRecord *c = chrFindByLiteralId(testgoto);
+            if (c != NULL && c->prop != NULL && c->prop->stan != NULL)
+            {
+                coopRespawnPlayerAt(&c->prop->pos, c->prop->stan, 0.0f, sLastWeapon);
+                portConLogf("ge: coop: testgoto -> chr %d at %.0f %.0f %.0f\n", testgoto,
+                            c->prop->pos.f[0], c->prop->pos.f[1], c->prop->pos.f[2]);
+            }
+        }
+    }
     if (coopNetIsHost() && sRemoteValid && sRemote.stage == bossGetStageNum())
     {   /* GE_COOP_TESTSPAWN=<chrnum>: once, at 15 s, spawn a copy of that chr next to Bond (harness only) */
         static s32 testspawn = -2;
@@ -2141,6 +2169,65 @@ s32 coopDeadTick(void)
     return 1;
 }
 
+
+/* Ticks until coopDeadTick brings us back: the minimum wait, the partner's
+ * calm (if they stay calm from now), capped by the maximum. -1 = not waiting. */
+static s32 coopRespawnEta(void)
+{
+    u32 dead, calm;
+    s32 eta;
+
+    if (sDeadSince == 0)
+    {
+        return -1;
+    }
+    dead = sTick - sDeadSince;
+    calm = sRemoteCalm + (sTick - sRemoteCalmTick);
+    if (coopNetIsHost())
+    {
+        u32 fight = (sLastFightTick == 0) ? COOP_CALM_CAP : sTick - sLastFightTick;
+        if (fight < calm)
+        {
+            calm = fight;
+        }
+    }
+    eta = (s32) COOP_RESPAWN_MIN - (s32) dead;
+    if ((s32) COOP_RESPAWN_CALM - (s32) calm > eta)
+    {
+        eta = (s32) COOP_RESPAWN_CALM - (s32) calm;
+    }
+    if ((s32) COOP_RESPAWN_MAX - (s32) dead < eta)
+    {
+        eta = (s32) COOP_RESPAWN_MAX - (s32) dead;
+    }
+    return (eta < 0) ? 0 : eta;
+}
+
+/* ---- HUD (coop_hud.c) ------------------------------------------------------- */
+
+/* 1 when the partner is in this mission; fills what the HUD shows of them */
+s32 coopHudPartner(CoopHudPartner *out)
+{
+    if (sEnabled <= 0 || !sRemoteValid || sRemote.stage != bossGetStageNum() || !coopInMission())
+    {
+        return 0;
+    }
+    out->pos.f[0] = sRemote.pos[0];
+    out->pos.f[1] = sRemote.pos[1];
+    out->pos.f[2] = sRemote.pos[2];
+    out->dead = sRemote.dead;
+    out->health = sRemote.health;
+    out->armour = sRemote.armour;
+    out->respawn = sRemote.respawn;
+    out->name = coopLobbyPartnerName();
+    return 1;
+}
+
+/* our own wait to respawn, -1 when not waiting */
+s32 coopHudRespawnEta(void)
+{
+    return (sEnabled > 0) ? coopRespawnEta() : -1;
+}
 
 /* ---- menus: hello and following the host ------------------------------------ */
 

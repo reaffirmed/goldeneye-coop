@@ -274,6 +274,18 @@ __attribute__((weak)) s32 portVideoKbdStickDown(void)
     return 0;
 }
 
+/** Weak default: Rare's weapon cycling; video.c overrides. */
+__attribute__((weak)) s32 portWeaponMenuOn(void)
+{
+    return 0;
+}
+
+/** Weak default: no objective list; video.c overrides. */
+__attribute__((weak)) s32 portObjectivesHudShown(void)
+{
+    return 0;
+}
+
 /** Weak default: no player names in the viewports; video.c overrides. */
 __attribute__((weak)) s32 portMpShowNames(void)
 {

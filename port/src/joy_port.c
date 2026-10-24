@@ -116,6 +116,14 @@ enum {
      * watch_next, injected as D-pad up / down edges while the watch is open. */
     PORTACT_WATCH_UP,
     PORTACT_WATCH_DOWN,
+    /* Appended for the co-op build: hide / show the objective list
+     * (coop_hud.c) and the weapon menu's five slots (weapon_menu.c). */
+    PORTACT_OBJECTIVE_LIST,
+    PORTACT_WEAPON_SLOT1,
+    PORTACT_WEAPON_SLOT2,
+    PORTACT_WEAPON_SLOT3,
+    PORTACT_WEAPON_SLOT4,
+    PORTACT_WEAPON_SLOT5,
     PORTACT_COUNT
 };
 
@@ -166,6 +174,12 @@ static const struct {
      * nothing outside the watch takes these presses. */
     [PORTACT_WATCH_UP]         = { "watch_up",         "Up",       1 },
     [PORTACT_WATCH_DOWN]       = { "watch_down",       "Down",     1 },
+    [PORTACT_OBJECTIVE_LIST]   = { "objective_list",   "O",        1 },
+    [PORTACT_WEAPON_SLOT1]     = { "weapon_slot_1",    "1",        1 },
+    [PORTACT_WEAPON_SLOT2]     = { "weapon_slot_2",    "2",        1 },
+    [PORTACT_WEAPON_SLOT3]     = { "weapon_slot_3",    "3",        1 },
+    [PORTACT_WEAPON_SLOT4]     = { "weapon_slot_4",    "4",        1 },
+    [PORTACT_WEAPON_SLOT5]     = { "weapon_slot_5",    "5",        1 },
 };
 
 /* [input] detonate_use_reload (default ON): with remote mines in the right
@@ -716,6 +730,36 @@ s32 portJoyPortClassicTogglePressed(s32 pad)
 /** The PORTACT_* ids the game side needs by name, so it needs no enum. */
 s32 portJoyPortActZoomIn(void)    { return PORTACT_ZOOM_IN; }
 s32 portJoyPortActZoomOut(void)   { return PORTACT_ZOOM_OUT; }
+
+/** coop_hud.c: a fresh objective_list press for this tick's player. */
+s32 portJoyPortObjectiveListPressed(void)
+{
+    s32 pad = joyPortPad();
+
+    return pad >= 0 && portJoyPortTake(pad, PORTACT_OBJECTIVE_LIST);
+}
+
+/** weapon_menu.c: 1..5 for a fresh weapon_slot_N press, 0 for none.
+ * Consumes every slot's latch, so a press never fires later. */
+s32 portJoyPortWeaponSlotPressed(void)
+{
+    s32 pad = joyPortPad();
+    s32 slot = 0;
+    s32 i;
+
+    if (pad < 0)
+    {
+        return 0;
+    }
+    for (i = 0; i < 5; i++)
+    {
+        if (portJoyPortTake(pad, PORTACT_WEAPON_SLOT1 + i) && slot == 0)
+        {
+            slot = i + 1;
+        }
+    }
+    return joyPortPermitted() ? slot : 0;
+}
 
 /** MoveBond: 1 while Bond should move at half speed. */
 s32 portJoyPortWalkActive(void)

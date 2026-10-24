@@ -222,6 +222,8 @@ static const struct PortOpt sOpts[] = {
     /* mission_timer lives on the gameplay page: the display page is full
      * at PORTOPT_ROWS_MAX 13 */
     TOGGLE("mission_timer", "[display]", "Mission Timer\n",   PORTOPT_CAT_GAMEPLAY),
+    TOGGLE("objectives_hud", "[display]", "Objective List\n", PORTOPT_CAT_GAMEPLAY),
+    TOGGLE("weapon_menu",    "[display]", "Weapon Menu\n",    PORTOPT_CAT_GAMEPLAY),
     /* pause_pillars lives on the gameplay page: the display page is full at 13 */
     TOGGLE("pause_pillars", "[display]", "Pause Pillars\n",   PORTOPT_CAT_GAMEPLAY),
     ENUMR("health_wide",        "[display]", "Health\n",             PORTOPT_CAT_GAMEPLAY, sHealthWideVals, sHealthWideText, NULL),

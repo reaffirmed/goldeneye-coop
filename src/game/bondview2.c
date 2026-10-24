@@ -3,6 +3,7 @@
 #include <bondtypes.h>
 #include <boss.h>
 #include <fr.h>
+#include "coop.h"
 #include <joy.h>
 #include <music.h>
 #include <snd.h>
@@ -8885,7 +8886,15 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
 #ifndef TARGET_N64
     { /* Port suite prev/next weapon (joy_port.c) = the A-tap / A+Z paths */
         extern s32 portJoyPortWeaponStep(void);
+        extern s32 portJoyPortObjectiveListPressed(void);
+        extern void portObjectivesHudToggle(void);
         s32 step = portJoyPortWeaponStep();
+
+        step = weapmenuInput(step);   /* the weapon menu and its slot keys (weapon_menu.c) */
+        if (portJoyPortObjectiveListPressed())
+        {
+            portObjectivesHudToggle();   /* the objective list (coop_hud.c) */
+        }
         if (step < 0)
         {
             moveData.weaponBackOffset = 1;
@@ -9550,6 +9559,9 @@ void MoveBond(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
     currentPlayerSetCameraMode(0);
     bondviewPlayerTickDamageAndHealth();
     bondviewPlayerTickExplode();
+#ifndef TARGET_N64
+    buttons = weapmenuFilterButtons(buttons, oldbuttons);   /* fire picks from an open weapon menu */
+#endif
     bondviewProcessInput(stick_x, stick_y, buttons, oldbuttons);
 
     if (lvlGetControlsLockedFlag())
@@ -12188,7 +12200,6 @@ Gfx *bondviewRenderGaugeBars(Gfx *gdl)
 #ifndef TARGET_N64
 #include "mp_weapon.h"
 #ifndef TARGET_N64
-#include "coop.h"
 #endif
 
 /**
@@ -13032,6 +13043,7 @@ blood_frame_held:;
     gdl = countdownTimerRender(gdl);
     gdl = display_red_blue_on_radar(gdl);
 #ifndef TARGET_N64
+    gdl = coopHudRender(gdl); /* co-op partner, objectives list (coop_hud.c) */
     gdl = portPillarOverlayDraw(gdl);
     gdl = portDrawFpsCounter(gdl); /* over the pillars and bars */
 #endif

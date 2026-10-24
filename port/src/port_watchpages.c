@@ -374,6 +374,12 @@ static const struct PortBindDef sBindsKbmOnly[] = {
  * PORTACT_CLASSIC_TOGGLE). */
 static const struct PortBindDef sBindsAllExtra[] = {
     { "Classic Mode\n",      "classic_toggle", "classic_toggle" }, /* keyboard default Tab */
+    { "Objective List\n",    "objective_list", "objective_list" }, /* keyboard default O */
+    { "Weapon Slot 1\n",     "weapon_slot_1",  "weapon_slot_1"  }, /* keyboard defaults 1..5 */
+    { "Weapon Slot 2\n",     "weapon_slot_2",  "weapon_slot_2"  },
+    { "Weapon Slot 3\n",     "weapon_slot_3",  "weapon_slot_3"  },
+    { "Weapon Slot 4\n",     "weapon_slot_4",  "weapon_slot_4"  },
+    { "Weapon Slot 5\n",     "weapon_slot_5",  "weapon_slot_5"  },
 };
 #define PORTBIND_ALL_EXTRA ((s32) (sizeof(sBindsAllExtra) / sizeof(sBindsAllExtra[0])))
 

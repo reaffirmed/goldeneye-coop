@@ -40,6 +40,8 @@ static const struct PortOptHelp sHelp[] = {
     { "crosshair_color",    "Colour of both crosshairs." },
     { "ammo_on_screen",     "Shows your ammo count." },
     { "mission_timer",      "Shows elapsed mission time." },
+    { "objectives_hud",     "Lists the mission's objectives in the top right. The Objective List key hides it." },
+    { "weapon_menu",        "Number keys and the wheel open a weapon menu; fire picks. Off: they switch at once." },
     { "pause_pillars",      "Black side bars ease in while paused." },
     { "hud_wide",           "Wide moves ammo and messages to the screen edges." },
     { "health_wide",        "Wide moves the health and armor arcs to the screen edges." },

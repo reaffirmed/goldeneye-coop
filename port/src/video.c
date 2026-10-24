@@ -109,6 +109,9 @@ static int s_CfgMpAimLock = 0;       /* [display] mp_aim_lock */
 static int s_CfgMpSight = 1;         /* [display] mp_sight_on_screen: Rare's MP "Aim" row, the sight half */
 static int s_CfgMpAutoAim = 1;       /* auto-aim allowed (per player): [display] mp_no_auto_aim=0; the old mp_auto_aim=1 */
 static int s_CfgMpNoAutoAimSeen = 0; /* an mp_no_auto_aim line was read: an old mp_auto_aim no longer counts */
+static int s_CfgWeaponMenu = 1;    /* [display] weapon_menu: Half-Life style weapon menu in solo (weapon_menu.c) */
+static int s_CfgObjectivesHud = 1; /* [display] objectives_hud: the objective list top right in solo (coop_hud.c) */
+static int s_ObjectivesHudHidden;  /* the objectives_hud key hid it for now */
 static int s_CfgMpShowNames = 1;     /* [display] mp_show_names: each player's name in their viewport's corner (gunfire.c) */
 /* Multiplayer-only cheats and two gameplay fixes; solo never reads these. lv.c applies the six
  * cheats at MP stage start in place of the solo cheat menu's picks (portMpCheatOwned). */
@@ -1229,6 +1232,8 @@ static int videoSetDisplayOption(const char *key, const char *value)
     if (SDL_strcasecmp(key, "mp_no_auto_aim") == 0) { s_CfgMpAutoAim = SDL_atoi(value) == 0; s_CfgMpNoAutoAimSeen = 1; return 1; }
     if (SDL_strcasecmp(key, "mp_auto_aim") == 0)   { if (!s_CfgMpNoAutoAimSeen) s_CfgMpAutoAim = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "mp_show_names") == 0) { s_CfgMpShowNames = SDL_atoi(value) != 0; return 1; }
+    if (SDL_strcasecmp(key, "objectives_hud") == 0) { s_CfgObjectivesHud = SDL_atoi(value) != 0; s_ObjectivesHudHidden = 0; return 1; }
+    if (SDL_strcasecmp(key, "weapon_menu") == 0) { s_CfgWeaponMenu = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "mp_invisibility") == 0) { s_CfgMpInvisibility = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "mp_dk_mode") == 0)    { s_CfgMpDkMode = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "mp_tiny_players") == 0) { s_CfgMpTinyPlayers = SDL_atoi(value) != 0; return 1; }
@@ -1495,6 +1500,8 @@ s32 portVideoOptionGet(const char *key, s32 *out)
     if (SDL_strcasecmp(key, "mp_no_auto_aim") == 0) { *out = s_CfgMpAutoAim == 0; return 1; }
     if (SDL_strcasecmp(key, "mp_auto_aim") == 0)   { *out = s_CfgMpAutoAim; return 1; }
     if (SDL_strcasecmp(key, "mp_show_names") == 0) { *out = s_CfgMpShowNames; return 1; }
+    if (SDL_strcasecmp(key, "objectives_hud") == 0) { *out = s_CfgObjectivesHud; return 1; }
+    if (SDL_strcasecmp(key, "weapon_menu") == 0) { *out = s_CfgWeaponMenu; return 1; }
     if (SDL_strcasecmp(key, "mp_invisibility") == 0) { *out = s_CfgMpInvisibility; return 1; }
     if (SDL_strcasecmp(key, "mp_dk_mode") == 0)    { *out = s_CfgMpDkMode; return 1; }
     if (SDL_strcasecmp(key, "mp_tiny_players") == 0) { *out = s_CfgMpTinyPlayers; return 1; }
@@ -2322,6 +2329,8 @@ static void videoWriteDefaultIni(void)
     fprintf(f, "mp_sight_on_screen=%d\n", s_CfgMpSight);
     fprintf(f, "mp_no_auto_aim=%d\n", s_CfgMpAutoAim == 0);
     fprintf(f, "mp_show_names=%d\n", s_CfgMpShowNames);
+    fprintf(f, "objectives_hud=%d\n", s_CfgObjectivesHud);
+    fprintf(f, "weapon_menu=%d\n", s_CfgWeaponMenu);
     fprintf(f, "mp_invisibility=%d\n", s_CfgMpInvisibility);
     fprintf(f, "mp_dk_mode=%d\n", s_CfgMpDkMode);
     fprintf(f, "mp_tiny_players=%d\n", s_CfgMpTinyPlayers);
@@ -5756,6 +5765,25 @@ s32 portMpAimLock(void)
     s32 e = videoEnvKnob("GE_AIMLOCK", &env);
 
     return (e == 2) ? (s_CfgMpAimLock != 0) : e;
+}
+
+/** midas.ini [display] objectives_hud, less a press of the objectives_hud key
+ * (coop_hud.c draws the list). */
+s32 portObjectivesHudShown(void)
+{
+    return s_CfgObjectivesHud && !s_ObjectivesHudHidden;
+}
+
+/** midas.ini [display] weapon_menu (weapon_menu.c). */
+s32 portWeaponMenuOn(void)
+{
+    return s_CfgWeaponMenu != 0;
+}
+
+/** The objective_list key: hide or show the list until the next press. */
+void portObjectivesHudToggle(void)
+{
+    s_ObjectivesHudHidden = !s_ObjectivesHudHidden;
 }
 
 /** midas.ini [display] mp_show_names - gunfire.c draws the viewport's player name. */

@@ -31,6 +31,26 @@ s32  coopDeadTick(void); /* 1: co-op owns this death (waiting or respawned) */
 void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon);
 s32  coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid);
 
+/* the HUD (coop_hud.c) */
+typedef struct
+{
+    coord3d pos;
+    s32 dead;
+    f32 health;
+    f32 armour;
+    s32 respawn;        /* ticks, -1 = not waiting */
+    const char *name;
+} CoopHudPartner;
+s32  coopHudPartner(CoopHudPartner *out);
+s32  coopHudRespawnEta(void);
+Gfx *coopHudRender(Gfx *gdl);
+
+/* the weapon menu (weapon_menu.c) */
+s32  weapmenuInput(s32 step);
+u16  weapmenuFilterButtons(u16 buttons, u16 oldbuttons);
+Gfx *weapmenuRender(Gfx *gdl);
+s32  weapmenuIsOpen(void);
+
 /* the lobby screen (front.c MENU_COOP_LOBBY) */
 enum { COOPLOBBY_OFF, COOPLOBBY_IDLE, COOPLOBBY_BUSY, COOPLOBBY_HOSTING, COOPLOBBY_JOINED };
 s32  coopLobbyOpen(void);   /* 1: co-op usable */
