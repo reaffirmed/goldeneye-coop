@@ -39,6 +39,10 @@
 void doorSetOpenState(DoorRecord *door, s32 newstate);
 bool doorIsClosed(DoorRecord *door);
 s32 chrGetNumFree(void);
+s32 sizepropdef(PropDefHeaderRecord *pdef);
+bool objIsMortal(ObjectRecord *obj);
+s32 objGetDestroyedLevel(ObjectRecord *obj);
+void objApplyDamage(ObjectRecord *obj, f32 damage, coord3d *pos, ITEM_IDS itemnum, s32 playernum);
 void chrSetFiring(ChrRecord *self, s32 hand, s32 firing);
 void sub_GAME_7F02BFE4(ChrRecord *self, s32 arg1, s32 arg2);
 PropRecord *chrSpawnAtCoord(s32 bodynum, s32 headnum, coord3d *pos, StandTile *stan, f32 angle, AIListRecord *ailist, s32 spawnflags);
@@ -66,7 +70,7 @@ typedef struct
 
 /* Reliable, in-order events (hits, shots, doors, ...). Every EVENTS packet
  * carries all unacked events plus an ack of what we have received. */
-enum { COOPEV_HIT = 1, COOPEV_SHOTCHR = 2, COOPEV_DOOR = 3 };
+enum { COOPEV_HIT = 1, COOPEV_SHOTCHR = 2, COOPEV_DOOR = 3, COOPEV_OBJDMG = 4 };
 
 typedef struct
 {
@@ -77,6 +81,7 @@ typedef struct
         struct { f32 damage; f32 angle; } hit;                                  /* host -> client */
         struct { s16 chrnum; s16 hitpart; s32 weaponid; f32 vector[3]; } shot;  /* client -> host */
         struct { s32 doorofs; s32 state; } door;                                /* both ways */
+        struct { s32 objofs; f32 damage; f32 pos[3]; s16 item; s16 player; } obj; /* both ways */
         u8 raw[28];
     } u;
 } CoopEvent;
@@ -129,6 +134,8 @@ typedef struct
 
 
 static s32 sEnabled = -1;
+static s32 sDefsBytes;  /* size of the stage's setup prop defs */
+static void *sDefsBase;
 static u32 sTick;
 
 static CoopStatePkt sRemote;
@@ -178,6 +185,8 @@ static void coopApplyEvent(CoopEvent *ev);
 static void coopQueueEvent(CoopEvent *ev);
 static void coopFlushEvents(void);
 static void coopApplyDoor(s32 doorofs, s32 state);
+static void coopApplyObjDamage(CoopEvent *ev);
+static s32 coopSetupOfs(void *rec);
 static StandTile *coopFindStan(coord3d *pos, StandTile *from, coord3d *frompos);
 static s32 coopIsMirroringClient(void);
 static void coopSendGuards(void);
@@ -588,6 +597,41 @@ void coopTick(void)
             }
         }
     }
+    if (sRemoteValid && sRemote.stage == bossGetStageNum())
+    {   /* GE_COOP_TESTOBJ=1: every 5 s, a heavy "shot" on the nearest breakable setup object (harness only) */
+        static s32 testobj = -1;
+        if (testobj == -1)
+        {
+            testobj = getenv("GE_COOP_TESTOBJ") != NULL;
+        }
+        if (testobj && (sTick % 300) == 150 && coopInMission())
+        {
+            PropRecord *bond = getCurrentPlayerProp();
+            PropRecord *it, *best = NULL;
+            f32 bestd = 1e30f;
+
+            for (it = g_ActivePropsHead; it != NULL; it = it->next)
+            {
+                if (it->type == PROP_TYPE_OBJ && it->obj != NULL && coopSetupOfs(it->obj) >= 0
+                    && objIsMortal(it->obj) && !objGetDestroyedLevel(it->obj))
+                {
+                    f32 dx = it->pos.f[0] - bond->pos.f[0];
+                    f32 dz = it->pos.f[2] - bond->pos.f[2];
+                    if (dx * dx + dz * dz < bestd)
+                    {
+                        bestd = dx * dx + dz * dz;
+                        best = it;
+                    }
+                }
+            }
+            if (best != NULL)
+            {
+                portConLogf("ge: coop: testobj %d model %d (dist %.0f)\n", coopSetupOfs(best->obj), best->obj->obj, sqrtf(bestd));
+                objApplyDamage(best->obj, 3.0f, &best->pos, ITEM_AK47, 0);
+            }
+        }
+    }
+
     if (sRemoteValid && sRemote.stage == bossGetStageNum())
     {   /* GE_COOP_TESTDOOR=1: toggle the door nearest Bond every 10 s (harness only) */
         static s32 testdoor = -1;
@@ -1327,6 +1371,9 @@ static void coopApplyEvent(CoopEvent *ev)
         case COOPEV_DOOR:
             coopApplyDoor(ev->u.door.doorofs, ev->u.door.state);
             break;
+        case COOPEV_OBJDMG:
+            coopApplyObjDamage(ev);
+            break;
     }
 }
 
@@ -1349,7 +1396,11 @@ void coopDoorStateChanged(DoorRecord *door, s32 state)
     }
     memset(&ev, 0, sizeof(ev));
     ev.kind = COOPEV_DOOR;
-    ev.u.door.doorofs = (s32) ((u8 *) door - (u8 *) g_CurrentSetup.propDefs);
+    ev.u.door.doorofs = coopSetupOfs(door);
+    if (ev.u.door.doorofs < 0)
+    {
+        return;
+    }
     ev.u.door.state = state;
     coopQueueEvent(&ev);
 }
@@ -1358,7 +1409,7 @@ static void coopApplyDoor(s32 doorofs, s32 state)
 {
     DoorRecord *door;
 
-    if (g_CurrentSetup.propDefs == NULL || doorofs < 0 || doorofs > 0x100000)
+    if (coopSetupOfs((u8 *) g_CurrentSetup.propDefs + doorofs) < 0)
     {
         return;
     }
@@ -1372,4 +1423,124 @@ static void coopApplyDoor(s32 doorofs, s32 state)
     doorSetOpenState(door, state);
     sApplyingRemoteDoor = 0;
     portConLogf("ge: coop: peer door %d -> state %d\n", doorofs, state);
+}
+
+
+/* Byte offset of a record in the stage's setup prop defs, or -1 for things
+ * made at run time (thrown grenades, dropped guns). Both sides load the same
+ * setup file, so the offset names the same object on each. */
+
+static s32 coopSetupOfs(void *rec)
+{
+    u8 *base = (u8 *) g_CurrentSetup.propDefs;
+    s32 ofs;
+
+    if (base == NULL)
+    {
+        return -1;
+    }
+    if ((void *) base != sDefsBase)
+    {
+        PropDefHeaderRecord *it = (PropDefHeaderRecord *) base;
+
+        while (it->type != PROPDEF_END)
+        {
+            it = (PropDefHeaderRecord *) ((u32 *) it + sizepropdef(it));
+        }
+        sDefsBase = base;
+        sDefsBytes = (s32) ((u8 *) it - base);
+    }
+    ofs = (s32) ((u8 *) rec - base);
+    return (ofs >= 0 && ofs < sDefsBytes) ? ofs : -1;
+}
+
+/* ---- objects ---------------------------------------------------------------
+ * The host owns object damage. The joiner forwards its own shots on setup
+ * objects to the host and drops the rest (its explosions are replays of the
+ * host's); the host applies everything and sends each result back, which the
+ * joiner replays with the same numbers so destruction and its explosions
+ * happen on both sides. */
+
+static s32 sApplyingRemoteObj;
+
+s32 coopObjDamage(ObjectRecord *obj, f32 damage, coord3d *pos, s32 item, s32 player)
+{
+    CoopEvent ev;
+    s32 ofs;
+
+    if (sEnabled <= 0 || sApplyingRemoteObj || !coopNetHasPeer() || !sRemoteValid
+        || sRemote.stage != bossGetStageNum())
+    {
+        return 0;
+    }
+    ofs = coopSetupOfs(obj);
+    if (ofs < 0)
+    {
+        return 0;
+    }
+    if (!coopNetIsHost())
+    {
+        if (item == ITEM_UNARMED || item == 0x1D) /* 0x1D: explosion */
+        {
+            return 1;
+        }
+    }
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = COOPEV_OBJDMG;
+    ev.u.obj.objofs = ofs;
+    ev.u.obj.damage = damage;
+    ev.u.obj.pos[0] = pos->f[0];
+    ev.u.obj.pos[1] = pos->f[1];
+    ev.u.obj.pos[2] = pos->f[2];
+    ev.u.obj.item = (s16) item;
+    ev.u.obj.player = (s16) player;
+    coopQueueEvent(&ev);
+    return !coopNetIsHost(); /* the joiner waits for the host's verdict */
+}
+
+static void coopApplyObjDamage(CoopEvent *ev)
+{
+    ObjectRecord *obj;
+    coord3d pos;
+
+    if (g_CurrentSetup.propDefs == NULL || coopSetupOfs((u8 *) g_CurrentSetup.propDefs + ev->u.obj.objofs) < 0)
+    {
+        return;
+    }
+    obj = (ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + ev->u.obj.objofs);
+    if (obj->prop == NULL)
+    {
+        return; /* already gone here */
+    }
+    pos.f[0] = ev->u.obj.pos[0];
+    pos.f[1] = ev->u.obj.pos[1];
+    pos.f[2] = ev->u.obj.pos[2];
+    if (coopNetIsHost())
+    {
+        /* the joiner's shot: apply as ours; the hook sends the result back */
+        objApplyDamage(obj, ev->u.obj.damage, &pos, ev->u.obj.item, ev->u.obj.player);
+    }
+    else
+    {
+        sApplyingRemoteObj = 1;
+        objApplyDamage(obj, ev->u.obj.damage, &pos, ev->u.obj.item, ev->u.obj.player);
+        sApplyingRemoteObj = 0;
+    }
+    portConLogf("ge: coop: peer obj %d damage %.2f (item %d)\n", ev->u.obj.objofs, ev->u.obj.damage, ev->u.obj.item);
+}
+
+/* Explosions hurt chrs on the host only; the joiner's copies of the host's
+ * explosions would count twice, and neither side's blast may hurt the
+ * puppet (each player's own game hurts its own Bond). */
+s32 coopSkipExplosionDamage(ChrRecord *chr)
+{
+    if (sEnabled <= 0 || !coopNetHasPeer())
+    {
+        return 0;
+    }
+    if (chr->prop != NULL && chr->prop == sPuppet)
+    {
+        return 1;
+    }
+    return coopIsMirroringClient();
 }

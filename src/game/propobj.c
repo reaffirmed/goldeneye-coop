@@ -9913,6 +9913,13 @@ void objApplyDamage(ObjectRecord *obj, f32 damage, coord3d *pos, ITEM_IDS itemnu
     AmmoCrateRecord *crate;
     PropRecord *nextchild;
     ObjectRecord tmpobj;
+
+#ifndef TARGET_N64
+    if (coopObjDamage(obj, damage, pos, itemnum, playernum)) /* co-op: the host owns object damage */
+    {
+        return;
+    }
+#endif
     
     /**
      * Set the OWNER field (bits 17-18) to the player index; clear-then-set, equivalent to obj->owner = playernum.

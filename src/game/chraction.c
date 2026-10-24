@@ -2736,6 +2736,13 @@ s32 chrlvExplosionDamage(ChrRecord *self, coord3d *arg1, f32 damage, s32 arg3)
     self_model = self->model;
     self_prop = self->prop;
 
+#ifndef TARGET_N64
+    if (coopSkipExplosionDamage(self)) /* co-op: the host's blasts hurt guards */
+    {
+        return 0;
+    }
+#endif
+
     if ((self->actiontype == ACT_DEAD) || (self->actiontype == ACT_DIE))
     {
         return 0;
