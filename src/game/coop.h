@@ -26,6 +26,7 @@ void coopMissionComplete(void);
 s32  coopFrontTick(void);
 s32  coopAltBondBegin(void); /* 1: "Bond" is now the partner, call coopAltBondEnd */
 void coopAltBondEnd(void);
+void coopAiCommand(u8 *list, s32 offset, ChrRecord *self);
 s32  coopDeadTick(void); /* 1: co-op owns this death (waiting or respawned) */
 void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon);
 s32  coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid);

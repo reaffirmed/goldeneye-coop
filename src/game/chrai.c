@@ -930,6 +930,9 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
              * GE uses long Switch/case while PD uses Bool functions and tests
              * for TRUE/FALSE if(funcpointer[ai]) break;
              */
+#ifndef TARGET_N64
+            coopAiCommand((u8 *) AiListp, Offset, ChrEntityp); /* co-op: cutscene and HUD commands reach the joiner */
+#endif
             switch ((AiListp + Offset)->cmd)
             {
                 // unfortunately we cannot use the cmdbuilder in matching rom as the ordering is not sequential

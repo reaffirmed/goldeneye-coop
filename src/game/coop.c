@@ -46,6 +46,7 @@ s32 chrGetNumFree(void);
 s32 sizepropdef(PropDefHeaderRecord *pdef);
 bool objIsMortal(ObjectRecord *obj);
 void alarmActivate(void);
+void ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType);
 void *explosionCreate(PropRecord *arg0, coord3d *target_pos, StandTile *target_stan, s16 explosion_type, s32 arg4, s32 player, u8 *rooms, s32 arg7);
 ITEM_IDS getCurrentPlayerWeaponId(GUNHAND hand);
 void hudmsgBottomShow(char *mess);
@@ -110,7 +111,7 @@ typedef struct
 
 /* Reliable, in-order events (hits, shots, doors, ...). Every EVENTS packet
  * carries all unacked events plus an ack of what we have received. */
-enum { COOPEV_HIT = 1, COOPEV_SHOTCHR = 2, COOPEV_DOOR = 3, COOPEV_OBJDMG = 4, COOPEV_PICKUP = 5, COOPEV_MISSIONEND = 6, COOPEV_EXPLODE = 7 };
+enum { COOPEV_HIT = 1, COOPEV_SHOTCHR = 2, COOPEV_DOOR = 3, COOPEV_OBJDMG = 4, COOPEV_PICKUP = 5, COOPEV_MISSIONEND = 6, COOPEV_EXPLODE = 7, COOPEV_AICMD = 8 };
 
 typedef struct
 {
@@ -125,6 +126,7 @@ typedef struct
         struct { s32 objofs; s32 kept; } pick;                                  /* both ways */
         struct { s32 stage; u32 stageflags; } end;                              /* both ways */
         struct { f32 pos[3]; s16 type; u8 rooms[8]; } boom;                     /* client -> host */
+        struct { s16 chrnum; u8 len; u8 cmd[25]; } ai;                          /* host -> client */
         u8 raw[28];
     } u;
 } CoopEvent;
@@ -249,6 +251,7 @@ static void coopApplyPickup(CoopEvent *ev);
 static void coopApplyMissionEnd(CoopEvent *ev);
 static void coopSendHello(void);
 static void coopApplyExplosion(CoopEvent *ev);
+static void coopApplyAiCommand(CoopEvent *ev);
 static s32 coopLocalCalm(void);
 static void coopTrackCombat(void);
 static void coopApplyWorld(CoopWorldPkt *p);
@@ -714,6 +717,32 @@ void coopTick(void)
 
 static void coopHarnessTick(void)
 {
+    if (coopNetIsHost() && sRemoteValid && sRemote.stage == bossGetStageNum())
+    {   /* GE_COOP_TESTFADE=1: the host's "script" fades to black at 15 s and back at 18 s (harness only) */
+        static s32 testfade = -1;
+        if (testfade == -1)
+        {
+            testfade = getenv("GE_COOP_TESTFADE") != NULL;
+        }
+        if (testfade && (sTick == 900 || sTick == 1080))
+        {
+            static u8 list[2];
+            ChrRecord *c = chrFindByLiteralId(6);
+            if (c != NULL)
+            {
+                AIRecord *sl = c->ailist;
+                s32 so = c->aioffset;
+                list[0] = (sTick == 900) ? AI_ScreenFadeToBlack : AI_ScreenFadeFromBlack;
+                list[1] = AI_EndList;
+                c->ailist = (AIRecord *) list;
+                c->aioffset = 0;
+                ai((PropDefHeaderRecord *) c, PROP_TYPE_CHR);
+                c->ailist = sl;
+                c->aioffset = so;
+                portConLogf("ge: coop: testfade %d\n", list[0]);
+            }
+        }
+    }
     if (coopIsMirroringClient())
     {   /* GE_COOP_TESTBOOM=<chrnum>: at 20 s, a grenade-sized blast on that chr (harness only) */
         static s32 testboom = -2;
@@ -1617,6 +1646,9 @@ static void coopApplyEvent(CoopEvent *ev)
         case COOPEV_EXPLODE:
             coopApplyExplosion(ev);
             break;
+        case COOPEV_AICMD:
+            coopApplyAiCommand(ev);
+            break;
     }
 }
 
@@ -1993,7 +2025,7 @@ void coopMissionComplete(void)
 
 static void coopApplyMissionEnd(CoopEvent *ev)
 {
-    if (ev->u.end.stage != bossGetStageNum() || !coopInMission())
+    if (ev->u.end.stage != bossGetStageNum())
     {
         return;
     }
@@ -2237,4 +2269,103 @@ static void coopApplyExplosion(CoopEvent *ev)
     explosionCreate(NULL, &pos, stan, ev->u.boom.type, 0, 0, ev->u.boom.rooms, 0);
     sApplyingRemoteBoom = 0;
     portConLogf("ge: coop: peer explosion (type %d) at %.0f %.0f %.0f\n", ev->u.boom.type, pos.f[0], pos.f[1], pos.f[2]);
+}
+
+
+/* ---- cutscenes and script presentation --------------------------------------
+ * Level scripts run only on the host, but some of their commands are about
+ * what the player sees: cutscene cameras, fades, locking the controls, on-
+ * screen text, music. The host sends each of those commands' bytes and the
+ * joiner runs that one command through its own interpreter. */
+
+static s32 coopIsPresentationCmd(u8 cmd)
+{
+    switch (cmd)
+    {
+        case AI_CameraReturnToBond:
+        case AI_CameraLookAtBondFromPad:
+        case AI_CameraSwitch:
+        case AI_CameraOrbitPad:
+        case AI_BondDisableControl:
+        case AI_BondEnableControl:
+        case AI_ScreenFadeToBlack:
+        case AI_ScreenFadeFromBlack:
+        case AI_BondEquipItemCinema:
+        case AI_BondHideWeapons:
+        case AI_BondSetLockedVelocity:
+        case AI_TextPrintBottom:
+        case AI_TextPrintTop:
+        case AI_MusicPlaySlot:
+        case AI_MusicStopSlot:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static s32 sApplyingRemoteAi;
+
+void coopAiCommand(u8 *list, s32 offset, ChrRecord *self)
+{
+    CoopEvent ev;
+    s32 len;
+    u8 cmd = list[offset];
+
+    if (!coopIsPresentationCmd(cmd) || sApplyingRemoteAi || sEnabled <= 0 || !coopNetIsHost()
+        || !coopNetHasPeer() || !sRemoteValid || sRemote.stage != bossGetStageNum())
+    {
+        return;
+    }
+    len = chraiitemsize(list, offset);
+    if (len <= 0 || len > (s32) sizeof(ev.u.ai.cmd) - 1)
+    {
+        portConLogf("ge: coop: script command %d is %d bytes, too long to send\n", cmd, len);
+        return;
+    }
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = COOPEV_AICMD;
+    ev.u.ai.chrnum = (self != NULL) ? self->chrnum : -1;
+    ev.u.ai.len = (u8) len;
+    memcpy(ev.u.ai.cmd, list + offset, len);
+    coopQueueEvent(&ev);
+}
+
+static void coopApplyAiCommand(CoopEvent *ev)
+{
+    static u8 list[32];
+    ChrRecord *chr;
+    AIRecord *savedlist;
+    s32 savedofs;
+    s32 i;
+
+    if (coopNetIsHost() || bossGetStageNum() == LEVELID_TITLE)
+    {
+        return;
+    }
+    /* the command runs as the same chr where there is one, else any chr:
+     * these commands are about the player, not the chr running them */
+    chr = (ev->u.ai.chrnum >= 0) ? chrFindByLiteralId(ev->u.ai.chrnum) : NULL;
+    for (i = 0; chr == NULL && i < g_NumChrSlots; i++)
+    {
+        if (g_ChrSlots[i].model != NULL && g_ChrSlots[i].prop != NULL)
+        {
+            chr = &g_ChrSlots[i];
+        }
+    }
+    if (chr == NULL)
+    {
+        return;
+    }
+    memcpy(list, ev->u.ai.cmd, ev->u.ai.len);
+    list[ev->u.ai.len] = AI_EndList;
+    savedlist = chr->ailist;
+    savedofs = chr->aioffset;
+    chr->ailist = (AIRecord *) list;
+    chr->aioffset = 0;
+    sApplyingRemoteAi = 1;
+    ai((PropDefHeaderRecord *) chr, PROP_TYPE_CHR);
+    sApplyingRemoteAi = 0;
+    chr->ailist = savedlist;
+    chr->aioffset = savedofs;
+    portConLogf("ge: coop: host script command %d\n", list[0]);
 }
