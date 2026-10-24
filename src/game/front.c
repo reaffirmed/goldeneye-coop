@@ -18122,7 +18122,11 @@ Gfx *constructor_menu0D_missioncomplete(Gfx *DL)
     DL = frontSetupMenuBackground(DL);
     DL = microcode_constructor(DL);
 
+#ifndef TARGET_N64
+    missiontimer = coopTeamTimer();     /* co-op: the team's (the host's) time (coop_teamtime.c) */
+#else
     missiontimer = getMissiontimer();
+#endif
     killcount = get_curplay_killcount();
     shotsfired = get_curplayer_shot_register(0);
     headshots = get_curplayer_shot_register(1);

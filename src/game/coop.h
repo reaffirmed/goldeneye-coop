@@ -262,6 +262,21 @@ u32  coopExtHostMissionTicks(void);
 s32  coopExtRemoteView(s32 p, CoopExtView *out);
 void coopExtTick(s32 inmission);
 void coopExtApply(s32 kind, const u8 *raw, s32 from);
+/* the features' own unreliable packets: u32 magic, u16 version, u16 type first, as coop.c's */
+#define COOPPKT_EXT_FIRST 10
+#define COOPPKT_EXT_LAST  11
+enum { COOPPKT_TEAMTIME = 10 };
+void coopExtSendPacket(void *pkt, s32 len, s32 to);    /* fills magic and version */
+void coopExtPacket(const void *pkt, s32 len, s32 from);
+
+/* team mission times (coop_teamtime.c): in co-op the mission's time is the
+ * host's, for the best time, the target time cheats and the debrief */
+s32  coopTeamTimer(void);           /* 60 Hz ticks: the team's time now, or as the mission ended */
+void coopTeamTimeFreeze(void);      /* coopMissionComplete: the mission is ending */
+void coopTeamTimeSend(void);        /* host: to everyone, before MISSIONEND */
+void coopTeamTimeApply(const u8 *raw, s32 from);
+void coopTeamTimeTick(s32 inmission);
+void coopTeamTimeUsed(s32 folder, s32 stage, s32 difficulty, s32 timer); /* file.c: the debrief saved with this time */
 
 /* chat (coop_chat.c): the chat key opens a line, Return sends it to everyone,
  * Escape drops it; lines and toasts fade out over the HUD and the lobby */
