@@ -11107,7 +11107,7 @@ s32 portFullHeightActive(void)
 
 s16 bondviewGetCurrentPlayerViewportWidth(void)
 {
-    if (getPlayerCount() >= 3)
+    if (getViewPlayerCount() >= 3)
     {
         return VIEWPORT_WIDTH_4P;
     }
@@ -11132,7 +11132,7 @@ s16 bondviewGetCurrentPlayerViewportWidth(void)
 
 s16 get_curplayer_viewport_ulx(void)
 {
-    if (2 < getPlayerCount())
+    if (2 < getViewPlayerCount())
     {
         if ((get_cur_playernum() == 1) || (get_cur_playernum() == 3))
         {
@@ -11153,7 +11153,7 @@ s16 bondviewGetCurrentPlayerViewportHeight(void)
 {
     f32 t;
 
-    if (getPlayerCount() >= 2)
+    if (getViewPlayerCount() >= 2)
     {
 #if !defined(TARGET_N64) && !defined(VERSION_EU)
         if (portFullHeightActive())
@@ -11214,7 +11214,7 @@ s16 bondviewGetCurrentPlayerViewportUly(void)
 {
     f32 t;
 
-    if (getPlayerCount() == 2)
+    if (getViewPlayerCount() == 2)
     {
         if (get_cur_playernum() == 0)
         {
@@ -11234,7 +11234,7 @@ s16 bondviewGetCurrentPlayerViewportUly(void)
         return VIEWPORT_ULY_2P_PLAYER_2;
     }
 
-    if (getPlayerCount() >= 3)
+    if (getViewPlayerCount() >= 3)
     {
         if (get_cur_playernum() < 2)
         {
@@ -11399,7 +11399,7 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
         {   /* PILLARBOX (video.c portSetScenePillar): an MP gameplay frame asks
              * for the centred 4:3 - set before the wide factor, which then reads 1 */
             extern void portSetScenePillar(s32 on);
-            portSetScenePillar(getPlayerCount() >= 2);
+            portSetScenePillar(getViewPlayerCount() >= 2);
         }
         wf = portWideFactor();
 
@@ -11420,7 +11420,7 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
              * anamorphic fallback (portMpPinActive). */
             extern void portSetSceneMp(s32 mp);
             extern s32 portMpPinActive(void); /* video.c; weak 0 headless */
-            s32 mp = getPlayerCount() >= 3 && !portMpPinActive();
+            s32 mp = getViewPlayerCount() >= 3 && !portMpPinActive();
             portSetSceneMp(mp);
             g_bondviewSceneWideFactor = mp ? 1.0f : wf; /* aim pin/unpin helpers follow the real presentation */
         }
@@ -12117,7 +12117,7 @@ Gfx *bondviewRenderGaugeBars(Gfx *gdl)
         f32 owf = portFrameWideFactor();
         f32 bandfar = 800.0f * D_800364CC * (2.0f * owf - 1.0f);
         f32 gsq = 1.0f;
-        s32 split = getPlayerCount() >= 2;
+        s32 split = getViewPlayerCount() >= 2;
 
         if (split)
         {   /* SPLIT SCREEN: the arcs were authored round for the solo viewport
@@ -12137,8 +12137,8 @@ Gfx *bondviewRenderGaugeBars(Gfx *gdl)
                 gsq = 1.0f;
             }
         }
-        if (healthAnchorsToEdges() && getPlayerCount() != 2
-            && (getPlayerCount() < 3 || portHealthIsWide()))
+        if (healthAnchorsToEdges() && getViewPlayerCount() != 2
+            && (getViewPlayerCount() < 3 || portHealthIsWide()))
         {
             /* Arcs flush to the VIEWPORT's edges: solo Wide and, per quadrant,
              * 3P/4P under Wide (4:3 takes the centred branch below). 2P keeps
@@ -12733,7 +12733,7 @@ static Gfx *portDrawFpsCounter(Gfx *gdl)
        * frames per second, drawn in-window for fullscreen use, from gfx_sdl2's
        * 500ms stat window via g_PortStatFps (0 headless). */
         extern s32 portVideoShowFps(void); /* video.c; weak 0 headless */
-        if (portVideoShowFps() && (getPlayerCount() == 1 || get_cur_playernum() == 0))
+        if (portVideoShowFps() && (getViewPlayerCount() == 1 || get_cur_playernum() == 0))
         {
             /* Just the number, in the small Gothic font, two units in from the
              * view's top-left so it stays above the top text box; always
@@ -12745,7 +12745,7 @@ static Gfx *portDrawFpsCounter(Gfx *gdl)
             /* Solo full height keeps the top row while paused, since the view
              * snaps 10 lines down at the end of the pause-box ease; the black
              * bar the digits sit on is drawn before them. */
-            if (getPlayerCount() == 1 && portFullHeightActive())
+            if (getViewPlayerCount() == 1 && portFullHeightActive())
             {
                 fp_y = 2;
             }
@@ -13249,6 +13249,13 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
     }
 #endif
 
+#ifndef TARGET_N64
+    if (coopVersusDamage(damage_amount, vectorx, vectorz, playerid, affects_armor))
+    {
+        return;     /* online versus: another PC's player; its own game deals this (coop_versus.c) */
+    }
+#endif
+
     if (g_CurrentPlayer->watch_animation_state != WATCH_ANIMATION_0x0)
     {
         hudMakeDamageSegments(g_CurrentPlayer->armor_display_values, 0x2E, 1, currentPlayerGetArmor());
@@ -13397,6 +13404,9 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
                             if(1);
 
                             g_playerPlayerData[playerid].kill_counts[sp2C]++;
+#ifndef TARGET_N64
+                            coopVersusKilled(sp2C, playerid, sp28);  /* online versus: and on every other PC */
+#endif
                         }
 
                         bondviewKillCurrentPlayer();
@@ -14292,7 +14302,7 @@ Gfx *sub_GAME_7F08AAE8(Gfx *gdl)
             static char sticktext[24];
             s32 in_x = viGetViewLeft() + 0x11;
             s32 in_y = viGetViewTop() + (get_debug_testingmanpos_flag() ? 0x20 : 0x11)
-                     + ((getPlayerCount() >= 3) ? PORT_OVERLAY_MP_DROP : 0);
+                     + ((getViewPlayerCount() >= 3) ? PORT_OVERLAY_MP_DROP : 0);
             s32 in_bot = in_y + 0xa;
 
             sprintf(sticktext, "X %d  Y %d", joyGetStickX(0), joyGetStickY(0));

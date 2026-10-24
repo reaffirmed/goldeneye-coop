@@ -1430,6 +1430,15 @@ s32 bondviewGetRandomSpawnPadIndex(void)
     osSyncPrintf("choosing a start pad for player %d\n", player_num);
 #endif
 #ifndef TARGET_N64
+    {   /* ONLINE VERSUS (coop_versus.c): each player's first pad is the same on every PC */
+        extern s32 coopVersusStartPad(s32 li, s32 count);
+        const s32 vs = coopVersusStartPad(player_num, startpadcount);
+
+        if (vs >= 0)
+        {
+            return vs;
+        }
+    }
     { /* RANDOM SPAWNS (Multiplayer Options): with the option on, AX's safest
        * spawn (portMpSafestSpawn, above) replaces Rare's in-turn pad walk,
        * except during demo playback, which must pick pads the vanilla way. */

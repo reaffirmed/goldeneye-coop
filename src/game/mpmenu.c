@@ -20,6 +20,9 @@
 #include "mp_music.h"
 #include "file.h"
 #include "assets/obseg/text/LmpmenuE.h"
+#ifndef TARGET_N64
+#include "coop.h"
+#endif
 
 #ifdef REFRESH_PAL
 #define MPMENU_YOFF 8   /* PAL: every text row sits 8 pixels lower */
@@ -448,6 +451,12 @@ void mpCalculateAwards(bool gameoverdelay)
     player_count = getPlayerCount();
     duration = getMissiontimer();
 
+#ifndef TARGET_N64
+    {   /* online versus (coop_versus.c): over here, over on every PC */
+        extern void coopVersusMatchOver(void);
+        coopVersusMatchOver();
+    }
+#endif
     sndDeactivateAllSfxByFlag_1();
     set_missionstate(MISSION_STATE_0);
 
@@ -808,7 +817,11 @@ void mpwatchMenuTick(void)
                     mpwatchPlayBeep();
                     g_CurrentPlayer->mpquitconfirm = 0;
                 }
-                else if (joyGetButtonsPressedThisFrame(player_num, A_BUTTON) && (g_CurrentPlayer->mpmenumode == MENU_PAUSE))
+                else if (joyGetButtonsPressedThisFrame(player_num, A_BUTTON) && (g_CurrentPlayer->mpmenumode == MENU_PAUSE)
+#ifndef TARGET_N64
+                         && !coopVersus()   /* online versus: one PC can't stop the others' clocks */
+#endif
+                        )
                 {
                     mpwatchPlayBeep();
                     if (!g_pausedFlag)
@@ -860,7 +873,11 @@ void mpwatchMenuTick(void)
 
                         for (i = 0; i < player_count; i++)
                         {
-                            if (g_playerPointers[i]->mpmenumode == MENU_FINISHED)
+                            if (g_playerPointers[i]->mpmenumode == MENU_FINISHED
+#ifndef TARGET_N64
+                                || coopVsRemote(i)  /* online versus: they leave from their own PCs */
+#endif
+                               )
                             {
                                 menu_count++;
                             }

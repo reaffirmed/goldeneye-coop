@@ -7068,6 +7068,16 @@ static Gfx *portDrawMpPlayerName(Gfx *gdl)
         return gdl;
     }
     name = portProfilePlayerLabel(get_cur_playernum());
+    {   /* an online versus match: our own name, from Steam */
+        extern s32 coopVersus(void);
+        extern s32 coopVsNetOfLocal(s32 li);
+        extern const char *coopPlayerName(s32 p);
+
+        if (coopVersus())
+        {
+            name = coopPlayerName(coopVsNetOfLocal(get_cur_playernum()));
+        }
+    }
     if (name != NULL)
     {
         /* Map every byte >= 0x80 to '?': textMeasure treats such a byte as the

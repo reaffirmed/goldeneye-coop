@@ -70,7 +70,7 @@ PropRecord *chrSpawnAtCoord(s32 bodynum, s32 headnum, coord3d *pos, StandTile *s
 extern void portConLogf(const char *fmt, ...);
 
 #define COOP_MAGIC   0x50434547u /* "GECP" */
-#define COOP_VERSION 5 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters */
+#define COOP_VERSION 7 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters; 7: versus */
 
 enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7 };
 
@@ -352,7 +352,8 @@ static s32 coopInMission(void)
 {
     PropRecord *bond = getCurrentPlayerProp();
 
-    return bond != NULL && bond->stan != NULL && g_CameraMode == CAMERAMODE_FP;
+    /* the multiplayer game never sets the camera mode (versus) */
+    return bond != NULL && bond->stan != NULL && (g_CameraMode == CAMERAMODE_FP || coopVersus());
 }
 
 static s32 coopRespawnEta(void);
@@ -627,6 +628,29 @@ static void coopRecvState(s32 c, CoopStatePkt *p)
     r->calmTick = sTick;
 }
 
+/* a VERSUS packet (coop_versus.c): the host passes a joiner's on, like a STATE */
+static void coopRecvVersus(s32 c, u8 *buf, s32 n)
+{
+    s32 q;
+    u8 *player = buf + 8;   /* CoopVsPkt.player, after the magic, version and type */
+
+    if (coopNetIsHost())
+    {
+        *player = (u8) coopPlayerOfChan(c);
+        for (q = 0; q < COOP_NET_MAX_PEERS; q++)
+        {
+            if (q != c)
+            {
+                coopNetSendTo(q, buf, n);
+            }
+        }
+    }
+    if (*player < COOP_MAX_PLAYERS && *player != coopSelf())
+    {
+        coopVersusRecvPkt(buf, *player);
+    }
+}
+
 static void coopPollNet(void)
 {
     u8 buf[1500];
@@ -708,6 +732,10 @@ static void coopPollNet(void)
         if (p->type == COOPPKT_STATE && n >= (s32) sizeof(CoopStatePkt))
         {
             coopRecvState(c, p);
+        }
+        if (p->type == COOPPKT_VERSUS && n >= coopVersusPktSize())
+        {
+            coopRecvVersus(c, buf, n);
         }
     }
 }
@@ -880,9 +908,26 @@ void coopStageStart(void)
         sR[i].valid = 0;
     }
     coopDifficultyStageStart();
+    coopVersusStageStart();
 }
 
+static void coopTickBody(void);
+
 void coopTick(void)
+{
+    if (coopVersus())
+    {   /* in a versus match the multiplayer loop leaves the last player current: we are player 0 */
+        const s32 cur = get_cur_playernum();
+
+        set_cur_player(0);
+        coopTickBody();
+        set_cur_player(cur);
+        return;
+    }
+    coopTickBody();
+}
+
+static void coopTickBody(void)
 {
     if (sEnabled < 0)
     {
@@ -904,6 +949,12 @@ void coopTick(void)
     }
 
     sMissionTicks++;
+    if (coopVersus())
+    {   /* the multiplayer game's own rules; the others' bodies, not puppets (coop_versus.c) */
+        coopSendState();
+        coopVersusTick();
+        return;
+    }
     coopStatsMissionTick(coopPartnerHere());
     coopSendState();
     coopTrackCombat();
@@ -1486,7 +1537,7 @@ static s32 coopChrTarget(ChrRecord *chr)
 
 static s32 coopIsMirroringClient(void)
 {
-    return sEnabled && !coopNetIsHost() && sLastSnapTick != 0 && coopRemoteHere(0);
+    return sEnabled && !coopNetIsHost() && sLastSnapTick != 0 && coopRemoteHere(0) && !coopVersus();
 }
 
 s32 coopChrTickBegin(ChrRecord *chr)
@@ -2151,7 +2202,62 @@ static void coopApplyEvent(CoopEvent *ev)
         case COOPEV_GIVEBACK:
             coopGiveReturned(&ev->u.give, ev->from);
             break;
+        default:
+            if (ev->kind >= COOPEV_VSHIT)
+            {
+                coopVersusApplyEvent(ev->kind, ev->from, ev->u.raw);
+            }
+            break;
     }
+}
+
+/* ---- versus (coop_versus.c) --------------------------------------------- */
+
+void coopSendVersusEvent(s32 kind, s32 to, const void *payload, s32 len)
+{
+    CoopEvent ev;
+
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = (u8) kind;
+    if (payload != NULL)
+    {
+        memcpy(ev.u.raw, payload, (len < (s32) sizeof(ev.u.raw)) ? len : (s32) sizeof(ev.u.raw));
+    }
+    coopQueueEventTo(&ev, to);
+}
+
+void coopSendVersusPkt(void *pkt, s32 len)
+{
+    CoopStatePkt *p = (CoopStatePkt *) pkt;
+
+    p->magic = COOP_MAGIC;
+    p->version = COOP_VERSION;
+    coopNetSend(pkt, len);
+}
+
+s32 coopRemoteInfo(s32 p, CoopRemoteInfo *out)
+{
+    CoopRemote *r;
+
+    if (!coopRemoteHere(p))
+    {
+        return 0;
+    }
+    r = &sR[p];
+    out->pos[0] = r->st.pos[0];
+    out->pos[1] = r->st.pos[1];
+    out->pos[2] = r->st.pos[2];
+    out->yaw = r->st.yaw;
+    out->dead = r->st.dead;
+    out->health = r->st.health;
+    out->armour = r->st.armour;
+    out->look = r->st.look;
+    return 1;
+}
+
+u32 coopMatchSerial(void)
+{
+    return coopNetIsHost() ? sMissionSerial : sFollowedMission;
 }
 
 /* coop_stats.c: our end-of-mission column for the partner */
@@ -2266,7 +2372,7 @@ s32 coopObjDamage(ObjectRecord *obj, f32 damage, coord3d *pos, s32 item, s32 pla
     CoopEvent ev;
     s32 ofs;
 
-    if (sEnabled <= 0 || sApplyingRemoteObj || !coopNetHasPeer() || !coopPartnerHere())
+    if (sEnabled <= 0 || sApplyingRemoteObj || !coopNetHasPeer() || !coopPartnerHere() || coopVersus())
     {
         return 0;
     }
@@ -2453,6 +2559,14 @@ void coopPickedUp(ObjectRecord *obj, s32 kept)
     CoopEvent ev;
     s32 ofs;
 
+    if (coopVersus())
+    {   /* each arena keeps its own guns; only the scenario's item is shared */
+        if (obj->type == PROPDEF_COLLECTABLE)
+        {
+            coopVersusPickedUp(((WeaponObjRecord *) obj)->weaponnum);
+        }
+        return;
+    }
     if (sEnabled <= 0 || !coopNetHasPeer() || !coopPartnerHere())
     {
         return;
@@ -2991,6 +3105,16 @@ s32 coopFrontTick(void)
             diff = DIFFICULTY_AGENT;
         }
         sFollowedMission = sHostHello.mission;
+        if (coopSetting(COOPSET_VSMODE) & 1)
+        {   /* versus (coop_versus.c, front.c coopVsStartMatch): the players it started with, from the start */
+            if (sHostHello.missionticks > 600 || !coopVersusRoster((u32) coopSetting(COOPSET_VSMODE) >> 4, sHostHello.mission))
+            {
+                portConLogf("ge: versus: the host's match started without us\n");
+                return 0;
+            }
+            coopVsStartMatch(sHostHello.stage);
+            return 1;
+        }
         sLateJoin = sHostHello.missionticks > 600;   /* the host is well into it: start beside them */
         portConLogf("ge: coop: following the host into stage %d (difficulty %d)\n", sHostHello.stage, diff);
         if (selected_folder_num < FOLDER1 || selected_folder_num >= MAX_FOLDER_COUNT)
@@ -3403,6 +3527,11 @@ void coopExplosionCreated(PropRecord *source, coord3d *pos, s32 type, u8 *rooms)
     CoopEvent ev;
     s32 i;
 
+    if (coopVersus())
+    {
+        coopVersusExplosion(source, pos, type, rooms);
+        return;
+    }
     if (source != NULL || type == EXPLOSION_DEF_PLAYER || sApplyingRemoteBoom || !coopIsMirroringClient())
     {
         return; /* destroyed objects replay from the host's damage events */

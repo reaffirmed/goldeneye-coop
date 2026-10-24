@@ -697,7 +697,14 @@ void explosionInflictDamage(PropRecord *arg0, f32 horiz_range, f32 vert_range)
                                 minfrac *= 2.0f;
                             }
 
+#ifndef TARGET_N64
+                            extern void coopVersusBlast(s32 on);
+                            coopVersusBlast(1);  /* online versus: each PC hurts its own player with its copy of the blast */
+#endif
                             record_damage_kills(minfrac, xdist, zdist, (s32) temp_s2->player, 1);
+#ifndef TARGET_N64
+                            coopVersusBlast(0);
+#endif
                             set_cur_player(sp90);
                         }
                     }

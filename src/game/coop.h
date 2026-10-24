@@ -60,11 +60,11 @@ enum
 {
     COOPSET_DIFFICULTY,     /* co-op difficulty: 0 normal (coop_difficulty.c) */
     COOPSET_FRIENDLYFIRE,   /* 0 off: shots pass partners by; 1 on: they hurt */
-    COOPSET_SPARE2,
-    COOPSET_SPARE3,
-    COOPSET_SPARE4,
-    COOPSET_SPARE5,
-    COOPSET_SPARE6,
+    COOPSET_VSMODE,         /* bit 0: versus (coop_versus.c) instead of co-op; bits 4-7: who played the last match */
+    COOPSET_VSARENA,        /* versus: the arena, a multi_stage_setups index (0 random) */
+    COOPSET_VSSCENARIO,     /* versus: the scenario (SCENARIO_*) */
+    COOPSET_VSLENGTH,       /* versus: Game Length, a multi_game_lengths index */
+    COOPSET_VSWEAPONS,      /* versus: the weapon set (setMPWeaponSet) */
     COOPSET_SPARE7,
     COOPSET_MAX = 8
 };
@@ -229,5 +229,48 @@ s32  coopCharacterStep(s32 c, s32 dir);     /* the next (dir 1) or previous (-1)
 void coopCharacterName(s32 c, char *out, s32 cap);  /* with "\n" */
 s32  coopCharacterBody(s32 c, s32 *head);   /* the body and head, -1 for the mission's Bond */
 s32  coopPlayerCharacter(s32 p);            /* player p's pick, as the lobby knows it */
+
+/* online versus (coop_versus.c): the multiplayer game, one player per PC.
+ * Local player indices (g_playerPointers) differ per game; the wire uses the
+ * session's player numbers. */
+#define COOPPKT_VERSUS 16
+#define COOP_ALL 0xFF               /* as coop.c: an event for everyone */
+#define COOP_PUPPET_CHRNUM 30000    /* as coop.c: + player number, a player's body's chrnum on the others' games */
+enum { COOPEV_VSHIT = 32, COOPEV_VSKILL, COOPEV_VSEND, COOPEV_VSITEM, COOPEV_VSBOOM };
+typedef struct
+{
+    f32 pos[3];
+    f32 yaw;
+    s32 dead;
+    f32 health;
+    f32 armour;
+    CoopLook look;
+} CoopRemoteInfo;
+s32  coopRemoteInfo(s32 p, CoopRemoteInfo *out);   /* coop.c: player p's newest STATE in this stage */
+void coopSendVersusEvent(s32 kind, s32 to, const void *payload, s32 len);
+void coopSendVersusPkt(void *pkt, s32 len);
+u32  coopMatchSerial(void);                         /* coop.c: the host's mission number, as both know it */
+s32  coopVersus(void);                  /* 1 in an online versus match */
+s32  coopVsViewCount(void);             /* 1 in one (one view, ours), else getPlayerCount() */
+s32  coopVsRemote(s32 li);              /* local player li is another PC's: no view, no tick */
+s32  coopVsNetOfLocal(s32 li);
+s32  coopVsLocalOfNet(s32 p);
+s32  coopVsPlayers(void);
+s32  coopVersusRoster(u32 mask, u32 serial);
+void coopVersusClear(void);
+u32  coopVersusSerial(void);
+void coopVersusStageStart(void);
+s32  coopVersusStartPad(s32 li, s32 count);
+s32  coopVersusDamage(f32 damage, f32 vx, f32 vz, s32 attacker, s32 armour);   /* 1: not ours to deal */
+void coopVersusBlast(s32 on);
+void coopVersusKilled(s32 victim, s32 killer, s32 gg);
+void coopVersusExplosion(PropRecord *source, coord3d *pos, s32 type, u8 *rooms);
+void coopVersusPickedUp(s32 item);
+void coopVersusApplyEvent(s32 kind, s32 from, const void *raw);
+void coopVersusMatchOver(void);
+s32  coopVersusPktSize(void);
+void coopVersusRecvPkt(void *buf, s32 player);
+void coopVersusTick(void);
+void coopVsStartMatch(s32 stage);          /* front.c: this PC's half of the match, then into the arena */
 
 #endif

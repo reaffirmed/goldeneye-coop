@@ -8835,8 +8835,8 @@ extern void portConLogf(const char *fmt, ...);
 
 enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLROW_CANCEL,
        CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE, CLROW_FRIENDLYFIRE,
-       CLROW_CHARACTER };
-#define COOP_LOBBY_ROWS     22
+       CLROW_CHARACTER, CLROW_VSMODE, CLROW_VSARENA, CLROW_VSSCENARIO, CLROW_VSLENGTH, CLROW_VSWEAPONS, CLROW_VSSTART };
+#define COOP_LOBBY_ROWS     24
 #define COOP_LOBBY_X        PORT_SHEET_LABEL_X
 #define COOP_LOBBY_VALUE_X  0xFA
 #define COOP_LOBBY_Y0       PORT_SHEET_ROW_Y0
@@ -8896,6 +8896,226 @@ static struct CoopLobbyRow *coopLobbyAdd(s32 kind, s32 arg, const char *label, c
     snprintf(r->label, sizeof(r->label), "%s", label);
     snprintf(r->value, sizeof(r->value), "%s", value);
     return r;
+}
+
+/* ---- ONLINE VERSUS (coop_versus.c): the Mode row, the match's rows (the host
+ * picks, the others see them), and setting the match up on each PC ---- */
+static const char *coop_vs_harness;   /* GE_COOP_VERSUS, until the host applies it */
+#define COOP_VS_ON()            (coopSetting(COOPSET_VSMODE) & 1)
+#define COOP_VS_WEAPONS_RANDOM  15  /* mp_weapon.c PORT_MP_WEAPONSET_RANDOM, rolled the same on every PC */
+#define COOP_VS_WEAPONS_CUSTOM  14  /* mp_weapon.c PORT_MP_WEAPONSET_CUSTOM: this PC's own list, not for versus */
+extern u16 portMpWeaponSetTextID(s32 set);
+s32 coopVsScenarioOk(s32 sc, s32 n);
+s32 coopVsLengthCount(s32 sc);
+s32 coopVsWeaponsOk(s32 w);
+s32 coopVsArenaCount(void);
+static const char *const coop_vs_scenario_names[] = { "Normal\n", "Live Twice\n", "Flag Tag\n", "Golden Gun\n",
+                                                      "Licence to Kill\n", "Teams 2 v 2\n", "Teams 3 v 1\n", "Teams 2 v 1\n" };
+static const char *const coop_vs_length_names[] = { "No Limit\n", "5 Minutes\n", "10 Minutes\n", "20 Minutes\n",
+                                                    "First to 5\n", "First to 10\n", "First to 20\n" };
+
+static s32 coopVsLobbyCount(void)
+{
+    s32 i, n = 0;
+
+    for (i = 0; i < COOP_MAX_PLAYERS; i++)
+    {
+        n += coopLobbyPlayerHere(i);
+    }
+    return (n < 2) ? 2 : n;
+}
+
+s32 coopVsArenaCount(void)
+{
+    return (s32) (sizeof(multi_stage_setups) / sizeof(multi_stage_setups[0]));
+}
+
+/* an arena for n players (Rare's caps: Egyptian 2, Bunker 3, ...); 0 is Random */
+static s32 coopVsArenaOk(s32 a, s32 n)
+{
+    return a == 0 || (a > 0 && a < coopVsArenaCount() && n <= multi_stage_setups[a].max_player);
+}
+
+/* the lobby's arena, Random when it doesn't hold this many players */
+static s32 coopVsArena(void)
+{
+    const s32 a = coopSetting(COOPSET_VSARENA);
+
+    return coopVsArenaOk(a, coopVsLobbyCount()) ? a : 0;
+}
+
+s32 coopVsScenarioOk(s32 sc, s32 n)
+{
+    return sc >= SCENARIO_NORMAL && sc <= SCENARIO_2v1 && mp_player_counts[sc].min <= n && n <= mp_player_counts[sc].max;
+}
+
+/* the lobby's scenario, Normal when it doesn't suit this many players */
+static s32 coopVsScenario(void)
+{
+    const s32 sc = coopSetting(COOPSET_VSSCENARIO);
+
+    return coopVsScenarioOk(sc, coopVsLobbyCount()) ? sc : SCENARIO_NORMAL;
+}
+
+s32 coopVsLengthCount(s32 sc)
+{
+    return (sc == SCENARIO_TLD) ? 4 : 7;    /* Flag Tag: time limits only */
+}
+
+s32 coopVsWeaponsOk(s32 w)
+{
+    return (w >= 0 && w < COOP_VS_WEAPONS_CUSTOM) || w == COOP_VS_WEAPONS_RANDOM;
+}
+
+static void coopVsTrimText(char *out, s32 cap, const char *in)
+{
+    s32 k = 0;
+
+    for (; in != NULL && *in != '\0' && *in != '\n' && k < cap - 2; in++)
+    {
+        out[k++] = (*in >= 0x20 && *in < 0x7F) ? *in : '?';
+    }
+    out[k++] = '\n';
+    out[k] = '\0';
+}
+
+static void coopVsArenaName(s32 arena, char *out, s32 cap)
+{
+    if (arena <= 0 || arena >= coopVsArenaCount())
+    {
+        snprintf(out, cap, "Random\n");
+        return;
+    }
+    coopVsTrimText(out, cap, langGet(multi_stage_setups[arena].folder_text_preset));
+}
+
+static void coopVsWeaponsName(s32 sc, s32 w, char *out, s32 cap)
+{
+    if (sc == SCENARIO_MWTGG)
+    {
+        w = 0xD;    /* the Golden Gun's own set */
+    }
+    if (w == COOP_VS_WEAPONS_RANDOM)
+    {
+        snprintf(out, cap, "Random\n");
+        return;
+    }
+    coopVsTrimText(out, cap, langGet(portMpWeaponSetTextID(coopVsWeaponsOk(w) ? w : 0)));
+}
+
+/* step a versus row (dir 1 / -1); host only */
+static void coopVsStep(s32 kind, s32 dir)
+{
+    const s32 sc = coopVsScenario();
+    s32 v, k;
+
+    switch (kind)
+    {
+        case CLROW_VSMODE:
+            coopSetSetting(COOPSET_VSMODE, !COOP_VS_ON());
+            break;
+        case CLROW_VSARENA:
+            v = coopVsArena();
+            for (k = 0; k < coopVsArenaCount(); k++)
+            {
+                v = (v + dir + coopVsArenaCount()) % coopVsArenaCount();
+                if (coopVsArenaOk(v, coopVsLobbyCount()))
+                {
+                    break;
+                }
+            }
+            coopSetSetting(COOPSET_VSARENA, v);
+            break;
+        case CLROW_VSSCENARIO:
+            v = sc;
+            for (k = 0; k <= SCENARIO_2v1; k++)
+            {
+                v = (v + dir + SCENARIO_2v1 + 1) % (SCENARIO_2v1 + 1);
+                if (coopVsScenarioOk(v, coopVsLobbyCount()))
+                {
+                    break;
+                }
+            }
+            coopSetSetting(COOPSET_VSSCENARIO, v);
+            if (coopSetting(COOPSET_VSLENGTH) >= coopVsLengthCount(v))
+            {
+                coopSetSetting(COOPSET_VSLENGTH, 2);
+            }
+            break;
+        case CLROW_VSLENGTH:
+            v = coopSetting(COOPSET_VSLENGTH);
+            coopSetSetting(COOPSET_VSLENGTH, (v + dir + coopVsLengthCount(sc)) % coopVsLengthCount(sc));
+            break;
+        case CLROW_VSWEAPONS:
+            v = coopSetting(COOPSET_VSWEAPONS);
+            for (k = 0; k < 32; k++)
+            {
+                v = (v + dir + 32) % 32;
+                if (coopVsWeaponsOk(v))
+                {
+                    break;
+                }
+            }
+            coopSetSetting(COOPSET_VSWEAPONS, v);
+            break;
+        default:
+            break;
+    }
+}
+
+/* the host's Start Match: everyone in the lobby now plays */
+static void coopVsHostStart(void)
+{
+    u32 mask = 0;
+    s32 arena = coopVsArena();
+    s32 i;
+
+    for (i = 0; i < COOP_MAX_PLAYERS; i++)
+    {
+        if (coopLobbyPlayerHere(i))
+        {
+            mask |= 1u << i;
+        }
+    }
+    coopSetSetting(COOPSET_VSMODE, 1 | (mask << 4));
+    if (!coopVersusRoster(mask, coopMatchSerial() + 1))
+    {
+        return;
+    }
+    for (i = 0; i < 64 && !(arena > 0 && coopVsArenaOk(arena, coopVsPlayers())); i++)
+    {   /* Random: one that holds everyone */
+        arena = 1 + (s32) (randomGetNext() % (u32) (coopVsArenaCount() - 1));
+    }
+    if (!coopVsArenaOk(arena, coopVsPlayers()) || arena <= 0)
+    {
+        arena = 1;  /* Temple holds four */
+    }
+    coopVsStartMatch(multi_stage_setups[arena].stage_id);
+}
+
+/* the versus rows under Rules (host: rows to change; the others: what is set) */
+static void coopVsLobbyRows(void)
+{
+    const s32 host = coopLobbyIsHost();
+    const s32 sc = coopVsScenario();
+    char value[32];
+
+    coopVsArenaName(coopVsArena(), value, sizeof(value));
+    coopLobbyAdd(host ? CLROW_VSARENA : CLROW_TEXT, 0, "Arena\n", value);
+    coopLobbyAdd(host ? CLROW_VSSCENARIO : CLROW_TEXT, 0, "Scenario\n", coop_vs_scenario_names[sc]);
+    if (sc == SCENARIO_YOLT)
+    {
+        coopLobbyAdd(CLROW_TEXT, 0, "Game Length\n", "Two Lives\n");
+    }
+    else
+    {
+        const s32 len = coopSetting(COOPSET_VSLENGTH);
+
+        coopLobbyAdd(host ? CLROW_VSLENGTH : CLROW_TEXT, 0, "Game Length\n",
+                     coop_vs_length_names[(len < coopVsLengthCount(sc)) ? len : 2]);
+    }
+    coopVsWeaponsName(sc, coopSetting(COOPSET_VSWEAPONS), value, sizeof(value));
+    coopLobbyAdd((host && sc != SCENARIO_MWTGG) ? CLROW_VSWEAPONS : CLROW_TEXT, 0, "Weapons\n", value);
 }
 
 static s32 coopLobbyActionable(const struct CoopLobbyRow *r)
@@ -8994,6 +9214,15 @@ static void coopLobbyBuild(void)
                 r->colour = PORT_SHEET_COL_DIM;
             }
         }
+        if (COOP_VS_ON())
+        {   /* versus: one row starts the match the Rules set up */
+            r = coopLobbyAdd(CLROW_VSSTART, 0, "Start Match\n", coopLobbyPartnerReady() ? "" : "Not Ready\n");
+            if (r != NULL && !coopLobbyPartnerReady())
+            {
+                r->dim = TRUE;
+            }
+        }
+        else
         {   /* the next mission of this pair's campaign (coop_campaign.txt) */
             s32 stage, diff;
             char label[48];
@@ -9029,10 +9258,13 @@ static void coopLobbyBuild(void)
                 }
             }
         }
-        r = coopLobbyAdd(CLROW_MISSION, 0, "Select Mission\n", coopLobbyPartnerReady() ? "" : "Not Ready\n");
-        if (r != NULL && !coopLobbyPartnerReady())
+        if (!COOP_VS_ON())
         {
-            r->dim = TRUE;
+            r = coopLobbyAdd(CLROW_MISSION, 0, "Select Mission\n", coopLobbyPartnerReady() ? "" : "Not Ready\n");
+            if (r != NULL && !coopLobbyPartnerReady())
+            {
+                r->dim = TRUE;
+            }
         }
     }
     else
@@ -9042,12 +9274,18 @@ static void coopLobbyBuild(void)
             coopLobbyAdd(CLROW_TEXT, 0, "Connecting to the host...\n", "");
         }
         coopLobbyAdd(CLROW_READY, 0, coopLobbySelfReady() ? "Cancel Ready\n" : "Ready Up\n", "");
-        coopLobbyAdd(CLROW_TEXT, 0, "The host picks the mission.\n", "");
+        coopLobbyAdd(CLROW_TEXT, 0, COOP_VS_ON() ? "The host starts the match.\n" : "The host picks the mission.\n", "");
     }
     coopLobbyAdd(CLROW_LEAVE, 0, "Leave Lobby\n", "");
 
     /* the host's rules; the joiner sees them as the host sets them */
     coopLobbyAdd(CLROW_HEAD, 0, "Rules\n", "");
+    coopLobbyAdd(coopLobbyIsHost() ? CLROW_VSMODE : CLROW_TEXT, 0, "Mode\n", COOP_VS_ON() ? "Versus\n" : "Co-op\n");
+    if (COOP_VS_ON())
+    {
+        coopVsLobbyRows();
+    }
+    else
     {
         static const char *const downrules[] = { "Revive or Timer\n", "Timer\n", "Revive\n" };
         s32 rule = coopDownRule();
@@ -9055,14 +9293,18 @@ static void coopLobbyBuild(void)
         coopLobbyAdd(coopLobbyIsHost() ? CLROW_DOWNRULE : CLROW_TEXT, 0, "When Down\n",
                      downrules[(rule >= 0 && rule <= COOPDOWN_REVIVE) ? rule : 0]);
     }
+    if (!COOP_VS_ON())
     {
         char diff[24];
 
         snprintf(diff, sizeof(diff), "%s\n", coopDifficultyName(coopSetting(COOPSET_DIFFICULTY)));
         coopLobbyAdd(coopLobbyIsHost() ? CLROW_DIFFICULTY : CLROW_TEXT, 0, "Guards\n", diff);
     }
-    coopLobbyAdd(coopLobbyIsHost() ? CLROW_FRIENDLYFIRE : CLROW_TEXT, 0, "Friendly Fire\n",
-                 coopSetting(COOPSET_FRIENDLYFIRE) ? "On\n" : "Off\n");
+    if (!COOP_VS_ON())
+    {
+        coopLobbyAdd(coopLobbyIsHost() ? CLROW_FRIENDLYFIRE : CLROW_TEXT, 0, "Friendly Fire\n",
+                     coopSetting(COOPSET_FRIENDLYFIRE) ? "On\n" : "Off\n");
+    }
 
     for (i = 0, k = 0; i < COOP_MAX_PLAYERS; i++)
     {
@@ -9141,6 +9383,16 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
         case CLROW_FRIENDLYFIRE:
             coopSetSetting(COOPSET_FRIENDLYFIRE, !coopSetting(COOPSET_FRIENDLYFIRE));
             break;
+        case CLROW_VSMODE:
+        case CLROW_VSARENA:
+        case CLROW_VSSCENARIO:
+        case CLROW_VSLENGTH:
+        case CLROW_VSWEAPONS:
+            coopVsStep(r->kind, 1);
+            break;
+        case CLROW_VSSTART:
+            coopVsHostStart();
+            break;
         default:
             break;
     }
@@ -9156,13 +9408,20 @@ void init_menu1D_cooplobby(void)
     coop_lobby_hot = -1;
     coop_lobby_ticks = 0;
     selected_folder_num = (selected_folder_num >= FOLDER1) ? selected_folder_num : FOLDER1;
+    if (gamemode == GAMEMODE_MULTI && coopVsPlayers() >= 2)
+    {   /* back from an online versus match, in co-op's mode of play */
+        coopVersusClear();
+        gamemode = GAMEMODE_SOLO;
+    }
     coop_lobby_ok = coopLobbyOpen();
     coop_lobby_nfriends = coopLobbyFriends();
     if (coop_lobby_auto == 0)
     {
         const char *e = getenv("GE_COOP_LOBBY");
+        const char *v = getenv("GE_COOP_VERSUS");   /* harness: applied once hosting */
 
         coop_lobby_auto = (e != NULL && strchr("hijw", e[0]) != NULL && e[0] != '\0') ? e[0] : -1;
+        coop_vs_harness = (coop_lobby_auto == 'h' || coop_lobby_auto == 'i') ? v : NULL;
     }
     coopLobbyBuild();
     load_walletbond();
@@ -9185,6 +9444,20 @@ static void coopLobbyHarness(void)
 {
     const s32 state = coopLobbyState();
 
+    if (coop_vs_harness != NULL && coopLobbyIsHost())
+    {   /* GE_COOP_VERSUS=<arena>:<scenario>:<length>:<weapons>, the host's versus rows */
+        s32 a = 1, sc = 0, len = 2, w = 1;
+
+        sscanf(coop_vs_harness, "%d:%d:%d:%d", &a, &sc, &len, &w);
+        coopSetSetting(COOPSET_VSMODE, 1);
+        coopSetSetting(COOPSET_VSARENA, a);
+        coopSetSetting(COOPSET_VSSCENARIO, sc);
+        coopSetSetting(COOPSET_VSLENGTH, len);
+        coopSetSetting(COOPSET_VSWEAPONS, w);
+        portConLogf("ge: versus: harness rows %d:%d:%d:%d\n", a, sc, len, w);
+        coop_vs_harness = NULL;
+        coopLobbyBuild();
+    }
     if (coop_lobby_auto <= 0 || (coop_lobby_ticks % 30) != 15)
     {
         return;
@@ -9257,8 +9530,14 @@ static void coopLobbyHarness(void)
         {
             coopSetDownRule(atoi(getenv("GE_COOP_DOWNRULE")));
         }
-        portConLogf("ge: coop lobby: partner ready, starting stage %d (down rule %d)\n", stage, coopDownRule());
         readyAt = -1;   /* again next time round */
+        if (COOP_VS_ON())
+        {
+            portConLogf("ge: coop lobby: everyone ready, starting the versus match\n");
+            coopVsHostStart();
+            return;
+        }
+        portConLogf("ge: coop lobby: partner ready, starting stage %d (down rule %d)\n", stage, coopDownRule());
         set_selected_difficulty(DIFFICULTY_AGENT);
         set_solo_and_ptr_briefing(stage);
         frontChangeMenu(MENU_RUN_STAGE, TRUE);
@@ -9328,6 +9607,13 @@ void interface_menu1D_cooplobby(void)
             sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE_SFX, 0);
             coopSetCharacter(coopCharacterStep(coopCharacter(),
                                                joyGetButtonsPressedThisFrame(PLAYER_1, L_TRIG|L_JPAD) ? -1 : 1));
+        }
+        else if (coop_lobby_hot >= 0 && coop_lobby_rows[coop_lobby_hot].kind >= CLROW_VSARENA
+                 && coop_lobby_rows[coop_lobby_hot].kind <= CLROW_VSWEAPONS
+                 && joyGetButtonsPressedThisFrame(PLAYER_1, L_TRIG|R_TRIG|L_JPAD|R_JPAD))
+        {   /* the versus rows step both ways too */
+            sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE_SFX, 0);
+            coopVsStep(coop_lobby_rows[coop_lobby_hot].kind, joyGetButtonsPressedThisFrame(PLAYER_1, L_TRIG|L_JPAD) ? -1 : 1);
         }
         else if (coop_lobby_hot >= 0 && joyGetButtonsPressedThisFrame(PLAYER_1, START_BUTTON|Z_TRIG|A_BUTTON))
         {
@@ -10933,6 +11219,81 @@ s32 portMpLives(void)
     }
     return (get_is_ramrom_flag() == 0) ? port_mp_lim[PORT_LIM_LIVES] : 0;
 }
+#endif
+
+#ifndef TARGET_N64
+/* this PC's half of the match the lobby set up: Rare's MP settings, our
+ * player first (coop_versus.c has the order), then into the arena. The host
+ * calls it from Start Match, the others when they follow it (coop.c). */
+void coopVsStartMatch(s32 stage)
+{
+    const s32 n = coopVsPlayers();
+    s32 sc = coopSetting(COOPSET_VSSCENARIO);
+    s32 li;
+
+    if (!coopVsScenarioOk(sc, n))
+    {
+        sc = SCENARIO_NORMAL;
+    }
+    gamemode = GAMEMODE_MULTI;
+    selected_num_players = n;
+    port_mp_teams_on = FALSE;           /* only Rare's team scenarios, with the same sides everywhere */
+    port_mp_lim[PORT_LIM_LIVES] = 0;    /* the PC's own Game Limits don't apply; the lobby's do */
+    reset_mp_options_for_scenario(sc);  /* the scenario's own length and weapons, where it fixes them */
+    if (unlock_game_length)
+    {
+        game_length = coopSetting(COOPSET_VSLENGTH);
+        if (game_length >= coopVsLengthCount(sc))
+        {
+            game_length = 2;
+        }
+    }
+    portMpLimFromLength(game_length);
+    if (sc == SCENARIO_YOLT)
+    {
+        port_mp_lim[PORT_LIM_TIME] = 0;
+        port_mp_lim[PORT_LIM_KILLS] = 0;
+    }
+    if (getenv("GE_VS_KILLS") != NULL)
+    {   /* harness: a short kill limit */
+        port_mp_lim[PORT_LIM_KILLS] = atoi(getenv("GE_VS_KILLS"));
+    }
+    if (unlock_weapon_select && coopVsWeaponsOk(coopSetting(COOPSET_VSWEAPONS)))
+    {
+        setMPWeaponSet(coopSetting(COOPSET_VSWEAPONS));
+    }
+    {
+        extern void portMpWeaponSeed(u32 seed);
+        portMpWeaponSeed(coopVersusSerial() * 2654435761u + 0x5EEDu);
+    }
+    for (li = 0; li < MAX_PLAYER_COUNT; li++)
+    {
+        const s32 p = coopVsNetOfLocal(li);
+        const s32 c = (p >= 0) ? coopPlayerCharacter(p) : 0;
+        const s32 lone = (sc == SCENARIO_2v1) ? 2 : 3;
+
+        player_char[li] = (c > 0) ? c - 1 : 0;      /* the lobby's pick; the mission's Bond is Rare's Bond here */
+        player_handicap[li] = 5;                    /* normal */
+        if (p >= 0 && portMpTeamScenario())
+        {   /* Rare's sides by session number (the team screen's opening picks), the same on every PC */
+            set_players_team_or_scenario_item_flag(li, (sc == SCENARIO_2v2) ? !(p == 0 || p == lone) : (p == lone));
+        }
+    }
+    MP_stage_selected = 0;
+    for (li = 1; li < coopVsArenaCount(); li++)
+    {
+        if (multi_stage_setups[li].stage_id == stage)
+        {
+            MP_stage_selected = li;
+        }
+    }
+    portConLogf("ge: versus: starting stage %d, scenario %d, length %d, weapons %d, %d players\n",
+                stage, sc, game_length, getMPWeaponSet(), n);
+    selected_stage = stage;
+    briefingpage = -1;
+    frontChangeMenu(MENU_RUN_STAGE, TRUE);
+}
+
 #endif
 
 s32 get_mp_timelimit(void) {
@@ -20398,6 +20759,13 @@ void menu_init(void)
 #endif
                 frontChangeMenu(MENU_LEGAL_SCREEN, 1);
             }
+#ifndef TARGET_N64
+            else if (gamemode == GAMEMODE_MULTI && coopVsPlayers() >= 2)
+            {   /* an online versus match: back to the lobby after it (this runs
+                 * as the stage starts; the lobby's init ends the match) */
+                frontChangeMenu(MENU_COOP_LOBBY, 1);
+            }
+#endif
             else if (gamemode == GAMEMODE_MULTI)
             {
                 frontChangeMenu(MENU_MP_OPTIONS, 1);

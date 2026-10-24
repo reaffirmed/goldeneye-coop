@@ -279,3 +279,65 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscen
   slower than wall time under Xvfb, so give the shots time. Verified: host
   sees Natalya with PP7 then KF7, muzzle flash and wall sparks from her
   shots; 3 and 4 player lobbies list each character.
+
+## Online versus (2026-10-24, COOP_VERSION 7)
+
+- The lobby's Rules section starts with Mode: Co-op / Versus (host only;
+  COOPSET_VSMODE bit 0). Versus shows Arena, Scenario, Game Length and Weapons
+  (COOPSET_VSARENA..VSWEAPONS) instead of When Down, Guards and Friendly Fire,
+  and the host's Continue / Select Mission become Start Match. Scenarios that
+  don't suit the player count fall back to Normal, as Rare's menu does. A
+  Random arena is resolved by the host before the start.
+- Start: coopVsHostStart builds the mask of present players (kept in
+  VSMODE bits 4-7 so it rides in HELLO with the other settings), calls
+  coopVersusRoster(mask, serial) and coopVsStartMatch(stage). Joiners follow
+  from coopFrontTick when the host's HELLO shows a versus mission they are
+  in; no late joining (over 10 s into the match, or not in the mask).
+- coopVsStartMatch (front.c) sets up Rare's own match: GAMEMODE_MULTI,
+  selected_num_players, reset_mp_options_for_scenario, the length (through
+  portMpLimFromLength; the PC's own Game Limits do not apply), the weapon set
+  with portMpWeaponSeed so a Random set rolls the same everywhere, player_char
+  from each player's lobby character, handicap normal, and Rare's team sides
+  by session number for the team scenarios.
+- Each PC is local player 0 (keyboard, mouse, pad 1 stay where they are).
+  sVsNet[li] / sVsLocal[p] map local index and session player, in the same
+  circle order everywhere. getViewPlayerCount() (player.h) is 1 in versus,
+  so viewport, z-buffer, HUD, pillarbox and FOV act as one-player; lv.c's
+  render loop skips the others (coopVsRemote).
+- Others' bodies: their VIEWER chrs, moved each tick from their STATE
+  (coopVsMoveBody). The MP body code (playerTick) puts a remote body back at
+  field_488.collision_position / current_tile_ptr each tick, so those are set
+  too; without them a body stayed where its player first spawned. A jump of
+  over 3 m (a respawn) looks straight down for its tile instead of walking
+  the old floor. player->cameramode must stay 0 (normal play) for the body
+  to draw. Pose, guns and shots are coop_look.c's, as for co-op puppets.
+- coopTick runs with player 0 current in versus (the MP loop leaves the last
+  player current), and coopInMission accepts versus (MP never sets
+  g_CameraMode).
+- Damage, kills, items, blasts and the end: see coop_versus.c's header.
+  COOPEV 32..36 (VSHIT, VSKILL, VSEND, VSITEM, VSBOOM) and COOPPKT 16
+  (VERSUS: flag hold time / golden gun holder, 5 a second, relayed by the
+  host). The first start pad is (serial*5 + p*stride) % count on every game
+  (bondviewGetRandomSpawnPadIndex asks coopVersusStartPad first; reset in
+  coopVersusRoster because the stage's spawns run before coopStageStart).
+- MP pause is off in versus; remote players count as done at the end screen;
+  after the match everyone returns to the lobby (menu_init's RUN_STAGE case
+  runs once as the stage starts, so it only queues MENU_COOP_LOBBY; the
+  lobby's init ends the match).
+- The name at the bottom right is the Steam name.
+- Not shared: ordinary weapon and armour pickups (each world has its own),
+  guns a victim drops (only the scenario item), the per-PC Multiplayer
+  Options in midas.ini. A player who drops out leaves a still body.
+- Harness: GE_COOP_VERSUS=<arena>:<scenario>:<length>:<weapons> (host's
+  rows), GE_VS_HUNT=<s> (step 4 m from the next player with a clear walk,
+  face them; tries another side every 5 s without a hit; tops up the
+  GE_COOP_TESTFIRE gun), GE_VS_GOTO=<s>, GE_VS_GRAB=<s> (walk onto the flag
+  or golden gun), GE_VS_RESPAWN=1 (Start to respawn and to leave the end
+  screen), GE_VS_KILLS=<n> (kill limit). coop/docker/versus.sh wraps
+  party_lobby.sh with these.
+- Verified on the mock Steam: 2 players First to 5 on Temple to the end
+  screen (5-0, ranks 1st/2nd on both) and back to the lobby; 4 players with
+  the same kill table on all four, two matches in a row; 3 players Licence
+  to Kill (one hit kills); Golden Gun (pickup leaves the other world, one
+  shot kills); Flag Tag (pickup, drop at the holder's body on death); You
+  Only Live Twice (two deaths end it).

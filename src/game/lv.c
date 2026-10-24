@@ -1159,6 +1159,12 @@ Gfx* lvlRender(Gfx* DL)
 
         for(i = 0; i < pcount; i++)
         {
+#ifndef TARGET_N64
+            if (coopVsRemote(get_nth_player_from_shuffled(i)))
+            {
+                continue;   /* online versus: another PC's player, no view here (coop_versus.c) */
+            }
+#endif
             set_cur_player(get_nth_player_from_shuffled(i));
 
             viSetViewSize(g_CurrentPlayer->viewx, g_CurrentPlayer->viewy);
@@ -1166,9 +1172,9 @@ Gfx* lvlRender(Gfx* DL)
 #ifndef TARGET_N64
             /* the vanilla height of this view: 220 solo, 109 in a split (whose
              * views are 119 under full height - same compensation, same reason) */
-            if (g_CurrentPlayer->viewy > ((getPlayerCount() == 1) ? VIEWPORT_HEIGHT_DEFAULT : VIEWPORT_HEIGHT_4P))
+            if (g_CurrentPlayer->viewy > ((getViewPlayerCount() == 1) ? VIEWPORT_HEIGHT_DEFAULT : VIEWPORT_HEIGHT_4P))
             {
-                const f32 vanillah = (f32) ((getPlayerCount() == 1) ? VIEWPORT_HEIGHT_DEFAULT : VIEWPORT_HEIGHT_4P);
+                const f32 vanillah = (f32) ((getViewPlayerCount() == 1) ? VIEWPORT_HEIGHT_DEFAULT : VIEWPORT_HEIGHT_4P);
                 /* Full height (bondview2.c portFullHeightActive) makes the view
                  * 240 lines instead of 220, so widen fovy in tan space by
                  * 240/220 to keep the horizontal FOV vanilla. The math
@@ -2227,6 +2233,12 @@ void lvlViewMoveTick(void)
                 bondviewMovePlayerUpdateViewport(joyGetStickX(local_player_number), joyGetStickY(local_player_number), 0);
             }
 
+#ifndef TARGET_N64
+            {
+                extern void coopVersusHarnessInput(void);
+                coopVersusHarnessInput();   /* harness only (GE_VS_RESPAWN) */
+            }
+#endif
             mpwatchMenuTick();
         }
         break;

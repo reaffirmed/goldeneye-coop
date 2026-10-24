@@ -1,8 +1,9 @@
 GoldenEye 007 story co-op (private build)
 =========================================
 
-Two to four players play the solo missions together over Steam. Nobody has to open
-ports or type IP addresses.
+Two to four players play the solo missions together over Steam, or play
+multiplayer against each other (see Versus). Nobody has to open ports or type
+IP addresses.
 
 You need
 --------
@@ -72,10 +73,36 @@ Rules
 - Name tags over partners are small, shrink with distance, fade out when a
   partner is right beside you, and fade (but stay) when they are far away.
 
+Versus (multiplayer)
+--------------------
+The original multiplayer, online: two to four players, each on their own PC
+with the whole screen to themselves.
+1. Meet in the lobby as for co-op (the host hosts, friends join and Ready Up).
+2. The host sets Mode to Versus under Rules, then picks:
+   - Arena: the multiplayer arenas (Temple, Complex, Caves, Library,
+     Basement, Stack, Facility, Bunker, Archives, Caverns, Egyptian, plus
+     Statue and Cradle), or Random. Arenas too small for everyone (Egyptian
+     takes two, Bunker three) are skipped.
+   - Scenario: Normal, You Only Live Twice, The Living Daylights (Flag Tag),
+     The Man with the Golden Gun, Licence to Kill, and the team games when
+     the player count suits them.
+   - Game Length: no limit, a time limit or a kill limit.
+   - Weapons: the original weapon sets (Slappers Only, Pistols, ... Random).
+   Everyone's character is the one picked under their name.
+3. The host picks Start Match. Everyone's game loads the arena.
+4. The match plays by the original rules: scores, the radar, Start to come
+   back after dying, the scenario's flag or golden gun. When it ends,
+   everyone sees the results; press Start to go back to the lobby, where the
+   host can start another.
+- Pausing is off in versus (the others keep playing); the watch still opens.
+- Each PC has its own copy of the ordinary weapons and armour lying around,
+  so two players can both take the same gun. The Flag Tag flag and the
+  Golden Gun are shared: only one player can hold them.
+
 If something goes wrong
 -----------------------
 Press ~ (tilde) in game to open the console. The co-op lines start with
-"ge: steam:" and "ge: coop:". Send those lines along with what happened.
+"ge: steam:", "ge: coop:" and "ge: versus:". Send those lines along with what happened.
 
 Known gaps in this build
 ------------------------

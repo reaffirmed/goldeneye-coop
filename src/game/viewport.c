@@ -36,7 +36,7 @@ void zbufAllocate(void)
     {
         z_buffer_width = SCREEN_WIDTH;
 
-        if (getPlayerCount() == 1)
+        if (getViewPlayerCount() == 1)
         {
             z_buffer_height = SCREEN_HEIGHT;
         }
@@ -70,7 +70,7 @@ Gfx *zbufInit(Gfx *gdl) {
     if (z_buffer == 0) {
         zbufAllocate();
     }
-    if (!(get_cur_playernum() < 2) || ((getPlayerCount() == 2) && (get_cur_playernum() == 1))) {
+    if (getViewPlayerCount() >= 2 && (!(get_cur_playernum() < 2) || ((getPlayerCount() == 2) && (get_cur_playernum() == 1)))) {
         phi_a3 = SCREEN_WIDTH * SCREEN_HEIGHT;
     } else {
         phi_a3 = 0;
@@ -95,7 +95,7 @@ Gfx *zbufClearCurrentPlayer(Gfx *gdl) {
     gDPSetCycleType(gdl++, G_CYC_FILL);
     gDPSetFillColor(gdl++, (GPACK_ZDZ(G_MAXFBZ, 0) << 16 | GPACK_ZDZ(G_MAXFBZ, 0)));
     gDPSetScissor(gdl++, G_SC_NON_INTERLACE, 0, 0, viGetX(), viGetY());
-    if (getPlayerCount() < 3) {
+    if (getViewPlayerCount() < 3) {
         start_x = 0;
         end_x = viGetX() - 1;
     } else if ((get_cur_playernum() == 0) || (get_cur_playernum() == 2)) {
