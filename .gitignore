@@ -194,6 +194,11 @@ assets/obseg/chr/*/Model.c
 assets/obseg/gun/*/Model.c
 assets/obseg/ob__ob_end.seg
 assets/obseg/prop/*/Model.c
+# the three menu models the exe always compiles in (PORT_ASSET_KEEP_SYMS in
+# CMakeLists.txt); tracked so the Windows build needs no ROM
+!assets/obseg/prop/legalpage/Model.c
+!assets/obseg/prop/nintendologo/Model.c
+!assets/obseg/prop/goldeneyelogo/Model.c
 assets/obseg/setup/*.bin
 assets/obseg/setup/[eju]/*.bin
 assets/obseg/stan/*.bin
