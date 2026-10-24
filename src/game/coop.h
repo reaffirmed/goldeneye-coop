@@ -185,6 +185,16 @@ s32  coopLobbyOnScreen(void);
 void coopLobbyJoinLobbyId(unsigned long long lobby);
 s32  coopExtVersion(void);
 
+/* photo mode (coop_photo.c) */
+void coopPhotoTick(f32 lookdx, f32 lookdy, s32 direct, f32 yawdeg, f32 pitchdeg);
+void coopPhotoStop(void);
+s32  coopPhotoActive(void);
+s32  coopPhotoCount(void);
+s32  coopPhotoCamera(struct coord3d *pos, struct coord3d *look, struct coord3d *up);
+s32  coopPhotoRoom(u8 *room);
+struct coord3d *coopPhotoPos(s32 three);
+Gfx *coopPhotoRender(Gfx *gdl);
+
 /* watching a partner while we are down (coop_spectate.c) */
 void coopSpectateTick(void);
 void coopSpectateStop(void);

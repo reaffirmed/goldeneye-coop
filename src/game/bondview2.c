@@ -6537,6 +6537,13 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
                        g_CurrentPlayer->vv_verta, g_CurrentPlayer->vv_theta);
             }
         }
+        { /* photo mode (coop_photo.c): the look is the photo camera's, taken
+           * before the locked controls drop it below */
+            f32 pdy = moveData.invertPitch ? moveData.freeLookDy : -moveData.freeLookDy;
+            f32 pdeg = moveData.invertPitch ? g_portMousePitchDeg : -g_portMousePitchDeg;
+
+            coopPhotoTick(moveData.freeLookDx, pdy, g_portMouseDirect, g_portMouseYawDeg, pdeg);
+        }
         /* Permission (see portMouseLookPermitted): drain the delta every tick
          * but discard it unless the stick could move Bond, so motion never
          * banks up; this single predicate replaces per-consumer checks that
@@ -6637,7 +6644,14 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         extern s32 get_is_ramrom_flag(void);
         extern void portRamromEscapeExit(const char *reason); /* ramromreplay.c */
 
-        if (get_cur_playernum() == 0 && coopChatEatEscape())
+        if (get_cur_playernum() == 0 && coopPhotoActive())
+        {
+            if (portEscPressed())
+            {
+                coopPhotoStop();    /* photo mode's Escape: back to Bond, not the pause (coop_photo.c) */
+            }
+        }
+        else if (get_cur_playernum() == 0 && coopChatEatEscape())
         {
             portEscPressed();   /* the chat line's Escape, not the pause's (coop_chat.c) */
         }
@@ -11746,6 +11760,7 @@ Gfx *bondviewRenderDebugBondView(Gfx *gdl)
 
 #ifndef TARGET_N64
     coopSpectateCamera(&cam_pos, &cam_look, &cam_up);   /* down in co-op: a partner's view */
+    coopPhotoCamera(&cam_pos, &cam_look, &cam_up);      /* photo mode's free camera */
 #endif
     bondviewUpdateCameraMatrices(&cam_pos, &cam_look, &cam_up);
     sub_GAME_7F068190(&zeropos, &vec);
@@ -12849,6 +12864,12 @@ Gfx *maybe_mp_interface(Gfx *gdl)
     s32 i;
     s32 total;
 
+#ifndef TARGET_N64
+    if (coopPhotoActive())
+    {
+        return coopPhotoRender(gdl);    /* photo mode: no HUD, no gun (coop_photo.c) */
+    }
+#endif
     if (g_CurrentPlayer->cameramode == 1)
     {
         bondviewIntroCameraTextTick();
@@ -13558,7 +13579,7 @@ u8 bondviewGetCurrentPlayersRoom(void)
 #ifndef TARGET_N64
     u8 spectating;
 
-    if (coopSpectateRoom(&spectating))
+    if (coopSpectateRoom(&spectating) || coopPhotoRoom(&spectating))
     {
         return spectating;
     }
@@ -13584,6 +13605,10 @@ coord3d *bondviewGetCurrentPlayersPosition(void)
     {
         return coopSpectatePos(0);
     }
+    if (coopPhotoPos(0) != NULL)
+    {
+        return coopPhotoPos(0);
+    }
 #endif
     if (g_CurrentPlayer->cameramode == 1)
     {
@@ -13601,6 +13626,10 @@ coord3d * bondviewGetCurrentPlayersPosition3(void)
     if (coopSpectatePos(1) != NULL)
     {
         return coopSpectatePos(1);
+    }
+    if (coopPhotoPos(1) != NULL)
+    {
+        return coopPhotoPos(1);
     }
 #endif
 
