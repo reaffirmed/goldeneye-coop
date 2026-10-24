@@ -356,3 +356,72 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscen
   3 and 2 players (mission goes on, guards keep fighting, dead guards stay
   dead), old host rejoins as a late joiner, joiner killed (lost, then
   removed at 30 s), Hand Over, End All, and Back to Lobby.
+
+## Feature batch: chat, objective credit, team times, cross-save, spectate, public games, lobby controls, photo mode (2026-10-24, COOP_VERSION 7)
+
+- Ids: COOPEV 20..31 are coop_ext.c's (CHAT 20, OBJDONE 22, TEAMTIME 23,
+  CAMPAIGN 24; 21 and 25..31 free), COOPPKT 10..11 (TEAMTIME 10). coop.c
+  hands those to coopExtApply / coopExtPacket and calls coopExtTick in
+  missions (coopTick) and menus (coopFrontTick). No COOPSET. Binds appended
+  after ping: chat (+32, T), photo_mode (+33, P).
+- Chat (coop_chat.c): the port text input (portTextInputStart); a line of up
+  to 63 characters goes as up to 3 events of 24. Feed bottom left, 6 lines,
+  10 s, player colours; toasts (coopFeedToast, '|' splits two lines) centred
+  3/8 down. In the lobby the latest 3 lines and a "Type a Message" row.
+  Escape closes the line without opening the watch (coopChatEatEscape).
+  Harness: GE_COOP_TESTCHAT=<s>:<text> (mission), GE_COOP_TESTLOBBYCHAT.
+- Objective credit (coop_objective.c): the host notes who changed the world
+  (coopObjNoteActor from WORLD bits, pickups, shots, damage, explosions; our
+  own shots in coop_look.c; chrai.c's "either player" checks through
+  coopAltBondCredit). When an objective turns complete on the host the credit
+  is whoever acted in the last 3 ticks, else the last damage in 5 s, else the
+  host; COOPEV_OBJDONE to all, toast unless it is ours. Harness:
+  GE_COOP_TESTOBJDONE=<s> (Bunker has room criteria; Dam has none).
+- Team time (coop_teamtime.c): the host sends its mission timer each second
+  (COOPPKT_TEAMTIME) and the exact time before MISSIONEND (COOPEV_TEAMTIME);
+  a joiner runs the last one on with its own clock. end_of_mission_briefing
+  and the debrief use coopTeamTimer, so best times and target-time cheats go
+  by the team's time. A joiner that ended the mission itself corrects its
+  save when the exact time comes (coopTeamTimeCorrect).
+- Cross-save (coop_stats.c): the host sends its furthest campaign line once
+  per joiner (COOPEV_CAMPAIGN); the joiner writes it under the host's key in
+  its coop_campaign.txt and shows "Next: <mission>" in the lobby.
+  two_player_split.sh runs the joiner from build_p2 so each has its own files.
+- Spectate (coop_spectate.c): once coopDeadTick owns the death (after the
+  fade to black), the view fades back in (light red wash) through a standing
+  partner's eyes. bondviewRenderDebugBondView takes the camera from
+  coopSpectateCamera, and bondviewGetCurrentPlayersRoom / Position /
+  Position3 the partner's room and position (portal visibility, fog). The
+  watched puppet is hidden (CHRFLAG_HIDDEN, as when both stand on one pad)
+  and so is its name tag. Fire (Z) cycles partners. coopSpectateStop on
+  respawn, revive and mission failure. Verified with the host 40 m away and
+  turned: the joiner's view matched the host's screen.
+- Public games and password (coop_browse.c, port/src/coop_steam.c): lobby
+  type friends-only or public (SetLobbyType, live), lobby data gever (the
+  COOP_VERSION, the list filters on it), host (persona name), pw (0/1).
+  RequestLobbyList with string filters gecoop=1 and gever, worldwide, every
+  5 s while the lobby screen is idle. The password never enters the game's
+  packets: a stranger's game sends GEPW + FNV-1a(password, lobby id) to the
+  host on the transport (8-byte message, intercepted in coopSteamRecvFrom);
+  the host's onSessionRequest accepts the session but only setPeer()s a
+  stranger after a matching GEPW (GEPA back, or GEPR, after which the joiner
+  leaves and the lobby screen says "Wrong password."). Steam friends
+  (GetFriendRelationship == 3) skip it. After a host migration the new host
+  keeps the lobby's type but has no password. The mock stores lobby data in
+  <lobby>.data and lists public lobbies. Harness: two_player_public.sh
+  (HOSTPW, JOINPW; copies that are not friends; GE_COOP_LOBBY=browse).
+- Lobby controls (front.c coopLobbyAddControls): "Your Controls": controller
+  layout preset of device 1 (portInputLayoutApply), hfov_wide, mouse,
+  mouse_sens_x (and _y with it when they were equal) via portOptStep.
+- Photo mode (coop_photo.c): P toggles, solo or co-op, when Bond could move.
+  Locks controls (lvlSetControlsLockedFlag) and takes the look delta in
+  bondview2.c before the lock drops it; the C buttons / stick fly the camera
+  along the view. xz moves only where walkTilesBetweenPoints_NoCallback
+  reaches from the camera's tile; y 15..400 over that floor; 800 units from
+  Bond's eyes. Camera and room go through the same hooks as spectate;
+  maybe_mp_interface draws only coopPhotoRender (a hint, hidden for the 8
+  ticks around a shot). The shot is gfx_sdl2.cpp's GE_SHOT writer with
+  ge_shot_path set: Photos/GE-<stage>-<date>-<time>-<n>.bmp beside the exe.
+  The co-op debrief says how many. Harness: GE_PHOTO_TEST=<s>. A replay was
+  ruled out: nothing records the world, and recording every guard, door
+  and shot for playback is much heavier than photo mode.
