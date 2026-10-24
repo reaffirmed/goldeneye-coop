@@ -5,7 +5,10 @@
  *     multiplayer radar (radar.c), and their name and distance over them
  *   - the partner's health and armour under their name in the top-left
  *     corner, or how long until they are back when they are down
- *   - our own wait to respawn while we are down
+ *   - our own wait to respawn while we are down, or to be revived (the
+ *     lobby's When Down rule), with the revive's progress
+ *   - a downed partner who can be revived: red on the radar and a red
+ *     REVIVE tag over where they fell
  *   - the mission's objectives in the top-right corner, solo too
  *     ([display] objectives_hud, toggled in play by the objectives_hud key)
  *
@@ -134,7 +137,7 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
     s32 th = 0, tw = 0;
     s32 x, y;
 
-    if (self == NULL || p->dead)
+    if (self == NULL || (p->dead && !p->revivable))
     {
         return gdl;
     }
@@ -145,7 +148,7 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
     dy = v.f[1] - self->pos.f[1];
     dz = v.f[2] - self->pos.f[2];
     dist = sqrtf(dx * dx + dy * dy + dz * dz);
-    if (dist < 150.0f)
+    if (dist < 150.0f && !p->dead)
     {
         return gdl;   /* right beside us (or inside us, just after a respawn) */
     }
@@ -158,7 +161,14 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
     s.f[0] = bondviewAimPinX(s.f[0]);
     coopHudText(name, sizeof(name), p->name);
     name[strlen(name) - 1] = '\0';
-    snprintf(text, sizeof(text), "%s %dM\n", name, (int) (dist / 100.0f + 0.5f));
+    if (p->dead)
+    {
+        snprintf(text, sizeof(text), "REVIVE %s %dM\n", name, (int) (dist / 100.0f + 0.5f));
+    }
+    else
+    {
+        snprintf(text, sizeof(text), "%s %dM\n", name, (int) (dist / 100.0f + 0.5f));
+    }
     textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
     x = (s32) s.f[0] - tw / 2;
     y = (s32) s.f[1] - th;
@@ -168,7 +178,7 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
         return gdl;
     }
     gdl = microcode_constructor(gdl);
-    gdl = coopHudPrint(gdl, x, y, text, COOP_HUD_COL_TAG);
+    gdl = coopHudPrint(gdl, x, y, text, p->dead ? COOP_HUD_COL_FAIL : COOP_HUD_COL_TAG);
     return combiner_bayer_lod_perspective(gdl);
 }
 
@@ -198,8 +208,12 @@ static Gfx *coopHudRadar(Gfx *gdl, CoopHudPartner *p)
     gdl = microcode_constructor_related_to_menus(gdl, left - 0x10, top - 0x10, left + 0x10, top + 0x10, 0x00000080);
     gdl = microcode_constructor_related_to_menus(gdl, left - 2, top - 2, left + 2, top + 2, 0x40);
     gdl = microcode_constructor_related_to_menus(gdl, left - 1, top - 1, left + 1, top + 1, -0x60);
-    if (!p->dead)
+    if (!p->dead || p->revivable)
     {
+        if (p->dead)
+        {
+            colour = 0xFF3030E0;   /* down where they fell: go and get them */
+        }
         dx = p->pos.f[0] - self->pos.f[0];
         dz = p->pos.f[2] - self->pos.f[2];
         ang = ((atan2f(dx, dz) * 180.0f) / M_PI_F) + g_CurrentPlayer->vv_theta + 180.0f;
@@ -207,7 +221,7 @@ static Gfx *coopHudRadar(Gfx *gdl, CoopHudPartner *p)
         if (r >= 16.0f)
         {
             r = 16.0f;   /* out of range: on the rim, fainter */
-            colour = 0xFFFF0060;
+            colour = (colour & ~0xFF) | 0x60;
         }
         px = (s32) (sinf(ang * 0.017453292f) * r) + left;
         py = (s32) (cosf(ang * 0.017453292f) * r) + top;
@@ -242,9 +256,27 @@ static Gfx *coopHudPartnerStatus(Gfx *gdl, CoopHudPartner *p)
     y += 0x0B;
     if (p->dead)
     {
-        if (p->respawn >= 0)
+        s32 secs = (p->respawn + 59) / 60;
+
+        if (p->revivable && coopHudDownRule() == COOPDOWN_REVIVE)
         {
-            snprintf(text, sizeof(text), "DOWN - BACK IN %d\n", (int) ((p->respawn + 59) / 60));
+            snprintf(text, sizeof(text), "DOWN - REVIVE THEM %d\n", (int) secs);   /* before they bleed out */
+        }
+        else if (p->revivable && p->respawn >= 0)
+        {
+            snprintf(text, sizeof(text), "DOWN - REVIVE OR %d\n", (int) secs);
+        }
+        else if (p->revivable)
+        {
+            snprintf(text, sizeof(text), "DOWN - REVIVE THEM\n");
+        }
+        else if (p->respawn >= 0)
+        {
+            snprintf(text, sizeof(text), "DOWN - BACK IN %d\n", (int) secs);
+        }
+        else if (coopHudDownRule() == COOPDOWN_REVIVE)
+        {
+            snprintf(text, sizeof(text), "OUT\n");   /* bled out */
         }
         else
         {
@@ -269,19 +301,49 @@ static Gfx *coopHudPartnerStatus(Gfx *gdl, CoopHudPartner *p)
     return gdl;
 }
 
-/* our own wait, centred low on the screen */
+/* our own wait, centred low on the screen, and a revive's progress under it */
 static Gfx *coopHudRespawn(Gfx *gdl, s32 eta)
 {
-    char text[48];
+    char text[56];
     s32 th = 0, tw = 0;
     s32 x, y;
+    s32 hold = coopHudReviveHold();
+    s32 secs = (eta + 59) / 60;
 
-    snprintf(text, sizeof(text), "BACK BESIDE YOUR PARTNER IN %d\n", (int) ((eta + 59) / 60));
+    if (coopHudBledOut())
+    {
+        snprintf(text, sizeof(text), "BLED OUT - OUT UNTIL THE MISSION ENDS\n");
+    }
+    else if (eta < 0)
+    {
+        return gdl;
+    }
+    else if (hold > 0)
+    {
+        snprintf(text, sizeof(text), "BEING REVIVED\n");
+    }
+    else if (coopHudDownRule() == COOPDOWN_REVIVE)
+    {
+        snprintf(text, sizeof(text), "WAIT FOR A REVIVE - BLEEDING OUT IN %d\n", (int) secs);
+    }
+    else if (coopHudDownRule() == COOPDOWN_BOTH)
+    {
+        snprintf(text, sizeof(text), "WAIT FOR A REVIVE OR BACK IN %d\n", (int) secs);
+    }
+    else
+    {
+        snprintf(text, sizeof(text), "BACK BESIDE YOUR PARTNER IN %d\n", (int) secs);
+    }
     textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
     x = viGetViewLeft() + (viGetViewWidth() - tw) / 2;
     y = viGetViewTop() + viGetViewHeight() * 2 / 3;
     gdl = microcode_constructor(gdl);
-    gdl = coopHudPrint(gdl, x, y, text, COOP_HUD_COL_TEXT);
+    gdl = coopHudPrint(gdl, x, y, text, coopHudBledOut() ? COOP_HUD_COL_FAIL : COOP_HUD_COL_TEXT);
+    if (hold > 0)
+    {
+        gdl = coopHudBar(gdl, viGetViewLeft() + (viGetViewWidth() - 0x50) / 2, y + th + 3, 0x50,
+                         (f32) hold / (f32) COOP_REVIVE_HOLD, COOP_HUD_COL_DONE);
+    }
     return combiner_bayer_lod_perspective(gdl);
 }
 
@@ -416,7 +478,7 @@ Gfx *coopHudRender(Gfx *gdl)
         }
     }
     eta = coopHudRespawnEta();
-    if (eta >= 0)
+    if (eta >= 0 || coopHudBledOut())
     {
         gdl = coopHudRespawn(gdl, eta);
     }

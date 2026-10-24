@@ -8834,8 +8834,8 @@ extern int atoi(const char *);
 extern void portConLogf(const char *fmt, ...);
 
 enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLROW_CANCEL,
-       CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE };
-#define COOP_LOBBY_ROWS     13
+       CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE };
+#define COOP_LOBBY_ROWS     16
 #define COOP_LOBBY_X        PORT_SHEET_LABEL_X
 #define COOP_LOBBY_VALUE_X  0xFA
 #define COOP_LOBBY_Y0       PORT_SHEET_ROW_Y0
@@ -8996,6 +8996,16 @@ static void coopLobbyBuild(void)
     }
     coopLobbyAdd(CLROW_LEAVE, 0, "Leave Lobby\n", "");
 
+    /* the host's rules; the joiner sees them as the host sets them */
+    coopLobbyAdd(CLROW_HEAD, 0, "Rules\n", "");
+    {
+        static const char *const downrules[] = { "Revive or Timer\n", "Timer\n", "Revive\n" };
+        s32 rule = coopDownRule();
+
+        coopLobbyAdd(coopLobbyIsHost() ? CLROW_DOWNRULE : CLROW_TEXT, 0, "When Down\n",
+                     downrules[(rule >= 0 && rule <= COOPDOWN_REVIVE) ? rule : 0]);
+    }
+
     if (coopLobbyIsHost() && coopLobbyIsSteam() && !coopLobbyHasPartner())
     {
         coopLobbyAdd(CLROW_HEAD, 0, "Invite a Friend\n", "");
@@ -9046,6 +9056,9 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
             break;
         case CLROW_OVERLAY:
             coopLobbyInviteOverlay();
+            break;
+        case CLROW_DOWNRULE:
+            coopSetDownRule((coopDownRule() + 1) % (COOPDOWN_REVIVE + 1));
             break;
         default:
             break;
@@ -9148,7 +9161,11 @@ static void coopLobbyHarness(void)
         {
             stage = atoi(strchr(e, ':') + 1);
         }
-        portConLogf("ge: coop lobby: partner ready, starting stage %d\n", stage);
+        if (getenv("GE_COOP_DOWNRULE") != NULL)
+        {
+            coopSetDownRule(atoi(getenv("GE_COOP_DOWNRULE")));
+        }
+        portConLogf("ge: coop lobby: partner ready, starting stage %d (down rule %d)\n", stage, coopDownRule());
         readyAt = -1;   /* again next time round */
         set_selected_difficulty(DIFFICULTY_AGENT);
         set_solo_and_ptr_briefing(stage);

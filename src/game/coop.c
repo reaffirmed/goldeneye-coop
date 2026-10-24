@@ -879,13 +879,14 @@ static void coopHarnessTick(void)
             }
         }
     }
-    {   /* GE_COOP_TESTDIE=1: kill our Bond at 15 s (harness only) */
+    {   /* GE_COOP_TESTDIE=<ticks>: kill our Bond that far into the mission, 900 if not given (harness only) */
         static s32 testdie = -1;
         if (testdie == -1)
         {
-            testdie = getenv("GE_COOP_TESTDIE") != NULL;
+            const char *e = getenv("GE_COOP_TESTDIE");
+            testdie = (e == NULL) ? 0 : (atoi(e) > 1) ? atoi(e) : 900;
         }
-        if (testdie && sTick >= 900 && sRemoteValid && !g_CurrentPlayer->bonddead)
+        if (testdie && sMissionTicks >= (u32) testdie && sRemoteValid && !g_CurrentPlayer->bonddead)
         {
             testdie = 0;
             portConLogf("ge: coop: testdie\n");
@@ -2242,7 +2243,6 @@ static s32 sReviveHold;     /* ticks the partner has stood over us */
 static s32 sBledOut;
 
 #define COOP_REVIVE_DIST   140.0f  /* the partner within this of where we fell (xz) */
-#define COOP_REVIVE_HOLD   45      /* ...for 3/4 s */
 #define COOP_BLEED_OUT     3600    /* revive only: 60 s down and you are out of this mission */
 
 /* A lobby setting (COOPSET_*): the host sets them on the lobby screen, the
@@ -2366,11 +2366,22 @@ static s32 coopRespawnEta(void)
     u32 dead, calm;
     s32 eta;
 
-    if (sDeadSince == 0 || sBledOut)
+    if (sBledOut)
     {
         return -1;
     }
-    dead = sTick - sDeadSince;
+    if (sDeadSince == 0)
+    {   /* still falling: count from now, if co-op will take this death */
+        if (!g_CurrentPlayer->bonddead || !sRemoteValid || sRemote.dead || sRemote.stage != bossGetStageNum())
+        {
+            return -1;
+        }
+        dead = 0;
+    }
+    else
+    {
+        dead = sTick - sDeadSince;
+    }
     if (sDownRule == COOPDOWN_REVIVE)
     {
         return ((s32) COOP_BLEED_OUT - (s32) dead > 0) ? (s32) COOP_BLEED_OUT - (s32) dead : 0;

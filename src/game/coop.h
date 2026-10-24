@@ -45,7 +45,8 @@ typedef struct
 s32  coopHudPartner(CoopHudPartner *out);
 s32  coopHudRespawnEta(void);
 s32  coopHudDownRule(void);
-s32  coopHudReviveHold(void);
+s32  coopHudReviveHold(void);   /* ticks of COOP_REVIVE_HOLD */
+#define COOP_REVIVE_HOLD 45        /* the partner stands where we fell for 3/4 s */
 s32  coopHudBledOut(void);
 
 /* Lobby settings the host picks and the joiner's game copies (coopSetting).
