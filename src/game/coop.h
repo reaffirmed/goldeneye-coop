@@ -22,6 +22,7 @@ s32  coopObjDamage(ObjectRecord *obj, f32 damage, coord3d *pos, s32 item, s32 pl
 s32  coopSkipExplosionDamage(ChrRecord *chr);
 void coopPickedUp(ObjectRecord *obj, s32 kept);
 s32  coopPeerHolds(ObjectRecord *obj);
+void coopMissionComplete(void);
 s32  coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid);
 
 #endif

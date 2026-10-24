@@ -930,6 +930,12 @@ LEVELID bossGetStageNum() {
  *     return to title screen from stage
  */
 void bossReturnTitleStage(void) {
+#ifndef TARGET_N64
+    {
+        extern void coopMissionComplete(void);
+        coopMissionComplete(); /* co-op: the partner's mission ends with ours */
+    }
+#endif
 #ifdef BUGFIX_R1
     display_objective_status_text_on_status_change();
     objectivestatusDisableStatusDisplay();

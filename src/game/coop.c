@@ -93,7 +93,7 @@ typedef struct
 
 /* Reliable, in-order events (hits, shots, doors, ...). Every EVENTS packet
  * carries all unacked events plus an ack of what we have received. */
-enum { COOPEV_HIT = 1, COOPEV_SHOTCHR = 2, COOPEV_DOOR = 3, COOPEV_OBJDMG = 4, COOPEV_PICKUP = 5 };
+enum { COOPEV_HIT = 1, COOPEV_SHOTCHR = 2, COOPEV_DOOR = 3, COOPEV_OBJDMG = 4, COOPEV_PICKUP = 5, COOPEV_MISSIONEND = 6 };
 
 typedef struct
 {
@@ -106,6 +106,7 @@ typedef struct
         struct { s32 doorofs; s32 state; } door;                                /* both ways */
         struct { s32 objofs; f32 damage; f32 pos[3]; s16 item; s16 player; } obj; /* both ways */
         struct { s32 objofs; s32 kept; } pick;                                  /* both ways */
+        struct { s32 stage; u32 stageflags; } end;                              /* both ways */
         u8 raw[28];
     } u;
 } CoopEvent;
@@ -215,6 +216,7 @@ static void coopApplyDoor(s32 doorofs, s32 state);
 static void coopApplyObjDamage(CoopEvent *ev);
 static void coopSendWorld(void);
 static void coopApplyPickup(CoopEvent *ev);
+static void coopApplyMissionEnd(CoopEvent *ev);
 static void coopApplyWorld(CoopWorldPkt *p);
 static s32 coopSetupOfs(void *rec);
 static StandTile *coopFindStan(coord3d *pos, StandTile *from, coord3d *frompos);
@@ -222,6 +224,8 @@ static s32 coopIsMirroringClient(void);
 static void coopSendGuards(void);
 static void coopReapGuards(void);
 static void coopClientGunfire(void);
+static void coopHarnessTick(void);
+static void coopPuppetRemove(void);
 
 static s32 coopLocalBody(void)
 {
@@ -509,6 +513,16 @@ static void coopPuppetUpdateGhost(void)
     }
 }
 
+static void coopPuppetRemove(void)
+{
+    if (sPuppet->chr != NULL)
+    {
+        sPuppet->chr->hidden |= CHRHIDDEN_REMOVE;
+    }
+    sPuppet = NULL;
+    portConLogf("ge: coop: puppet removed\n");
+}
+
 s32 coopPropIsGhost(PropRecord *prop)
 {
     return prop != NULL && prop == sPuppet && sPuppetGhost;
@@ -565,20 +579,6 @@ void coopTick(void)
     {
         coopSendWorld();
     }
-    {   /* GE_COOP_TESTWORLD=1: host raises the alarm and a stage flag at 15 s (harness only) */
-        static s32 testworld = -1;
-        if (testworld == -1)
-        {
-            testworld = getenv("GE_COOP_TESTWORLD") != NULL;
-        }
-        if (testworld && coopNetIsHost() && sTick >= 900)
-        {
-            testworld = 0;
-            alarmActivate();
-            objectiveregisters1 |= 0x40000000;
-            portConLogf("ge: coop: testworld: alarm + flag 0x40000000\n");
-        }
-    }
 
     {   /* GE_COOP_TRACE=<chrnum>: log one chr on both sides to compare */
         static s32 trace = -2;
@@ -607,21 +607,94 @@ void coopTick(void)
     {
         coopReapGuards();
         coopClientGunfire();
-        {   /* GE_COOP_TESTSHOT=<chrnum>: a chest shot every 2 s (harness only) */
-            static s32 testchr = -2;
-            if (testchr == -2)
+    }
+
+    coopHarnessTick();
+
+    if (sRemoteValid && sTick - sRemoteSeenTick > 300)
+    {
+        portConLogf("ge: coop: nothing from the peer for 5 s, dropping its Bond\n");
+        sRemoteValid = 0;
+    }
+    if (sPuppet != NULL && (!sRemoteValid || sRemote.stage != bossGetStageNum()))
+    {
+        coopPuppetRemove();
+    }
+
+    if (!sRemoteValid || sRemote.stage != bossGetStageNum())
+    {
+        return;
+    }
+
+    if (sPuppet == NULL)
+    {
+        coopPuppetSpawn();
+    }
+    else if (sPuppet->chr == NULL)
+    {
+        sPuppet = NULL; /* freed under us (stage cleanup); respawn */
+    }
+    else
+    {
+        coopPuppetUpdate();
+        coopPuppetUpdateGhost();
+        if ((sTick % 60) == 0)
+        {
+            ChrRecord *c = sPuppet->chr;
+            portConLogf("ge: coop: puppet pos %.0f %.0f %.0f stan %p chrflags %x hidden %x propflags %x anim %d ghost %d\n",
+                        sPuppet->pos.f[0], sPuppet->pos.f[1], sPuppet->pos.f[2], (void *) sPuppet->stan,
+                        c->chrflags, c->hidden, sPuppet->flags, sPuppetAnim, sPuppetGhost);
+        }
+    }
+}
+
+
+/* ---- test harness hooks (env vars, see coop/NOTES.md) ------------------ */
+
+static void coopHarnessTick(void)
+{
+    {   /* GE_COOP_TESTEND=1: complete the mission at 20 s (harness only) */
+        static s32 testend = -1;
+        if (testend == -1)
+        {
+            testend = getenv("GE_COOP_TESTEND") != NULL;
+        }
+        if (testend && sTick >= 1200 && sRemoteValid)
+        {
+            testend = 0;
+            portConLogf("ge: coop: testend\n");
+            bossReturnTitleStage();
+        }
+    }
+    {   /* GE_COOP_TESTWORLD=1: host raises the alarm and a stage flag at 15 s (harness only) */
+        static s32 testworld = -1;
+        if (testworld == -1)
+        {
+            testworld = getenv("GE_COOP_TESTWORLD") != NULL;
+        }
+        if (testworld && coopNetIsHost() && sTick >= 900)
+        {
+            testworld = 0;
+            alarmActivate();
+            objectiveregisters1 |= 0x40000000;
+            portConLogf("ge: coop: testworld: alarm + flag 0x40000000\n");
+        }
+    }
+    if (coopIsMirroringClient())
+    {   /* GE_COOP_TESTSHOT=<chrnum>: a chest shot every 2 s (harness only) */
+        static s32 testchr = -2;
+        if (testchr == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTSHOT");
+            testchr = (e != NULL) ? atoi(e) : -1;
+        }
+        if (testchr >= 0 && (sTick % 120) == 0)
+        {
+            ChrRecord *c = chrFindByLiteralId(testchr);
+            coord3d v = { 0.0f, 0.0f, 1.0f };
+            if (c != NULL && c->prop != NULL)
             {
-                const char *e = getenv("GE_COOP_TESTSHOT");
-                testchr = (e != NULL) ? atoi(e) : -1;
-            }
-            if (testchr >= 0 && (sTick % 120) == 0)
-            {
-                ChrRecord *c = chrFindByLiteralId(testchr);
-                coord3d v = { 0.0f, 0.0f, 1.0f };
-                if (c != NULL && c->prop != NULL)
-                {
-                    coopClientForwardShot(c, HIT_CHEST, &v, ITEM_WPPK);
-                }
+                coopClientForwardShot(c, HIT_CHEST, &v, ITEM_WPPK);
             }
         }
     }
@@ -762,34 +835,7 @@ void coopTick(void)
             }
         }
     }
-
-    if (!sRemoteValid || sRemote.stage != bossGetStageNum())
-    {
-        return;
-    }
-
-    if (sPuppet == NULL)
-    {
-        coopPuppetSpawn();
-    }
-    else if (sPuppet->chr == NULL)
-    {
-        sPuppet = NULL; /* freed under us (stage cleanup); respawn */
-    }
-    else
-    {
-        coopPuppetUpdate();
-        coopPuppetUpdateGhost();
-        if ((sTick % 60) == 0)
-        {
-            ChrRecord *c = sPuppet->chr;
-            portConLogf("ge: coop: puppet pos %.0f %.0f %.0f stan %p chrflags %x hidden %x propflags %x anim %d ghost %d\n",
-                        sPuppet->pos.f[0], sPuppet->pos.f[1], sPuppet->pos.f[2], (void *) sPuppet->stan,
-                        c->chrflags, c->hidden, sPuppet->flags, sPuppetAnim, sPuppetGhost);
-        }
-    }
 }
-
 
 /* ---- host guard targeting ---------------------------------------------- */
 
@@ -1472,6 +1518,9 @@ static void coopApplyEvent(CoopEvent *ev)
         case COOPEV_PICKUP:
             coopApplyPickup(ev);
             break;
+        case COOPEV_MISSIONEND:
+            coopApplyMissionEnd(ev);
+            break;
     }
 }
 
@@ -1814,4 +1863,47 @@ s32 coopPeerHolds(ObjectRecord *obj)
         }
     }
     return 0;
+}
+
+
+/* ---- mission end -----------------------------------------------------------
+ * The mission is completed once, for the team: whichever game reaches the
+ * end (normally the host, whose level scripts run the exit) takes the other
+ * along. Stage flags ride along so the joiner's objective check at the end
+ * sees what the host saw. */
+
+static s32 sApplyingRemoteEnd;
+
+void coopMissionComplete(void)
+{
+    CoopEvent ev;
+
+    if (sEnabled <= 0 || sApplyingRemoteEnd || !coopNetHasPeer() || !sRemoteValid
+        || sRemote.stage != bossGetStageNum())
+    {
+        return;
+    }
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = COOPEV_MISSIONEND;
+    ev.u.end.stage = bossGetStageNum();
+    ev.u.end.stageflags = (u32) objectiveregisters1;
+    coopQueueEvent(&ev);
+    coopFlushEvents(); /* the stage may unload before the next tick */
+    portConLogf("ge: coop: mission complete, telling the peer\n");
+}
+
+static void coopApplyMissionEnd(CoopEvent *ev)
+{
+    if (ev->u.end.stage != bossGetStageNum() || !coopInMission())
+    {
+        return;
+    }
+    if (!coopNetIsHost())
+    {
+        objectiveregisters1 = (s32) ev->u.end.stageflags;
+    }
+    portConLogf("ge: coop: peer completed the mission\n");
+    sApplyingRemoteEnd = 1;
+    bossReturnTitleStage();
+    sApplyingRemoteEnd = 0;
 }
