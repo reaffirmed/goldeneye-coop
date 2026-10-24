@@ -17,6 +17,7 @@ f32  coopTargetDuckingHeight(void);
 s32  coopTargetDamageShowTime(void);
 s32  coopTargetIsDead(void);
 s32  coopTargetRecordDamage(f32 damage, f32 angle);
+void coopDoorStateChanged(DoorRecord *door, s32 state);
 s32  coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid);
 
 #endif

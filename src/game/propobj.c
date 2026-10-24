@@ -57,6 +57,9 @@
 #ifndef TARGET_N64
 #include "frametiming.h"   /* portAnimTicks / portLagStep: sub-field smoothing */
 #include "cheat.h"         /* cheatIsActive(CHEAT_PORT_UNLOCK_DOORS) - propdoorInteract */
+#ifndef TARGET_N64
+#include "coop.h"
+#endif
 extern s32 g_PortFadeDbg;  /* the fade diagnostic (cl_fadedbg), defined beside posIsOnScreen */
 static void portFadeNote(PropRecord *prop, s32 state, s32 alpha, f32 foga);
 #endif
@@ -14394,6 +14397,9 @@ void doorFinishClose(DoorRecord* door)
  */
 void doorSetOpenState(DoorRecord *door, s32 newstate)
 {
+#ifndef TARGET_N64
+    coopDoorStateChanged(door, newstate); /* co-op: mirror to the peer */
+#endif
     if (newstate == DOORSTATE_OPENING)
     {
         if (door->openstate == DOORSTATE_STATIONARY || door->openstate == DOORSTATE_WAITING)

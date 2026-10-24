@@ -33,13 +33,17 @@
 #include "lv.h"
 #include "coop.h"
 #include "coop_net.h"
+#include "propobj.h"
+
+void doorSetOpenState(DoorRecord *door, s32 newstate);
+bool doorIsClosed(DoorRecord *door);
 
 extern void portConLogf(const char *fmt, ...);
 
 #define COOP_MAGIC   0x50434547u /* "GECP" */
 #define COOP_VERSION 1
 
-enum { COOPPKT_STATE = 1, COOPPKT_HIT = 2, COOPPKT_GUARDS = 3, COOPPKT_SHOTCHR = 4 };
+enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5 };
 
 typedef struct
 {
@@ -55,15 +59,36 @@ typedef struct
     s32 dead;
 } CoopStatePkt;
 
+/* Reliable, in-order events (hits, shots, doors, ...). Every EVENTS packet
+ * carries all unacked events plus an ack of what we have received. */
+enum { COOPEV_HIT = 1, COOPEV_SHOTCHR = 2, COOPEV_DOOR = 3 };
+
+typedef struct
+{
+    u8 kind;
+    u8 pad[3];
+    union
+    {
+        struct { f32 damage; f32 angle; } hit;                                  /* host -> client */
+        struct { s16 chrnum; s16 hitpart; s32 weaponid; f32 vector[3]; } shot;  /* client -> host */
+        struct { s32 doorofs; s32 state; } door;                                /* both ways */
+        u8 raw[28];
+    } u;
+} CoopEvent;
+
+#define COOP_EVENTS_PER_PKT 32
+#define COOP_EVENT_RING     256
+
 typedef struct
 {
     u32 magic;
     u16 version;
     u16 type;
-    u32 seq;
-    f32 damage;
-    f32 angle;
-} CoopHitPkt;
+    u32 ack;        /* highest in-order seq received from the peer */
+    u32 firstseq;   /* seq of ev[0] */
+    u32 count;
+    CoopEvent ev[COOP_EVENTS_PER_PKT];
+} CoopEventsPkt;
 
 /* host -> client guard snapshot, one entry per chr */
 enum { GSF_HIDDEN = 1, GSF_FLIP = 2, GSF_LOOP = 4 };
@@ -93,17 +118,6 @@ typedef struct
     CoopGuardEnt ent[COOP_GUARDS_PER_PKT];
 } CoopGuardsPkt;
 
-/* client -> host: the client's Bond shot a guard */
-typedef struct
-{
-    u32 magic;
-    u16 version;
-    u16 type;
-    s16 chrnum;
-    s16 hitpart;
-    s32 weaponid;
-    f32 vector[3];
-} CoopShotChrPkt;
 
 static s32 sEnabled = -1;
 static u32 sTick;
@@ -131,7 +145,14 @@ typedef struct
 static CoopChrTarget sChrTarget[COOP_MAX_CHRS];
 static ChrRecord *sTickChr;         /* guard whose tick has the puppet as Bond */
 PropRecord *g_CoopPropOverride;     /* read by getCurrentPlayerProp() */
-static u32 sHitSeq;
+
+/* reliable events */
+static CoopEvent sOut[COOP_EVENT_RING];
+static u32 sOutNext = 1;    /* seq the next queued event gets */
+static u32 sOutAcked;       /* peer has everything up to here */
+static u32 sInDone;         /* we have applied everything up to here */
+static u32 sEvLastSend;
+static s32 sAckDirty;
 
 /* client guard mirroring */
 static u32 sGuardSnap;
@@ -142,7 +163,10 @@ enum { PANIM_IDLE, PANIM_WALK, PANIM_RUN };
 
 static s32 coopInMission(void);
 static void coopApplyGuard(CoopGuardEnt *e);
-static void coopHostApplyShot(CoopShotChrPkt *p);
+static void coopApplyEvent(CoopEvent *ev);
+static void coopQueueEvent(CoopEvent *ev);
+static void coopFlushEvents(void);
+static void coopApplyDoor(s32 doorofs, s32 state);
 static StandTile *coopFindStan(coord3d *pos, StandTile *from, coord3d *frompos);
 static s32 coopIsMirroringClient(void);
 static void coopSendGuards(void);
@@ -206,15 +230,31 @@ static void coopPollNet(void)
         {
             continue;
         }
-        if (p->type == COOPPKT_HIT && n >= (s32) sizeof(CoopHitPkt))
+        if (p->type == COOPPKT_EVENTS)
         {
-            CoopHitPkt *h = (CoopHitPkt *) buf;
+            CoopEventsPkt *e = (CoopEventsPkt *) buf;
+            s32 hdr = (s32) ((u8 *) &e->ev[0] - (u8 *) e);
+            u32 k;
 
-            if (coopInMission() && !g_CurrentPlayer->bonddead)
+            if (n < hdr || e->count > COOP_EVENTS_PER_PKT || n < hdr + (s32) (e->count * sizeof(CoopEvent)))
             {
-                portConLogf("ge: coop: hit from host guard #%u: %.3f\n", h->seq, h->damage);
-                bondviewCallRecordDamageKills(h->damage, h->angle, -1, 1);
+                continue;
             }
+            if ((s32) (e->ack - sOutAcked) > 0)
+            {
+                sOutAcked = e->ack;
+            }
+            for (k = 0; k < e->count; k++)
+            {
+                u32 seq = e->firstseq + k;
+
+                if (seq == sInDone + 1)
+                {
+                    coopApplyEvent(&e->ev[k]);
+                    sInDone = seq;
+                }
+            }
+            sAckDirty = 1;
             continue;
         }
         if (p->type == COOPPKT_GUARDS && !coopNetIsHost())
@@ -234,14 +274,6 @@ static void coopPollNet(void)
                     coopApplyGuard(&g->ent[k]);
                 }
                 sLastSnapTick = sTick;
-            }
-            continue;
-        }
-        if (p->type == COOPPKT_SHOTCHR && coopNetIsHost() && n >= (s32) sizeof(CoopShotChrPkt))
-        {
-            if (coopInMission())
-            {
-                coopHostApplyShot((CoopShotChrPkt *) buf);
             }
             continue;
         }
@@ -458,6 +490,7 @@ void coopTick(void)
 
     sTick++;
     coopPollNet();
+    coopFlushEvents();
 
     if (!coopInMission())
     {
@@ -507,6 +540,42 @@ void coopTick(void)
                 {
                     coopClientForwardShot(c, HIT_CHEST, &v, ITEM_WPPK);
                 }
+            }
+        }
+    }
+
+    if (sRemoteValid && sRemote.stage == bossGetStageNum())
+    {   /* GE_COOP_TESTDOOR=1: toggle the door nearest Bond every 10 s (harness only) */
+        static s32 testdoor = -1;
+        if (testdoor == -1)
+        {
+            testdoor = getenv("GE_COOP_TESTDOOR") != NULL;
+        }
+        if (testdoor && (sTick % 600) == 300)
+        {
+            PropRecord *bond = getCurrentPlayerProp();
+            PropRecord *it, *best = NULL;
+            f32 bestd = 1e30f;
+
+            for (it = g_ActivePropsHead; it != NULL; it = it->next)
+            {
+                if (it->type == PROP_TYPE_DOOR && it->door != NULL)
+                {
+                    f32 dx = it->pos.f[0] - bond->pos.f[0];
+                    f32 dz = it->pos.f[2] - bond->pos.f[2];
+                    if (dx * dx + dz * dz < bestd)
+                    {
+                        bestd = dx * dx + dz * dz;
+                        best = it;
+                    }
+                }
+            }
+            if (best != NULL)
+            {
+                s32 st = doorIsClosed(best->door) ? DOORSTATE_OPENING : DOORSTATE_CLOSING;
+                portConLogf("ge: coop: testdoor %d -> state %d (dist %.0f)\n",
+                    (s32) ((u8 *) best->door - (u8 *) g_CurrentSetup.propDefs), st, sqrtf(bestd));
+                doorActivate(best->door, st);
             }
         }
     }
@@ -793,21 +862,18 @@ s32 coopTargetIsDead(void)
 /* Damage a guard dealt to "Bond". Returns 1 when it belonged to the peer. */
 s32 coopTargetRecordDamage(f32 damage, f32 angle)
 {
-    CoopHitPkt h;
+    CoopEvent ev;
 
     if (g_CoopPropOverride == NULL)
     {
         return 0;
     }
-    memset(&h, 0, sizeof(h));
-    h.magic = COOP_MAGIC;
-    h.version = COOP_VERSION;
-    h.type = COOPPKT_HIT;
-    h.seq = ++sHitSeq;
-    h.damage = damage;
-    h.angle = angle;
-    coopNetSend(&h, sizeof(h));
-    portConLogf("ge: coop: guard %d hit the peer #%u: %.3f\n", sTickChr ? sTickChr->chrnum : -1, h.seq, damage);
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = COOPEV_HIT;
+    ev.u.hit.damage = damage;
+    ev.u.hit.angle = angle;
+    coopQueueEvent(&ev);
+    portConLogf("ge: coop: guard %d hit the peer: %.3f\n", sTickChr ? sTickChr->chrnum : -1, damage);
     return 1;
 }
 
@@ -987,42 +1053,154 @@ static void coopReapGuards(void)
 
 s32 coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid)
 {
-    CoopShotChrPkt p;
+    CoopEvent ev;
 
     if (!coopIsMirroringClient() || chr == NULL || chr->prop == sPuppet)
     {
         return 0;
     }
-    memset(&p, 0, sizeof(p));
-    p.magic = COOP_MAGIC;
-    p.version = COOP_VERSION;
-    p.type = COOPPKT_SHOTCHR;
-    p.chrnum = chr->chrnum;
-    p.hitpart = (s16) hitpart;
-    p.weaponid = weaponid;
-    p.vector[0] = vector->f[0];
-    p.vector[1] = vector->f[1];
-    p.vector[2] = vector->f[2];
-    coopNetSend(&p, sizeof(p));
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = COOPEV_SHOTCHR;
+    ev.u.shot.chrnum = chr->chrnum;
+    ev.u.shot.hitpart = (s16) hitpart;
+    ev.u.shot.weaponid = weaponid;
+    ev.u.shot.vector[0] = vector->f[0];
+    ev.u.shot.vector[1] = vector->f[1];
+    ev.u.shot.vector[2] = vector->f[2];
+    coopQueueEvent(&ev);
     portConLogf("ge: coop: shot guard %d (part %d, weapon %d), sent to host\n", chr->chrnum, hitpart, weaponid);
     return 1;
 }
 
 /* Host: apply a client's shot as if the remote player fired it. */
-static void coopHostApplyShot(CoopShotChrPkt *p)
+static void coopHostApplyShot(CoopEvent *ev)
 {
-    ChrRecord *chr = chrFindByLiteralId(p->chrnum);
+    ChrRecord *chr = chrFindByLiteralId(ev->u.shot.chrnum);
     coord3d vec;
 
     if (chr == NULL || chr->prop == NULL || sPuppet == NULL)
     {
         return;
     }
-    vec.f[0] = p->vector[0];
-    vec.f[1] = p->vector[1];
-    vec.f[2] = p->vector[2];
+    vec.f[0] = ev->u.shot.vector[0];
+    vec.f[1] = ev->u.shot.vector[1];
+    vec.f[2] = ev->u.shot.vector[2];
     g_CoopPropOverride = sPuppet; /* the stimulus belongs to the peer */
-    handles_shot_actors(chr, p->hitpart, &vec, p->weaponid, TRUE);
+    handles_shot_actors(chr, ev->u.shot.hitpart, &vec, ev->u.shot.weaponid, TRUE);
     g_CoopPropOverride = NULL;
-    portConLogf("ge: coop: peer shot guard %d (part %d)\n", p->chrnum, p->hitpart);
+    portConLogf("ge: coop: peer shot guard %d (part %d)\n", ev->u.shot.chrnum, ev->u.shot.hitpart);
+}
+
+/* ---- reliable events -------------------------------------------------- */
+
+static void coopQueueEvent(CoopEvent *ev)
+{
+    if (sOutNext - sOutAcked > COOP_EVENT_RING)
+    {
+        portConLogf("ge: coop: event queue full, dropping kind %d\n", ev->kind);
+        return;
+    }
+    sOut[sOutNext % COOP_EVENT_RING] = *ev;
+    sOutNext++;
+}
+
+/* Send every unacked event at most every 4 ticks (at once when there is
+ * something new or an ack owed). Repeats cover loss; seq numbers drop the
+ * duplicates on the other side. */
+static u32 sOutSentUpTo;
+
+static void coopFlushEvents(void)
+{
+    CoopEventsPkt pkt;
+    s32 hdr = (s32) ((u8 *) &pkt.ev[0] - (u8 *) &pkt);
+    u32 seq;
+    s32 pending = (s32) (sOutNext - 1 - sOutAcked);
+    s32 fresh = (s32) (sOutNext - 1 - sOutSentUpTo) > 0;
+
+    if (!sAckDirty && (pending <= 0 || (!fresh && sTick - sEvLastSend < 4)))
+    {
+        return;
+    }
+
+    memset(&pkt, 0, hdr);
+    pkt.magic = COOP_MAGIC;
+    pkt.version = COOP_VERSION;
+    pkt.type = COOPPKT_EVENTS;
+    pkt.ack = sInDone;
+    pkt.firstseq = sOutAcked + 1;
+    for (seq = sOutAcked + 1; seq < sOutNext && pkt.count < COOP_EVENTS_PER_PKT; seq++)
+    {
+        pkt.ev[pkt.count++] = sOut[seq % COOP_EVENT_RING];
+    }
+    coopNetSend(&pkt, hdr + (s32) (pkt.count * sizeof(CoopEvent)));
+    sOutSentUpTo = seq - 1;
+    sEvLastSend = sTick;
+    sAckDirty = 0;
+}
+
+static void coopApplyEvent(CoopEvent *ev)
+{
+    switch (ev->kind)
+    {
+        case COOPEV_HIT:
+            if (coopInMission() && !g_CurrentPlayer->bonddead)
+            {
+                portConLogf("ge: coop: hit from a host guard: %.3f\n", ev->u.hit.damage);
+                bondviewCallRecordDamageKills(ev->u.hit.damage, ev->u.hit.angle, -1, 1);
+            }
+            break;
+        case COOPEV_SHOTCHR:
+            if (coopNetIsHost() && coopInMission())
+            {
+                coopHostApplyShot(ev);
+            }
+            break;
+        case COOPEV_DOOR:
+            coopApplyDoor(ev->u.door.doorofs, ev->u.door.state);
+            break;
+    }
+}
+
+
+/* ---- doors ---------------------------------------------------------------
+ * Both sides run door motion; only state changes cross the wire. A door is
+ * named by its byte offset in the stage's prop defs, which both sides load
+ * from the same setup file. */
+
+static s32 sApplyingRemoteDoor;
+
+void coopDoorStateChanged(DoorRecord *door, s32 state)
+{
+    CoopEvent ev;
+
+    if (!sEnabled || sApplyingRemoteDoor || !coopNetHasPeer() || !sRemoteValid
+        || sRemote.stage != bossGetStageNum() || g_CurrentSetup.propDefs == NULL)
+    {
+        return;
+    }
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = COOPEV_DOOR;
+    ev.u.door.doorofs = (s32) ((u8 *) door - (u8 *) g_CurrentSetup.propDefs);
+    ev.u.door.state = state;
+    coopQueueEvent(&ev);
+}
+
+static void coopApplyDoor(s32 doorofs, s32 state)
+{
+    DoorRecord *door;
+
+    if (g_CurrentSetup.propDefs == NULL || doorofs < 0 || doorofs > 0x100000)
+    {
+        return;
+    }
+    door = (DoorRecord *) ((u8 *) g_CurrentSetup.propDefs + doorofs);
+    if (door->type != PROPDEF_DOOR)
+    {
+        portConLogf("ge: coop: door event for offset %d is not a door here\n", doorofs);
+        return;
+    }
+    sApplyingRemoteDoor = 1;
+    doorSetOpenState(door, state);
+    sApplyingRemoteDoor = 0;
+    portConLogf("ge: coop: peer door %d -> state %d\n", doorofs, state);
 }
