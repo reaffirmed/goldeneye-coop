@@ -155,3 +155,25 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscen
   with the current partner. GE_COOP_TESTWIN=1 counts any end as a win (harness).
 - The joiner keeps its own save folder when it follows the host (it used to be
   forced to folder 1), so a co-op win unlocks the next mission in its folder.
+
+## Give to partner (2026-10-24)
+
+- give_partner (default G, unbound on pads; PORTACT_GIVE_PARTNER, appended):
+  partner alive, within 250 units across and 200 up or down, and within 60
+  degrees of where you look. Sends half the reserve of the right-hand gun's
+  ammo type (at least a magazine's worth when you have it; the loaded
+  magazine stays). Logic in src/game/coop_give.c.
+- COOPEV_GIVE carries gun, ammo type, rounds and stage; the receiver adds the
+  gun if new (bondinvAddInvItem), adds what fits under the type's maximum
+  (give_cur_player_ammo, as a pickup) and answers with COOPEV_GIVEBACK, which
+  refunds what did not fit. A give that arrives in another stage, or to a dead
+  partner, is refunded whole.
+- The giver keeps the gun: ammo is moved, never made, so a copy is only worth
+  the rounds that came with it. Only ammo types 1..AMMO_GGUN and guns from
+  the throwing knife to remote mines (no watch laser) are given; mission
+  gadgets never are.
+- Harness: GE_COOP_TESTGIVE=<s> faces the partner and presses give <s>
+  seconds into the mission; GE_COOP_TESTGIVEWEAPON=<item> first draws that
+  gun with 100 more rounds. Verified both ways in Dam: host PP7 46 of 93 to
+  the joiner (93 -> 139); joiner KF7 35 of 70 plus the gun to the host (no
+  KF7 before, 0 -> 35); too far gives "Get closer" and moves nothing.

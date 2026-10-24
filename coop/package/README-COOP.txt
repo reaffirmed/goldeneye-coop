@@ -34,6 +34,10 @@ Rules
 - The host's game runs the guards and the level. Both players see the same
   guards, doors, alarms, destroyed objects and pickups.
 - Objectives are shared. Whoever completes the mission finishes it for both.
+- G gives your partner ammo for the gun in your hand: half your spare
+  rounds (at least one magazine's worth), and the gun too if they don't have
+  it. Stand next to them and face them. You keep your gun. The key can be
+  changed in the controls menu (Give To Partner).
 - When you die, you come back next to your partner once they have been out
   of combat for 4 seconds, and after 20 seconds at most. If you are both dead
   at the same time, the mission fails.

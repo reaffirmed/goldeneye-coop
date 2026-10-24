@@ -124,6 +124,9 @@ enum {
     PORTACT_WEAPON_SLOT3,
     PORTACT_WEAPON_SLOT4,
     PORTACT_WEAPON_SLOT5,
+    /* Appended for the co-op build: give ammo (and the gun) in hand to the
+     * partner (coop_give.c). */
+    PORTACT_GIVE_PARTNER,
     PORTACT_COUNT
 };
 
@@ -180,6 +183,7 @@ static const struct {
     [PORTACT_WEAPON_SLOT3]     = { "weapon_slot_3",    "3",        1 },
     [PORTACT_WEAPON_SLOT4]     = { "weapon_slot_4",    "4",        1 },
     [PORTACT_WEAPON_SLOT5]     = { "weapon_slot_5",    "5",        1 },
+    [PORTACT_GIVE_PARTNER]     = { "give_partner",     "G",        1 },
 };
 
 /* [input] detonate_use_reload (default ON): with remote mines in the right
@@ -759,6 +763,14 @@ s32 portJoyPortWeaponSlotPressed(void)
         }
     }
     return joyPortPermitted() ? slot : 0;
+}
+
+/** coop_give.c: a fresh give_partner press for this tick's player. */
+s32 portJoyPortGivePartnerPressed(void)
+{
+    s32 pad = joyPortPad();
+
+    return pad >= 0 && portJoyPortTake(pad, PORTACT_GIVE_PARTNER) && joyPortPermitted();
 }
 
 /** MoveBond: 1 while Bond should move at half speed. */

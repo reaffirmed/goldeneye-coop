@@ -80,6 +80,25 @@ s32  coopDownRule(void);
 void coopSetDownRule(s32 rule);
 Gfx *coopHudRender(Gfx *gdl);
 
+/* giving ammo and guns to the partner (coop_give.c). A give and its answer
+ * ride the reliable events (COOPEV_GIVE, COOPEV_GIVEBACK). */
+typedef struct
+{
+    s16 weapon;     /* the giver's gun, ITEM_NOTHING for ammo only */
+    s16 ammotype;
+    s32 amount;     /* give: rounds sent; answer: rounds taken */
+    s32 stage;      /* the giver's stage: a stale give is sent back */
+    s32 refund;     /* answer: rounds that did not fit, back to the giver */
+    u8 gotweapon;   /* answer: the gun was new to the receiver */
+    u8 pad[3];
+} CoopGive;
+void coopGivePress(void);       /* the give_partner key (bondview2.c) */
+void coopGiveSend(s32 answer, CoopGive *give);
+void coopGiveReceive(CoopGive *give);
+void coopGiveReturned(CoopGive *give);
+void coopGiveTestDraw(s32 weapon);
+void coopGiveTestPress(void);
+
 /* the weapon menu (weapon_menu.c) */
 s32  weapmenuInput(s32 step);
 u16  weapmenuFilterButtons(u16 buttons, u16 oldbuttons);

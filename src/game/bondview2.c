@@ -8888,12 +8888,17 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         extern s32 portJoyPortWeaponStep(void);
         extern s32 portJoyPortObjectiveListPressed(void);
         extern void portObjectivesHudToggle(void);
+        extern s32 portJoyPortGivePartnerPressed(void);
         s32 step = portJoyPortWeaponStep();
 
         step = weapmenuInput(step);   /* the weapon menu and its slot keys (weapon_menu.c) */
         if (portJoyPortObjectiveListPressed())
         {
             portObjectivesHudToggle();   /* the objective list (coop_hud.c) */
+        }
+        if (portJoyPortGivePartnerPressed())
+        {
+            coopGivePress();   /* co-op: ammo and the gun in hand to the partner (coop_give.c) */
         }
         if (step < 0)
         {
