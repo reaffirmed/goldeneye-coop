@@ -37,6 +37,8 @@
 #include "objecthandler.h"
 #include "objective_status.h"
 #include "bondinv.h"
+#include "front.h"
+#include "file.h"
 
 void doorSetOpenState(DoorRecord *door, s32 newstate);
 bool doorIsClosed(DoorRecord *door);
@@ -61,7 +63,7 @@ extern void portConLogf(const char *fmt, ...);
 #define COOP_MAGIC   0x50434547u /* "GECP" */
 #define COOP_VERSION 1
 
-enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6 };
+enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7 };
 
 typedef struct
 {
@@ -76,6 +78,18 @@ typedef struct
     s32 headnum;
     s32 dead;
 } CoopStatePkt;
+
+/* Where each game is, both ways once a second, menus included: the joiner
+ * follows the host into each mission. */
+typedef struct
+{
+    u32 magic;
+    u16 version;
+    u16 type;
+    s32 stage;          /* LEVELID_TITLE in the menus */
+    s32 difficulty;
+    u32 mission;        /* host: counts missions started */
+} CoopHelloPkt;
 
 /* Mission state, both ways twice a second. Everything in it is a level
  * (not an edge), so a lost packet costs nothing. */
@@ -164,6 +178,11 @@ static s32 sEnabled = -1;
 #define COOP_MAX_PEERHELD 32
 static s32 sPeerHeld[COOP_MAX_PEERHELD];
 static s32 sNumPeerHeld;
+static CoopHelloPkt sHostHello;  /* the other game's last hello */
+static u32 sHelloTick;
+static s32 sHelloSeen;
+static u32 sMissionSerial;      /* host: missions started */
+static u32 sFollowedMission;    /* joiner: last host mission we launched into */
 static u32 sRemoteCalm;     /* the partner's calm at sRemoteCalmTick */
 static u32 sRemoteCalmTick;
 static u32 sLastHurtTick;   /* local Bond lost health */
@@ -226,6 +245,7 @@ static void coopApplyObjDamage(CoopEvent *ev);
 static void coopSendWorld(void);
 static void coopApplyPickup(CoopEvent *ev);
 static void coopApplyMissionEnd(CoopEvent *ev);
+static void coopSendHello(void);
 static s32 coopLocalCalm(void);
 static void coopTrackCombat(void);
 static void coopApplyWorld(CoopWorldPkt *p);
@@ -340,6 +360,17 @@ static void coopPollNet(void)
                     coopApplyGuard(&g->ent[k]);
                 }
                 sLastSnapTick = sTick;
+            }
+            continue;
+        }
+        if (p->type == COOPPKT_HELLO && n >= (s32) sizeof(CoopHelloPkt))
+        {
+            sHostHello = *(CoopHelloPkt *) buf;
+            sHelloTick = sTick;
+            if (!sHelloSeen)
+            {
+                sHelloSeen = 1;
+                portConLogf("ge: coop: connected to the other player\n");
             }
             continue;
         }
@@ -543,6 +574,11 @@ void coopStageStart(void)
 {
     s32 i;
 
+    if (bossGetStageNum() != LEVELID_TITLE)
+    {
+        sMissionSerial++;
+    }
+
     for (i = 0; i < COOP_MAX_CHRS; i++)
     {
         sChrTarget[i].lastupdate60 = -1;
@@ -583,6 +619,7 @@ void coopTick(void)
     sTick++;
     coopPollNet();
     coopFlushEvents();
+    coopSendHello();
 
     if (!coopInMission())
     {
@@ -2034,4 +2071,63 @@ s32 coopDeadTick(void)
         sDeadSince = 0;
     }
     return 1;
+}
+
+
+/* ---- menus: hello and following the host ------------------------------------ */
+
+static void coopSendHello(void)
+{
+    CoopHelloPkt p;
+
+    if ((sTick % 60) != 0 || !coopNetHasPeer())
+    {
+        return;
+    }
+    memset(&p, 0, sizeof(p));
+    p.magic = COOP_MAGIC;
+    p.version = COOP_VERSION;
+    p.type = COOPPKT_HELLO;
+    p.stage = bossGetStageNum();
+    p.difficulty = selected_difficulty;
+    p.mission = sMissionSerial;
+    coopNetSend(&p, sizeof(p));
+}
+
+/* Called every frontend tick (front.c). Returns 1 when it started a mission. */
+s32 coopFrontTick(void)
+{
+    if (sEnabled < 0)
+    {
+        sEnabled = coopNetInit();
+    }
+    if (sEnabled <= 0)
+    {
+        return 0;
+    }
+    sTick++;
+    coopPollNet();
+    coopFlushEvents();
+    coopSendHello();
+
+    /* the joiner goes where the host goes, once per host mission */
+    if (!coopNetIsHost() && sHelloSeen && sTick - sHelloTick < 180
+        && sHostHello.stage != LEVELID_TITLE && sHostHello.stage > 0
+        && sHostHello.mission != sFollowedMission)
+    {
+        s32 diff = sHostHello.difficulty;
+
+        if (diff < DIFFICULTY_AGENT || diff >= DIFFICULTY_MAX)
+        {
+            diff = DIFFICULTY_AGENT;
+        }
+        sFollowedMission = sHostHello.mission;
+        portConLogf("ge: coop: following the host into stage %d (difficulty %d)\n", sHostHello.stage, diff);
+        selected_folder_num = FOLDER1;
+        set_selected_difficulty(diff);
+        set_solo_and_ptr_briefing(sHostHello.stage);
+        frontChangeMenu(MENU_RUN_STAGE, TRUE);
+        return 1;
+    }
+    return 0;
 }

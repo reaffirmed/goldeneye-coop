@@ -747,6 +747,33 @@ int main(int argc, char **argv)
     portInitRootDir(argv[0]);
     portMigrateIni();
 
+    { /* co-op over Steam: "+connect_lobby <id>" is how Steam starts us for an
+       * invite or Join Game; -coophost / -coopjoin are the launcher's switches.
+       * They all become GE_COOP (port/src/coop_net.c). */
+        static char coopspec[96];
+        int i;
+
+        for (i = 1; i < argc; i++)
+        {
+            if (strcmp(argv[i], "+connect_lobby") == 0 && i + 1 < argc)
+            {
+                snprintf(coopspec, sizeof(coopspec), "GE_COOP=steam:join:%s", argv[++i]);
+            }
+            else if (strcmp(argv[i], "-coophost") == 0)
+            {
+                snprintf(coopspec, sizeof(coopspec), "GE_COOP=steam");
+            }
+            else if (strcmp(argv[i], "-coopjoin") == 0)
+            {
+                snprintf(coopspec, sizeof(coopspec), "GE_COOP=steam:join");
+            }
+        }
+        if (coopspec[0] != '\0')
+        {
+            putenv(coopspec);
+        }
+    }
+
 #ifdef GE_VIDEO
     /* GE_LISTPADS=1: GELauncher's controller probe - print SDL's device
      * list (index/GUID/mapped-or-raw/name + default-map tokens) and exit

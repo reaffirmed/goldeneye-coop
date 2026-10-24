@@ -1,8 +1,11 @@
 /**
- * Co-op UDP transport (test backend).
+ * Co-op transport.
  *
- * GE_COOP=host:<port>        listen on <port>, reply to whoever writes first.
- * GE_COOP=join:<ip>:<port>   send to the host at <ip>:<port>.
+ * GE_COOP=steam              host over Steam (lobby + invite, see coop_steam.c)
+ * GE_COOP=steam:join[:<id>]  join a friend's Steam lobby (found by itself
+ *                            when no id is given)
+ * GE_COOP=host:<port>        plain UDP: listen on <port>, reply to whoever writes first
+ * GE_COOP=join:<ip>:<port>   plain UDP: send to the host at <ip>:<port>
  *
  * Non-blocking, one peer. Packets are game-defined (see src/game/coop.c).
  */
@@ -32,6 +35,7 @@ typedef int SOCKET;
 extern void portConLogf(const char *fmt, ...);
 
 static SOCKET sSock = INVALID_SOCKET;
+static int sSteam; /* the Steam backend is in use */
 static int sIsHost;
 static int sHasPeer;
 static struct sockaddr_in sPeer;
@@ -49,6 +53,15 @@ int coopNetInit(void)
     if (e == NULL || e[0] == '\0')
     {
         return 0;
+    }
+    if (strncmp(e, "steam", 5) == 0)
+    {
+        if (!coopSteamInit(e))
+        {
+            return 0;
+        }
+        sSteam = 1;
+        return 1;
     }
 
 #ifdef _WIN32
@@ -134,16 +147,21 @@ int coopNetInit(void)
 
 int coopNetIsHost(void)
 {
-    return sIsHost;
+    return sSteam ? coopSteamIsHost() : sIsHost;
 }
 
 int coopNetHasPeer(void)
 {
-    return sHasPeer;
+    return sSteam ? coopSteamHasPeer() : sHasPeer;
 }
 
 void coopNetSend(const void *buf, int len)
 {
+    if (sSteam)
+    {
+        coopSteamSend(buf, len);
+        return;
+    }
     if (sSock == INVALID_SOCKET || !sHasPeer)
     {
         return;
@@ -157,6 +175,10 @@ int coopNetRecv(void *buf, int cap)
     socklen_t fromlen = sizeof(from);
     int n;
 
+    if (sSteam)
+    {
+        return coopSteamRecv(buf, cap);
+    }
     if (sSock == INVALID_SOCKET)
     {
         return 0;
@@ -177,6 +199,11 @@ int coopNetRecv(void *buf, int cap)
 
 void coopNetShutdown(void)
 {
+    if (sSteam)
+    {
+        coopSteamShutdown();
+        sSteam = 0;
+    }
     if (sSock != INVALID_SOCKET)
     {
         COOP_CLOSE(sSock);

@@ -19305,6 +19305,10 @@ void menu_init(void)
             portPlayerOptsApplyOnce();
         }
     }
+    {   /* co-op: keep the link alive in the menus and follow the host */
+        extern s32 coopFrontTick(void);
+        coopFrontTick();
+    }
     portDirectLaunchTick();
     portDirectLaunchMpTick();
     portDirectLaunchDemoTick();
