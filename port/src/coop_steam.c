@@ -388,7 +388,15 @@ static void onSessionRequest(const unsigned char *p)
         }
         return;
     }
-    portConLogf("ge: steam: ignoring a session from %llu (not in our lobby)\n", from);
+    {   /* once per sender: a host keeps knocking until we are in its lobby */
+        static u64s lastIgnored;
+
+        if (from != lastIgnored)
+        {
+            lastIgnored = from;
+            portConLogf("ge: steam: ignoring a session from %llu (not in our lobby)\n", from);
+        }
+    }
 }
 
 static void handle(int id, const unsigned char *p)

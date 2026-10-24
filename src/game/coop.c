@@ -63,7 +63,7 @@ PropRecord *chrSpawnAtCoord(s32 bodynum, s32 headnum, coord3d *pos, StandTile *s
 extern void portConLogf(const char *fmt, ...);
 
 #define COOP_MAGIC   0x50434547u /* "GECP" */
-#define COOP_VERSION 2 /* 2: lobby fields in HELLO, health in STATE */
+#define COOP_VERSION 3 /* 2: lobby fields in HELLO, health in STATE; 3: session ids */
 
 enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7 };
 
@@ -97,6 +97,8 @@ typedef struct
     u8 ready;           /* the lobby screen's Ready */
     u8 inlobby;         /* on the lobby screen */
     u8 pad[2];
+    u32 session;        /* as in CoopEventsPkt */
+    u32 missionticks;   /* how long the sender has been in this mission */
 } CoopHelloPkt;
 
 /* Mission state, both ways twice a second. Everything in it is a level
@@ -149,6 +151,7 @@ typedef struct
     u32 ack;        /* highest in-order seq received from the peer */
     u32 firstseq;   /* seq of ev[0] */
     u32 count;
+    u32 session;    /* the sender's session: a new one means it restarted */
     CoopEvent ev[COOP_EVENTS_PER_PKT];
 } CoopEventsPkt;
 
@@ -194,6 +197,11 @@ static s32 sHelloSeen;
 static u32 sMissionSerial;      /* host: missions started */
 static u32 sFollowedMission;    /* joiner: last host mission we launched into */
 static s32 sLobbyReady;         /* our Ready on the lobby screen */
+static u32 sSelfSession;        /* ours, new each run and each lobby session */
+static u32 sPeerSession;        /* the partner's, 0 until heard */
+static u32 sMissionTicks;       /* ticks in this mission */
+static s32 sLateJoin;           /* joiner: followed the host into a mission under way */
+static s32 sResyncPending;      /* host: the partner restarted; resend doors when it is back in */
 static s32 sOnLobbyScreen;      /* front.c: the lobby screen is up */
 static u32 sRemoteCalm;     /* the partner's calm at sRemoteCalmTick */
 static u32 sRemoteCalmTick;
@@ -235,6 +243,7 @@ static CoopEvent sOut[COOP_EVENT_RING];
 static u32 sOutNext = 1;    /* seq the next queued event gets */
 static u32 sOutAcked;       /* peer has everything up to here */
 static u32 sInDone;         /* we have applied everything up to here */
+static u32 sOutSentUpTo;
 static u32 sEvLastSend;
 static s32 sAckDirty;
 
@@ -322,6 +331,71 @@ static void coopSendState(void)
     }
 }
 
+static u32 coopSelfSession(void)
+{
+    while (sSelfSession == 0)
+    {   /* any value that differs from the last run's */
+        sSelfSession = (u32) osGetCount() ^ ((u32) osGetTime() << 7) ^ (u32) (size_t) &sSelfSession;
+    }
+    return sSelfSession;
+}
+
+/* Doors the joiner's fresh copy of the level has shut: send every open one */
+static void coopResyncDoors(void)
+{
+    PropDefHeaderRecord *it = (PropDefHeaderRecord *) g_CurrentSetup.propDefs;
+    s32 n = 0;
+
+    if (it == NULL || !coopNetIsHost())
+    {
+        return;
+    }
+    for (; it->type != PROPDEF_END; it = (PropDefHeaderRecord *) ((u32 *) it + sizepropdef(it)))
+    {
+        if (it->type == PROPDEF_DOOR && ((DoorRecord *) it)->prop != NULL && !doorIsClosed((DoorRecord *) it))
+        {
+            CoopEvent ev;
+
+            memset(&ev, 0, sizeof(ev));
+            ev.kind = COOPEV_DOOR;
+            ev.u.door.doorofs = coopSetupOfs(it);
+            ev.u.door.state = DOORSTATE_OPENING;
+            if (ev.u.door.doorofs >= 0)
+            {
+                coopQueueEvent(&ev);
+                n++;
+            }
+        }
+    }
+    portConLogf("ge: coop: resent %d open doors\n", n);
+}
+
+/* A partner that restarted (a crash, or rejoining from the lobby) starts its
+ * event numbering again: start ours again too, so neither side waits for or
+ * acks numbers the other never sent. */
+static void coopPeerSession(u32 session)
+{
+    if (session == 0 || session == sPeerSession)
+    {
+        return;
+    }
+    if (sPeerSession != 0)
+    {
+        portConLogf("ge: coop: the partner rejoined (new session), restarting the event channel\n");
+        sOutNext = 1;
+        sOutAcked = 0;
+        sOutSentUpTo = 0;
+        sInDone = 0;
+        sAckDirty = 0;
+        sNumPeerHeld = 0;   /* its pickups start again too */
+        if (coopNetIsHost())
+        {
+            sResyncPending = 1;   /* once they are back in this mission */
+        }
+    }
+    sPeerSession = session;
+}
+
 static void coopPollNet(void)
 {
     u8 buf[1500];
@@ -345,6 +419,7 @@ static void coopPollNet(void)
             {
                 continue;
             }
+            coopPeerSession(e->session);
             if ((s32) (e->ack - sOutAcked) > 0)
             {
                 sOutAcked = e->ack;
@@ -384,6 +459,7 @@ static void coopPollNet(void)
         }
         if (p->type == COOPPKT_HELLO && n >= (s32) sizeof(CoopHelloPkt))
         {
+            coopPeerSession(((CoopHelloPkt *) buf)->session);
             sHostHello = *(CoopHelloPkt *) buf;
             sHelloTick = sTick;
             if (!sHelloSeen)
@@ -613,6 +689,7 @@ void coopStageStart(void)
         sChrFiring[i] = 0;
     }
     sLastSnapTick = 0;
+    sMissionTicks = 0;
     sNumPeerHeld = 0;
     sLastHurtTick = sLastFightTick = sDeadSince = 0;
     sRemoteCalm = sRemoteCalmTick = 0;
@@ -647,6 +724,7 @@ void coopTick(void)
         return;
     }
 
+    sMissionTicks++;
     coopSendState();
     coopTrackCombat();
     if ((sTick % 30) == 0 && sRemoteValid && sRemote.stage == bossGetStageNum())
@@ -723,6 +801,20 @@ void coopTick(void)
                         sPuppet->pos.f[0], sPuppet->pos.f[1], sPuppet->pos.f[2], (void *) sPuppet->stan,
                         c->chrflags, c->hidden, sPuppet->flags, sPuppetAnim, sPuppetGhost);
         }
+    }
+    if (sLateJoin && sPuppet != NULL && sPuppet->chr != NULL && sPuppet->stan != NULL && sMissionTicks > 30 && !g_CurrentPlayer->bonddead)
+    {   /* joined a mission under way: go to the partner, not the level's start */
+        sLateJoin = 0;
+        sPuppetGhost = 1;
+        coopRespawnPlayerAt(&sPuppet->pos, sPuppet->stan, 6.2831855f - sRemote.yaw, sLastWeapon);
+        hudmsgBottomShow("Joined your partner.\n");
+        portConLogf("ge: coop: late join, moved beside the partner\n");
+    }
+    if (sResyncPending && coopNetIsHost() && sPuppet != NULL)
+    {
+        sResyncPending = 0;
+        coopResyncDoors();
+        hudmsgBottomShow("Your partner rejoined.\n");
     }
 }
 
@@ -1617,7 +1709,6 @@ static void coopQueueEvent(CoopEvent *ev)
 /* Send every unacked event at most every 4 ticks (at once when there is
  * something new or an ack owed). Repeats cover loss; seq numbers drop the
  * duplicates on the other side. */
-static u32 sOutSentUpTo;
 
 static void coopFlushEvents(void)
 {
@@ -1637,6 +1728,7 @@ static void coopFlushEvents(void)
     pkt.version = COOP_VERSION;
     pkt.type = COOPPKT_EVENTS;
     pkt.ack = sInDone;
+    pkt.session = coopSelfSession();
     pkt.firstseq = sOutAcked + 1;
     for (seq = sOutAcked + 1; seq < sOutNext && pkt.count < COOP_EVENTS_PER_PKT; seq++)
     {
@@ -2247,7 +2339,9 @@ static void coopSendHello(void)
     p.difficulty = selected_difficulty;
     p.mission = sMissionSerial;
     p.ready = (u8) sLobbyReady;
+    p.session = coopSelfSession();
     p.inlobby = (u8) sOnLobbyScreen;
+    p.missionticks = coopInMission() ? sMissionTicks : 0;
     coopNetSend(&p, sizeof(p));
 }
 
@@ -2279,6 +2373,7 @@ s32 coopFrontTick(void)
             diff = DIFFICULTY_AGENT;
         }
         sFollowedMission = sHostHello.mission;
+        sLateJoin = sHostHello.missionticks > 600;   /* the host is well into it: start beside them */
         portConLogf("ge: coop: following the host into stage %d (difficulty %d)\n", sHostHello.stage, diff);
         selected_folder_num = FOLDER1;
         set_selected_difficulty(diff);
@@ -2299,6 +2394,8 @@ s32 coopFrontTick(void)
 
 static void coopSessionReset(void)
 {
+    sSelfSession = 0;   /* a new one on first use */
+    sPeerSession = 0;
     sOutNext = 1;
     sOutAcked = 0;
     sInDone = 0;
