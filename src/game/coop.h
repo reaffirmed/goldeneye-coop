@@ -104,6 +104,37 @@ void coopGiveReturned(CoopGive *give, s32 from);
 void coopGiveTestDraw(s32 weapon);
 void coopGiveTestPress(void);
 
+/* pings (coop_ping.c): the ping key marks the spot, or the guard, under the
+ * crosshair for every player, with the pinger's name, for COOP_PING_LIFE
+ * ticks. One ping per player; a new one replaces it. Rides the reliable
+ * events (COOPEV_PING) to everyone. */
+#define COOP_PING_LIFE 600   /* 10 s */
+enum { COOPPING_SPOT, COOPPING_ENEMY };
+typedef struct
+{
+    f32 pos[3];     /* where the aim met a wall, floor or the guard */
+    s16 room;
+    s16 chrnum;     /* COOPPING_ENEMY: the guard, followed while alive; else -1 */
+    s32 stage;      /* the pinger's stage: a ping from another one is dropped */
+    u8 kind;        /* COOPPING_* */
+    u8 pad[3];
+} CoopPing;
+typedef struct
+{
+    coord3d pos;
+    s32 kind;
+    s32 player;     /* who pinged (0 the host) */
+    s32 age;        /* ticks since the ping */
+    const char *name;
+} CoopPingMark;
+void coopPingPress(void);       /* the ping key (bondview2.c) */
+void coopPingSend(CoopPing *ping);
+void coopPingReceive(CoopPing *ping, s32 from);
+void coopPingStageStart(void);
+void coopPingTick(void);
+s32  coopPingAt(s32 i, CoopPingMark *out);  /* the i-th live ping, from 0 */
+void coopPingTestPress(s32 pitch);          /* harness: GE_COOP_TESTPING */
+
 /* the weapon menu (weapon_menu.c) */
 s32  weapmenuInput(s32 step);
 u16  weapmenuFilterButtons(u16 buttons, u16 oldbuttons);
