@@ -492,6 +492,23 @@ void coopTick(void)
     if (coopIsMirroringClient())
     {
         coopReapGuards();
+        {   /* GE_COOP_TESTSHOT=<chrnum>: a chest shot every 2 s (harness only) */
+            static s32 testchr = -2;
+            if (testchr == -2)
+            {
+                const char *e = getenv("GE_COOP_TESTSHOT");
+                testchr = (e != NULL) ? atoi(e) : -1;
+            }
+            if (testchr >= 0 && (sTick % 120) == 0)
+            {
+                ChrRecord *c = chrFindByLiteralId(testchr);
+                coord3d v = { 0.0f, 0.0f, 1.0f };
+                if (c != NULL && c->prop != NULL)
+                {
+                    coopClientForwardShot(c, HIT_CHEST, &v, ITEM_WPPK);
+                }
+            }
+        }
     }
 
     if (!sRemoteValid || sRemote.stage != bossGetStageNum())
