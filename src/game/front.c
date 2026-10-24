@@ -8835,7 +8835,8 @@ extern void portConLogf(const char *fmt, ...);
 
 enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLROW_CANCEL,
        CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE, CLROW_FRIENDLYFIRE,
-       CLROW_CHARACTER, CLROW_CHAT, CLROW_PUBLIC, CLROW_PASSWORD, CLROW_JOINPUBLIC, CLROW_LAYOUT, CLROW_OPTION };
+       CLROW_CHARACTER, CLROW_CHAT, CLROW_PUBLIC, CLROW_PASSWORD, CLROW_JOINPUBLIC, CLROW_LAYOUT, CLROW_OPTION,
+       CLROW_HOSTLEAVES };
 #define COOP_LOBBY_ROWS     40
 #define COOP_LOBBY_VISIBLE  19  /* rows that fit on the paper; more scroll (coop_lobby_scroll) */
 #define COOP_LOBBY_CHAT_LINES 3
@@ -9090,6 +9091,14 @@ static void coopLobbyBuild(void)
     }
 
     /* in a lobby: the players, host first */
+    if (coopLobbyNotice() != NULL)
+    {   /* who just came or went, a new host */
+        r = coopLobbyAdd(CLROW_TEXT, 0, coopLobbyNotice(), "");
+        if (r != NULL)
+        {
+            r->colour = COOP_LOBBY_COL_OK;
+        }
+    }
     coopLobbyAdd(CLROW_HEAD, 0, "Players\n", "");
     if (coopLobbyIsHost() || coopLobbyHasPartner())
     {
@@ -9210,7 +9219,14 @@ static void coopLobbyBuild(void)
             }
         }
     }
-    coopLobbyAdd(CLROW_LEAVE, 0, "Leave Lobby\n", "");
+    if (coopLobbyIsHost() && coopLobbyHasPartner())
+    {   /* the lobby goes on without us: the next player hosts */
+        coopLobbyAdd(CLROW_LEAVE, 0, "Leave Lobby\n", "Hand Over\n");
+    }
+    else
+    {
+        coopLobbyAdd(CLROW_LEAVE, 0, "Leave Lobby\n", "");
+    }
 
     /* chat: the newest lines, and a row (or the chat key) to type one (coop_chat.c) */
     if (coopLobbyHasPartner())
@@ -9269,6 +9285,8 @@ static void coopLobbyBuild(void)
     }
     coopLobbyAdd(coopLobbyIsHost() ? CLROW_FRIENDLYFIRE : CLROW_TEXT, 0, "Friendly Fire\n",
                  coopSetting(COOPSET_FRIENDLYFIRE) ? "On\n" : "Off\n");
+    coopLobbyAdd(coopLobbyIsHost() ? CLROW_HOSTLEAVES : CLROW_TEXT, 0, "Host Leaves\n",
+                 coopHostLeavesName(coopSetting(COOPSET_HOSTLEAVES)));
     if (coopLobbyIsHost())
     {
         coopLobbyAddHostOptions();
@@ -9401,6 +9419,9 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
             }
             break;
         }
+        case CLROW_HOSTLEAVES:
+            coopSetSetting(COOPSET_HOSTLEAVES, (coopSetting(COOPSET_HOSTLEAVES) + 1) % coopHostLeavesCount());
+            break;
         default:
             break;
     }

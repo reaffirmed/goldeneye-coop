@@ -26,6 +26,13 @@ int  coopNetRecv(void *buf, int cap);   /* bytes, or 0 when nothing is queued */
 int  coopNetRecvFrom(void *buf, int cap, int *peer);    /* ...and which slot sent it */
 void coopNetShutdown(void);
 
+/* Host migration: the host is gone and this game takes its place or follows
+ * whoever does. ashost: become the host, with ids[0..n-1] (coopNetPeerId
+ * values from the old host's roster) reserved in peer slots 0..n-1; else
+ * ids[0] is the new host. The socket or the Steam lobby stays open. */
+void coopNetMigrate(int ashost, const unsigned long long *ids, int n);
+int  coopNetHostLeft(void);             /* joiner: the transport saw the host leave (Steam: it left the lobby) */
+
 /* Steam backend (coop_steam.c), used by coop_net.c when GE_COOP starts with "steam" */
 int  coopSteamInit(const char *spec);
 int  coopSteamIsHost(void);
@@ -37,6 +44,8 @@ void coopSteamSendTo(int peer, const void *buf, int len);
 int  coopSteamRecv(void *buf, int cap);
 int  coopSteamRecvFrom(void *buf, int cap, int *peer);
 void coopSteamShutdown(void);
+void coopSteamMigrate(int ashost, const unsigned long long *ids, int n);
+int  coopSteamHostLeft(void);
 
 /* the lobby screen (front.c through src/game/coop.c) */
 int  coopSteamLobbyState(void);         /* 0 none, 1 creating or looking, 2 in a lobby */

@@ -105,6 +105,46 @@ void coopStatsMissionStart(void)
     memset(sNames, 0, sizeof(sNames));
 }
 
+/* Host migration renumbered the players (coop.c coopRenumber): their columns
+ * move with them. The old host's column goes; the kills and hits it counted
+ * for the joiners stay theirs, and the new host counts from here on. */
+void coopStatsRemap(const s32 *newof)
+{
+    s32 was[COOP_MAX_PLAYERS], ownin[COOP_MAX_PLAYERS], guardsin[COOP_MAX_PLAYERS];
+    CoopStatsCol own[COOP_MAX_PLAYERS], guards[COOP_MAX_PLAYERS];
+    char names[COOP_MAX_PLAYERS][32];
+    s32 p;
+
+    memcpy(was, sWas, sizeof(was));
+    memcpy(ownin, sOwnIn, sizeof(ownin));
+    memcpy(guardsin, sGuardsIn, sizeof(guardsin));
+    memcpy(own, sOwn, sizeof(own));
+    memcpy(guards, sGuards, sizeof(guards));
+    memcpy(names, sNames, sizeof(names));
+    memset(sWas, 0, sizeof(sWas));
+    memset(sOwnIn, 0, sizeof(sOwnIn));
+    memset(sGuardsIn, 0, sizeof(sGuardsIn));
+    memset(sOwn, 0, sizeof(sOwn));
+    memset(sGuards, 0, sizeof(sGuards));
+    memset(sNames, 0, sizeof(sNames));
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        s32 q = newof[p];
+
+        if (q < 0 || q >= COOP_MAX_PLAYERS)
+        {
+            continue;
+        }
+        sWas[q] = was[p];
+        sOwnIn[q] = ownin[p];
+        sGuardsIn[q] = guardsin[p];
+        sOwn[q] = own[p];
+        sGuards[q] = guards[p];
+        memcpy(sNames[q], names[p], sizeof(sNames[q]));
+    }
+    sBlame = 0;
+}
+
 /* every mission tick (coopTick); partnerhere: a partner is in this stage */
 void coopStatsMissionTick(s32 partnerhere)
 {

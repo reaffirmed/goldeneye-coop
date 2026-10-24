@@ -34,6 +34,8 @@ Playing
    - When Down: Revive or Timer, Revive only, or Timer only.
    - Guards: Normal, Hard (tougher, more of them) or Brutal.
    - Friendly Fire: Off (default, your shots pass your partners by) or On.
+   - Host Leaves: Next Player Hosts (default) or Back to Lobby. See "When
+     someone leaves" below.
 5. When every friend shows as Ready, the host picks "Select Mission" (or
    Continue), then the mission and difficulty as usual. The friends' games
    follow into the mission by themselves.
@@ -78,6 +80,28 @@ Rules
   radar and the partner status at the side of the screen.
 - Name tags over partners are small, shrink with distance, fade out when a
   partner is right beside you, and fade (but stay) when they are far away.
+
+When someone leaves
+-------------------
+- If the host's game quits, crashes or loses its connection, everyone else
+  sees "HOST NOT RESPONDING" with a countdown, so a host whose connection
+  only hiccuped can come back. After about 15 seconds without the host (at
+  once if the host quit on purpose), the next player in the lobby list
+  becomes the host and the mission carries
+  on from where it was: guards, doors, objectives and everyone's position
+  stay as they were. The others connect to the new host by themselves.
+- With the Host Leaves rule on Back to Lobby, everyone returns to the lobby
+  instead, with the next player as host.
+- The old host can come back: start co-op again and join the lobby, or
+  accept an invite, and you join the mission beside the others.
+- When the host wants to quit, the watch's Abort asks first:
+  HAND OVER: you leave, the next player becomes host and the others play on.
+  END ALL: the mission ends for everyone and you all go back to the lobby.
+  "Leave Lobby" as host also hands the lobby to the next player.
+- If a joiner drops, the others see "<name> lost connection" and their Bond
+  stands still (guards ignore it). If they are not back within 30 seconds
+  the Bond is removed and "<name> disconnected" shows. They can join again
+  like a late joiner.
 
 If something goes wrong
 -----------------------
