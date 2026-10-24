@@ -380,6 +380,7 @@ static const struct PortBindDef sBindsAllExtra[] = {
     { "Weapon Slot 3\n",     "weapon_slot_3",  "weapon_slot_3"  },
     { "Weapon Slot 4\n",     "weapon_slot_4",  "weapon_slot_4"  },
     { "Weapon Slot 5\n",     "weapon_slot_5",  "weapon_slot_5"  },
+    { "Give To Partner\n",   "give_partner",   "give_partner"   }, /* keyboard default G (co-op) */
 };
 #define PORTBIND_ALL_EXTRA ((s32) (sizeof(sBindsAllExtra) / sizeof(sBindsAllExtra[0])))
 

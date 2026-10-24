@@ -122,7 +122,8 @@ typedef struct
 
 /* Reliable, in-order events (hits, shots, doors, ...). Every EVENTS packet
  * carries all unacked events plus an ack of what we have received. */
-enum { COOPEV_HIT = 1, COOPEV_SHOTCHR = 2, COOPEV_DOOR = 3, COOPEV_OBJDMG = 4, COOPEV_PICKUP = 5, COOPEV_MISSIONEND = 6, COOPEV_EXPLODE = 7, COOPEV_AICMD = 8 };
+enum { COOPEV_HIT = 1, COOPEV_SHOTCHR = 2, COOPEV_DOOR = 3, COOPEV_OBJDMG = 4, COOPEV_PICKUP = 5, COOPEV_MISSIONEND = 6, COOPEV_EXPLODE = 7, COOPEV_AICMD = 8,
+       COOPEV_GIVE = 9, COOPEV_GIVEBACK = 10 };
 
 typedef struct
 {
@@ -138,6 +139,7 @@ typedef struct
         struct { s32 stage; u32 stageflags; } end;                              /* both ways */
         struct { f32 pos[3]; s16 type; u8 rooms[8]; } boom;                     /* client -> host */
         struct { s16 chrnum; u8 len; u8 cmd[25]; } ai;                          /* host -> client */
+        CoopGive give;                                                          /* both ways (coop_give.c) */
         u8 raw[28];
     } u;
 } CoopEvent;
@@ -956,6 +958,28 @@ static void coopHarnessTick(void)
                 portConLogf("ge: coop: testgoto -> chr %d at %.0f %.0f %.0f\n", testgoto,
                             c->prop->pos.f[0], c->prop->pos.f[1], c->prop->pos.f[2]);
             }
+        }
+    }
+    if (sRemoteValid && sRemote.stage == bossGetStageNum() && coopInMission())
+    {   /* GE_COOP_TESTGIVE=<s>: <s> seconds into the mission, face the partner and
+         * press give_partner; GE_COOP_TESTGIVEWEAPON=<item> draws that gun 3 s
+         * before, with 100 rounds (harness only) */
+        static s32 testgive = -2;
+        static s32 testweapon = -1;
+        if (testgive == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTGIVE");
+            const char *w = getenv("GE_COOP_TESTGIVEWEAPON");
+            testgive = (e != NULL) ? atoi(e) * 60 : -1;
+            testweapon = (w != NULL) ? atoi(w) : -1;
+        }
+        if (testweapon > 0 && testgive > 180 && (s32) sMissionTicks == testgive - 180)
+        {
+            coopGiveTestDraw(testweapon);
+        }
+        if (testgive > 0 && (s32) sMissionTicks == testgive)
+        {
+            coopGiveTestPress();
         }
     }
     if (coopNetIsHost() && sRemoteValid && sRemote.stage == bossGetStageNum())
@@ -1786,7 +1810,24 @@ static void coopApplyEvent(CoopEvent *ev)
         case COOPEV_AICMD:
             coopApplyAiCommand(ev);
             break;
+        case COOPEV_GIVE:
+            coopGiveReceive(&ev->u.give);
+            break;
+        case COOPEV_GIVEBACK:
+            coopGiveReturned(&ev->u.give);
+            break;
     }
+}
+
+/* coop_give.c: a give to the partner, or our answer to theirs */
+void coopGiveSend(s32 answer, CoopGive *give)
+{
+    CoopEvent ev;
+
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = answer ? COOPEV_GIVEBACK : COOPEV_GIVE;
+    ev.u.give = *give;
+    coopQueueEvent(&ev);
 }
 
 
