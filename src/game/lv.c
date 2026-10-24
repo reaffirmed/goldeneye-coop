@@ -38,6 +38,9 @@
 #include "vtxstore.h"
 #include "initunk_005450.h"
 #include "initobjects.h"
+#ifndef TARGET_N64
+#include "coop.h"
+#endif
 #include "initguards.h"
 #include "prop.h"
 #include "initexplosioncasing.h"
@@ -739,6 +742,7 @@ void lvlStageLoad(s32 stage)
 #ifndef TARGET_N64
     g_PortCheatCountdown = 60; /* apply GE_CHEATS ~1s into the mission */
     g_PortSpawnWepCountdown = 120; /* GE_SPAWNWEAPON drops ~2s in */
+    coopStageStart();
     portDebugPosApply();
     portCheatApplyLoadTimeSafe(); /* GE_CHEATS=rockets must be live before
                                    * proplvreset2/weaponAssignToHome below */
@@ -1962,6 +1966,9 @@ void lvlTick(void)
         update_bullet_casings();
         update_broken_windows();
         explosionUpdateFlyingParticles();
+#ifndef TARGET_N64
+        coopTick(); /* co-op: send local Bond, move the peer's puppet */
+#endif
         chrpropTick();
         reset_all_music_slots();
         langTick();

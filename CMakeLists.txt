@@ -440,7 +440,7 @@ if(GE_VIDEO)
             set(SDL2_ROOT ${CMAKE_SOURCE_DIR}/third_party/SDL2-2.30.11/i686-w64-mingw32)
         endif()
         target_include_directories(ge PRIVATE ${SDL2_ROOT}/include ${SDL2_ROOT}/include/SDL2)
-        target_link_libraries(ge ${SDL2_ROOT}/lib/libSDL2.dll.a opengl32 gdi32 imm32 winmm setupapi hid version ole32 oleaut32)
+        target_link_libraries(ge ${SDL2_ROOT}/lib/libSDL2.dll.a opengl32 gdi32 imm32 winmm setupapi hid version ole32 oleaut32 ws2_32)
         # the game needs SDL2.dll beside the exe
         add_custom_command(TARGET ge POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SDL2_ROOT}/bin/SDL2.dll $<TARGET_FILE_DIR:ge>)

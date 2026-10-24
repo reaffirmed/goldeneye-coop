@@ -36,6 +36,9 @@
 #include "objective_status.h"
 #include "stan.h"
 #include "tex.h"
+#ifndef TARGET_N64
+#include "coop.h"
+#endif
 
 
 // bss
@@ -2711,6 +2714,12 @@ s32 propIsOfCdType(PropRecord* prop, s32 cdtypes) {
         if (!(cdtypes & CDTYPE_CHRS)) {
             ret = 0;
         }
+#ifndef TARGET_N64
+        /* co-op: the peer's puppet has no collision while it overlaps us */
+        if (coopPropIsGhost(prop)) {
+            ret = 0;
+        }
+#endif
     } else {
         obj = prop->obj;
 
