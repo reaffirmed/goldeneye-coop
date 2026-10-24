@@ -53,5 +53,15 @@ int  coopSteamFriendIsPeer(int i);
 void coopSteamFriendInvite(int i);
 unsigned long long coopSteamFriendLobby(int i);
 void coopSteamInviteOverlay(void);
+void coopSteamSetLobbyOptions(int pub, const char *password, int version);  /* host */
+void coopSteamBrowseRefresh(void);      /* Public Games: ask Steam again */
+int  coopSteamBrowseCount(void);        /* -1 still looking */
+const char *coopSteamBrowseName(int i);
+int  coopSteamBrowseMembers(int i);
+int  coopSteamBrowseLocked(int i);      /* the host set a password */
+unsigned long long coopSteamBrowseLobby(int i);
+void coopSteamSetJoinPassword(const char *password);
+int  coopSteamAdmitWaiting(void);       /* joiner: the host is checking our password */
+int  coopSteamJoinRefused(void);        /* once, after a wrong password */
 
 #endif

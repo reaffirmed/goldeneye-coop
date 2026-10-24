@@ -3688,3 +3688,24 @@ void coopExtSendPacket(void *pkt, s32 len, s32 to)
         }
     }
 }
+
+/* the lobby screen is up (coop_browse.c refreshes Public Games only then) */
+s32 coopLobbyOnScreen(void)
+{
+    return sOnLobbyScreen;
+}
+
+/* join a Steam lobby by id (a public game from coop_browse.c) */
+void coopLobbyJoinLobbyId(unsigned long long lobby)
+{
+    char spec[48];
+
+    sprintf(spec, "steam:join:%llu", lobby);
+    coopLobbyStart(spec);
+}
+
+/* the co-op protocol's version: public games list only those of ours */
+s32 coopExtVersion(void)
+{
+    return COOP_VERSION;
+}

@@ -163,6 +163,28 @@ s32  coopCampaignNext(s32 *stage, s32 *difficulty, char *label, s32 labelcap);  
 void coopCampaignTick(void);
 void coopCampaignApply(const u8 *raw, s32 from);
 
+/* public games and the lobby password (coop_browse.c) */
+enum { COOPBROWSE_TYPE_HOST = 1, COOPBROWSE_TYPE_JOIN = 2 };
+void coopBrowseTick(s32 inmission);
+s32  coopBrowsePublic(void);
+void coopBrowseTogglePublic(void);
+s32  coopBrowseHasPassword(void);
+s32  coopBrowseCount(void);             /* -1 still looking */
+const char *coopBrowseName(s32 i);
+s32  coopBrowseMembers(s32 i);
+s32  coopBrowseLocked(s32 i);
+void coopBrowseJoin(s32 i);
+s32  coopBrowseChecking(void);
+s32  coopBrowseRefused(void);
+void coopBrowseTypeStart(s32 kind, s32 forgame);
+s32  coopBrowseTyping(void);
+s32  coopBrowseTypingFor(void);
+void coopBrowseTypedMask(char *out, s32 cap);
+s32  coopBrowseHarnessJoin(void);
+s32  coopLobbyOnScreen(void);
+void coopLobbyJoinLobbyId(unsigned long long lobby);
+s32  coopExtVersion(void);
+
 /* watching a partner while we are down (coop_spectate.c) */
 void coopSpectateTick(void);
 void coopSpectateStop(void);
