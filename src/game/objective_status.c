@@ -7,6 +7,7 @@
 #include "PR/os.h"
 #include "str.h"
 #include "bondview.h"
+#include "coop.h"
 
 //Public variables - move to header
 // bss
@@ -231,7 +232,11 @@ OBJECTIVESTATUS get_status_of_objective(s32 objectiveNum) //#MATCH
                             {
                                 currentstatus = OBJECTIVESTATUS_FAILED;
                             }
-                            else if (!bondinvHasPropInInv(obj->prop))
+                            else if (!bondinvHasPropInInv(obj->prop)
+#ifndef TARGET_N64
+                                     && !coopPeerHolds(obj) /* co-op: the team's inventory */
+#endif
+                                     )
                             {
                                 currentstatus = OBJECTIVESTATUS_INCOMPLETE;
                             }

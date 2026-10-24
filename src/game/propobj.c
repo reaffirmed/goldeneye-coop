@@ -11630,6 +11630,13 @@ TICKOP propPickupByPlayer(PropRecord *prop, bool showstring)
         }
     }
 
+#ifndef TARGET_N64
+    if (op != TICKOP_NONE) /* co-op: take it out of the other world too */
+    {
+        coopPickedUp(obj, !((op == TICKOP_FREE) && ((obj->runtime_bitflags & RUNTIMEBITFLAG_TAGGED) == 0)));
+    }
+#endif
+
     if ((op == TICKOP_FREE) && ((obj->runtime_bitflags & RUNTIMEBITFLAG_TAGGED) == 0))
     {
         objFree(obj, 0, (obj->state & RUNTIMEBITFLAG_REMOVE));

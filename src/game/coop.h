@@ -20,6 +20,8 @@ s32  coopTargetRecordDamage(f32 damage, f32 angle);
 void coopDoorStateChanged(DoorRecord *door, s32 state);
 s32  coopObjDamage(ObjectRecord *obj, f32 damage, coord3d *pos, s32 item, s32 player); /* 1: skip */
 s32  coopSkipExplosionDamage(ChrRecord *chr);
+void coopPickedUp(ObjectRecord *obj, s32 kept);
+s32  coopPeerHolds(ObjectRecord *obj);
 s32  coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid);
 
 #endif

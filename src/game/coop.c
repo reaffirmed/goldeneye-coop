@@ -36,6 +36,7 @@
 #include "propobj.h"
 #include "objecthandler.h"
 #include "objective_status.h"
+#include "bondinv.h"
 
 void doorSetOpenState(DoorRecord *door, s32 newstate);
 bool doorIsClosed(DoorRecord *door);
@@ -43,6 +44,8 @@ s32 chrGetNumFree(void);
 s32 sizepropdef(PropDefHeaderRecord *pdef);
 bool objIsMortal(ObjectRecord *obj);
 void alarmActivate(void);
+TICKOP propPickupByPlayer(PropRecord *prop, bool showstring);
+void objFreePermanently(ObjectRecord *obj, bool freeprop);
 void alarmDeactivate(void);
 bool alarmIsActive(void);
 s32 objGetDestroyedLevel(ObjectRecord *obj);
@@ -90,7 +93,7 @@ typedef struct
 
 /* Reliable, in-order events (hits, shots, doors, ...). Every EVENTS packet
  * carries all unacked events plus an ack of what we have received. */
-enum { COOPEV_HIT = 1, COOPEV_SHOTCHR = 2, COOPEV_DOOR = 3, COOPEV_OBJDMG = 4 };
+enum { COOPEV_HIT = 1, COOPEV_SHOTCHR = 2, COOPEV_DOOR = 3, COOPEV_OBJDMG = 4, COOPEV_PICKUP = 5 };
 
 typedef struct
 {
@@ -102,6 +105,7 @@ typedef struct
         struct { s16 chrnum; s16 hitpart; s32 weaponid; f32 vector[3]; } shot;  /* client -> host */
         struct { s32 doorofs; s32 state; } door;                                /* both ways */
         struct { s32 objofs; f32 damage; f32 pos[3]; s16 item; s16 player; } obj; /* both ways */
+        struct { s32 objofs; s32 kept; } pick;                                  /* both ways */
         u8 raw[28];
     } u;
 } CoopEvent;
@@ -154,6 +158,9 @@ typedef struct
 
 
 static s32 sEnabled = -1;
+#define COOP_MAX_PEERHELD 32
+static s32 sPeerHeld[COOP_MAX_PEERHELD];
+static s32 sNumPeerHeld;
 static s32 sDefsBytes;  /* size of the stage's setup prop defs */
 static void *sDefsBase;
 static u32 sTick;
@@ -207,6 +214,7 @@ static void coopFlushEvents(void);
 static void coopApplyDoor(s32 doorofs, s32 state);
 static void coopApplyObjDamage(CoopEvent *ev);
 static void coopSendWorld(void);
+static void coopApplyPickup(CoopEvent *ev);
 static void coopApplyWorld(CoopWorldPkt *p);
 static s32 coopSetupOfs(void *rec);
 static StandTile *coopFindStan(coord3d *pos, StandTile *from, coord3d *frompos);
@@ -523,6 +531,7 @@ void coopStageStart(void)
         sChrFiring[i] = 0;
     }
     sLastSnapTick = 0;
+    sNumPeerHeld = 0;
     sTickChr = NULL;
     g_CoopPropOverride = NULL;
     sPuppet = NULL;
@@ -676,6 +685,44 @@ void coopTick(void)
             {
                 portConLogf("ge: coop: testobj %d model %d (dist %.0f)\n", coopSetupOfs(best->obj), best->obj->obj, sqrtf(bestd));
                 objApplyDamage(best->obj, 3.0f, &best->pos, ITEM_AK47, 0);
+            }
+        }
+    }
+
+    if (sRemoteValid && sRemote.stage == bossGetStageNum())
+    {   /* GE_COOP_TESTPICK=1: every 10 s, grab the nearest pickup in the setup (harness only) */
+        static s32 testpick = -1;
+        if (testpick == -1)
+        {
+            testpick = getenv("GE_COOP_TESTPICK") != NULL;
+        }
+        if (testpick && (sTick % 600) == 450 && coopInMission())
+        {
+            PropRecord *bond = getCurrentPlayerProp();
+            PropRecord *it, *best = NULL;
+            f32 bestd = 1e30f;
+
+            for (it = g_ActivePropsHead; it != NULL; it = it->next)
+            {
+                if ((it->type == PROP_TYPE_WEAPON || it->type == PROP_TYPE_OBJ) && it->obj != NULL
+                    && coopSetupOfs(it->obj) >= 0 && (it->obj->type == PROPDEF_COLLECTABLE || it->obj->type == PROPDEF_AMMO
+                        || it->obj->type == PROPDEF_KEY || it->obj->type == PROPDEF_ARMOUR))
+                {
+                    f32 dx = it->pos.f[0] - bond->pos.f[0];
+                    f32 dz = it->pos.f[2] - bond->pos.f[2];
+                    if (dx * dx + dz * dz < bestd)
+                    {
+                        bestd = dx * dx + dz * dz;
+                        best = it;
+                    }
+                }
+            }
+            if (best != NULL)
+            {
+                TICKOP op;
+                portConLogf("ge: coop: testpick %d type %d (dist %.0f)\n", coopSetupOfs(best->obj), best->obj->type, sqrtf(bestd));
+                op = propPickupByPlayer(best, TRUE);
+                propExecuteTickOperation(best, op);
             }
         }
     }
@@ -1422,6 +1469,9 @@ static void coopApplyEvent(CoopEvent *ev)
         case COOPEV_OBJDMG:
             coopApplyObjDamage(ev);
             break;
+        case COOPEV_PICKUP:
+            coopApplyPickup(ev);
+            break;
     }
 }
 
@@ -1689,4 +1739,79 @@ static void coopApplyWorld(CoopWorldPkt *p)
     {
         g_CurrentPlayer->copiedgoldeneye = 1;
     }
+}
+
+
+/* ---- pickups ---------------------------------------------------------------
+ * Whoever picks a setup item up first has it; it leaves the other world. Kept
+ * items (keys, mission items) are only taken out of play there, so objective
+ * checks can still find the record and count it as the team's. */
+
+
+void coopPickedUp(ObjectRecord *obj, s32 kept)
+{
+    CoopEvent ev;
+    s32 ofs;
+
+    if (sEnabled <= 0 || !coopNetHasPeer() || !sRemoteValid || sRemote.stage != bossGetStageNum())
+    {
+        return;
+    }
+    ofs = coopSetupOfs(obj);
+    if (ofs < 0)
+    {
+        return;
+    }
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = COOPEV_PICKUP;
+    ev.u.pick.objofs = ofs;
+    ev.u.pick.kept = kept;
+    coopQueueEvent(&ev);
+}
+
+static void coopApplyPickup(CoopEvent *ev)
+{
+    ObjectRecord *obj;
+    PropRecord *prop;
+
+    if (coopSetupOfs((u8 *) g_CurrentSetup.propDefs + ev->u.pick.objofs) < 0)
+    {
+        return;
+    }
+    obj = (ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + ev->u.pick.objofs);
+    prop = obj->prop;
+    if (prop == NULL || bondinvHasPropInInv(prop))
+    {
+        return; /* gone already, or we grabbed it in the same instant */
+    }
+    if (ev->u.pick.kept)
+    {
+        chrpropDeregisterRooms(prop);
+        chrpropDelist(prop);
+        chrpropDisable(prop);
+        if (sNumPeerHeld < COOP_MAX_PEERHELD)
+        {
+            sPeerHeld[sNumPeerHeld++] = ev->u.pick.objofs;
+        }
+    }
+    else
+    {
+        objFreePermanently(obj, TRUE);
+    }
+    portConLogf("ge: coop: peer picked up obj %d (%s)\n", ev->u.pick.objofs, ev->u.pick.kept ? "kept" : "used");
+}
+
+s32 coopPeerHolds(ObjectRecord *obj)
+{
+    s32 ofs = coopSetupOfs(obj);
+    s32 i;
+
+    for (i = 0; ofs >= 0 && i < sNumPeerHeld; i++)
+    {
+        if (sPeerHeld[i] == ofs)
+        {
+            return 1;
+        }
+    }
+    return 0;
 }
