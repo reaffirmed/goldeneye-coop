@@ -35,12 +35,16 @@
 #include "coop_net.h"
 #include "propobj.h"
 #include "objecthandler.h"
+#include "objective_status.h"
 
 void doorSetOpenState(DoorRecord *door, s32 newstate);
 bool doorIsClosed(DoorRecord *door);
 s32 chrGetNumFree(void);
 s32 sizepropdef(PropDefHeaderRecord *pdef);
 bool objIsMortal(ObjectRecord *obj);
+void alarmActivate(void);
+void alarmDeactivate(void);
+bool alarmIsActive(void);
 s32 objGetDestroyedLevel(ObjectRecord *obj);
 void objApplyDamage(ObjectRecord *obj, f32 damage, coord3d *pos, ITEM_IDS itemnum, s32 playernum);
 void chrSetFiring(ChrRecord *self, s32 hand, s32 firing);
@@ -52,7 +56,7 @@ extern void portConLogf(const char *fmt, ...);
 #define COOP_MAGIC   0x50434547u /* "GECP" */
 #define COOP_VERSION 1
 
-enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5 };
+enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6 };
 
 typedef struct
 {
@@ -67,6 +71,22 @@ typedef struct
     s32 headnum;
     s32 dead;
 } CoopStatePkt;
+
+/* Mission state, both ways twice a second. Everything in it is a level
+ * (not an edge), so a lost packet costs nothing. */
+typedef struct
+{
+    u32 magic;
+    u16 version;
+    u16 type;
+    u32 stageflags;     /* host's objectiveregisters1 (set by level scripts) */
+    u32 roombits;       /* objective criteria met, one bit per list entry */
+    u32 depositbits;
+    u32 photobits;
+    u8 keycopied;
+    u8 alarm;
+    u8 pad[2];
+} CoopWorldPkt;
 
 /* Reliable, in-order events (hits, shots, doors, ...). Every EVENTS packet
  * carries all unacked events plus an ack of what we have received. */
@@ -186,6 +206,8 @@ static void coopQueueEvent(CoopEvent *ev);
 static void coopFlushEvents(void);
 static void coopApplyDoor(s32 doorofs, s32 state);
 static void coopApplyObjDamage(CoopEvent *ev);
+static void coopSendWorld(void);
+static void coopApplyWorld(CoopWorldPkt *p);
 static s32 coopSetupOfs(void *rec);
 static StandTile *coopFindStan(coord3d *pos, StandTile *from, coord3d *frompos);
 static s32 coopIsMirroringClient(void);
@@ -295,6 +317,14 @@ static void coopPollNet(void)
                     coopApplyGuard(&g->ent[k]);
                 }
                 sLastSnapTick = sTick;
+            }
+            continue;
+        }
+        if (p->type == COOPPKT_WORLD && n >= (s32) sizeof(CoopWorldPkt))
+        {
+            if (coopInMission() && sRemoteValid && sRemote.stage == bossGetStageNum())
+            {
+                coopApplyWorld((CoopWorldPkt *) buf);
             }
             continue;
         }
@@ -522,6 +552,24 @@ void coopTick(void)
     }
 
     coopSendState();
+    if ((sTick % 30) == 0 && sRemoteValid && sRemote.stage == bossGetStageNum())
+    {
+        coopSendWorld();
+    }
+    {   /* GE_COOP_TESTWORLD=1: host raises the alarm and a stage flag at 15 s (harness only) */
+        static s32 testworld = -1;
+        if (testworld == -1)
+        {
+            testworld = getenv("GE_COOP_TESTWORLD") != NULL;
+        }
+        if (testworld && coopNetIsHost() && sTick >= 900)
+        {
+            testworld = 0;
+            alarmActivate();
+            objectiveregisters1 |= 0x40000000;
+            portConLogf("ge: coop: testworld: alarm + flag 0x40000000\n");
+        }
+    }
 
     {   /* GE_COOP_TRACE=<chrnum>: log one chr on both sides to compare */
         static s32 trace = -2;
@@ -1543,4 +1591,102 @@ s32 coopSkipExplosionDamage(ChrRecord *chr)
         return 1;
     }
     return coopIsMirroringClient();
+}
+
+
+/* ---- objectives and alarm ------------------------------------------------
+ * Level scripts run on the host only, so its stage flags are the truth. The
+ * criteria either player can meet (entering a room, a deposit, a photo,
+ * copying the key) are OR'd together, so the team shares one objective list. */
+
+static void coopSendWorld(void)
+{
+    CoopWorldPkt p;
+    struct criteria_roomentered *r;
+    struct criteria_deposit *d;
+    struct criteria_picture *ph;
+    s32 i;
+
+    memset(&p, 0, sizeof(p));
+    p.magic = COOP_MAGIC;
+    p.version = COOP_VERSION;
+    p.type = COOPPKT_WORLD;
+    p.stageflags = (u32) objectiveregisters1;
+    for (r = ptr_last_enter_room_subobject_entry_type20, i = 0; r != NULL && i < 32; r = r->next, i++)
+    {
+        if (r->status)
+        {
+            p.roombits |= 1u << i;
+        }
+    }
+    for (d = ptr_last_deposit_in_room_subobject_entry_type21, i = 0; d != NULL && i < 32; d = d->next, i++)
+    {
+        if (d->flag)
+        {
+            p.depositbits |= 1u << i;
+        }
+    }
+    for (ph = ptr_last_photo_obj_in_room_subobject_entry_type1E, i = 0; ph != NULL && i < 32; ph = ph->next, i++)
+    {
+        if (ph->flag)
+        {
+            p.photobits |= 1u << i;
+        }
+    }
+    p.keycopied = g_CurrentPlayer->copiedgoldeneye != 0;
+    p.alarm = alarmIsActive() != 0;
+    coopNetSend(&p, sizeof(p));
+}
+
+static void coopApplyWorld(CoopWorldPkt *p)
+{
+    struct criteria_roomentered *r;
+    struct criteria_deposit *d;
+    struct criteria_picture *ph;
+    s32 i;
+
+    if (!coopNetIsHost())
+    {
+        if ((u32) objectiveregisters1 != p->stageflags)
+        {
+            portConLogf("ge: coop: stage flags %08x -> %08x\n", (u32) objectiveregisters1, p->stageflags);
+            objectiveregisters1 = (s32) p->stageflags;
+        }
+        if (p->alarm && !alarmIsActive())
+        {
+            portConLogf("ge: coop: alarm on (host)\n");
+            alarmActivate();
+        }
+        else if (!p->alarm && alarmIsActive())
+        {
+            portConLogf("ge: coop: alarm off (host)\n");
+            alarmDeactivate();
+        }
+    }
+    for (r = ptr_last_enter_room_subobject_entry_type20, i = 0; r != NULL && i < 32; r = r->next, i++)
+    {
+        if ((p->roombits & (1u << i)) && !r->status)
+        {
+            portConLogf("ge: coop: peer entered objective room %d\n", i);
+            r->status = 1;
+        }
+    }
+    for (d = ptr_last_deposit_in_room_subobject_entry_type21, i = 0; d != NULL && i < 32; d = d->next, i++)
+    {
+        if ((p->depositbits & (1u << i)) && !d->flag)
+        {
+            d->flag = 1;
+        }
+    }
+    for (ph = ptr_last_photo_obj_in_room_subobject_entry_type1E, i = 0; ph != NULL && i < 32; ph = ph->next, i++)
+    {
+        if ((p->photobits & (1u << i)) && !ph->flag)
+        {
+            ph->flag = 1;
+        }
+    }
+    if (p->keycopied && !g_CurrentPlayer->copiedgoldeneye)
+    {
+        g_CurrentPlayer->copiedgoldeneye = 1;
+    }
 }
