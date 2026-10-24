@@ -6537,6 +6537,13 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
                        g_CurrentPlayer->vv_verta, g_CurrentPlayer->vv_theta);
             }
         }
+        { /* photo mode (coop_photo.c): the look is the photo camera's, taken
+           * before the locked controls drop it below */
+            f32 pdy = moveData.invertPitch ? moveData.freeLookDy : -moveData.freeLookDy;
+            f32 pdeg = moveData.invertPitch ? g_portMousePitchDeg : -g_portMousePitchDeg;
+
+            coopPhotoTick(moveData.freeLookDx, pdy, g_portMouseDirect, g_portMouseYawDeg, pdeg);
+        }
         /* Permission (see portMouseLookPermitted): drain the delta every tick
          * but discard it unless the stick could move Bond, so motion never
          * banks up; this single predicate replaces per-consumer checks that
@@ -6637,7 +6644,18 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         extern s32 get_is_ramrom_flag(void);
         extern void portRamromEscapeExit(const char *reason); /* ramromreplay.c */
 
-        if (get_cur_playernum() == 0 && portEscPressed())
+        if (get_cur_playernum() == 0 && coopPhotoActive())
+        {
+            if (portEscPressed())
+            {
+                coopPhotoStop();    /* photo mode's Escape: back to Bond, not the pause (coop_photo.c) */
+            }
+        }
+        else if (get_cur_playernum() == 0 && coopChatEatEscape())
+        {
+            portEscPressed();   /* the chat line's Escape, not the pause's (coop_chat.c) */
+        }
+        else if (get_cur_playernum() == 0 && portEscPressed())
         {
             if (get_is_ramrom_flag() != 0)
             {   /* demo playback: Escape is a PC key the replay's "any real
@@ -8889,6 +8907,8 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         extern s32 portJoyPortObjectiveListPressed(void);
         extern void portObjectivesHudToggle(void);
         extern s32 portJoyPortGivePartnerPressed(void);
+        extern s32 portJoyPortPingPressed(void);
+        extern s32 portJoyPortChatPressed(void);
         s32 step = portJoyPortWeaponStep();
 
         step = weapmenuInput(step);   /* the weapon menu and its slot keys (weapon_menu.c) */
@@ -8899,6 +8919,14 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         if (portJoyPortGivePartnerPressed())
         {
             coopGivePress();   /* co-op: ammo and the gun in hand to the partner (coop_give.c) */
+        }
+        if (portJoyPortPingPressed())
+        {
+            coopPingPress();   /* co-op: mark what the crosshair is on for the partners (coop_ping.c) */
+        }
+        if (portJoyPortChatPressed())
+        {
+            coopChatPress();   /* co-op: the chat line (coop_chat.c) */
         }
         if (step < 0)
         {
@@ -11735,6 +11763,10 @@ Gfx *bondviewRenderDebugBondView(Gfx *gdl)
         cam_up.z = collision->applied_view2.z;
     }
 
+#ifndef TARGET_N64
+    coopSpectateCamera(&cam_pos, &cam_look, &cam_up);   /* down in co-op: a partner's view */
+    coopPhotoCamera(&cam_pos, &cam_look, &cam_up);      /* photo mode's free camera */
+#endif
     bondviewUpdateCameraMatrices(&cam_pos, &cam_look, &cam_up);
     sub_GAME_7F068190(&zeropos, &vec);
 
@@ -12837,6 +12869,12 @@ Gfx *maybe_mp_interface(Gfx *gdl)
     s32 i;
     s32 total;
 
+#ifndef TARGET_N64
+    if (coopPhotoActive())
+    {
+        return coopPhotoRender(gdl);    /* photo mode: no HUD, no gun (coop_photo.c) */
+    }
+#endif
     if (g_CurrentPlayer->cameramode == 1)
     {
         bondviewIntroCameraTextTick();
@@ -13553,6 +13591,14 @@ s32 get_obj_collision_flag(void) {
  */
 u8 bondviewGetCurrentPlayersRoom(void)
 {
+#ifndef TARGET_N64
+    u8 spectating;
+
+    if (coopSpectateRoom(&spectating) || coopPhotoRoom(&spectating))
+    {
+        return spectating;
+    }
+#endif
     if ((g_CurrentPlayer->cameramode == 1) && (g_CurrentPlayer->cameratile != 0))
     {
         return g_CurrentPlayer->cameratile->room;
@@ -13569,6 +13615,16 @@ u8 bondviewGetCurrentPlayersRoom(void)
  */
 coord3d *bondviewGetCurrentPlayersPosition(void)
 {
+#ifndef TARGET_N64
+    if (coopSpectatePos(0) != NULL)
+    {
+        return coopSpectatePos(0);
+    }
+    if (coopPhotoPos(0) != NULL)
+    {
+        return coopPhotoPos(0);
+    }
+#endif
     if (g_CurrentPlayer->cameramode == 1)
     {
         return &g_CurrentPlayer->pos;
@@ -13581,6 +13637,16 @@ coord3d *bondviewGetCurrentPlayersPosition(void)
 
 coord3d * bondviewGetCurrentPlayersPosition3(void)
 {
+#ifndef TARGET_N64
+    if (coopSpectatePos(1) != NULL)
+    {
+        return coopSpectatePos(1);
+    }
+    if (coopPhotoPos(1) != NULL)
+    {
+        return coopPhotoPos(1);
+    }
+#endif
 
     if (g_CurrentPlayer->cameramode == 1)
     {

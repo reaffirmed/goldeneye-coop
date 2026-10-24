@@ -8835,15 +8835,18 @@ extern void portConLogf(const char *fmt, ...);
 
 enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLROW_CANCEL,
        CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE, CLROW_FRIENDLYFIRE,
-       CLROW_CHARACTER, CLROW_VSMODE, CLROW_VSARENA, CLROW_VSSCENARIO, CLROW_VSLENGTH, CLROW_VSWEAPONS, CLROW_VSSTART };
-#define COOP_LOBBY_ROWS     24
+       CLROW_CHARACTER, CLROW_CHAT, CLROW_PUBLIC, CLROW_PASSWORD, CLROW_JOINPUBLIC, CLROW_LAYOUT, CLROW_OPTION,
+       CLROW_HOSTLEAVES, CLROW_VSMODE, CLROW_VSARENA, CLROW_VSSCENARIO, CLROW_VSLENGTH, CLROW_VSWEAPONS, CLROW_VSSTART };
+#define COOP_LOBBY_ROWS     48
+#define COOP_LOBBY_VISIBLE  19  /* rows that fit on the paper; more scroll (coop_lobby_scroll) */
+#define COOP_LOBBY_CHAT_LINES 3
 #define COOP_LOBBY_X        PORT_SHEET_LABEL_X
 #define COOP_LOBBY_VALUE_X  0xFA
 #define COOP_LOBBY_Y0       PORT_SHEET_ROW_Y0
 #define COOP_LOBBY_PITCH    PORT_SHEET_ROW_PITCH
 #define COOP_LOBBY_LABEL_W  (COOP_LOBBY_VALUE_X - COOP_LOBBY_X - 6)
 #define COOP_LOBBY_COL_OK   0x006000FF  /* Ready: dark green ink */
-struct CoopLobbyRow { s32 kind; s32 arg; s32 dim; s32 colour; s32 indent; char label[48]; char value[24]; };
+struct CoopLobbyRow { s32 kind; s32 arg; s32 dim; s32 colour; s32 indent; s32 wide; char label[80]; char value[24]; };
 static struct CoopLobbyRow coop_lobby_rows[COOP_LOBBY_ROWS];
 static s32 coop_lobby_nrows;
 static s32 coop_lobby_hot = -1;
@@ -8852,6 +8855,7 @@ static s32 coop_lobby_nfriends;
 static s32 coop_lobby_ticks;
 static s32 coop_lobby_auto;         /* GE_COOP_LOBBY harness: 'h'ost or 'j'oin */
 static u8 coop_lobby_invited[48];
+static s32 coop_lobby_scroll;       /* the first row shown */
 
 /* Steam names can hold anything; the menu font has ASCII */
 static void coopLobbyCopyName(char *out, s32 cap, const char *name)
@@ -8893,6 +8897,7 @@ static struct CoopLobbyRow *coopLobbyAdd(s32 kind, s32 arg, const char *label, c
     r->dim = FALSE;
     r->colour = 0xFF;
     r->indent = 0;
+    r->wide = FALSE;
     snprintf(r->label, sizeof(r->label), "%s", label);
     snprintf(r->value, sizeof(r->value), "%s", value);
     return r;
@@ -9123,6 +9128,92 @@ static s32 coopLobbyActionable(const struct CoopLobbyRow *r)
     return r->kind != CLROW_TEXT && r->kind != CLROW_HEAD && !r->dim;
 }
 
+/* each player's chat ink on the paper: darker takes on the HUD's colours */
+static s32 coopLobbyChatColour(s32 player)
+{
+    static const s32 inks[COOP_MAX_PLAYERS] = { 0x806000FF, 0x00608CFF, 0x902070FF, 0x206820FF };
+
+    return (player >= 0 && player < COOP_MAX_PLAYERS) ? inks[player] : 0xFF;
+}
+
+/* the host's lobby type and password (coop_browse.c): before hosting, and
+ * while hosting, where a change goes to Steam at once */
+static void coopLobbyAddHostOptions(void)
+{
+    struct CoopLobbyRow *r;
+
+    if (!coopLobbyIsSteam())
+    {
+        return;
+    }
+    coopLobbyAdd(CLROW_PUBLIC, 0, "Lobby\n", coopBrowsePublic() ? "Public\n" : "Friends Only\n");
+    if (coopBrowseTyping() == COOPBROWSE_TYPE_HOST)
+    {
+        char typed[32];
+        char label[48];
+
+        coopBrowseTypedMask(typed, sizeof(typed));
+        snprintf(label, sizeof(label), "Password: %s_\n", typed);
+        r = coopLobbyAdd(CLROW_TEXT, 0, label, "Enter\n");
+    }
+    else
+    {
+        r = coopLobbyAdd(CLROW_PASSWORD, 0, "Password\n", coopBrowseHasPassword() ? "Set\n" : "None\n");
+    }
+}
+
+/* your own controls, in the lobby too: the first controller's layout preset
+ * and the Port Options a co-op player reaches for first (Field of View,
+ * Mouse Look, mouse speed). Each click steps the value on and round; it
+ * applies at once and saves, as on the options sheets. */
+static const char *const coop_lobby_opts[][2] = {
+    { "hfov_wide", "Field of View\n" },
+    { "mouse", "Mouse Look\n" },
+    { "mouse_sens_x", "Mouse Speed\n" },
+};
+
+static void coopLobbyAddControls(void)
+{
+    struct CoopLobbyRow *r;
+    char value[24];
+    s32 i;
+
+    coopLobbyAdd(CLROW_HEAD, 0, "Your Controls\n", "");
+    if (portInputDeviceCount() > 1 && portInputLayoutCount() > 0)
+    {
+        const char *shown = portInputLayoutShown(1);
+
+        snprintf(value, sizeof(value), "%.20s\n", (shown != NULL && shown[0] != '\0') ? shown : "Default");
+        coopLobbyAdd(CLROW_LAYOUT, 0, "Controller Layout\n", value);
+    }
+    else
+    {
+        r = coopLobbyAdd(CLROW_TEXT, 0, "Controller Layout\n", "No Controller\n");
+        if (r != NULL)
+        {
+            r->colour = PORT_SHEET_COL_DIM;
+        }
+    }
+    for (i = 0; i < (s32) (sizeof(coop_lobby_opts) / sizeof(coop_lobby_opts[0])); i++)
+    {
+        const s32 opt = portOptFind(coop_lobby_opts[i][0]);
+
+        if (opt < 0)
+        {
+            continue;
+        }
+        if (strcmp(coop_lobby_opts[i][0], "mouse") == 0)
+        {
+            snprintf(value, sizeof(value), "%s", portOptGet(opt) ? "On\n" : "Off\n");
+        }
+        else
+        {
+            snprintf(value, sizeof(value), "%s", portOptValueText(opt));
+        }
+        coopLobbyAdd(CLROW_OPTION, i, coop_lobby_opts[i][1], value);
+    }
+}
+
 static void coopLobbyBuild(void)
 {
     const s32 state = coopLobbyState();
@@ -9140,14 +9231,59 @@ static void coopLobbyBuild(void)
     }
     if (state == COOPLOBBY_IDLE)
     {
+        if (coopBrowseRefused() > 0)
+        {
+            r = coopLobbyAdd(CLROW_TEXT, 0, "Wrong password.\n", "");
+            if (r != NULL)
+            {
+                r->colour = 0xA00000FF;
+            }
+        }
         coopLobbyAdd(CLROW_HOST, 0, "Host a Game\n", "");
         coopLobbyAdd(CLROW_JOINANY, 0, "Join a Friend's Game\n", "");
+        coopLobbyAddHostOptions();
         coopCharacterName(coopCharacter(), name, sizeof(name));
         coopLobbyAdd(CLROW_HEAD, 0, "Your Character\n", "");
         r = coopLobbyAdd(CLROW_CHARACTER, 0, name, "Change\n");
         if (r != NULL)
         {
             r->indent = 0xC;
+        }
+        coopLobbyAddControls();
+        coopLobbyAdd(CLROW_HEAD, 0, "Public Games\n", "");
+        k = coopBrowseCount();
+        for (i = 0; i < k && coop_lobby_nrows < COOP_LOBBY_ROWS - 4; i++)
+        {
+            char label[48];
+
+            coopLobbyCopyName(name, sizeof(name), coopBrowseName(i));
+            name[strlen(name) - 1] = '\0';
+            snprintf(label, sizeof(label), "%.30s  %d/%d\n", name, (int) coopBrowseMembers(i), COOP_MAX_PLAYERS);
+            r = coopLobbyAdd(CLROW_JOINPUBLIC, i, label, coopBrowseLocked(i) ? "Password\n" : "Join\n");
+            if (r != NULL && coopBrowseMembers(i) >= COOP_MAX_PLAYERS)
+            {
+                r->dim = TRUE;
+            }
+            if (coopBrowseTyping() == COOPBROWSE_TYPE_JOIN && coopBrowseTypingFor() == i)
+            {
+                char typed[32];
+
+                coopBrowseTypedMask(typed, sizeof(typed));
+                snprintf(label, sizeof(label), "Password: %s_\n", typed);
+                r = coopLobbyAdd(CLROW_TEXT, 0, label, "");
+                if (r != NULL)
+                {
+                    r->indent = 0xC;
+                }
+            }
+        }
+        if (k <= 0)
+        {
+            r = coopLobbyAdd(CLROW_TEXT, 0, (k < 0) ? "Looking for public games...\n" : "No public games right now\n", "");
+            if (r != NULL)
+            {
+                r->colour = PORT_SHEET_COL_DIM;
+            }
         }
         coopLobbyAdd(CLROW_HEAD, 0, "Friends Online\n", "");
         for (i = 0; i < coop_lobby_nfriends && coop_lobby_nrows < COOP_LOBBY_ROWS; i++)
@@ -9175,6 +9311,14 @@ static void coopLobbyBuild(void)
     }
 
     /* in a lobby: the players, host first */
+    if (coopLobbyNotice() != NULL)
+    {   /* who just came or went, a new host */
+        r = coopLobbyAdd(CLROW_TEXT, 0, coopLobbyNotice(), "");
+        if (r != NULL)
+        {
+            r->colour = COOP_LOBBY_COL_OK;
+        }
+    }
     coopLobbyAdd(CLROW_HEAD, 0, "Players\n", "");
     if (coopLobbyIsHost() || coopLobbyHasPartner())
     {
@@ -9271,12 +9415,91 @@ static void coopLobbyBuild(void)
     {
         if (!coopLobbyHasPartner())
         {
-            coopLobbyAdd(CLROW_TEXT, 0, "Connecting to the host...\n", "");
+            coopLobbyAdd(CLROW_TEXT, 0, coopBrowseChecking() ? "Checking the password...\n" : "Connecting to the host...\n", "");
         }
         coopLobbyAdd(CLROW_READY, 0, coopLobbySelfReady() ? "Cancel Ready\n" : "Ready Up\n", "");
         coopLobbyAdd(CLROW_TEXT, 0, COOP_VS_ON() ? "The host starts the match.\n" : "The host picks the mission.\n", "");
+        if (!COOP_VS_ON())
+        {   /* the host's campaign, which is ours too (cross-save, coop_stats.c) */
+            s32 stage, diff;
+            char label[48];
+
+            if (coopCampaignNext(&stage, &diff, label, sizeof(label) - 1))
+            {
+                char *paren = strstr(label, " (");
+                char value[24] = "";
+
+                if (paren != NULL)
+                {
+                    *paren = '\0';
+                    snprintf(value, sizeof(value), "%s", paren + 2);
+                    if (strchr(value, ')') != NULL)
+                    {
+                        strcpy(strchr(value, ')'), "\n");
+                    }
+                }
+                strcat(label, "\n");
+                if (strncmp(label, "Continue:", 9) == 0)
+                {   /* the host starts it: "Next: Runway" */
+                    memmove(label, label + 4, strlen(label + 4) + 1);
+                    memcpy(label, "Next:", 5);
+                }
+                r = coopLobbyAdd(CLROW_TEXT, 0, label, value);
+                if (r != NULL)
+                {
+                    r->colour = PORT_SHEET_COL_DIM;
+                }
+            }
+        }
     }
-    coopLobbyAdd(CLROW_LEAVE, 0, "Leave Lobby\n", "");
+    if (coopLobbyIsHost() && coopLobbyHasPartner())
+    {   /* the lobby goes on without us: the next player hosts */
+        coopLobbyAdd(CLROW_LEAVE, 0, "Leave Lobby\n", "Hand Over\n");
+    }
+    else
+    {
+        coopLobbyAdd(CLROW_LEAVE, 0, "Leave Lobby\n", "");
+    }
+
+    /* chat: the newest lines, and a row (or the chat key) to type one (coop_chat.c) */
+    if (coopLobbyHasPartner())
+    {
+        char lines[COOP_LOBBY_CHAT_LINES + 1][80];
+        s32 who[COOP_LOBBY_CHAT_LINES + 1];
+        s32 n = coopFeedLines(COOP_LOBBY_CHAT_LINES, lines, who);
+
+        coopLobbyAdd(CLROW_HEAD, 0, "Chat\n", "");
+        for (i = 0; i < n; i++)
+        {
+            if (who[i] == -2)
+            {
+                continue;   /* the line being typed is the Chat row's */
+            }
+            coopLobbyCopyName(name, sizeof(name), lines[i]);
+            r = coopLobbyAdd(CLROW_TEXT, 0, name, "");
+            if (r != NULL)
+            {
+                r->wide = TRUE;
+                r->colour = coopLobbyChatColour(who[i]);
+            }
+        }
+        if (coopChatTyping())
+        {
+            char typed[80];
+
+            coopChatTypedLine(typed, sizeof(typed));
+            snprintf(name, sizeof(name), "Say: %s_\n", typed);
+            r = coopLobbyAdd(CLROW_TEXT, 0, name, "");
+            if (r != NULL)
+            {
+                r->wide = TRUE;
+            }
+        }
+        else
+        {
+            coopLobbyAdd(CLROW_CHAT, 0, "Type a Message\n", "T\n");
+        }
+    }
 
     /* the host's rules; the joiner sees them as the host sets them */
     coopLobbyAdd(CLROW_HEAD, 0, "Rules\n", "");
@@ -9304,7 +9527,14 @@ static void coopLobbyBuild(void)
     {
         coopLobbyAdd(coopLobbyIsHost() ? CLROW_FRIENDLYFIRE : CLROW_TEXT, 0, "Friendly Fire\n",
                      coopSetting(COOPSET_FRIENDLYFIRE) ? "On\n" : "Off\n");
+        coopLobbyAdd(coopLobbyIsHost() ? CLROW_HOSTLEAVES : CLROW_TEXT, 0, "Host Leaves\n",
+                     coopHostLeavesName(coopSetting(COOPSET_HOSTLEAVES)));
     }
+    if (coopLobbyIsHost())
+    {
+        coopLobbyAddHostOptions();
+    }
+    coopLobbyAddControls();
 
     for (i = 0, k = 0; i < COOP_MAX_PLAYERS; i++)
     {
@@ -9393,6 +9623,58 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
         case CLROW_VSSTART:
             coopVsHostStart();
             break;
+        case CLROW_CHAT:
+            coopChatPress();
+            break;
+        case CLROW_PUBLIC:
+            coopBrowseTogglePublic();
+            break;
+        case CLROW_PASSWORD:
+            coopBrowseTypeStart(COOPBROWSE_TYPE_HOST, 0);
+            break;
+        case CLROW_JOINPUBLIC:
+            coopBrowseJoin(r->arg);
+            break;
+        case CLROW_LAYOUT:
+        {   /* the first controller: the next shipped or saved layout */
+            const char *shown = portInputLayoutShown(1);
+            const s32 n = portInputLayoutCount();
+            s32 i, cur = -1;
+
+            for (i = 0; shown != NULL && i < n; i++)
+            {
+                if (strcmp(portInputLayoutName(i), shown) == 0)
+                {
+                    cur = i;
+                    break;
+                }
+            }
+            if (n > 0)
+            {
+                portInputLayoutApply(1, (cur + 1) % n);
+            }
+            break;
+        }
+        case CLROW_OPTION:
+        {
+            const s32 opt = portOptFind(coop_lobby_opts[r->arg][0]);
+
+            if (opt >= 0)
+            {
+                const s32 y = (strcmp(coop_lobby_opts[r->arg][0], "mouse_sens_x") == 0) ? portOptFind("mouse_sens_y") : -1;
+                const s32 tied = (y >= 0 && portOptGet(y) == portOptGet(opt));
+
+                portOptStep(opt, 1);
+                if (tied)
+                {
+                    portOptStep(y, 1);  /* up and down kept with it, unless the player set them apart */
+                }
+            }
+            break;
+        }
+        case CLROW_HOSTLEAVES:
+            coopSetSetting(COOPSET_HOSTLEAVES, (coopSetting(COOPSET_HOSTLEAVES) + 1) % coopHostLeavesCount());
+            break;
         default:
             break;
     }
@@ -9407,6 +9689,7 @@ void init_menu1D_cooplobby(void)
     tab_start_highlight = FALSE;
     coop_lobby_hot = -1;
     coop_lobby_ticks = 0;
+    coop_lobby_scroll = 0;
     selected_folder_num = (selected_folder_num >= FOLDER1) ? selected_folder_num : FOLDER1;
     if (gamemode == GAMEMODE_MULTI && coopVsPlayers() >= 2)
     {   /* back from an online versus match, in co-op's mode of play */
@@ -9420,7 +9703,7 @@ void init_menu1D_cooplobby(void)
         const char *e = getenv("GE_COOP_LOBBY");
         const char *v = getenv("GE_COOP_VERSUS");   /* harness: applied once hosting */
 
-        coop_lobby_auto = (e != NULL && strchr("hijw", e[0]) != NULL && e[0] != '\0') ? e[0] : -1;
+        coop_lobby_auto = (e != NULL && strchr("hijwb", e[0]) != NULL && e[0] != '\0') ? e[0] : -1;
         coop_vs_harness = (coop_lobby_auto == 'h' || coop_lobby_auto == 'i') ? v : NULL;
     }
     coopLobbyBuild();
@@ -9468,6 +9751,10 @@ static void coopLobbyHarness(void)
         {
             coopLobbyHost();
         }
+        else if (coop_lobby_auto == 'b')
+        {
+            coopBrowseHarnessJoin();
+        }
         else
         {
             s32 i;
@@ -9490,7 +9777,7 @@ static void coopLobbyHarness(void)
         coopLobbyInvite(0);
         coop_lobby_invited[0] = 1;
     }
-    if ((coop_lobby_auto == 'j' || coop_lobby_auto == 'w') && state == COOPLOBBY_JOINED && coopLobbyHasPartner() && !coopLobbySelfReady())
+    if ((coop_lobby_auto == 'j' || coop_lobby_auto == 'w' || coop_lobby_auto == 'b') && state == COOPLOBBY_JOINED && coopLobbyHasPartner() && !coopLobbySelfReady())
     {
         portConLogf("ge: coop lobby: ready\n");
         coopLobbySetReady(TRUE);
@@ -9575,6 +9862,36 @@ void interface_menu1D_cooplobby(void)
         return;   /* the harness started a mission */
     }
 
+    {   /* the chat key types a line here too (coop_chat.c) */
+        extern s32 portJoyPortChatPressed(void);   /* joy_port.c */
+
+        if (portJoyPortChatPressed() && coopLobbyHasPartner())
+        {
+            coopChatPress();
+        }
+    }
+    if (coopChatTyping() || coopBrowseTyping())
+    {   /* the keys are the chat line's (or the password's); the rows wait */
+        frontUpdateControlStickPosition();
+        return;
+    }
+    if (coop_lobby_scroll > coop_lobby_nrows - COOP_LOBBY_VISIBLE)
+    {
+        coop_lobby_scroll = (coop_lobby_nrows > COOP_LOBBY_VISIBLE) ? coop_lobby_nrows - COOP_LOBBY_VISIBLE : 0;
+    }
+    if ((coop_lobby_ticks % 6) == 0 && cursor_h_pos >= (f32) (COOP_LOBBY_X - 8) && cursor_h_pos < (f32) PORT_SHEET_HELP_X1)
+    {   /* more rows than the paper holds: the cursor at the top or bottom edge scrolls */
+        if (cursor_v_pos >= (f32) (COOP_LOBBY_Y0 + (COOP_LOBBY_VISIBLE - 1) * COOP_LOBBY_PITCH + 8)
+            && coop_lobby_scroll + COOP_LOBBY_VISIBLE < coop_lobby_nrows)
+        {
+            coop_lobby_scroll++;
+        }
+        else if (cursor_v_pos < (f32) (COOP_LOBBY_Y0 - 6) && coop_lobby_scroll > 0)
+        {
+            coop_lobby_scroll--;
+        }
+    }
+
     coop_lobby_hot = -1;
     if (frontCheckCursorOnPreviousTab())
     {
@@ -9588,9 +9905,9 @@ void interface_menu1D_cooplobby(void)
     else if (coop_lobby_ticks > 10   /* a press still down from the last screen is not for these rows */
              && cursor_h_pos >= (f32) (COOP_LOBBY_X - 8) && cursor_h_pos < (f32) PORT_SHEET_HELP_X1)
     {
-        for (i = 0; i < coop_lobby_nrows; i++)
+        for (i = coop_lobby_scroll; i < coop_lobby_nrows && i < coop_lobby_scroll + COOP_LOBBY_VISIBLE; i++)
         {
-            const f32 y = (f32) (COOP_LOBBY_Y0 + i * COOP_LOBBY_PITCH);
+            const f32 y = (f32) (COOP_LOBBY_Y0 + (i - coop_lobby_scroll) * COOP_LOBBY_PITCH);
 
             if (cursor_v_pos >= y - 3.0f && cursor_v_pos < y - 3.0f + (f32) COOP_LOBBY_PITCH)
             {
@@ -9658,21 +9975,34 @@ Gfx *constructor_menu1D_cooplobby(Gfx *DL)
     y = PORT_SHEET_TITLE_Y;
     DL = frontPrintText(DL, &x, &y, "CO-OP LOBBY\n", ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
 
-    for (i = 0; i < coop_lobby_nrows; i++)
+    for (i = coop_lobby_scroll; i < coop_lobby_nrows && i < coop_lobby_scroll + COOP_LOBBY_VISIBLE; i++)
     {
         const struct CoopLobbyRow *r = &coop_lobby_rows[i];
-        const char *label = portSheetFitText(r->label, COOP_LOBBY_LABEL_W);
+        const s32 slot = i - coop_lobby_scroll;
         s32 lx = COOP_LOBBY_X + ((r->kind == CLROW_HEAD) ? 0 : 8) + r->indent;
+        const char *label = portSheetFitText(r->label, r->wide ? PORT_SHEET_RULE_R - lx : COOP_LOBBY_LABEL_W);
         s32 colour = r->dim ? PORT_SHEET_COL_DIM : r->colour;
 
+        if ((slot == 0 && coop_lobby_scroll > 0) || (slot == COOP_LOBBY_VISIBLE - 1 && i + 1 < coop_lobby_nrows))
+        {   /* more above or below: a small mark at the right */
+            s32 mx = PORT_SHEET_RULE_R - 0x10;
+            s32 my = COOP_LOBBY_Y0 + slot * COOP_LOBBY_PITCH;
+
+            DL = frontPrintText(DL, &mx, &my, (slot == 0) ? "...\n" : "more\n", ptrFontZurichBoldChars, ptrFontZurichBold,
+                                PORT_SHEET_COL_DIM, viGetX(), viGetY(), 0, 0);
+            if (slot != 0)
+            {
+                continue;
+            }
+        }
         if (r->kind == CLROW_HEAD)
         {   /* a heading with a pencil rule under it, like the Control sheet's */
-            const s32 ry = COOP_LOBBY_Y0 + i * COOP_LOBBY_PITCH + 0xF;
+            const s32 ry = COOP_LOBBY_Y0 + slot * COOP_LOBBY_PITCH + 0xF;
 
             DL = microcode_constructor_related_to_menus(DL, COOP_LOBBY_X - 2, ry, PORT_SHEET_RULE_R, ry + 1, PORT_SHEET_COL_RULE);
             DL = microcode_constructor(DL);
         }
-        y = COOP_LOBBY_Y0 + i * COOP_LOBBY_PITCH;
+        y = COOP_LOBBY_Y0 + slot * COOP_LOBBY_PITCH;
         if (i == coop_lobby_hot)
         {
             textMeasure(&th, &tw, (char *) label, ptrFontZurichBoldChars, ptrFontZurichBold, 0);
@@ -9683,7 +10013,7 @@ Gfx *constructor_menu1D_cooplobby(Gfx *DL)
         if (r->value[0] != '\0')
         {
             x = COOP_LOBBY_VALUE_X;
-            y = COOP_LOBBY_Y0 + i * COOP_LOBBY_PITCH;
+            y = COOP_LOBBY_Y0 + slot * COOP_LOBBY_PITCH;
             DL = frontPrintText(DL, &x, &y, (char *) r->value, ptrFontZurichBoldChars, ptrFontZurichBold,
                                 (r->colour == COOP_LOBBY_COL_OK) ? COOP_LOBBY_COL_OK : (r->dim ? PORT_SHEET_COL_DIM : 0xFF),
                                 viGetX(), viGetY(), 0, 0);
@@ -9792,6 +10122,13 @@ static Gfx *coopDebriefStats(Gfx *DL, s32 y0, s32 pitch)
             y = y0 + (i + 1) * pitch + 2;
             DL = frontPrintText(DL, &x, &y, buf, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
         }
+    }
+    if (coopPhotoCount() > 0)
+    {   /* photo mode's shots from this mission (coop_photo.c) */
+        sprintf(buf, "Photos: %d, in the Photos folder\n", (int) coopPhotoCount());
+        x = 0x37;
+        y = y0 + (i + 1) * pitch + 4;
+        DL = frontPrintText(DL, &x, &y, buf, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
     }
     return DL;
 }
@@ -18384,7 +18721,11 @@ Gfx *constructor_menu0D_missioncomplete(Gfx *DL)
     DL = frontSetupMenuBackground(DL);
     DL = microcode_constructor(DL);
 
+#ifndef TARGET_N64
+    missiontimer = coopTeamTimer();     /* co-op: the team's (the host's) time (coop_teamtime.c) */
+#else
     missiontimer = getMissiontimer();
+#endif
     killcount = get_curplay_killcount();
     shotsfired = get_curplayer_shot_register(0);
     headshots = get_curplayer_shot_register(1);

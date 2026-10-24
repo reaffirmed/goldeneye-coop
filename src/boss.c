@@ -947,7 +947,11 @@ void bossReturnTitleStage(void) {
         portMissionEndLog(bossGetStageNum(), objectiveIsAllComplete());
     }
 #endif
+#ifndef TARGET_N64
+    if ((bossGetStageNum() != LEVELID_CUBA) && (objectiveIsAllComplete() != 0x0 || getenv("GE_COOP_TESTWIN") != NULL)) { /* harness: any end is a win */
+#else
     if ((bossGetStageNum() != LEVELID_CUBA) && (objectiveIsAllComplete() != 0x0)) {
+#endif
         end_of_mission_briefing();
     }
     bossRunTitleStage();

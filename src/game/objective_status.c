@@ -375,6 +375,12 @@ void display_objective_status_text_on_status_change(void)
         status = get_status_of_objective(i);
         if (objectiveStatuses[i] != status) {
             objectiveStatuses[i] = status;
+#ifndef TARGET_N64
+            if (get_difficulty_for_objective(i) <= lvlGetSelectedDifficulty())
+            {
+                coopObjStatusChanged(i, availableindex, status);   /* co-op: who gets the credit (coop_objective.c) */
+            }
+#endif
             if (get_difficulty_for_objective(i) <= lvlGetSelectedDifficulty()) {
                 if (j_text_trigger != 0)
                 {

@@ -280,7 +280,152 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscen
   sees Natalya with PP7 then KF7, muzzle flash and wall sparks from her
   shots; 3 and 4 player lobbies list each character.
 
-## Online versus (2026-10-24, COOP_VERSION 7)
+## Pings (2026-10-24)
+
+- src/game/coop_ping.c. Key `ping` (default Mouse Middle, unbound on pads;
+  PORTACT_PING and pad map +31, appended; bind row "Ping"). The crosshair's
+  line (bullet_path_from_screen_center, right hand) is traced like a shot:
+  stan tiles for where the floor runs out, then the standing room and every
+  drawn room with bgTestBulletHitBackground, nearest wins; then on-screen
+  living chrs (not puppets) as 35-wide, 190-tall cylinders from chr->ground,
+  if nearer. Nothing is damaged. 20-tick cooldown; 200 m range.
+- COOPEV_PING = 16 (12..15 are the host-leaving work's, 20+ the next
+  feature batch's, 32+ versus) to everyone: pos, room, chrnum, stage, kind
+  (spot / enemy). One ping per player, 10 s, the last 2 s fading. An enemy
+  ping follows chrFindByLiteralId(chrnum) (mirrored guards keep chrnums) and
+  ends a second after the guard dies. A ping from another stage is dropped.
+- HUD (coop_hud.c coopHudPing): diamond in the pinger's colour (red edge for
+  an enemy), a closing ring for the first half second, "NAME 12M" or
+  "ENEMY 12M" at 0.6 scale; off screen or behind, clamped to the view's
+  edge toward it. Radar: hollow square, blinking for the first second.
+  Receivers get a BEEP_SFX and "<name> pinged a spot." / "spotted an enemy.".
+- Bug found on the way: a channel's numbering only started at 1 after
+  coopSessionReset, which GE_COOP / -coophost / -coopjoin (the .bat
+  launchers) never called, so the first event on each channel sat at seq 0
+  and was never sent (a first door or pickup could be lost). coopNetInitFirst
+  now resets before the first coopNetInit.
+- Harness: GE_COOP_TESTPING=<s>[:<pitch>] presses ping <s> seconds into the
+  mission, looking <pitch> degrees (default -20, negative is down) for the
+  second before; GE_COOP_TESTPINGCHR=<chrnum> (-1 the nearest living guard)
+  aims at that guard instead, GE_COOP_TESTPINGSTEP=<units> first moves that
+  far from it. Verified on Dam with the mock: joiner's floor ping 4 m ahead
+  on both games; host's enemy ping on guard 6 (TESTPINGCHR=-1 STEP=500)
+  shown as ENEMY on both, the joiner's through the rock; 3 copies, player
+  3's ping relayed by the host to 1 and 2, on player 2's screen held to the
+  bottom edge (it lay at their feet).
+
+## Host leaving and migration (2026-10-24, COOP_VERSION 6)
+
+- Ids: COOPPKT_AISYNC 8, COOPPKT_BYE 9; COOPEV_PLAYERNOTE 12, COOPEV_ENDALL 13
+  (14, 15 kept for this); COOPSET_HOSTLEAVES (was SPARE7). Other threads
+  claimed COOPEV 16 (ping), 20..31 and COOPPKT 10..11 (feature batch),
+  COOPSET_SPARE2..6, COOPEV 32+ and COOPPKT 16 (versus).
+- Detection is wall clock (coopNowMs = osGetTime()/46875), so a paused or
+  cutscene-locked game still counts: while g_ClockTimer <= 0, coopKeepAlive
+  sends a hello every 500 ms. A joiner that hears nothing from the host for
+  3 s shows a banner, waits 12 s more, then migrates. A COOPPKT_BYE (3
+  copies, sent from atexit, Leave Lobby and the watch Abort) or Steam
+  reporting the owner left the lobby migrates at once.
+- Election: lowest player number left in the old host's roster. Everyone
+  renumbers in roster order (new host = player 0) with coopRenumber, which
+  remaps sR, puppet chrnums (30000+p), roster, channels and coopStatsRemap.
+  The new host reserves transport slots from the roster ids (UDP:
+  addr<<16|port, Steam: SteamID) via coopNetMigrate. A follower with no
+  hello from the new host in 8 s elects again without that player.
+- World: the host sends COOPPKT_AISYNC every 60 ticks (ailist id, aioffset,
+  action, damage and a few AI fields per chr). coopTakeOverWorld rebuilds AI
+  from it on the new host: dead chrs ACT_DEAD, live ones ACT_INIT so their
+  scripts restart from the synced offset. Doors, objects and objectives were
+  already mirrored on joiners, so they carry over.
+- Steam: optional SetLobbyOwner; lobby data "gehost" names the host so a
+  rejoiner finds the right player even before ownership moves. The mock
+  stores owner and gehost in /tmp/gecoop-mock, and CloseSessionWithUser now
+  drops the peer like real Steam (needed for rejoin).
+- Joiner drop, on the host: 3 s silence = lost (Bond idle, coopRemoteAliveHere
+  false so guards and scripts ignore it), 30 s = slot freed. The host
+  broadcasts COOPEV_PLAYERNOTE (LOST/BACK/GONE/LEFT/LEFTMISSION). A joiner
+  whose hello is on another stage left the mission.
+- Watch Abort as host with partners: first confirm turns the row into
+  "HOST: END ALL / HAND OVER". Hand Over sends a fresh AI sync and BYE
+  HANDOFF; End All sends reliable COOPEV_ENDALL and everyone goes to the
+  lobby (coopEndMissionLocal: mission state 0, title stage, no save reset).
+- Harness: coop/docker/host_drop.sh (PLAYERS, KILL, KILLAT, REJOIN, SHOTS,
+  RUNSECS, ALLENV/HOSTENV/P<i>ENV); GE_COOP_HOSTLEAVES=0|1,
+  GE_COOP_TESTABORT=<s>:handover|endall, GE_COOP_TESTABORTUI=1 (shows the
+  host prompt on the watch). Verified with the Steam mock: host killed with
+  3 and 2 players (mission goes on, guards keep fighting, dead guards stay
+  dead), old host rejoins as a late joiner, joiner killed (lost, then
+  removed at 30 s), Hand Over, End All, and Back to Lobby.
+
+## Feature batch: chat, objective credit, team times, cross-save, spectate, public games, lobby controls, photo mode (2026-10-24, COOP_VERSION 7)
+
+- Ids: COOPEV 20..31 are coop_ext.c's (CHAT 20, OBJDONE 22, TEAMTIME 23,
+  CAMPAIGN 24; 21 and 25..31 free), COOPPKT 10..11 (TEAMTIME 10). coop.c
+  hands those to coopExtApply / coopExtPacket and calls coopExtTick in
+  missions (coopTick) and menus (coopFrontTick). No COOPSET. Binds appended
+  after ping: chat (+32, T), photo_mode (+33, P).
+- Chat (coop_chat.c): the port text input (portTextInputStart); a line of up
+  to 63 characters goes as up to 3 events of 24. Feed bottom left, 6 lines,
+  10 s, player colours; toasts (coopFeedToast, '|' splits two lines) centred
+  3/8 down. In the lobby the latest 3 lines and a "Type a Message" row.
+  Escape closes the line without opening the watch (coopChatEatEscape).
+  Harness: GE_COOP_TESTCHAT=<s>:<text> (mission), GE_COOP_TESTLOBBYCHAT.
+- Objective credit (coop_objective.c): the host notes who changed the world
+  (coopObjNoteActor from WORLD bits, pickups, shots, damage, explosions; our
+  own shots in coop_look.c; chrai.c's "either player" checks through
+  coopAltBondCredit). When an objective turns complete on the host the credit
+  is whoever acted in the last 3 ticks, else the last damage in 5 s, else the
+  host; COOPEV_OBJDONE to all, toast unless it is ours. Harness:
+  GE_COOP_TESTOBJDONE=<s> (Bunker has room criteria; Dam has none).
+- Team time (coop_teamtime.c): the host sends its mission timer each second
+  (COOPPKT_TEAMTIME) and the exact time before MISSIONEND (COOPEV_TEAMTIME);
+  a joiner runs the last one on with its own clock. end_of_mission_briefing
+  and the debrief use coopTeamTimer, so best times and target-time cheats go
+  by the team's time. A joiner that ended the mission itself corrects its
+  save when the exact time comes (coopTeamTimeCorrect).
+- Cross-save (coop_stats.c): the host sends its furthest campaign line once
+  per joiner (COOPEV_CAMPAIGN); the joiner writes it under the host's key in
+  its coop_campaign.txt and shows "Next: <mission>" in the lobby.
+  two_player_split.sh runs the joiner from build_p2 so each has its own files.
+- Spectate (coop_spectate.c): once coopDeadTick owns the death (after the
+  fade to black), the view fades back in (light red wash) through a standing
+  partner's eyes. bondviewRenderDebugBondView takes the camera from
+  coopSpectateCamera, and bondviewGetCurrentPlayersRoom / Position /
+  Position3 the partner's room and position (portal visibility, fog). The
+  watched puppet is hidden (CHRFLAG_HIDDEN, as when both stand on one pad)
+  and so is its name tag. Fire (Z) cycles partners. coopSpectateStop on
+  respawn, revive and mission failure. Verified with the host 40 m away and
+  turned: the joiner's view matched the host's screen.
+- Public games and password (coop_browse.c, port/src/coop_steam.c): lobby
+  type friends-only or public (SetLobbyType, live), lobby data gever (the
+  COOP_VERSION, the list filters on it), host (persona name), pw (0/1).
+  RequestLobbyList with string filters gecoop=1 and gever, worldwide, every
+  5 s while the lobby screen is idle. The password never enters the game's
+  packets: a stranger's game sends GEPW + FNV-1a(password, lobby id) to the
+  host on the transport (8-byte message, intercepted in coopSteamRecvFrom);
+  the host's onSessionRequest accepts the session but only setPeer()s a
+  stranger after a matching GEPW (GEPA back, or GEPR, after which the joiner
+  leaves and the lobby screen says "Wrong password."). Steam friends
+  (GetFriendRelationship == 3) skip it. After a host migration the new host
+  keeps the lobby's type but has no password. The mock stores lobby data in
+  <lobby>.data and lists public lobbies. Harness: two_player_public.sh
+  (HOSTPW, JOINPW; copies that are not friends; GE_COOP_LOBBY=browse).
+- Lobby controls (front.c coopLobbyAddControls): "Your Controls": controller
+  layout preset of device 1 (portInputLayoutApply), hfov_wide, mouse,
+  mouse_sens_x (and _y with it when they were equal) via portOptStep.
+- Photo mode (coop_photo.c): P toggles, solo or co-op, when Bond could move.
+  Locks controls (lvlSetControlsLockedFlag) and takes the look delta in
+  bondview2.c before the lock drops it; the C buttons / stick fly the camera
+  along the view. xz moves only where walkTilesBetweenPoints_NoCallback
+  reaches from the camera's tile; y 15..400 over that floor; 800 units from
+  Bond's eyes. Camera and room go through the same hooks as spectate;
+  maybe_mp_interface draws only coopPhotoRender (a hint, hidden for the 8
+  ticks around a shot). The shot is gfx_sdl2.cpp's GE_SHOT writer with
+  ge_shot_path set: Photos/GE-<stage>-<date>-<time>-<n>.bmp beside the exe.
+  The co-op debrief says how many. Harness: GE_PHOTO_TEST=<s>. A replay was
+  ruled out: nothing records the world, and recording every guard, door
+  and shot for playback is much heavier than photo mode.
+## Online versus (2026-10-24, COOP_VERSION 8)
 
 - The lobby's Rules section starts with Mode: Co-op / Versus (host only;
   COOPSET_VSMODE bit 0). Versus shows Arena, Scenario, Game Length and Weapons

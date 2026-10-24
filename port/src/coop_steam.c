@@ -7,9 +7,14 @@
  * needed. Struct fields are read at fixed byte offsets, because the DLL is
  * built with 8-byte packing and gcc on i686 aligns 64-bit fields to 4.
  *
- * Host:  creates a friends-only lobby, advertises it in rich presence and
- *        opens the invite overlay. Friends join with Join Game, an invite,
- *        or by starting with GE_COOP=steam:join.
+ * Host:  creates a friends-only lobby (or a public one, listed in the lobby
+ *        screen's Public Games), advertises it in rich presence and opens
+ *        the invite overlay. Friends join with Join Game, an invite, or by
+ *        starting with GE_COOP=steam:join.
+ * Password: a host can set one. Its Steam friends get in without it; anyone
+ *        else's game sends it (hashed with the lobby id) as a GEPW message
+ *        when it enters the lobby, and the host takes it as a player only
+ *        once that matches (GEPA back), or turns it away (GEPR).
  * Join:  GE_COOP=steam:join:<lobbyid>, "+connect_lobby <id>" from Steam, an
  *        accepted invite, or, with no id, the first friend found hosting.
  *
@@ -46,6 +51,15 @@ typedef unsigned char sbool; /* C++ bool in the DLL: only the low byte is set */
 
 #define APPID_SPACEWAR 480
 #define LOBBY_KEY "gecoop"
+#define LOBBY_KEY_VERSION "gever"   /* the game's co-op protocol: the list shows only ours */
+#define LOBBY_KEY_NAME "host"
+#define LOBBY_KEY_PASSWORD "pw"
+
+/* the password handshake: transport-level messages, never handed to the game */
+#define PW_ASK    0x57504547u   /* "GEPW" + the hash */
+#define PW_OK     0x41504547u   /* "GEPA" */
+#define PW_NO     0x52504547u   /* "GEPR" */
+#define LOBBY_HOST_KEY "gehost"   /* the host's SteamID, once the host is not the lobby's creator */
 
 /* callback ids */
 enum
@@ -53,6 +67,7 @@ enum
     CB_GameLobbyJoinRequested = 333,
     CB_GameRichPresenceJoinRequested = 337,
     CB_LobbyEnter = 504,
+    CB_LobbyMatchList = 510,
     CB_LobbyChatUpdate = 506,
     CB_LobbyCreated = 513,
     CB_SteamAPICallCompleted = 703,
@@ -102,6 +117,13 @@ static int (*pReceiveMessagesOnChannel)(void *self, int channel, void **out, int
 static sbool (*pAcceptSessionWithUser)(void *self, const void *ident);
 static sbool (*pCloseSessionWithUser)(void *self, const void *ident);
 static void (*pMessageRelease)(void *msg);
+static u64s (*pRequestLobbyList)(void *self);
+static void (*pAddLobbyStringFilter)(void *self, const char *key, const char *value, int cmp);
+static void (*pAddLobbyDistanceFilter)(void *self, int filter);
+static u64s (*pGetLobbyByIndex)(void *self, int i);
+static sbool (*pSetLobbyType)(void *self, u64s lobby, int type);
+static int (*pGetFriendRelationship)(void *self, u64s user);
+static sbool (*pSetLobbyOwner)(void *self, u64s lobby, u64s owner);   /* optional */
 
 static void *sLib;
 static void *sUser, *sMM, *sFriends, *sNM;
@@ -119,6 +141,8 @@ static unsigned int sPolls;
 static int sSenderOfs;      /* 12 or 16, see coopSteamRecv */
 static int sReady;          /* the library is loaded and SteamAPI is up */
 static int sOverlay;        /* host: open Steam's invite overlay with the lobby */
+static int sHostLeft;       /* joiner: the host left the lobby (the game picks a new one) */
+static int sHostTagged;     /* host after a migration: the lobby says who hosts */
 
 /* the lobby screen's friend list, see coopSteamFriendsRefresh */
 #define MAX_FRIENDS 48
@@ -130,6 +154,29 @@ typedef struct
 } SteamFriend;
 static SteamFriend sFriendList[MAX_FRIENDS];
 static int sNumFriends;
+
+/* the host's lobby options (coopSteamSetLobbyOptions) */
+static int sPublic;
+static char sPassword[32];
+static char sVersion[8] = "0";
+/* a joiner's password for the lobby it is joining, and how that went */
+static char sJoinPassword[32];
+static int sAdmitWait;      /* in a passworded lobby: not taken as a player yet */
+static int sJoinRefused;    /* the host turned our password down */
+
+/* the lobby screen's Public Games, see coopSteamBrowseRefresh */
+#define MAX_PUBLIC 16
+typedef struct
+{
+    u64s lobby;
+    char name[32];
+    int members;
+    int locked;
+} SteamPublic;
+static SteamPublic sPublicList[MAX_PUBLIC];
+static int sNumPublic;
+static u64s sListCall;      /* a request is out */
+static int sListDone;       /* a list has come back at least once */
 
 static u64s rd64(const unsigned char *p)
 {
@@ -198,7 +245,14 @@ static int loadAll(void)
     L(pAcceptSessionWithUser, "SteamAPI_ISteamNetworkingMessages_AcceptSessionWithUser");
     L(pCloseSessionWithUser, "SteamAPI_ISteamNetworkingMessages_CloseSessionWithUser");
     L(pMessageRelease, "SteamAPI_SteamNetworkingMessage_t_Release");
+    L(pRequestLobbyList, "SteamAPI_ISteamMatchmaking_RequestLobbyList");
+    L(pAddLobbyStringFilter, "SteamAPI_ISteamMatchmaking_AddRequestLobbyListStringFilter");
+    L(pAddLobbyDistanceFilter, "SteamAPI_ISteamMatchmaking_AddRequestLobbyListDistanceFilter");
+    L(pGetLobbyByIndex, "SteamAPI_ISteamMatchmaking_GetLobbyByIndex");
+    L(pSetLobbyType, "SteamAPI_ISteamMatchmaking_SetLobbyType");
+    L(pGetFriendRelationship, "SteamAPI_ISteamFriends_GetFriendRelationship");
 #undef L
+    pSetLobbyOwner = (sbool (*)(void *, u64s, u64s)) LIB_SYM(sLib, "SteamAPI_ISteamMatchmaking_SetLobbyOwner");
     pSteamFriends = (void *(*)(void)) LIB_SYM(sLib, "SteamAPI_SteamFriends_v018");
     if (pSteamFriends == NULL)
     {
@@ -312,6 +366,176 @@ static int isLobbyMember(u64s id)
     return 0;
 }
 
+/* FNV-1a over the password and the lobby id: the password itself never
+ * goes over the wire, and a hash for one lobby is no good for another */
+static unsigned int pwHash(const char *pw, u64s lobby)
+{
+    unsigned int h = 2166136261u;
+    int i;
+
+    for (i = 0; pw[i] != '\0'; i++)
+    {
+        h = (h ^ (unsigned char) pw[i]) * 16777619u;
+    }
+    for (i = 0; i < 8; i++)
+    {
+        h = (h ^ (unsigned char) (lobby >> (i * 8))) * 16777619u;
+    }
+    return h;
+}
+
+/* a short control message to anyone, peer or not */
+static void sendControl(u64s to, unsigned int kind, unsigned int arg)
+{
+    unsigned char ident[IDENTITY_SIZE];
+    unsigned int m[2];
+
+    m[0] = kind;
+    m[1] = arg;
+    memset(ident, 0, sizeof(ident));
+    pIdentSetSteamID64(ident, to);
+    pSendMessageToUser(sNM, ident, m, sizeof(m), SEND_UNRELIABLE_NONAGLE, 0);
+}
+
+static int isFriend(u64s id)
+{
+    return pGetFriendRelationship(sFriends, id) == 3 /* k_EFriendRelationshipFriend */;
+}
+
+/* host: the lobby's type and keys, as set now */
+static void applyLobbyOptions(void)
+{
+    char buf[48];
+
+    if (!sIsHost || sLobby == 0)
+    {
+        return;
+    }
+    pSetLobbyType(sMM, sLobby, sPublic ? 2 /* public */ : 1 /* friends only */);
+    pSetLobbyData(sMM, sLobby, LOBBY_KEY_VERSION, sVersion);
+    snprintf(buf, sizeof(buf), "%s", pGetFriendPersonaName(sFriends, sSelf));
+    pSetLobbyData(sMM, sLobby, LOBBY_KEY_NAME, buf);
+    pSetLobbyData(sMM, sLobby, LOBBY_KEY_PASSWORD, sPassword[0] != '\0' ? "1" : "0");
+}
+
+/* host: a control message from someone in the lobby (1 when it was one) */
+static int hostControl(u64s from, const unsigned char *data, int size)
+{
+    unsigned int m[2];
+
+    if (size != 8)
+    {
+        return 0;
+    }
+    memcpy(m, data, 8);
+    if (m[0] != PW_ASK)
+    {
+        return 0;
+    }
+    if (peerSlot(from) >= 0)
+    {
+        sendControl(from, PW_OK, 0);    /* in already; our answer was lost */
+    }
+    else if (isLobbyMember(from) && (sPassword[0] == '\0' || isFriend(from) || m[1] == pwHash(sPassword, sLobby)))
+    {
+        if (setPeer(-1, from) >= 0)
+        {
+            sendControl(from, PW_OK, 0);
+            portConLogf("ge: steam: %s joined (password)\n", pGetFriendPersonaName(sFriends, from));
+        }
+    }
+    else
+    {
+        sendControl(from, PW_NO, 0);
+        portConLogf("ge: steam: turned %llu away: wrong password\n", from);
+    }
+    return 1;
+}
+
+/* joiner: the host's answer to our password (1 when it was one) */
+static int joinControl(u64s from, const unsigned char *data, int size)
+{
+    unsigned int m[2];
+
+    if (size != 8 || from != sPeers[0])
+    {
+        return 0;
+    }
+    memcpy(m, data, 8);
+    if (m[0] == PW_OK)
+    {
+        if (sAdmitWait)
+        {
+            portConLogf("ge: steam: the host let us in\n");
+        }
+        sAdmitWait = 0;
+        return 1;
+    }
+    if (m[0] == PW_NO)
+    {
+        if (sAdmitWait)
+        {
+            portConLogf("ge: steam: wrong password for lobby %llu\n", sLobby);
+            sJoinRefused = 1;
+            dropAllPeers();
+            pLeaveLobby(sMM, sLobby);
+            sLobby = 0;
+            sJoinWanted = 0;
+            sJoinCall = 0;
+            sAdmitWait = 0;
+            pClearRichPresence(sFriends);
+        }
+        return 1;
+    }
+    return 0;
+}
+
+static void onLobbyList(const unsigned char *p)
+{
+    int n = (int) rd32(p);
+    int i;
+
+    sListCall = 0;
+    sListDone = 1;
+    sNumPublic = 0;
+    for (i = 0; i < n && sNumPublic < MAX_PUBLIC; i++)
+    {
+        u64s lobby = pGetLobbyByIndex(sMM, i);
+        const char *v;
+        SteamPublic *e;
+
+        /* each answer is read before the next call: the string may not outlive it */
+        v = pGetLobbyData(sMM, lobby, LOBBY_KEY);
+        if (lobby == 0 || lobby == sLobby || v == NULL || strcmp(v, "1") != 0)
+        {
+            continue;
+        }
+        e = &sPublicList[sNumPublic];
+        e->lobby = lobby;
+        v = pGetLobbyData(sMM, lobby, LOBBY_KEY_PASSWORD);
+        e->locked = (v != NULL && strcmp(v, "1") == 0);
+        v = pGetLobbyData(sMM, lobby, LOBBY_KEY_NAME);
+        snprintf(e->name, sizeof(e->name), "%s", (v != NULL && v[0] != '\0') ? v : "?");
+        e->members = pGetNumLobbyMembers(sMM, lobby);
+        sNumPublic++;
+    }
+    portConLogf("ge: steam: %d public game(s) listed\n", sNumPublic);
+}
+
+/* Who hosts a lobby: its owner, unless a migration moved the game to
+ * another member (LOBBY_HOST_KEY, set by the owner once it is the host). */
+static u64s lobbyHost(u64s lobby)
+{
+    const char *h = pGetLobbyData(sMM, lobby, LOBBY_HOST_KEY);
+    u64s id = (h != NULL && h[0] != '\0') ? strtoull(h, NULL, 10) : 0;
+
+    if (id != 0 && id != sSelf && isLobbyMember(id))
+    {
+        return id;
+    }
+    return pGetLobbyOwner(sMM, lobby);
+}
+
 static void joinLobby(u64s lobby)
 {
     if (sLobby == lobby || lobby == 0)
@@ -366,6 +590,7 @@ static void onLobbyCreated(const unsigned char *p)
     }
     sLobby = lobby;
     pSetLobbyData(sMM, lobby, LOBBY_KEY, "1");
+    applyLobbyOptions();
     snprintf(buf, sizeof(buf), "+connect_lobby %llu", lobby);
     pSetRichPresence(sFriends, "connect", buf);
     pSetRichPresence(sFriends, "status", "Hosting GoldenEye co-op");
@@ -407,7 +632,9 @@ static void onLobbyEnter(const unsigned char *p)
     }
     sLobby = lobby;
     dropAllPeers();
-    setPeer(0, pGetLobbyOwner(sMM, lobby));
+    setPeer(0, lobbyHost(lobby));
+    tag = pGetLobbyData(sMM, lobby, LOBBY_KEY_PASSWORD);
+    sAdmitWait = (tag != NULL && strcmp(tag, "1") == 0);
     pSetRichPresence(sFriends, "status", "Playing GoldenEye co-op");
     portConLogf("ge: steam: in lobby %llu, host %s\n", lobby, pGetFriendPersonaName(sFriends, sPeers[0]));
 }
@@ -425,11 +652,38 @@ static void onChatUpdate(const unsigned char *p)
         return;
     }
     portConLogf("ge: steam: %s left\n", pGetFriendPersonaName(sFriends, who));
-    dropPeer(slot);
     if (!sIsHost)
+    {   /* the host: keep the lobby and the slot, the game picks a new host
+         * among those still here (coopNetMigrate) */
+        sHostLeft = 1;
+        return;
+    }
+    dropPeer(slot);
+}
+
+/* After a migration Steam's owner of the lobby (whoever it handed it to
+ * when the old host left) may not be the game's host: an owner that is not
+ * hosting passes it on, and the host says in the lobby that it hosts. */
+static void fixOwner(void)
+{
+    u64s owner;
+    char buf[64];
+
+    if (sLobby == 0 || (sPolls % 60) != 0)
     {
-        sLobby = 0;
-        sJoinWanted = 1; /* the host may come back with a new lobby */
+        return;
+    }
+    owner = pGetLobbyOwner(sMM, sLobby);
+    if (!sIsHost && owner == sSelf && sPeers[0] != 0 && pSetLobbyOwner != NULL && isLobbyMember(sPeers[0]))
+    {
+        portConLogf("ge: steam: passing the lobby to the host\n");
+        pSetLobbyOwner(sMM, sLobby, sPeers[0]);
+    }
+    if (sIsHost && !sHostTagged && owner == sSelf)
+    {
+        snprintf(buf, sizeof(buf), "%llu", sSelf);
+        pSetLobbyData(sMM, sLobby, LOBBY_HOST_KEY, buf);
+        sHostTagged = 1;
     }
 }
 
@@ -439,6 +693,11 @@ static void onSessionRequest(const unsigned char *p)
 
     if (peerSlot(from) >= 0)
     {
+        pAcceptSessionWithUser(sNM, p);
+        return;
+    }
+    if (sIsHost && isLobbyMember(from) && sPassword[0] != '\0' && !isFriend(from))
+    {   /* hear them out: they are a player once their password matches */
         pAcceptSessionWithUser(sNM, p);
         return;
     }
@@ -471,6 +730,9 @@ static void handle(int id, const unsigned char *p)
             break;
         case CB_LobbyChatUpdate:
             onChatUpdate(p);
+            break;
+        case CB_LobbyMatchList:
+            onLobbyList(p);
             break;
         case CB_GameLobbyJoinRequested:
             if (!sIsHost)
@@ -535,6 +797,11 @@ static void pump(void)
     {
         findHostingFriend();
     }
+    if (sAdmitWait && sPeers[0] != 0 && (sPolls % 30) == 0)
+    {
+        sendControl(sPeers[0], PW_ASK, pwHash(sJoinPassword, sLobby));
+    }
+    fixOwner();
     sPolls++;
 }
 
@@ -599,6 +866,13 @@ int coopSteamInit(const char *spec)
     sLobby = 0;
     sOverlay = 0;
     sJoinCall = 0;
+    sAdmitWait = 0;
+    if (strncmp(spec, "steam:join", 10) != 0)
+    {
+        sJoinPassword[0] = '\0';
+    }
+    sHostLeft = 0;
+    sHostTagged = 1;
 
     /* "steam" hosts and opens the invite overlay; "steam:host" hosts (the
      * lobby screen invites in game); "steam:idle" only brings Steam up;
@@ -610,6 +884,7 @@ int coopSteamInit(const char *spec)
     if (strncmp(spec, "steam:join", 10) == 0)
     {
         sIsHost = 0;
+        sJoinRefused = 0;
         if (spec[10] == ':' && spec[11] != '\0')
         {
             joinLobby(strtoull(spec + 11, NULL, 10));
@@ -624,7 +899,7 @@ int coopSteamInit(const char *spec)
     {
         sIsHost = 1;
         sOverlay = strcmp(spec, "steam:host") != 0;
-        sCreateCall = pCreateLobby(sMM, 1 /* friends only */, COOP_NET_MAX_PEERS + 1);
+        sCreateCall = pCreateLobby(sMM, sPublic ? 2 /* public */ : 1 /* friends only */, COOP_NET_MAX_PEERS + 1);
         portConLogf("ge: steam: creating a lobby\n");
     }
     return 1;
@@ -633,6 +908,51 @@ int coopSteamInit(const char *spec)
 int coopSteamIsHost(void)
 {
     return sIsHost;
+}
+
+/* see coopNetMigrate: the lobby stays, the peers change */
+void coopSteamMigrate(int ashost, const unsigned long long *ids, int n)
+{
+    char buf[64];
+    int i;
+
+    if (!sReady)
+    {
+        return;
+    }
+    dropAllPeers();
+    sIsHost = ashost;
+    sHostLeft = 0;
+    sJoinWanted = 0;
+    for (i = 0; i < n && i < COOP_NET_MAX_PEERS && (ashost || i == 0); i++)
+    {
+        if (ids[i] != 0)
+        {
+            setPeer(i, ids[i]);
+        }
+    }
+    if (!ashost)
+    {
+        portConLogf("ge: steam: new host %s\n", pGetFriendPersonaName(sFriends, sPeers[0]));
+        return;
+    }
+    portConLogf("ge: steam: hosting lobby %llu now\n", sLobby);
+    sHostTagged = 0;    /* fixOwner tags the lobby once Steam makes us its owner */
+    if (sLobby != 0)
+    {
+        if (pSetLobbyOwner != NULL && pGetLobbyOwner(sMM, sLobby) != sSelf)
+        {
+            pSetLobbyOwner(sMM, sLobby, sSelf);   /* refused unless we own it; the owner passes it on */
+        }
+        snprintf(buf, sizeof(buf), "+connect_lobby %llu", sLobby);
+        pSetRichPresence(sFriends, "connect", buf);
+        pSetRichPresence(sFriends, "status", "Hosting GoldenEye co-op");
+    }
+}
+
+int coopSteamHostLeft(void)
+{
+    return sReady && !sIsHost && sHostLeft;
 }
 
 int coopSteamHasPeer(void)
@@ -710,6 +1030,17 @@ int coopSteamRecvFrom(void *buf, int cap, int *peer)
             portConLogf("ge: steam: message sender read at offset %d\n", sSenderOfs);
         }
         from = pIdentGetSteamID64((void *) (m + sSenderOfs));
+        if (sIsHost ? hostControl(from, (const unsigned char *) data, size)
+                    : joinControl(from, (const unsigned char *) data, size))
+        {
+            pMessageRelease(msgs[0]);   /* the password handshake: ours, not the game's */
+            continue;
+        }
+        if (!sIsHost && sAdmitWait)
+        {
+            pMessageRelease(msgs[0]);   /* not in yet: the host is not talking to us */
+            continue;
+        }
         if (peerSlot(from) >= 0 && size > 0 && size <= cap)
         {
             memcpy(buf, data, (size_t) size);
@@ -743,6 +1074,7 @@ void coopSteamShutdown(void)
     sJoinCall = 0;
     sIsHost = 0;
     sJoinWanted = 0;
+    sAdmitWait = 0;
 }
 
 /* ---- the lobby screen ------------------------------------------------------- */
@@ -873,4 +1205,79 @@ void coopSteamInviteOverlay(void)
     {
         pInviteDialog(sFriends, sLobby);
     }
+}
+
+/* ---- public games and the password ------------------------------------------ */
+
+/* host: list the lobby publicly or for friends only, and its password ("" for
+ * none); the game's protocol version keys the list. Live while hosting. */
+void coopSteamSetLobbyOptions(int pub, const char *password, int version)
+{
+    sPublic = pub != 0;
+    snprintf(sPassword, sizeof(sPassword), "%s", password != NULL ? password : "");
+    snprintf(sVersion, sizeof(sVersion), "%d", version);
+    if (sReady)
+    {
+        applyLobbyOptions();
+    }
+}
+
+/* ask Steam for the public games of our version (the answer comes in a pump) */
+void coopSteamBrowseRefresh(void)
+{
+    if (!sReady || sListCall != 0)
+    {
+        return;
+    }
+    pAddLobbyStringFilter(sMM, LOBBY_KEY, "1", 0 /* equal */);
+    pAddLobbyStringFilter(sMM, LOBBY_KEY_VERSION, sVersion, 0);
+    pAddLobbyDistanceFilter(sMM, 3 /* worldwide */);
+    sListCall = pRequestLobbyList(sMM);
+}
+
+/* -1 still looking (no list yet), else how many */
+int coopSteamBrowseCount(void)
+{
+    return sListDone ? sNumPublic : -1;
+}
+
+const char *coopSteamBrowseName(int i)
+{
+    return (i >= 0 && i < sNumPublic) ? sPublicList[i].name : "";
+}
+
+int coopSteamBrowseMembers(int i)
+{
+    return (i >= 0 && i < sNumPublic) ? sPublicList[i].members : 0;
+}
+
+int coopSteamBrowseLocked(int i)
+{
+    return i >= 0 && i < sNumPublic && sPublicList[i].locked;
+}
+
+unsigned long long coopSteamBrowseLobby(int i)
+{
+    return (i >= 0 && i < sNumPublic) ? sPublicList[i].lobby : 0;
+}
+
+/* the password the next steam:join sends, if its lobby wants one */
+void coopSteamSetJoinPassword(const char *password)
+{
+    snprintf(sJoinPassword, sizeof(sJoinPassword), "%s", password != NULL ? password : "");
+}
+
+/* 1: in a passworded lobby, waiting for the host to check ours */
+int coopSteamAdmitWaiting(void)
+{
+    return sReady && sAdmitWait;
+}
+
+/* 1 once after the host turned our password down */
+int coopSteamJoinRefused(void)
+{
+    int r = sJoinRefused;
+
+    sJoinRefused = 0;
+    return r;
 }

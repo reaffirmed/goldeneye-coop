@@ -11,12 +11,20 @@
  * held until AcceptSessionWithUser, a message's sender identity sits at byte
  * 12 (the real 32-bit DLL's layout), and LobbyCreated arrives twice.
  *
+ * Lobby data lives in <lobby>.data (key=value lines, the creator and type
+ * among them), so a public lobby can be listed (RequestLobbyList) by a copy
+ * that is not the owner's friend. A member's <id>.lobby file names the lobby
+ * it is in, so friends see it there (as Steam's GetFriendGamePlayed does);
+ * <lobby>.owner holds SetLobbyOwner's value (any member may set it here, and
+ * any member may set lobby data; real Steam lets only the owner).
+ *
  * Build: gcc -m32 -shared -fPIC -O1 -o libsteam_api.so steam_mock.c
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <dirent.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <sys/socket.h>
@@ -37,6 +45,11 @@ static u64 sNextCall = 1000;
 static u64 sAccepted[8];
 static int sNumAccepted;
 static char sValue[64];
+/* RequestLobbyList: the filters set for the next request, and its results */
+static char sFilterKey[4][32], sFilterVal[4][64];
+static int sNumFilters;
+static u64 sListed[32];
+static int sNumListed;
 
 /* callback queue */
 typedef struct { int id; int size; unsigned char param[512]; } Cb;
@@ -84,6 +97,61 @@ static u64 pushResult(int id, const void *p, int size)
 static void path(char *out, size_t n, u64 id, const char *ext)
 {
     snprintf(out, n, "%s/%llu.%s", sDir, id, ext);
+}
+
+/* a lobby's key, "" when it has none */
+static const char *dataGet(u64 lobby, const char *key, char *out, int cap)
+{
+    char p[320], line[160];
+    FILE *f;
+    size_t kl = strlen(key);
+
+    out[0] = '\0';
+    path(p, sizeof(p), lobby, "data");
+    f = fopen(p, "r");
+    while (f != NULL && fgets(line, sizeof(line), f) != NULL)
+    {
+        if (strncmp(line, key, kl) == 0 && line[kl] == '=')
+        {
+            snprintf(out, cap, "%s", line + kl + 1);
+            out[strcspn(out, "\n")] = '\0';
+        }
+    }
+    if (f != NULL)
+    {
+        fclose(f);
+    }
+    return out;
+}
+
+static void dataSet(u64 lobby, const char *key, const char *value)
+{
+    char p[320], tmp[330], line[160];
+    FILE *f, *o;
+    size_t kl = strlen(key);
+
+    path(p, sizeof(p), lobby, "data");
+    snprintf(tmp, sizeof(tmp), "%s.%llu", p, sSelf);
+    o = fopen(tmp, "w");
+    if (o == NULL)
+    {
+        return;
+    }
+    f = fopen(p, "r");
+    while (f != NULL && fgets(line, sizeof(line), f) != NULL)
+    {
+        if (!(strncmp(line, key, kl) == 0 && line[kl] == '='))
+        {
+            fputs(line, o);
+        }
+    }
+    if (f != NULL)
+    {
+        fclose(f);
+    }
+    fprintf(o, "%s=%s\n", key, value);
+    fclose(o);
+    rename(tmp, p);
 }
 
 static u64 readLobbyOf(u64 user)
@@ -275,11 +343,24 @@ API u64 SteamAPI_ISteamMatchmaking_CreateLobby(void *self, int type, int max)
     FILE *f;
     u64 call;
 
-    (void) self; (void) type; (void) max;
+    (void) self; (void) max;
     path(p, sizeof(p), sSelf, "lobby");
     f = fopen(p, "w");
     fprintf(f, "%llu\n", lobby);
     fclose(f);
+    path(p, sizeof(p), lobby, "data");
+    unlink(p);
+    path(p, sizeof(p), lobby, "members");
+    unlink(p);
+    path(p, sizeof(p), lobby, "owner");
+    unlink(p);
+    {
+        char v[32];
+        snprintf(v, sizeof(v), "%llu", sSelf);
+        dataSet(lobby, "__owner", v);
+        snprintf(v, sizeof(v), "%d", type);
+        dataSet(lobby, "__type", v);
+    }
     memset(r, 0, sizeof(r));
     memcpy(r, &ok, 4);
     memcpy(r + 8, &lobby, 8);
@@ -301,6 +382,10 @@ API u64 SteamAPI_ISteamMatchmaking_JoinLobby(void *self, u64 lobby)
     f = fopen(p, "a");
     fprintf(f, "%llu\n", sSelf);
     fclose(f);
+    path(p, sizeof(p), sSelf, "lobby");
+    f = fopen(p, "w");
+    fprintf(f, "%llu\n", lobby);
+    fclose(f);
     memset(r, 0, sizeof(r));
     memcpy(r, &lobby, 8);
     memcpy(r + 16, &resp, 4);
@@ -310,33 +395,179 @@ API u64 SteamAPI_ISteamMatchmaking_JoinLobby(void *self, u64 lobby)
 
 API void SteamAPI_ISteamMatchmaking_LeaveLobby(void *self, u64 lobby)
 {
-    char p[320];
+    char p[320], tmp[330];
+    FILE *f, *o;
+    u64 v;
     (void) self;
-    if ((lobby & 0xFFFFFFFFFFFFULL) == (sSelf & 0xFFFFFFFFFFFFULL))
+    path(p, sizeof(p), sSelf, "lobby");
+    unlink(p);
+    /* off the member list (the lobby itself lives on with its other members) */
+    path(p, sizeof(p), lobby, "members");
+    snprintf(tmp, sizeof(tmp), "%s.%llu", p, sSelf);
+    f = fopen(p, "r");
+    o = fopen(tmp, "w");
+    while (f != NULL && o != NULL && fscanf(f, "%llu", &v) == 1)
     {
-        path(p, sizeof(p), sSelf, "lobby");
-        unlink(p);
+        if (v != sSelf)
+        {
+            fprintf(o, "%llu\n", v);
+        }
+    }
+    if (f != NULL)
+    {
+        fclose(f);
+    }
+    if (o != NULL)
+    {
+        fclose(o);
+        rename(tmp, p);
+    }
+    log_("left lobby");
+}
+
+static u64 readId(u64 id, const char *ext)
+{
+    char p[320];
+    FILE *f;
+    u64 v = 0;
+
+    path(p, sizeof(p), id, ext);
+    f = fopen(p, "r");
+    if (f != NULL)
+    {
+        if (fscanf(f, "%llu", &v) != 1)
+        {
+            v = 0;
+        }
+        fclose(f);
+    }
+    return v;
+}
+
+static void writeId(u64 id, const char *ext, u64 v)
+{
+    char p[320];
+    FILE *f;
+
+    path(p, sizeof(p), id, ext);
+    f = fopen(p, "w");
+    if (f != NULL)
+    {
+        fprintf(f, "%llu\n", v);
+        fclose(f);
     }
 }
 
 API sbool SteamAPI_ISteamMatchmaking_SetLobbyData(void *self, u64 l, const char *k, const char *v)
 {
-    (void) self; (void) l; (void) k; (void) v;
+    (void) self;
+    dataSet(l, k, v);
     return 1;
 }
 
 API const char *SteamAPI_ISteamMatchmaking_GetLobbyData(void *self, u64 l, const char *k)
 {
-    (void) self; (void) l;
-    snprintf(sValue, sizeof(sValue), "%s", strcmp(k, "gecoop") == 0 ? "1" : "");
+    (void) self;
+    dataGet(l, k, sValue, sizeof(sValue));
+    if (sValue[0] == '\0' && strcmp(k, "gecoop") == 0)
+    {
+        snprintf(sValue, sizeof(sValue), "1");  /* a lobby made before the data file */
+    }
     return sValue;
+}
+
+API sbool SteamAPI_ISteamMatchmaking_SetLobbyType(void *self, u64 l, int type)
+{
+    char v[16];
+    (void) self;
+    snprintf(v, sizeof(v), "%d", type);
+    dataSet(l, "__type", v);
+    log_(type == 2 ? "lobby type public" : "lobby type friends only");
+    return 1;
+}
+
+API void SteamAPI_ISteamMatchmaking_AddRequestLobbyListStringFilter(void *self, const char *k, const char *v, int cmp)
+{
+    (void) self; (void) cmp;
+    if (sNumFilters < 4)
+    {
+        snprintf(sFilterKey[sNumFilters], sizeof(sFilterKey[0]), "%s", k);
+        snprintf(sFilterVal[sNumFilters], sizeof(sFilterVal[0]), "%s", v);
+        sNumFilters++;
+    }
+}
+
+API void SteamAPI_ISteamMatchmaking_AddRequestLobbyListDistanceFilter(void *self, int f) { (void) self; (void) f; }
+
+/* every public lobby in the folder that passes the filters */
+API u64 SteamAPI_ISteamMatchmaking_RequestLobbyList(void *self)
+{
+    DIR *d = opendir(sDir);
+    struct dirent *e;
+    unsigned int n;
+    char v[64];
+
+    (void) self;
+    sNumListed = 0;
+    while (d != NULL && (e = readdir(d)) != NULL && sNumListed < 32)
+    {
+        const char *dot = strrchr(e->d_name, '.');
+        u64 lobby;
+        int i, ok;
+
+        if (dot == NULL || strcmp(dot, ".data") != 0)
+        {
+            continue;
+        }
+        lobby = strtoull(e->d_name, NULL, 10);
+        ok = strcmp(dataGet(lobby, "__type", v, sizeof(v)), "2") == 0;
+        for (i = 0; i < sNumFilters && ok; i++)
+        {
+            ok = strcmp(dataGet(lobby, sFilterKey[i], v, sizeof(v)), sFilterVal[i]) == 0;
+        }
+        if (ok)
+        {
+            sListed[sNumListed++] = lobby;
+        }
+    }
+    if (d != NULL)
+    {
+        closedir(d);
+    }
+    sNumFilters = 0;
+    n = (unsigned int) sNumListed;
+    log_("lobby list");
+    return pushResult(510, &n, 4);
+}
+
+API u64 SteamAPI_ISteamMatchmaking_GetLobbyByIndex(void *self, int i)
+{
+    (void) self;
+    return (i >= 0 && i < sNumListed) ? sListed[i] : 0;
+}
+
+API sbool SteamAPI_ISteamMatchmaking_SetLobbyOwner(void *self, u64 l, u64 owner)
+{
+    (void) self;
+    writeId(l, "owner", owner);
+    log_("lobby owner set");
+    return 1;
 }
 
 static u64 ownerOf(u64 lobby)
 {
     /* mock ids keep the owner's low 48 bits; the high bits are the usual 7656119... */
     int i;
+    char v[32];
 
+    if (readId(lobby, "owner") != 0)
+    {
+        return readId(lobby, "owner");  /* SetLobbyOwner's */
+    }
+    if (dataGet(lobby, "__owner", v, sizeof(v))[0] != '\0')
+    {
+        return strtoull(v, NULL, 10);   /* the creator */
+    }
     for (i = 0; i < sNumFriends; i++)
     {
         if ((sFriend[i] & 0xFFFFFFFFFFFFULL) == (lobby & 0xFFFFFFFFFFFFULL))
@@ -413,6 +644,20 @@ API sbool SteamAPI_ISteamFriends_GetFriendGamePlayed(void *self, u64 user, unsig
     memcpy(info, &game, 8);
     memcpy(info + 16, &lobby, 8);
     return 1;
+}
+
+API int SteamAPI_ISteamFriends_GetFriendRelationship(void *self, u64 user)
+{
+    int i;
+    (void) self;
+    for (i = 0; i < sNumFriends; i++)
+    {
+        if (sFriend[i] == user)
+        {
+            return 3; /* friend */
+        }
+    }
+    return 0;
 }
 
 API int SteamAPI_ISteamFriends_GetFriendPersonaState(void *self, u64 user) { (void) self; (void) user; return 1; /* online */ }
@@ -539,5 +784,21 @@ API sbool SteamAPI_ISteamNetworkingMessages_AcceptSessionWithUser(void *self, co
     return 1;
 }
 
-API sbool SteamAPI_ISteamNetworkingMessages_CloseSessionWithUser(void *self, const unsigned char *ident) { (void) self; (void) ident; return 1; }
+/* like Steam, a closed session must be asked for and accepted again */
+API sbool SteamAPI_ISteamNetworkingMessages_CloseSessionWithUser(void *self, const unsigned char *ident)
+{
+    u64 id = SteamAPI_SteamNetworkingIdentity_GetSteamID64(ident);
+    int i;
+
+    (void) self;
+    for (i = 0; i < sNumAccepted; i++)
+    {
+        if (sAccepted[i] == id)
+        {
+            sAccepted[i] = sAccepted[--sNumAccepted];
+            break;
+        }
+    }
+    return 1;
+}
 API void SteamAPI_SteamNetworkingMessage_t_Release(void *msg) { free(msg); }

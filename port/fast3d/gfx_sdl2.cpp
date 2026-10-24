@@ -769,6 +769,9 @@ static inline void sync_framerate_with_timer(void) {
  * what each menu shows at the transition. */
 extern "C" int ge_shot_force;
 int ge_shot_force;
+/* photo mode (coop_photo.c): where the next forced shot goes, "" = shot_N.bmp */
+extern "C" char ge_shot_path[512];
+char ge_shot_path[512];
 
 static void gfx_sdl_maybe_screenshot(void) {
     static int interval = -2;
@@ -796,9 +799,10 @@ static void gfx_sdl_maybe_screenshot(void) {
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, px);
     /* repack in place bottom-up rows into padded stride, RGB->BGR */
+    uint8_t *row = (uint8_t *)SDL_malloc(stride);   /* a 5K window is wider than any stack row */
+    if (!row) { SDL_free(px); return; }
     for (int y = h - 1; y >= 0; y--) {
         uint8_t *src = px + (size_t)y * stride;
-        uint8_t row[4096 * 3];
         memcpy(row, src, stride);
         uint8_t *dst = px + (size_t)y * padded;
         for (int x = 0; x < w; x++) {
@@ -807,8 +811,14 @@ static void gfx_sdl_maybe_screenshot(void) {
             dst[x * 3 + 2] = row[x * 3 + 0];
         }
     }
-    char name[64];
-    SDL_snprintf(name, sizeof(name), "shot_%05d.bmp", framenum);
+    SDL_free(row);
+    char name[512];
+    if (forced && ge_shot_path[0] != '\0') {
+        SDL_strlcpy(name, ge_shot_path, sizeof(name));
+        ge_shot_path[0] = '\0';
+    } else {
+        SDL_snprintf(name, sizeof(name), "shot_%05d.bmp", framenum);
+    }
     FILE *f = fopen(name, "wb");
     if (f) {
         uint32_t imgsize = (uint32_t)(padded * h);

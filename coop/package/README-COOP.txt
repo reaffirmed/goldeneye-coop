@@ -7,8 +7,8 @@ IP addresses.
 
 You need
 --------
-- Steam running and logged in on every PC. Each joiner must be a Steam
-  friend of the host. Nobody has to own anything: the game connects as Valve's free
+- Steam running and logged in on every PC. Joiners are the host's Steam
+  friends, or anyone who finds a Public game (see step 2). Nobody has to own anything: the game connects as Valve's free
   "Spacewar" test app, so Steam will show you both as "playing Spacewar".
 - Your own GoldenEye 007 (USA) cart image in the Data folder (see
   Data\README if present). The image is not included.
@@ -20,6 +20,10 @@ Playing
 2. The host picks "Host a Game". Your online Steam friends are listed under
    "Invite a Friend"; pick one to invite them (or use "Steam Invite Window").
    Invite up to three friends.
+   Before or after you host you can set "Lobby" to Public, so anyone with
+   this build sees your game under "Public Games", and set a "Password"
+   (type it and press Enter; Enter on an empty line removes it). Your Steam
+   friends never need the password; it keeps strangers out.
    Under "Your Character" (and under your name once you are in a lobby)
    pick who you play as: the multiplayer cast (Bond in each outfit,
    Natalya, Trevelyan, Xenia, Ourumov, Boris, Valentin, Mishkin, Jaws,
@@ -30,16 +34,29 @@ Playing
    pick is kept for next time.
 3. Each friend either accepts the Steam invite, or picks the host's name
    (marked "Join") on their own CO-OP screen, then picks "Ready Up".
+   Public games are listed under "Public Games" with the host's name and
+   how many are in; one marked "Password" asks for it before you join.
+   If the CO-OP screen says "Wrong password.", try again.
+   "Your Controls" on the CO-OP screen has the controller layout, Field of
+   View, Mouse Look and Mouse Speed; each click steps to the next setting
+   (the same settings as in the Options menus).
 4. The host can set the rules in the lobby before starting:
    - Continue: jumps to the next mission you have not beaten together.
    - When Down: Revive or Timer, Revive only, or Timer only.
    - Guards: Normal, Hard (tougher, more of them) or Brutal.
    - Friendly Fire: Off (default, your shots pass your partners by) or On.
+   - Host Leaves: Next Player Hosts (default) or Back to Lobby. See "When
+     someone leaves" below.
 5. When every friend shows as Ready, the host picks "Select Mission" (or
    Continue), then the mission and difficulty as usual. The friends' games
    follow into the mission by themselves.
 6. After each mission everyone sees a stats page with a column per player,
-   then returns to the lobby, and the host picks the next one.
+   then returns to the lobby, and the host picks the next one. The mission
+   time is the team's (the host's clock), so beating a mission's target time
+   together unlocks its cheat for everyone, as in solo.
+7. Your campaign is the host's: a joiner's lobby shows "Next:" with the
+   host's next mission, and it is saved for that joiner too, so Continue
+   works for them next time they host with you.
 
 "Host co-op.bat" and "Join co-op.bat" still work as a shortcut: the joiner
 waits on the title screen and follows the host into each mission.
@@ -53,11 +70,34 @@ Rules
   rounds (at least one magazine's worth), and the gun too if they don't have
   it. Stand next to them and face them. You keep your gun. The key can be
   changed in the controls menu (Give To Partner).
+- The middle mouse button pings: aim at a spot and press it, and a diamond
+  in your colour marks that spot for everyone, with your name and how far
+  away it is, plus a square on the radar. Aim at a guard and it is marked
+  in red as ENEMY and the marker follows that guard. A ping lasts 10
+  seconds; your next ping moves it. When it is off screen the diamond
+  sits at the edge of the screen, on the side to turn to. The key can be
+  changed in the controls menu (Ping).
 - When you go down, what happens depends on the host's When Down rule.
   Revive: a partner stands over you for a moment to bring you back. Timer:
   you come back next to a partner once they have been out of combat for 4
   seconds, and after 20 seconds at most. If everyone is down at the same
   time, the mission fails.
+- T opens a chat line (in a mission and in the lobby). Type and press Enter
+  to send it to everyone, or Escape to close it. Lines show at the bottom
+  left in each player's colour. The key can be changed (Chat).
+- When a partner completes an objective, a note across the middle of the
+  screen says who did it: "MOCK COMPLETED OBJECTIVE A" and the objective.
+- While you are down, the screen fades back in through a partner's eyes
+  ("WATCHING <NAME>"); fire switches to the next partner. Your own view
+  comes back when you are revived or respawn.
+- P is photo mode, in solo too: the HUD and gun disappear and the camera
+  comes loose. Look around with the mouse, fly with WASD (it goes the way you
+  look, stays above the floor and within about 8 metres of Bond), and press
+  fire to save a picture in the Photos folder next to the game. P or Escape
+  goes back. The world keeps going (guards can still shoot you) and Bond
+  stands still meanwhile. The stats page after a co-op mission says how many
+  photos you took. Your own Bond is not in the photos, your partners are.
+  The key can be changed (Photo Mode).
 - Keys 1 to 6 open the weapon menu at the top of the screen (the game keeps
   running): 1 melee, 2 pistols, 3 rifles, 4 heavy, 5 explosives, 6 mission
   items such as the covert modem, keys and the camera. Press the key again to
@@ -72,6 +112,28 @@ Rules
   radar and the partner status at the side of the screen.
 - Name tags over partners are small, shrink with distance, fade out when a
   partner is right beside you, and fade (but stay) when they are far away.
+
+When someone leaves
+-------------------
+- If the host's game quits, crashes or loses its connection, everyone else
+  sees "HOST NOT RESPONDING" with a countdown, so a host whose connection
+  only hiccuped can come back. After about 15 seconds without the host (at
+  once if the host quit on purpose), the next player in the lobby list
+  becomes the host and the mission carries
+  on from where it was: guards, doors, objectives and everyone's position
+  stay as they were. The others connect to the new host by themselves.
+- With the Host Leaves rule on Back to Lobby, everyone returns to the lobby
+  instead, with the next player as host.
+- The old host can come back: start co-op again and join the lobby, or
+  accept an invite, and you join the mission beside the others.
+- When the host wants to quit, the watch's Abort asks first:
+  HAND OVER: you leave, the next player becomes host and the others play on.
+  END ALL: the mission ends for everyone and you all go back to the lobby.
+  "Leave Lobby" as host also hands the lobby to the next player.
+- If a joiner drops, the others see "<name> lost connection" and their Bond
+  stands still (guards ignore it). If they are not back within 30 seconds
+  the Bond is removed and "<name> disconnected" shows. They can join again
+  like a late joiner.
 
 Versus (multiplayer)
 --------------------
@@ -98,6 +160,8 @@ with the whole screen to themselves.
 - Each PC has its own copy of the ordinary weapons and armour lying around,
   so two players can both take the same gun. The Flag Tag flag and the
   Golden Gun are shared: only one player can hold them.
+- Chat (T) works in versus too. A host leaving in the middle of a versus
+  match has not been tested yet.
 
 If something goes wrong
 -----------------------

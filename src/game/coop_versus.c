@@ -168,6 +168,34 @@ s32 coopVersusRoster(u32 mask, u32 serial)
     return sVs;
 }
 
+/* host migration renumbered the session (coop.c coopRenumber): our map
+ * follows; a player who left keeps their slot here and their body stays still */
+void coopVersusRenumber(const s32 *newof)
+{
+    s32 li;
+
+    if (!sVs)
+    {
+        return;
+    }
+    memset(sVsLocal, -1, sizeof(sVsLocal));
+    for (li = 0; li < sVsCount; li++)
+    {
+        const s32 p = sVsNet[li];
+
+        if (p >= 0 && p < COOP_MAX_PLAYERS && newof[p] >= 0)
+        {
+            sVsNet[li] = newof[p];
+            sVsLocal[newof[p]] = li;
+        }
+        else
+        {
+            sVsNet[li] = COOP_MAX_PLAYERS;  /* gone: no session number answers to it */
+        }
+    }
+    portConLogf("ge: versus: players renumbered after the host left\n");
+}
+
 void coopVersusClear(void)
 {
     sVs = 0;
@@ -323,7 +351,8 @@ s32 coopVersusDamage(f32 damage, f32 vx, f32 vz, s32 attacker, s32 armour)
     {
         return 0;
     }
-    if (sVsInBlast || attacker != 0 || g_playerPointers[victim]->bonddead || g_stopPlayFlag || g_gameOverFlag)
+    if (sVsInBlast || attacker != 0 || g_playerPointers[victim]->bonddead || g_stopPlayFlag || g_gameOverFlag
+        || sVsNet[victim] >= COOP_MAX_PLAYERS)
     {
         return 1;
     }
