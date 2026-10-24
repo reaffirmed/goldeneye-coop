@@ -77,7 +77,8 @@ jobs:
           mkdir zipcheck && unzip -q GoldenEye-Coop-win32.zip -d zipcheck
           (cd zipcheck && find . -type f | sort | xargs -d '\n' sha256sum)
           for sec in .text .data .idata .rsrc; do
-            echo "ProjectMidas.exe $sec $(i686-w64-mingw32-objcopy -O binary -j $sec zipcheck/GoldenEye-Coop/ProjectMidas.exe /dev/stdout | sha256sum | cut -d' ' -f1)"
+            i686-w64-mingw32-objcopy -O binary -j $sec zipcheck/GoldenEye-Coop/ProjectMidas.exe section.bin
+            echo "ProjectMidas.exe $sec $(sha256sum < section.bin | cut -d' ' -f1)"
           done
 
       - name: Upload the zip
