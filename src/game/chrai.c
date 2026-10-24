@@ -2106,7 +2106,15 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     AiIFBondDistanceToPadLessThanDecimeterRecord *ai    = AiListp + Offset;
                     u16                                           pad   = ntohs(ai->PAD);
                     f32                                           value = ntohs(ai->DISTANCE) * 10.0f;
-                    if (value > chrGetDistanceFromBondToPad(ChrEntityp, pad))
+                    s32                                           near  = value > chrGetDistanceFromBondToPad(ChrEntityp, pad);
+#ifndef TARGET_N64
+                    if (!near && coopAltBondBegin()) /* co-op: either player counts */
+                    {
+                        near = value > chrGetDistanceFromBondToPad(ChrEntityp, pad);
+                        coopAltBondEnd();
+                    }
+#endif
+                    if (near)
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -2121,7 +2129,15 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     AiIFBondDistanceToPadGreaterThanDecimeterRecord *ai    = AiListp + Offset;
                     u16                                              pad   = ntohs(ai->PAD);
                     f32                                              value = ntohs(ai->DISTANCE) * 10.0f;
-                    if (value < chrGetDistanceFromBondToPad(ChrEntityp, pad))
+                    s32                                              far   = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
+#ifndef TARGET_N64
+                    if (far && coopAltBondBegin()) /* co-op: both players must be away */
+                    {
+                        far = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
+                        coopAltBondEnd();
+                    }
+#endif
+                    if (far)
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -2149,7 +2165,15 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 {
                     AiIFBondInRoomWithPadRecord *ai     = AiListp + Offset;
                     u16                          pad_id = ntohs(ai->PAD);
-                    if (check_if_actor_is_at_preset(ChrEntityp, pad_id))
+                    s32                          inroom = check_if_actor_is_at_preset(ChrEntityp, pad_id);
+#ifndef TARGET_N64
+                    if (!inroom && coopAltBondBegin()) /* co-op: either player counts */
+                    {
+                        inroom = check_if_actor_is_at_preset(ChrEntityp, pad_id);
+                        coopAltBondEnd();
+                    }
+#endif
+                    if (inroom)
                     {
     #ifdef ENABLE_LOG
                         osSyncPrintf("BOND IN ROOM\n");
@@ -2169,7 +2193,11 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 {
                     AiIFBondCollectedObjectRecord *ai  = AiListp + Offset;
                     ObjectRecord                  *obj = objFindByTagId(ai->OBJECT_TAG);
-                    if (obj && obj->prop && bondinvHasPropInInv(obj->prop))
+                    if (obj && obj->prop && (bondinvHasPropInInv(obj->prop)
+#ifndef TARGET_N64
+                                             || coopPeerHolds(obj) /* co-op: the team's items */
+#endif
+                                             ))
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -4084,7 +4112,15 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 {
                     AiIFBondYPosLessThanRecord *ai      = AiListp + Offset;
                     f32                         bondpos = (s16)ntohs(ai->Y_POS);
-                    if (getCurrentPlayerProp()->pos.y < bondpos)
+                    s32                         below   = getCurrentPlayerProp()->pos.y < bondpos;
+#ifndef TARGET_N64
+                    if (!below && coopAltBondBegin()) /* co-op: either player counts */
+                    {
+                        below = getCurrentPlayerProp()->pos.y < bondpos;
+                        coopAltBondEnd();
+                    }
+#endif
+                    if (below)
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }

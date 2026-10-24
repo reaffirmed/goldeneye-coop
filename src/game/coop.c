@@ -2136,3 +2136,25 @@ s32 coopFrontTick(void)
     }
     return 0;
 }
+
+
+/* ---- level scripts: either player ------------------------------------------
+ * Level scripts run on the host and ask about "Bond". Position checks (near a
+ * pad, in a room, below a height) are asked a second time with the partner as
+ * Bond, so either player can trigger an exit or an event. */
+
+s32 coopAltBondBegin(void)
+{
+    if (g_CoopPropOverride != NULL || sPuppet == NULL || sPuppet->chr == NULL || !coopNetIsHost()
+        || !sRemoteValid || sRemote.dead || sRemote.stage != bossGetStageNum())
+    {
+        return 0;
+    }
+    g_CoopPropOverride = sPuppet;
+    return 1;
+}
+
+void coopAltBondEnd(void)
+{
+    g_CoopPropOverride = NULL;
+}
