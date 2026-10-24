@@ -88,3 +88,13 @@ Each item verified with two copies in Dam using the harness switches listed belo
 - Death (owner's choice): a dead player respawns beside the partner, with full health and the same inventory, once the partner has been out of combat for 4 s (at least 3 s after the death fade, at most 20 s). If both players are dead, the mission fails as usual (GE_COOP_TESTDIE).
 
 Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscenes (intro and exit) only play on the host; guard tracers; vehicles (Runway plane, tank) run on both sides; and only the host can trigger level exits that check "Bond's" position.
+
+## Milestone 4, Steam (2026-10-24)
+
+- port/src/coop_steam.c: Spacewar (480) over the flat API, loaded at run time; follows the coop-anything Steam playbook (manual dispatch, fixed struct offsets, sender identity at 12 or 16, LobbyCreated handled twice, session accept for lobby members only).
+- Host: `-coophost` (GE_COOP=steam). Friends-only lobby tagged `gecoop=1`, rich presence connect string, invite overlay.
+- Joiner: `-coopjoin` (GE_COOP=steam:join) finds a friend playing 480 with a lobby; `+connect_lobby <id>` and invites (333/337) also work.
+- The joiner follows the host into each mission from the menus (HELLO packet: stage, difficulty, mission serial).
+- Tested over the mock (coop/mock/steam_mock.c, coop/docker/two_player_steam.sh): lobby, friend discovery, session accept, follow into Dam, full game sync. steam_api.dll exports checked against the code: all present (Steamworks.NET Standalone 2025.164.1, Windows-x86, SHA-256 fdafb7c6...).
+- Not yet tested on real Steam: needs two accounts on two PCs (the owner).
+- Package: coop/package (bat launchers, README-COOP.txt) + Release mingw build + steam_api.dll + steam_appid.txt.

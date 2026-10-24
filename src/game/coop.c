@@ -491,6 +491,7 @@ static void coopPuppetSpawn(void)
     sPuppetGhost = 1;
     coopPuppetSetAnim(prop->chr, PANIM_IDLE, 0.0f);
     portConLogf("ge: coop: puppet spawned at %.0f %.0f %.0f\n", pos.f[0], pos.f[1], pos.f[2]);
+    hudmsgBottomShow("Your partner is here.\n");
 }
 
 static void coopPuppetUpdate(void)
@@ -667,6 +668,10 @@ void coopTick(void)
     if (sRemoteValid && sTick - sRemoteSeenTick > 300)
     {
         portConLogf("ge: coop: nothing from the peer for 5 s, dropping its Bond\n");
+        if (coopInMission())
+        {
+            hudmsgBottomShow("Lost contact with your partner.\n");
+        }
         sRemoteValid = 0;
     }
     if (sPuppet != NULL && (!sRemoteValid || sRemote.stage != bossGetStageNum()))
