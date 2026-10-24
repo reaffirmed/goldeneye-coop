@@ -247,6 +247,7 @@ static u32 sDeadSince;      /* sTick our Bond's death fade finished, 0 alive */
 static s32 sDefsBytes;  /* size of the stage's setup prop defs */
 static void *sDefsBase;
 static u32 sTick;
+static s32 sWorldFrom;  /* the player whose WORLD coopApplyWorld is applying */
 
 /* the other players, by player number (ours is unused) */
 typedef struct
@@ -703,6 +704,7 @@ static void coopPollNet(void)
         {
             if (coopInMission() && coopRemoteHere(coopPlayerOfChan(c)))
             {
+                sWorldFrom = coopPlayerOfChan(c);
                 coopApplyWorld((CoopWorldPkt *) buf);
             }
             continue;
@@ -2008,6 +2010,7 @@ static void coopHostApplyShot(CoopEvent *ev)
     vec.f[2] = ev->u.shot.vector[2];
     g_CoopPropOverride = sR[ev->from].puppet; /* the stimulus belongs to that player */
     coopStatsBlameBegin(ev->from);            /* and so do the hit and the kill */
+    coopObjNoteActor(ev->from, 1);
     handles_shot_actors(chr, ev->u.shot.hitpart, &vec, ev->u.shot.weaponid, TRUE);
     coopStatsBlameEnd();
     g_CoopPropOverride = NULL;
@@ -2327,6 +2330,7 @@ static void coopApplyObjDamage(CoopEvent *ev)
     if (coopNetIsHost())
     {
         /* the joiner's shot: apply as ours; the hook sends the result back */
+        coopObjNoteActor(ev->from, 1);
         objApplyDamage(obj, ev->u.obj.damage, &pos, ev->u.obj.item, ev->u.obj.player);
     }
     else
@@ -2431,6 +2435,7 @@ static void coopApplyWorld(CoopWorldPkt *p)
         {
             portConLogf("ge: coop: peer entered objective room %d\n", i);
             r->status = 1;
+            coopObjNoteActor(sWorldFrom, 0);
         }
     }
     for (d = ptr_last_deposit_in_room_subobject_entry_type21, i = 0; d != NULL && i < 32; d = d->next, i++)
@@ -2438,6 +2443,7 @@ static void coopApplyWorld(CoopWorldPkt *p)
         if ((p->depositbits & (1u << i)) && !d->flag)
         {
             d->flag = 1;
+            coopObjNoteActor(sWorldFrom, 0);
         }
     }
     for (ph = ptr_last_photo_obj_in_room_subobject_entry_type1E, i = 0; ph != NULL && i < 32; ph = ph->next, i++)
@@ -2445,11 +2451,13 @@ static void coopApplyWorld(CoopWorldPkt *p)
         if ((p->photobits & (1u << i)) && !ph->flag)
         {
             ph->flag = 1;
+            coopObjNoteActor(sWorldFrom, 0);
         }
     }
     if (p->keycopied && !g_CurrentPlayer->copiedgoldeneye)
     {
         g_CurrentPlayer->copiedgoldeneye = 1;
+        coopObjNoteActor(sWorldFrom, 0);
     }
 }
 
@@ -2510,6 +2518,7 @@ static void coopApplyPickup(CoopEvent *ev)
     {
         objFreePermanently(obj, TRUE);
     }
+    coopObjNoteActor(ev->from, 0);
     portConLogf("ge: coop: peer picked up obj %d (%s)\n", ev->u.pick.objofs, ev->u.pick.kept ? "kept" : "used");
 }
 
@@ -3403,6 +3412,22 @@ void coopAltBondEnd(void)
     g_CoopPropOverride = NULL;
 }
 
+/* a level script's check passed for the k-th living partner: whatever the
+ * script does next is theirs (coop_objective.c) */
+void coopAltBondCredit(s32 k)
+{
+    s32 p;
+
+    for (p = 1; p < COOP_MAX_PLAYERS; p++)
+    {
+        if (coopRemoteAliveHere(p) && k-- == 0)
+        {
+            coopObjNoteActor(p, 0);
+            return;
+        }
+    }
+}
+
 
 /* ---- the joiner's explosives ------------------------------------------------
  * A grenade, mine or rocket the joiner fires exists only in its own game. Its
@@ -3459,6 +3484,7 @@ static void coopApplyExplosion(CoopEvent *ev)
         return;
     }
     sApplyingRemoteBoom = ev->from;   /* whose (coop_stats.c) */
+    coopObjNoteActor(ev->from, 1);
     explosionCreate(NULL, &pos, stan, ev->u.boom.type, 0, 0, ev->u.boom.rooms, 0);
     sApplyingRemoteBoom = 0;
     portConLogf("ge: coop: peer explosion (type %d) at %.0f %.0f %.0f\n", ev->u.boom.type, pos.f[0], pos.f[1], pos.f[2]);

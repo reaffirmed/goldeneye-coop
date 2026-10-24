@@ -199,6 +199,7 @@ void coopLookShotBegin(s32 hand, s32 weapon, coord3d *from, coord3d *dir)
         sCurOpen = 0;   /* no path to show: a NaN tracer would blank the partners' screens */
         return;
     }
+    coopObjNoteActor(coopExtSelf(), 1);   /* our own shot: a kill now is ours (coop_objective.c) */
     memset(&sCur, 0, sizeof(sCur));
     sCur.kind = COOPSHOT_MISS | ((hand == GUNLEFT) ? COOPSHOT_LEFT : 0);
     sCur.weapon = (s8) weapon;

@@ -10,6 +10,7 @@
 void coopExtTick(s32 inmission)
 {
     coopChatTick(inmission);
+    coopObjTick(inmission);
 }
 
 void coopExtApply(s32 kind, const u8 *raw, s32 from)
@@ -18,6 +19,9 @@ void coopExtApply(s32 kind, const u8 *raw, s32 from)
     {
         case COOPEV_CHAT:
             coopChatApply(raw, from);
+            break;
+        case COOPEV_OBJDONE:
+            coopObjApply(kind, raw, from);
             break;
     }
 }
