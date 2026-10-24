@@ -683,6 +683,12 @@ const char *coopSteamPeerName(void)
     return (sReady && sPeer != 0) ? pGetFriendPersonaName(sFriends, sPeer) : "";
 }
 
+/* the partner's SteamID, 0 until known (keys the co-op campaign record) */
+unsigned long long coopSteamPeerId(void)
+{
+    return sReady ? (unsigned long long) sPeer : 0;
+}
+
 /* Online friends, those hosting first. Returns how many. */
 int coopSteamFriendsRefresh(void)
 {

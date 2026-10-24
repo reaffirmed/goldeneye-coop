@@ -122,7 +122,7 @@ typedef struct
 
 /* Reliable, in-order events (hits, shots, doors, ...). Every EVENTS packet
  * carries all unacked events plus an ack of what we have received. */
-enum { COOPEV_HIT = 1, COOPEV_SHOTCHR = 2, COOPEV_DOOR = 3, COOPEV_OBJDMG = 4, COOPEV_PICKUP = 5, COOPEV_MISSIONEND = 6, COOPEV_EXPLODE = 7, COOPEV_AICMD = 8 };
+enum { COOPEV_HIT = 1, COOPEV_SHOTCHR = 2, COOPEV_DOOR = 3, COOPEV_OBJDMG = 4, COOPEV_PICKUP = 5, COOPEV_MISSIONEND = 6, COOPEV_EXPLODE = 7, COOPEV_AICMD = 8, COOPEV_STATS = 9 };
 
 typedef struct
 {
@@ -138,6 +138,7 @@ typedef struct
         struct { s32 stage; u32 stageflags; } end;                              /* both ways */
         struct { f32 pos[3]; s16 type; u8 rooms[8]; } boom;                     /* client -> host */
         struct { s16 chrnum; u8 len; u8 cmd[25]; } ai;                          /* host -> client */
+        /* COOPEV_STATS: a CoopStatsMsg (coop_stats.c) in raw, both ways */
         u8 raw[28];
     } u;
 } CoopEvent;
@@ -685,6 +686,7 @@ void coopStageStart(void)
     {
         sMissionSerial++;
         sLobbyReady = 0; /* ready again in the lobby for the next one */
+        coopStatsMissionStart();
     }
 
     for (i = 0; i < COOP_MAX_CHRS; i++)
@@ -736,6 +738,7 @@ void coopTick(void)
     }
 
     sMissionTicks++;
+    coopStatsMissionTick(sRemoteValid && sRemote.stage == bossGetStageNum());
     coopSendState();
     coopTrackCombat();
     if ((sTick % 30) == 0 && sRemoteValid && sRemote.stage == bossGetStageNum())
@@ -1699,7 +1702,9 @@ static void coopHostApplyShot(CoopEvent *ev)
     vec.f[1] = ev->u.shot.vector[1];
     vec.f[2] = ev->u.shot.vector[2];
     g_CoopPropOverride = sPuppet; /* the stimulus belongs to the peer */
+    coopStatsBlameBegin(1);       /* and so do the hit and the kill */
     handles_shot_actors(chr, ev->u.shot.hitpart, &vec, ev->u.shot.weaponid, TRUE);
+    coopStatsBlameEnd();
     g_CoopPropOverride = NULL;
     portConLogf("ge: coop: peer shot guard %d (part %d)\n", ev->u.shot.chrnum, ev->u.shot.hitpart);
 }
@@ -1786,7 +1791,21 @@ static void coopApplyEvent(CoopEvent *ev)
         case COOPEV_AICMD:
             coopApplyAiCommand(ev);
             break;
+        case COOPEV_STATS:
+            coopStatsApply(ev->u.raw);
+            break;
     }
+}
+
+/* coop_stats.c: our end-of-mission column for the partner */
+void coopSendStatsEvent(const void *payload, s32 len)
+{
+    CoopEvent ev;
+
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = COOPEV_STATS;
+    memcpy(ev.u.raw, payload, (len < (s32) sizeof(ev.u.raw)) ? len : (s32) sizeof(ev.u.raw));
+    coopQueueEvent(&ev);
 }
 
 
@@ -2146,6 +2165,7 @@ void coopMissionComplete(void)
 {
     CoopEvent ev;
 
+    coopCampaignMissionEnd(); /* a win together goes in coop_campaign.txt */
     if (sEnabled <= 0 || sApplyingRemoteEnd || !coopNetHasPeer() || !sRemoteValid
         || sRemote.stage != bossGetStageNum())
     {
@@ -2277,6 +2297,7 @@ s32 coopDeadTick(void)
 {
     u32 dead, calm;
 
+    coopStatsDown();
     if (sEnabled <= 0 || !coopNetHasPeer() || !sRemoteValid || sRemote.stage != bossGetStageNum()
         || sRemote.dead || sPuppet == NULL || sPuppet->stan == NULL)
     {
@@ -2316,6 +2337,7 @@ s32 coopDeadTick(void)
                 sPuppetGhost = 1;
                 coopRespawnPlayerAt(&sDeathPos, sDeathStan, sDeathYaw, sLastWeapon);
                 hudmsgBottomShow("Revived!\n");
+                coopStatsNote(COOPSTAT_REVIVED);
                 sLastHealth = g_CurrentPlayer->bondhealth;
                 sDeadSince = 0;
                 return 1;
@@ -2352,6 +2374,7 @@ s32 coopDeadTick(void)
                     dead / 60.0f, calm / 60.0f);
         sPuppetGhost = 1; /* we arrive inside the partner */
         coopRespawnPlayerAt(&sPuppet->pos, sPuppet->stan, 6.2831855f - sRemote.yaw, sLastWeapon); /* view yaw runs the other way */
+        coopStatsNote(COOPSTAT_RESPAWNS);
         sLastHealth = g_CurrentPlayer->bondhealth;
         sDeadSince = 0;
     }
@@ -2477,6 +2500,7 @@ s32 coopFrontTick(void)
     }
     sTick++;
     coopPollNet();
+    coopStatsFrontTick();   /* back from a mission: send our stats column */
     coopFlushEvents();
     coopSendHello();
 
@@ -2494,7 +2518,10 @@ s32 coopFrontTick(void)
         sFollowedMission = sHostHello.mission;
         sLateJoin = sHostHello.missionticks > 600;   /* the host is well into it: start beside them */
         portConLogf("ge: coop: following the host into stage %d (difficulty %d)\n", sHostHello.stage, diff);
-        selected_folder_num = FOLDER1;
+        if (selected_folder_num < FOLDER1 || selected_folder_num >= MAX_FOLDER_COUNT)
+        {   /* a win saves to our own folder, as solo; folder 1 only if none is picked */
+            selected_folder_num = FOLDER1;
+        }
         set_selected_difficulty(diff);
         set_solo_and_ptr_briefing(sHostHello.stage);
         frontChangeMenu(MENU_RUN_STAGE, TRUE);
@@ -2743,6 +2770,12 @@ void coopExplosionCreated(PropRecord *source, coord3d *pos, s32 type, u8 *rooms)
     }
     coopQueueEvent(&ev);
     portConLogf("ge: coop: our explosion (type %d), sent to host\n", type);
+}
+
+/* coop_stats.c: the explosion being made is the partner's */
+s32 coopApplyingPartnerExplosion(void)
+{
+    return sApplyingRemoteBoom;
 }
 
 static void coopApplyExplosion(CoopEvent *ev)

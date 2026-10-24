@@ -26,6 +26,7 @@ void coopSteamShutdown(void);
 int  coopSteamLobbyState(void);         /* 0 none, 1 creating or looking, 2 in a lobby */
 const char *coopSteamSelfName(void);
 const char *coopSteamPeerName(void);
+unsigned long long coopSteamPeerId(void);  /* 0 until known */
 int  coopSteamFriendsRefresh(void);     /* online friends, hosting ones first */
 const char *coopSteamFriendName(int i);
 int  coopSteamFriendHosting(int i);

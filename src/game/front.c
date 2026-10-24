@@ -9304,6 +9304,82 @@ static s32 coopLobbyAfterMission(void)
     frontChangeMenu(MENU_COOP_LOBBY, FALSE);
     return TRUE;
 }
+
+/* The co-op debrief (menu0D after a co-op mission, won or failed): both
+ * players side by side in place of the solo hit table. Numbers the partner's
+ * game has not sent yet show as "-". */
+#define COOP_DEBRIEF_COL1   0xA0
+#define COOP_DEBRIEF_COL2   0x108
+#define COOP_DEBRIEF_NAME_W (COOP_DEBRIEF_COL2 - COOP_DEBRIEF_COL1 - 8)
+
+static void coopDebriefValue(char *out, s32 player, s32 row)
+{
+    s32 v;
+
+    switch (row)
+    {
+        case 0: v = coopStatsGet(player, COOPSTAT_KILLS); break;
+        case 1: v = coopStatsGet(player, COOPSTAT_SHOTS); break;
+        case 2:
+        {
+            const s32 shots = coopStatsGet(player, COOPSTAT_SHOTS);
+            const s32 hits = coopStatsGet(player, COOPSTAT_HITS);
+
+            if (shots < 0 || hits < 0)
+            {
+                strcpy(out, "-\n");
+            }
+            else
+            {
+                sprintf(out, "%.1f%%\n", (shots > 0) ? (hits * 100.0f) / shots : 0.0f);
+            }
+            return;
+        }
+        case 3: v = coopStatsGet(player, COOPSTAT_HEAD); break;
+        case 4: v = coopStatsGet(player, COOPSTAT_DEATHS); break;
+        default: v = coopStatsGet(!player, COOPSTAT_REVIVED); break;  /* revives given: the other one got back up */
+    }
+    if (v < 0)
+    {
+        strcpy(out, "-\n");
+    }
+    else
+    {
+        sprintf(out, "%d\n", v);
+    }
+}
+
+static Gfx *coopDebriefStats(Gfx *DL, s32 y0, s32 pitch)
+{
+    static const char *const labels[] = { "Kills:\n", "Shots:\n", "Accuracy:\n", "Head hits:\n", "Deaths:\n", "Revives:\n" };
+    char buf[48];
+    s32 x, y, i, p;
+
+    for (p = 0; p < 2; p++)
+    {
+        coopLobbyCopyName(buf, sizeof(buf), coopStatsName(p));
+        x = p ? COOP_DEBRIEF_COL2 : COOP_DEBRIEF_COL1;
+        y = y0;
+        DL = frontPrintText(DL, &x, &y, (char *) portSheetFitText(buf, COOP_DEBRIEF_NAME_W), ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+    }
+    DL = microcode_constructor_related_to_menus(DL, 0x37 - 2, y0 + pitch - 1, PORT_SHEET_RULE_R, y0 + pitch, PORT_SHEET_COL_RULE);
+    DL = microcode_constructor(DL);
+
+    for (i = 0; i < (s32) (sizeof(labels) / sizeof(labels[0])); i++)
+    {
+        x = 0x37;
+        y = y0 + (i + 1) * pitch + 2;
+        DL = frontPrintText(DL, &x, &y, (char *) labels[i], ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+        for (p = 0; p < 2; p++)
+        {
+            coopDebriefValue(buf, p, i);
+            x = p ? COOP_DEBRIEF_COL2 : COOP_DEBRIEF_COL1;
+            y = y0 + (i + 1) * pitch + 2;
+            DL = frontPrintText(DL, &x, &y, buf, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+        }
+    }
+    return DL;
+}
 #endif /* !TARGET_N64 */
 
 
@@ -17928,6 +18004,17 @@ Gfx *constructor_menu0D_missioncomplete(Gfx *DL)
         }
     }
 
+
+#ifndef TARGET_N64
+    if (coopStatsShown())
+    {   /* co-op: both players' numbers instead of the solo table below */
+        DL = coopDebriefStats(DL, 0xCC, y2);
+        DL = frontAddNextTabText(DL);
+        DL = frontAddPreviousTabText(DL);
+        DL = frontDrawCursor(DL);
+        return DL;
+    }
+#endif
 
     text = langGet(getStringID(LTITLE, TITLE_STR_106_ACCURACY)); //Accuracy:*
     x = 0x37;
