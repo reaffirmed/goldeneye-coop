@@ -26,6 +26,7 @@ void coopMissionComplete(void);
 s32  coopFrontTick(void);
 s32  coopAltBondBegin(s32 k); /* 1: "Bond" is now the k-th living partner (from 0), call coopAltBondEnd */
 void coopAltBondEnd(void);
+void coopAltBondCredit(s32 k); /* the check passed for that partner */
 void coopAiCommand(u8 *list, s32 offset, ChrRecord *self);
 s32  coopDeadTick(void); /* 1: co-op owns this death (waiting or respawned) */
 void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon);
@@ -237,7 +238,7 @@ s32  coopPlayerCharacter(s32 p);            /* player p's pick, as the lobby kno
 enum
 {
     COOPEV_CHAT = 20,       /* a part of a chat line (coop_chat.c) */
-    COOPEV_OBJCLAIM = 21,   /* joiner -> host: I saw an objective complete first */
+    /* 21 spare */
     COOPEV_OBJDONE = 22,    /* host -> all: objective done, and who gets the credit */
     COOPEV_TEAMTIME = 23,   /* host -> all: the team's time for the mission just won */
     COOPEV_CAMPAIGN = 24    /* host -> joiner: a line of the host's campaign record */
@@ -269,9 +270,16 @@ s32  coopChatTyping(void);
 s32  coopChatEatEscape(void);   /* 1: this Escape was the chat's, not the pause's */
 void coopChatTick(s32 inmission);
 void coopChatApply(const u8 *raw, s32 from);
-void coopFeedToast(const char *text, s32 player);   /* centred, in the player's colour; -1 white */
+void coopFeedToast(const char *text, s32 player);   /* centred, the first line in the player's colour (-1 white); '|' starts a second line */
 Gfx *coopFeedRender(Gfx *gdl);                       /* in play (coop_hud.c) */
 s32  coopFeedLines(s32 maxlines, char lines[][80], s32 *players);  /* the newest chat lines as typed, for the lobby */
 void coopChatTypedLine(char *out, s32 cap);         /* the line being typed */
+
+/* objective credit (coop_objective.c): the host names who completed each
+ * objective and every game shows a toast for a partner's */
+void coopObjNoteActor(s32 player, s32 damage);  /* host: something player did just changed the world */
+void coopObjStatusChanged(s32 index, s32 letter, s32 status);  /* objective_status.c */
+void coopObjTick(s32 inmission);
+void coopObjApply(s32 kind, const u8 *raw, s32 from);
 
 #endif

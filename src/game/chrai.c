@@ -2120,6 +2120,10 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                         near = value > chrGetDistanceFromBondToPad(ChrEntityp, pad);
                         coopAltBondEnd();
                     }
+                    if (near && coopk > 0)
+                    {
+                        coopAltBondCredit(coopk - 1);   /* the partner did it (coop_objective.c) */
+                    }
 #endif
                     if (near)
                     {
@@ -2178,6 +2182,10 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     {
                         inroom = check_if_actor_is_at_preset(ChrEntityp, pad_id);
                         coopAltBondEnd();
+                    }
+                    if (inroom && coopk > 0)
+                    {
+                        coopAltBondCredit(coopk - 1);   /* the partner did it (coop_objective.c) */
                     }
 #endif
                     if (inroom)
@@ -4125,6 +4133,10 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     {
                         below = getCurrentPlayerProp()->pos.y < bondpos;
                         coopAltBondEnd();
+                    }
+                    if (below && coopk > 0)
+                    {
+                        coopAltBondCredit(coopk - 1);   /* the partner did it (coop_objective.c) */
                     }
 #endif
                     if (below)

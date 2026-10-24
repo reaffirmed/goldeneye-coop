@@ -63,7 +63,7 @@ extern s32 portTextInputActive(void);
 #define COOPFEED_LINES    6
 #define COOPFEED_SHOW     (60 * 10)     /* a line stays 10 s in play */
 #define COOPFEED_FADE     60
-#define COOPTOAST_SHOW    (60 * 4)
+#define COOPTOAST_SHOW    (60 * 5)
 #define COOPTOAST_FADE    40
 #define COOPTOAST_MAX     3
 
@@ -432,6 +432,30 @@ void coopChatTypedLine(char *out, s32 cap)
     snprintf(out, cap, "%s", sTyping ? sLine : "");
 }
 
+/* cut a line (ending in '\n') with "..." so it is no wider than maxw */
+static void coopFeedFit(char *text, s32 maxw)
+{
+    char orig[128];
+    s32 th = 0, tw = 0;
+    s32 k;
+
+    textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+    if (tw <= maxw)
+    {
+        return;
+    }
+    snprintf(orig, sizeof(orig), "%s", text);
+    for (k = (s32) strlen(orig) - 2; k > 1; k--)
+    {
+        sprintf(text, "%.*s...\n", (int) k, orig);
+        textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+        if (tw <= maxw)
+        {
+            return;
+        }
+    }
+}
+
 static Gfx *coopFeedPrint(Gfx *gdl, s32 x, s32 y, char *text, u32 colour)
 {
     return textRenderOutlined(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic, colour,
@@ -506,28 +530,43 @@ Gfx *coopFeedRender(Gfx *gdl)
         sToastCount--;
     }
     if (sToastCount > 0)
-    {
+    {   /* centred a little under the top; a toast's lines are split at '|' and each cut to fit */
+        const s32 cx = viGetViewLeft() + viGetViewWidth() / 2;
+        const s32 maxw = viGetViewWidth() - 0x20;
+
         gdl = microcode_constructor(gdl);
-        y = viGetViewTop() + viGetViewHeight() / 4;
+        y = viGetViewTop() + viGetViewHeight() * 3 / 8;
         for (i = 0; i < sToastCount; i++)
         {
             u32 age = sNow - sToast[i].tick;
-            char text[100];
-            s32 th = 0, tw = 0;
+            const char *at = sToast[i].text;
             s32 a = 0xFF;
+            s32 line;
 
             if (age > COOPTOAST_SHOW - COOPTOAST_FADE)
             {
                 a = (s32) ((COOPTOAST_SHOW - age) * 0xFF / COOPTOAST_FADE);
             }
-            coopFeedText(text, sizeof(text), sToast[i].text);
-            textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
-            gdl = microcode_constructor_related_to_menus(gdl, viGetViewLeft() + (viGetViewWidth() - tw) / 2 - 6, y - 3,
-                                                         viGetViewLeft() + (viGetViewWidth() + tw) / 2 + 6, y + th + 2,
-                                                         coopFeedAlpha(0x00000090, a));
-            gdl = coopFeedPrint(gdl, viGetViewLeft() + (viGetViewWidth() - tw) / 2, y, text,
-                                coopFeedAlpha(coopFeedColour(sToast[i].player), a));
-            y += th + 8;
+            for (line = 0; line < 2 && *at != '\0'; line++)
+            {
+                char part[80];
+                char text[100];
+                const char *bar = strchr(at, '|');
+                s32 n = (bar != NULL) ? (s32) (bar - at) : (s32) strlen(at);
+                s32 th = 0, tw = 0;
+
+                snprintf(part, sizeof(part), "%.*s", (int) n, at);
+                at += n + (bar != NULL);
+                coopFeedText(text, sizeof(text), part);
+                coopFeedFit(text, maxw);
+                textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+                gdl = microcode_constructor_related_to_menus(gdl, cx - tw / 2 - 4, y - 2, cx + tw / 2 + 4, y + th + 1,
+                                                             coopFeedAlpha(0x00000090, a));
+                gdl = coopFeedPrint(gdl, cx - tw / 2, y, text,
+                                    coopFeedAlpha(line == 0 ? coopFeedColour(sToast[i].player) : 0xFFFFFFFF, a));
+                y += th + 3;
+            }
+            y += 6;
         }
         gdl = combiner_bayer_lod_perspective(gdl);
     }
