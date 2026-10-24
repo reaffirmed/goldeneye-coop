@@ -29,3 +29,11 @@ Working notes for online story co-op (Steam, Spacewar AppID 480), following the 
 
 - Whether float results match between Windows and Linux builds (affects any lockstep idea; state sync chosen to avoid it).
 - How level setup scripts reference the player beyond TARGET_BOND.
+
+## Cloud test setup (verified 2026-10-24)
+
+- The repo Dockerfile's wget can't reach GitHub through this sandbox's TLS proxy. Workaround: download the two SDL2 tarballs on the host (sha1 checked, both match the Dockerfile) and COPY them in.
+- HOST_UID=0 breaks the Dockerfile's useradd step; build with HOST_UID=1000 and run containers with `-u 0`.
+- `GE_HEADLESS=ON` does not link on 1.0.2b (missing port* symbols from video/input). The GE_VIDEO Linux build links and runs.
+- `coop/docker/Dockerfile.run` adds Xvfb + 32-bit Mesa on top of the build image. `coop/docker/smoke.sh` boots Dam via GE_STAGE and screenshots the virtual display. Dam reached gameplay at ~58 fps with software GL.
+- `GE_SHOT` is listed in the env help but not implemented in this tree; screenshots come from `import -window root`.
