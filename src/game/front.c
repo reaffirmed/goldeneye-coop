@@ -8835,7 +8835,7 @@ extern void portConLogf(const char *fmt, ...);
 
 enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLROW_CANCEL,
        CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE, CLROW_FRIENDLYFIRE,
-       CLROW_CHARACTER, CLROW_CHAT };
+       CLROW_CHARACTER, CLROW_CHAT, CLROW_PUBLIC, CLROW_PASSWORD, CLROW_JOINPUBLIC };
 #define COOP_LOBBY_ROWS     40
 #define COOP_LOBBY_VISIBLE  19  /* rows that fit on the paper; more scroll (coop_lobby_scroll) */
 #define COOP_LOBBY_CHAT_LINES 3
@@ -8915,6 +8915,32 @@ static s32 coopLobbyChatColour(s32 player)
     return (player >= 0 && player < COOP_MAX_PLAYERS) ? inks[player] : 0xFF;
 }
 
+/* the host's lobby type and password (coop_browse.c): before hosting, and
+ * while hosting, where a change goes to Steam at once */
+static void coopLobbyAddHostOptions(void)
+{
+    struct CoopLobbyRow *r;
+
+    if (!coopLobbyIsSteam())
+    {
+        return;
+    }
+    coopLobbyAdd(CLROW_PUBLIC, 0, "Lobby\n", coopBrowsePublic() ? "Public\n" : "Friends Only\n");
+    if (coopBrowseTyping() == COOPBROWSE_TYPE_HOST)
+    {
+        char typed[32];
+        char label[48];
+
+        coopBrowseTypedMask(typed, sizeof(typed));
+        snprintf(label, sizeof(label), "Password: %s_\n", typed);
+        r = coopLobbyAdd(CLROW_TEXT, 0, label, "Enter\n");
+    }
+    else
+    {
+        r = coopLobbyAdd(CLROW_PASSWORD, 0, "Password\n", coopBrowseHasPassword() ? "Set\n" : "None\n");
+    }
+}
+
 static void coopLobbyBuild(void)
 {
     const s32 state = coopLobbyState();
@@ -8932,14 +8958,58 @@ static void coopLobbyBuild(void)
     }
     if (state == COOPLOBBY_IDLE)
     {
+        if (coopBrowseRefused() > 0)
+        {
+            r = coopLobbyAdd(CLROW_TEXT, 0, "Wrong password.\n", "");
+            if (r != NULL)
+            {
+                r->colour = 0xA00000FF;
+            }
+        }
         coopLobbyAdd(CLROW_HOST, 0, "Host a Game\n", "");
         coopLobbyAdd(CLROW_JOINANY, 0, "Join a Friend's Game\n", "");
+        coopLobbyAddHostOptions();
         coopCharacterName(coopCharacter(), name, sizeof(name));
         coopLobbyAdd(CLROW_HEAD, 0, "Your Character\n", "");
         r = coopLobbyAdd(CLROW_CHARACTER, 0, name, "Change\n");
         if (r != NULL)
         {
             r->indent = 0xC;
+        }
+        coopLobbyAdd(CLROW_HEAD, 0, "Public Games\n", "");
+        k = coopBrowseCount();
+        for (i = 0; i < k && coop_lobby_nrows < COOP_LOBBY_ROWS - 4; i++)
+        {
+            char label[48];
+
+            coopLobbyCopyName(name, sizeof(name), coopBrowseName(i));
+            name[strlen(name) - 1] = '\0';
+            snprintf(label, sizeof(label), "%.30s  %d/%d\n", name, (int) coopBrowseMembers(i), COOP_MAX_PLAYERS);
+            r = coopLobbyAdd(CLROW_JOINPUBLIC, i, label, coopBrowseLocked(i) ? "Password\n" : "Join\n");
+            if (r != NULL && coopBrowseMembers(i) >= COOP_MAX_PLAYERS)
+            {
+                r->dim = TRUE;
+            }
+            if (coopBrowseTyping() == COOPBROWSE_TYPE_JOIN && coopBrowseTypingFor() == i)
+            {
+                char typed[32];
+
+                coopBrowseTypedMask(typed, sizeof(typed));
+                snprintf(label, sizeof(label), "Password: %s_\n", typed);
+                r = coopLobbyAdd(CLROW_TEXT, 0, label, "");
+                if (r != NULL)
+                {
+                    r->indent = 0xC;
+                }
+            }
+        }
+        if (k <= 0)
+        {
+            r = coopLobbyAdd(CLROW_TEXT, 0, (k < 0) ? "Looking for public games...\n" : "No public games right now\n", "");
+            if (r != NULL)
+            {
+                r->colour = PORT_SHEET_COL_DIM;
+            }
         }
         coopLobbyAdd(CLROW_HEAD, 0, "Friends Online\n", "");
         for (i = 0; i < coop_lobby_nfriends && coop_lobby_nrows < COOP_LOBBY_ROWS; i++)
@@ -9051,7 +9121,7 @@ static void coopLobbyBuild(void)
     {
         if (!coopLobbyHasPartner())
         {
-            coopLobbyAdd(CLROW_TEXT, 0, "Connecting to the host...\n", "");
+            coopLobbyAdd(CLROW_TEXT, 0, coopBrowseChecking() ? "Checking the password...\n" : "Connecting to the host...\n", "");
         }
         coopLobbyAdd(CLROW_READY, 0, coopLobbySelfReady() ? "Cancel Ready\n" : "Ready Up\n", "");
         coopLobbyAdd(CLROW_TEXT, 0, "The host picks the mission.\n", "");
@@ -9146,6 +9216,10 @@ static void coopLobbyBuild(void)
     }
     coopLobbyAdd(coopLobbyIsHost() ? CLROW_FRIENDLYFIRE : CLROW_TEXT, 0, "Friendly Fire\n",
                  coopSetting(COOPSET_FRIENDLYFIRE) ? "On\n" : "Off\n");
+    if (coopLobbyIsHost())
+    {
+        coopLobbyAddHostOptions();
+    }
 
     for (i = 0, k = 0; i < COOP_MAX_PLAYERS; i++)
     {
@@ -9227,6 +9301,15 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
         case CLROW_CHAT:
             coopChatPress();
             break;
+        case CLROW_PUBLIC:
+            coopBrowseTogglePublic();
+            break;
+        case CLROW_PASSWORD:
+            coopBrowseTypeStart(COOPBROWSE_TYPE_HOST, 0);
+            break;
+        case CLROW_JOINPUBLIC:
+            coopBrowseJoin(r->arg);
+            break;
         default:
             break;
     }
@@ -9249,7 +9332,7 @@ void init_menu1D_cooplobby(void)
     {
         const char *e = getenv("GE_COOP_LOBBY");
 
-        coop_lobby_auto = (e != NULL && strchr("hijw", e[0]) != NULL && e[0] != '\0') ? e[0] : -1;
+        coop_lobby_auto = (e != NULL && strchr("hijwb", e[0]) != NULL && e[0] != '\0') ? e[0] : -1;
     }
     coopLobbyBuild();
     load_walletbond();
@@ -9282,6 +9365,10 @@ static void coopLobbyHarness(void)
         {
             coopLobbyHost();
         }
+        else if (coop_lobby_auto == 'b')
+        {
+            coopBrowseHarnessJoin();
+        }
         else
         {
             s32 i;
@@ -9304,7 +9391,7 @@ static void coopLobbyHarness(void)
         coopLobbyInvite(0);
         coop_lobby_invited[0] = 1;
     }
-    if ((coop_lobby_auto == 'j' || coop_lobby_auto == 'w') && state == COOPLOBBY_JOINED && coopLobbyHasPartner() && !coopLobbySelfReady())
+    if ((coop_lobby_auto == 'j' || coop_lobby_auto == 'w' || coop_lobby_auto == 'b') && state == COOPLOBBY_JOINED && coopLobbyHasPartner() && !coopLobbySelfReady())
     {
         portConLogf("ge: coop lobby: ready\n");
         coopLobbySetReady(TRUE);
@@ -9391,8 +9478,8 @@ void interface_menu1D_cooplobby(void)
             coopChatPress();
         }
     }
-    if (coopChatTyping())
-    {   /* the keys are the chat line's; the rows wait */
+    if (coopChatTyping() || coopBrowseTyping())
+    {   /* the keys are the chat line's (or the password's); the rows wait */
         frontUpdateControlStickPosition();
         return;
     }
