@@ -8834,8 +8834,8 @@ extern int atoi(const char *);
 extern void portConLogf(const char *fmt, ...);
 
 enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLROW_CANCEL,
-       CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE };
-#define COOP_LOBBY_ROWS     18
+       CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE, CLROW_FRIENDLYFIRE };
+#define COOP_LOBBY_ROWS     20
 #define COOP_LOBBY_X        PORT_SHEET_LABEL_X
 #define COOP_LOBBY_VALUE_X  0xFA
 #define COOP_LOBBY_Y0       PORT_SHEET_ROW_Y0
@@ -9040,6 +9040,8 @@ static void coopLobbyBuild(void)
         snprintf(diff, sizeof(diff), "%s\n", coopDifficultyName(coopSetting(COOPSET_DIFFICULTY)));
         coopLobbyAdd(coopLobbyIsHost() ? CLROW_DIFFICULTY : CLROW_TEXT, 0, "Guards\n", diff);
     }
+    coopLobbyAdd(coopLobbyIsHost() ? CLROW_FRIENDLYFIRE : CLROW_TEXT, 0, "Friendly Fire\n",
+                 coopSetting(COOPSET_FRIENDLYFIRE) ? "On\n" : "Off\n");
 
     for (i = 0, k = 0; i < COOP_MAX_PLAYERS; i++)
     {
@@ -9111,6 +9113,9 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
             break;
         case CLROW_DIFFICULTY:
             coopSetSetting(COOPSET_DIFFICULTY, (coopSetting(COOPSET_DIFFICULTY) + 1) % coopDifficultyCount());
+            break;
+        case CLROW_FRIENDLYFIRE:
+            coopSetSetting(COOPSET_FRIENDLYFIRE, !coopSetting(COOPSET_FRIENDLYFIRE));
             break;
         default:
             break;

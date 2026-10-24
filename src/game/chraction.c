@@ -2498,6 +2498,11 @@ bool handles_shot_actors(ChrRecord *self, s32 hitpart, coord3d *vector, s32 weap
     {
         return TRUE;
     }
+    /* co-op: a partner is never hurt here; friendly fire goes to their game */
+    if (coopShotPuppet(self, hitpart, vector, weaponid, isPlayer))
+    {
+        return TRUE;
+    }
 #endif
 
     // Handle hat shots.

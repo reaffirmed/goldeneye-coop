@@ -228,3 +228,17 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscen
   appended), bind row "Mission Items".
 - Harness: GE_WEAPMENU_TEST=items. Verified on Dam 00 Agent (GE_DIFF=2):
   slot 6 shows Covert Modem, fire puts it in hand.
+
+## Friendly fire and the partner-shot crash (2026-10-24)
+
+- Bug (real play test): shooting a partner killed their puppet on the
+  shooter's game, and the dead chr's freed model crashed coopPuppetUpdate
+  (setsuboffset: no objinst, signal 11). Reproduced with GE_COOP_TESTFF.
+- Fix: handles_shot_actors calls coopShotPuppet first; a puppet is never
+  damaged locally. Lobby row "Friendly Fire" (COOPSET_FRIENDLYFIRE, was
+  SPARE1; default Off). On: the hit goes to that player as COOPEV_HIT,
+  0.125 x the gun's destruction amount (a guard's scale), x2 on the head.
+- Harness: GE_COOP_TESTFF=<mission ticks> shoots the first partner in the
+  chest every 2 s; GE_COOP_FRIENDLYFIRE=0|1. Verified with two copies: Off,
+  23 shots each way, no damage, no crash; On, the partner dies, respawns, no
+  crash.

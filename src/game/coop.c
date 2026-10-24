@@ -55,6 +55,7 @@ void alarmActivate(void);
 void ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType);
 void *explosionCreate(PropRecord *arg0, coord3d *target_pos, StandTile *target_stan, s16 explosion_type, s32 arg4, s32 player, u8 *rooms, s32 arg7);
 ITEM_IDS getCurrentPlayerWeaponId(GUNHAND hand);
+f32 gunItemGetDestructionAmount(ITEM_IDS item);
 void hudmsgBottomShow(char *mess);
 TICKOP propPickupByPlayer(PropRecord *prop, bool showstring);
 void objFreePermanently(ObjectRecord *obj, bool freeprop);
@@ -1159,6 +1160,30 @@ static void coopHarnessTick(void)
     }
 
     if (coopPartnerHere() && coopInMission())
+    {   /* GE_COOP_TESTFF=<mission ticks>: from then, shoot the first partner in the chest every 2 s, as the gun would (harness only) */
+        static s32 testff = -2;
+        if (testff == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTFF");
+            testff = (e != NULL) ? atoi(e) : -1;
+        }
+        if (testff >= 0 && sMissionTicks >= testff && (sMissionTicks % 120) == 0)
+        {
+            s32 p;
+            for (p = 0; p < COOP_MAX_PLAYERS; p++)
+            {
+                if (p != coopSelf() && coopRemoteHere(p) && sR[p].puppet != NULL && sR[p].puppet->chr != NULL)
+                {
+                    coord3d v = { 0.0f, 0.0f, 1.0f };
+                    portConLogf("ge: coop: testff: shooting player %d\n", p + 1);
+                    handles_shot_actors(sR[p].puppet->chr, HIT_CHEST, &v, ITEM_AK47, TRUE);
+                    break;
+                }
+            }
+        }
+    }
+
+    if (coopPartnerHere() && coopInMission())
     {   /* GE_COOP_TESTGOTO=<chrnum>: once, 5 s into the mission, stand where that chr stands (harness only) */
         static s32 testgoto = -2;
         static s32 inmission;
@@ -1948,6 +1973,47 @@ s32 coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weap
     return 1;
 }
 
+/* A shot on a partner's puppet never touches the puppet: it is that player's
+ * Bond, and a local death frees its model under the puppet code (the crash
+ * in setsuboffset). With friendly fire on, the hit goes to that player's own
+ * game, scaled as a guard's hit on Bond. Returns 1 for any puppet. */
+s32 coopShotPuppet(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, s32 isPlayer)
+{
+    CoopEvent ev;
+    s32 p;
+    f32 damage;
+
+    if (!sEnabled || chr == NULL || chr->prop == NULL || (p = coopPlayerOfProp(chr->prop)) < 0)
+    {
+        return 0;
+    }
+    if (!isPlayer || !coopSetting(COOPSET_FRIENDLYFIRE) || !coopRemoteAliveHere(p) || !coopInMission())
+    {
+        return 1;
+    }
+    damage = 0.125f * gunItemGetDestructionAmount(weaponid);
+    if (hitpart == HIT_HEAD)
+    {
+        damage *= 2.0f;
+    }
+    else if (hitpart == HIT_GENERALHALF)
+    {
+        damage *= 0.25f;
+    }
+    else if (hitpart == HIT_GENERAL)
+    {
+        damage *= 0.5f;
+    }
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = COOPEV_HIT;
+    ev.u.hit.damage = damage;
+    ev.u.hit.angle = 0.0f;
+    coopQueueEventTo(&ev, p);
+    portConLogf("ge: coop: friendly fire on player %d (part %d, weapon %d): %.3f\n", p + 1, hitpart, weaponid, damage);
+    (void) vector;
+    return 1;
+}
+
 /* Host: apply a client's shot as if the remote player fired it. */
 static void coopHostApplyShot(CoopEvent *ev)
 {
@@ -2075,7 +2141,7 @@ static void coopApplyEvent(CoopEvent *ev)
         case COOPEV_HIT:
             if (coopInMission() && !g_CurrentPlayer->bonddead)
             {
-                portConLogf("ge: coop: hit from a host guard: %.3f\n", ev->u.hit.damage);
+                portConLogf("ge: coop: hit from player %d: %.3f\n", ev->from + 1, ev->u.hit.damage);
                 bondviewCallRecordDamageKills(ev->u.hit.damage, ev->u.hit.angle, -1, 1);
             }
             break;
@@ -2911,7 +2977,12 @@ s32 coopFrontTick(void)
         if (testdiff == -1)
         {
             const char *e = getenv("GE_COOP_DIFFICULTY");
+            const char *f = getenv("GE_COOP_FRIENDLYFIRE");
             testdiff = 0;
+            if (f != NULL)
+            {
+                sSettings[COOPSET_FRIENDLYFIRE] = (u8) atoi(f);
+            }
             if (e != NULL)
             {
                 sSettings[COOPSET_DIFFICULTY] = (u8) atoi(e);

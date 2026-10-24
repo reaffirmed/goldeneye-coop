@@ -30,6 +30,7 @@ void coopAiCommand(u8 *list, s32 offset, ChrRecord *self);
 s32  coopDeadTick(void); /* 1: co-op owns this death (waiting or respawned) */
 void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon);
 s32  coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid);
+s32  coopShotPuppet(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, s32 isPlayer);
 
 #define COOP_MAX_PLAYERS 4   /* the host and up to three joiners */
 
@@ -58,7 +59,7 @@ s32  coopHudBledOut(void);
 enum
 {
     COOPSET_DIFFICULTY,     /* co-op difficulty: 0 normal (coop_difficulty.c) */
-    COOPSET_SPARE1,
+    COOPSET_FRIENDLYFIRE,   /* 0 off: shots pass partners by; 1 on: they hurt */
     COOPSET_SPARE2,
     COOPSET_SPARE3,
     COOPSET_SPARE4,

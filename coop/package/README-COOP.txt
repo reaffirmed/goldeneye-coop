@@ -25,6 +25,7 @@ Playing
    - Continue: jumps to the next mission you have not beaten together.
    - When Down: Revive or Timer, Revive only, or Timer only.
    - Guards: Normal, Hard (tougher, more of them) or Brutal.
+   - Friendly Fire: Off (default, your shots pass your partners by) or On.
 5. When every friend shows as Ready, the host picks "Select Mission" (or
    Continue), then the mission and difficulty as usual. The friends' games
    follow into the mission by themselves.
