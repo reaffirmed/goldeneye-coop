@@ -255,6 +255,7 @@ scripts/__pycache__/generate_prop_model_c.cpython-310.pyc
 port_sweep/
 __pycache__/
 build_pc/
+build_p2/
 cmake_*.log
 third_party/
 build_win/

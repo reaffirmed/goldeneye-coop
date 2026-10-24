@@ -499,6 +499,8 @@ static void coopCampaignLoad(void)
     fclose(f);
 }
 
+static u8 sCampaignSent[COOP_MAX_PLAYERS];  /* host: told this player our furthest (cross-save) */
+
 static void coopCampaignSave(void)
 {
     FILE *f = fopen(portRootPath(COOP_CAMPAIGN_FILE), "w");
@@ -633,6 +635,7 @@ void coopCampaignMissionEnd(void)
         return;
     }
     coopCampaignSave();
+    memset(sCampaignSent, 0, sizeof(sCampaignSent));   /* host: the joiners hear the new furthest */
     {
         s32 stage, d;
         char label[48];
@@ -644,44 +647,71 @@ void coopCampaignMissionEnd(void)
     }
 }
 
-/* The mission after the furthest one finished with every partner here (the
- * least far partner sets it), at the difficulty it was finished on. 1 and
- * stage (LEVELID_*), difficulty and a label like "Continue: Facility (Agent)";
- * 0 with no partner, nothing finished together, or the last mission done. */
-s32 coopCampaignNext(s32 *stage, s32 *difficulty, char *label, s32 labelcap)
+/* Cross-save: the campaign is the host's. Our own progress is the furthest
+ * mission in coop_campaign.txt with anyone (lines inherited from a host
+ * count too). The host's Continue is the mission after its own furthest,
+ * so a partner new to the campaign joins it where the host is; the host
+ * sends its furthest to each joiner (COOPEV_CAMPAIGN), which shows it on its
+ * lobby and keeps it as a line under the host's key, so it carries the
+ * progress on when it hosts itself. */
+typedef struct
 {
-    char key[40];
-    s32 i, p;
-    s32 best = COOP_MISSIONS;   /* the group's: the least far partner's */
-    s32 diff = DIFFICULTY_AGENT;
-    s32 partners = 0;
-    s32 next;
+    s8 mission;     /* the host's furthest, -1 none */
+    s8 difficulty;
+    u8 pad[2];
+} CoopCampaignMsg;
+
+static s32 sHostBest = -1;      /* joiner: the host's furthest, as it sent it */
+static s32 sHostBestDiff;
+static s32 sInheritPending;     /* joiner: sHostBest is not in our record yet */
+static void coopCampaignInherit(void);
+
+/* our furthest mission in the record, with anyone; -1 none */
+static s32 coopCampaignBest(s32 *difficulty)
+{
+    s32 best = -1, diff = DIFFICULTY_AGENT;
+    s32 i;
 
     coopCampaignLoad();
-    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    for (i = 0; i < sCampaignCount; i++)
     {
-        s32 pbest = -1, pdiff = DIFFICULTY_AGENT;
-
-        if (!coopCampaignKey(p, key, sizeof(key)))
+        if (sCampaign[i].mission > best
+            || (sCampaign[i].mission == best && sCampaign[i].difficulty > diff && sCampaign[i].difficulty != DIFFICULTY_007))
         {
-            continue;
-        }
-        partners++;
-        for (i = 0; i < sCampaignCount; i++)
-        {
-            if (strcmp(sCampaign[i].key, key) == 0 && sCampaign[i].mission > pbest)
-            {
-                pbest = sCampaign[i].mission;
-                pdiff = sCampaign[i].difficulty;
-            }
-        }
-        if (pbest < best)
-        {
-            best = pbest;
-            diff = pdiff;
+            best = sCampaign[i].mission;
+            diff = sCampaign[i].difficulty;
         }
     }
-    if (partners == 0 || best < 0 || best + 1 >= COOP_MISSIONS)
+    if (difficulty != NULL)
+    {
+        *difficulty = diff;
+    }
+    return best;
+}
+
+/* The mission after the campaign's furthest (the host's: ours when we host,
+ * the one it sent when we joined), at the difficulty it was finished on. 1
+ * and stage (LEVELID_*), difficulty and a label like "Continue: Facility
+ * (Agent)"; 0 with no partner, nothing finished, or the last mission done. */
+s32 coopCampaignNext(s32 *stage, s32 *difficulty, char *label, s32 labelcap)
+{
+    s32 best, diff = DIFFICULTY_AGENT;
+    s32 next;
+
+    if (!coopLobbyHasPartner())
+    {
+        return 0;
+    }
+    if (coopLobbyIsHost())
+    {
+        best = coopCampaignBest(&diff);
+    }
+    else
+    {
+        best = sHostBest;
+        diff = sHostBestDiff;
+    }
+    if (best < 0 || best + 1 >= COOP_MISSIONS)
     {
         return 0;
     }
@@ -703,4 +733,98 @@ s32 coopCampaignNext(s32 *stage, s32 *difficulty, char *label, s32 labelcap)
         snprintf(label, labelcap, "Continue: %s (%s)", sMissionNames[best + 1], sDiffNames[diff]);
     }
     return 1;
+}
+
+/* host: our furthest to each joiner once it is here, and again after a win */
+void coopCampaignTick(void)
+{
+    s32 p;
+
+    if (sInheritPending && !coopExtIsHost())
+    {
+        coopCampaignInherit();
+    }
+    if (!coopExtIsHost() || !coopSessionActive())
+    {
+        memset(sCampaignSent, 0, sizeof(sCampaignSent));
+        return;
+    }
+    for (p = 1; p < COOP_MAX_PLAYERS; p++)
+    {
+        if (!coopLobbyPlayerHere(p))
+        {
+            sCampaignSent[p] = 0;
+        }
+        else if (!sCampaignSent[p])
+        {
+            CoopCampaignMsg m;
+            s32 diff;
+
+            memset(&m, 0, sizeof(m));
+            m.mission = (s8) coopCampaignBest(&diff);
+            m.difficulty = (s8) diff;
+            coopExtSend(COOPEV_CAMPAIGN, p, &m, sizeof(m));
+            sCampaignSent[p] = 1;
+            portConLogf("ge: coop: campaign: told player %d we are at %d (%s)\n", p + 1, m.mission,
+                        (m.mission >= 0) ? sMissionNames[(s32) m.mission] : "nothing yet");
+        }
+    }
+}
+
+/* joiner: keep the host's furthest as ours too, under the host's key */
+static void coopCampaignInherit(void)
+{
+    char key[40];
+    CoopCampaignEnt *e = NULL;
+    s32 i;
+
+    if (sHostBest < 0 || !coopCampaignKey(0, key, sizeof(key)))
+    {
+        return;     /* nothing, or the host's hello is not in yet: next tick */
+    }
+    sInheritPending = 0;
+    coopCampaignLoad();
+    for (i = 0; i < sCampaignCount; i++)
+    {
+        if (strcmp(sCampaign[i].key, key) == 0 && sCampaign[i].mission == sHostBest)
+        {
+            e = &sCampaign[i];
+        }
+    }
+    if (e != NULL && e->difficulty >= sHostBestDiff)
+    {
+        return;     /* we have it */
+    }
+    if (e == NULL)
+    {
+        if (sCampaignCount >= COOP_CAMPAIGN_MAX)
+        {
+            return;
+        }
+        e = &sCampaign[sCampaignCount++];
+        memset(e, 0, sizeof(*e));
+        strncpy(e->key, key, sizeof(e->key) - 1);
+        e->mission = (s8) sHostBest;
+    }
+    e->difficulty = (s8) sHostBestDiff;
+    coopStatsCopyName(e->name, sizeof(e->name), coopPlayerName(0));
+    coopCampaignSave();
+    portConLogf("ge: coop: campaign: inherited %s (%s) from the host\n", sMissionNames[sHostBest], sDiffNames[sHostBestDiff]);
+}
+
+void coopCampaignApply(const u8 *raw, s32 from)
+{
+    CoopCampaignMsg m;
+
+    memcpy(&m, raw, sizeof(m));
+    if (from != 0 || coopExtIsHost() || m.mission >= COOP_MISSIONS || m.difficulty < DIFFICULTY_AGENT
+        || m.difficulty >= DIFFICULTY_MAX)
+    {
+        return;
+    }
+    sHostBest = m.mission;
+    sHostBestDiff = m.difficulty;
+    portConLogf("ge: coop: campaign: the host is at %d (%s)\n", m.mission, (m.mission >= 0) ? sMissionNames[(s32) m.mission] : "nothing yet");
+    sInheritPending = 1;
+    coopCampaignInherit();
 }

@@ -159,7 +159,9 @@ s32  coopStatsColumns(void);            /* the debrief's columns (players), up t
 s32  coopStatsGet(s32 col, s32 stat);    /* -1 not in yet */
 const char *coopStatsName(s32 col);
 void coopCampaignMissionEnd(void);
-s32  coopCampaignNext(s32 *stage, s32 *difficulty, char *label, s32 labelcap);
+s32  coopCampaignNext(s32 *stage, s32 *difficulty, char *label, s32 labelcap);  /* the host's campaign (cross-save) */
+void coopCampaignTick(void);
+void coopCampaignApply(const u8 *raw, s32 from);
 
 /* how partners look (coop_look.c): the character they picked in the lobby,
  * the guns in their hands with the multiplayer body animations, and their

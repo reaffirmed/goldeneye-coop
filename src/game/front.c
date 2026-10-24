@@ -9055,6 +9055,37 @@ static void coopLobbyBuild(void)
         }
         coopLobbyAdd(CLROW_READY, 0, coopLobbySelfReady() ? "Cancel Ready\n" : "Ready Up\n", "");
         coopLobbyAdd(CLROW_TEXT, 0, "The host picks the mission.\n", "");
+        {   /* the host's campaign, which is ours too (cross-save, coop_stats.c) */
+            s32 stage, diff;
+            char label[48];
+
+            if (coopCampaignNext(&stage, &diff, label, sizeof(label) - 1))
+            {
+                char *paren = strstr(label, " (");
+                char value[24] = "";
+
+                if (paren != NULL)
+                {
+                    *paren = '\0';
+                    snprintf(value, sizeof(value), "%s", paren + 2);
+                    if (strchr(value, ')') != NULL)
+                    {
+                        strcpy(strchr(value, ')'), "\n");
+                    }
+                }
+                strcat(label, "\n");
+                if (strncmp(label, "Continue:", 9) == 0)
+                {   /* the host starts it: "Next: Runway" */
+                    memmove(label, label + 4, strlen(label + 4) + 1);
+                    memcpy(label, "Next:", 5);
+                }
+                r = coopLobbyAdd(CLROW_TEXT, 0, label, value);
+                if (r != NULL)
+                {
+                    r->colour = PORT_SHEET_COL_DIM;
+                }
+            }
+        }
     }
     coopLobbyAdd(CLROW_LEAVE, 0, "Leave Lobby\n", "");
 
