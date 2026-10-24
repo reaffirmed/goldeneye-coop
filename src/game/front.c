@@ -9815,6 +9815,13 @@ static Gfx *coopDebriefStats(Gfx *DL, s32 y0, s32 pitch)
             DL = frontPrintText(DL, &x, &y, buf, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
         }
     }
+    if (coopPhotoCount() > 0)
+    {   /* photo mode's shots from this mission (coop_photo.c) */
+        sprintf(buf, "Photos: %d, in the Photos folder\n", (int) coopPhotoCount());
+        x = 0x37;
+        y = y0 + (i + 1) * pitch + 4;
+        DL = frontPrintText(DL, &x, &y, buf, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+    }
     return DL;
 }
 #endif /* !TARGET_N64 */
