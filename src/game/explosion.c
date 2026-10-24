@@ -266,6 +266,13 @@ explosionCreate(PropRecord *arg0, struct coord3d *target_pos, StandTile *target_
     sp44 = &g_ExplosionTypes[explosion_type];
     sp40 = NULL;
 
+#ifndef TARGET_N64
+    { /* co-op: the joiner's own grenades, mines and rockets go off on the host too */
+        extern void coopExplosionCreated(PropRecord *source, coord3d *pos, s32 type, u8 *rooms);
+        coopExplosionCreated(arg0, target_pos, explosion_type, rooms);
+    }
+#endif
+
 #if defined(VERSION_US)
     if ((explosion_type != 0x10) && (explosion_type != 1))
     {

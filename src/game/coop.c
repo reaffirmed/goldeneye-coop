@@ -46,6 +46,7 @@ s32 chrGetNumFree(void);
 s32 sizepropdef(PropDefHeaderRecord *pdef);
 bool objIsMortal(ObjectRecord *obj);
 void alarmActivate(void);
+void *explosionCreate(PropRecord *arg0, coord3d *target_pos, StandTile *target_stan, s16 explosion_type, s32 arg4, s32 player, u8 *rooms, s32 arg7);
 ITEM_IDS getCurrentPlayerWeaponId(GUNHAND hand);
 void hudmsgBottomShow(char *mess);
 TICKOP propPickupByPlayer(PropRecord *prop, bool showstring);
@@ -109,7 +110,7 @@ typedef struct
 
 /* Reliable, in-order events (hits, shots, doors, ...). Every EVENTS packet
  * carries all unacked events plus an ack of what we have received. */
-enum { COOPEV_HIT = 1, COOPEV_SHOTCHR = 2, COOPEV_DOOR = 3, COOPEV_OBJDMG = 4, COOPEV_PICKUP = 5, COOPEV_MISSIONEND = 6 };
+enum { COOPEV_HIT = 1, COOPEV_SHOTCHR = 2, COOPEV_DOOR = 3, COOPEV_OBJDMG = 4, COOPEV_PICKUP = 5, COOPEV_MISSIONEND = 6, COOPEV_EXPLODE = 7 };
 
 typedef struct
 {
@@ -123,6 +124,7 @@ typedef struct
         struct { s32 objofs; f32 damage; f32 pos[3]; s16 item; s16 player; } obj; /* both ways */
         struct { s32 objofs; s32 kept; } pick;                                  /* both ways */
         struct { s32 stage; u32 stageflags; } end;                              /* both ways */
+        struct { f32 pos[3]; s16 type; u8 rooms[8]; } boom;                     /* client -> host */
         u8 raw[28];
     } u;
 } CoopEvent;
@@ -246,6 +248,7 @@ static void coopSendWorld(void);
 static void coopApplyPickup(CoopEvent *ev);
 static void coopApplyMissionEnd(CoopEvent *ev);
 static void coopSendHello(void);
+static void coopApplyExplosion(CoopEvent *ev);
 static s32 coopLocalCalm(void);
 static void coopTrackCombat(void);
 static void coopApplyWorld(CoopWorldPkt *p);
@@ -711,6 +714,25 @@ void coopTick(void)
 
 static void coopHarnessTick(void)
 {
+    if (coopIsMirroringClient())
+    {   /* GE_COOP_TESTBOOM=<chrnum>: at 20 s, a grenade-sized blast on that chr (harness only) */
+        static s32 testboom = -2;
+        if (testboom == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTBOOM");
+            testboom = (e != NULL) ? atoi(e) : -1;
+        }
+        if (testboom >= 0 && sTick >= 1200)
+        {
+            ChrRecord *c = chrFindByLiteralId(testboom);
+            testboom = -1;
+            if (c != NULL && c->prop != NULL)
+            {
+                portConLogf("ge: coop: testboom on chr %d\n", c->chrnum);
+                explosionCreate(NULL, &c->prop->pos, c->prop->stan, 2, 0, 0, c->prop->rooms, 0);
+            }
+        }
+    }
     {   /* GE_COOP_TESTDIE=1: kill our Bond at 15 s (harness only) */
         static s32 testdie = -1;
         if (testdie == -1)
@@ -1592,6 +1614,9 @@ static void coopApplyEvent(CoopEvent *ev)
         case COOPEV_MISSIONEND:
             coopApplyMissionEnd(ev);
             break;
+        case COOPEV_EXPLODE:
+            coopApplyExplosion(ev);
+            break;
     }
 }
 
@@ -2157,4 +2182,59 @@ s32 coopAltBondBegin(void)
 void coopAltBondEnd(void)
 {
     g_CoopPropOverride = NULL;
+}
+
+
+/* ---- the joiner's explosives ------------------------------------------------
+ * A grenade, mine or rocket the joiner fires exists only in its own game. Its
+ * blast there shows the effect and hurts the joiner; the same blast is set
+ * off in the host's game, which owns the damage to guards and objects. */
+
+static s32 sApplyingRemoteBoom;
+
+void coopExplosionCreated(PropRecord *source, coord3d *pos, s32 type, u8 *rooms)
+{
+    CoopEvent ev;
+    s32 i;
+
+    if (source != NULL || type == EXPLOSION_DEF_PLAYER || sApplyingRemoteBoom || !coopIsMirroringClient())
+    {
+        return; /* destroyed objects replay from the host's damage events */
+    }
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = COOPEV_EXPLODE;
+    ev.u.boom.pos[0] = pos->f[0];
+    ev.u.boom.pos[1] = pos->f[1];
+    ev.u.boom.pos[2] = pos->f[2];
+    ev.u.boom.type = (s16) type;
+    memset(ev.u.boom.rooms, 0xFF, sizeof(ev.u.boom.rooms));
+    for (i = 0; rooms != NULL && i < 7 && rooms[i] != 0xFF; i++)
+    {
+        ev.u.boom.rooms[i] = rooms[i];
+    }
+    coopQueueEvent(&ev);
+    portConLogf("ge: coop: our explosion (type %d), sent to host\n", type);
+}
+
+static void coopApplyExplosion(CoopEvent *ev)
+{
+    coord3d pos;
+    StandTile *stan;
+
+    if (!coopNetIsHost() || !coopInMission())
+    {
+        return;
+    }
+    pos.f[0] = ev->u.boom.pos[0];
+    pos.f[1] = ev->u.boom.pos[1];
+    pos.f[2] = ev->u.boom.pos[2];
+    stan = stanFindTileBelowPos(&pos, NULL, NULL);
+    if (stan == NULL || ev->u.boom.rooms[0] == 0xFF)
+    {
+        return;
+    }
+    sApplyingRemoteBoom = 1;
+    explosionCreate(NULL, &pos, stan, ev->u.boom.type, 0, 0, ev->u.boom.rooms, 0);
+    sApplyingRemoteBoom = 0;
+    portConLogf("ge: coop: peer explosion (type %d) at %.0f %.0f %.0f\n", ev->u.boom.type, pos.f[0], pos.f[1], pos.f[2]);
 }
