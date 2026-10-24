@@ -112,4 +112,22 @@ void coopLobbyInvite(s32 i);
 void coopLobbyInviteOverlay(void);
 s32  coopSessionActive(void);
 
+/* end-of-mission stats and the campaign record (coop_stats.c) */
+enum { COOPSTAT_KILLS, COOPSTAT_SHOTS, COOPSTAT_HITS, COOPSTAT_HEAD, COOPSTAT_DEATHS, COOPSTAT_REVIVED, COOPSTAT_RESPAWNS, COOPSTAT_COUNT };
+void coopStatsMissionStart(void);
+void coopStatsMissionTick(s32 partnerhere);
+void coopStatsFrontTick(void);
+void coopStatsDown(void);
+void coopStatsNote(s32 stat);
+void coopStatsBlameBegin(s32 partner); /* host: kills and hits until End are the partner's */
+void coopStatsBlameEnd(void);
+void coopStatsExplosionMade(void *explosion);
+s32  coopStatsExplosionIsPartner(void *explosion);
+void coopStatsApply(const void *payload);
+s32  coopStatsShown(void);              /* 1: the debrief shows the co-op columns */
+s32  coopStatsGet(s32 player, s32 stat); /* player 0 us, 1 the partner; -1 not in yet */
+const char *coopStatsName(s32 player);
+void coopCampaignMissionEnd(void);
+s32  coopCampaignNext(s32 *stage, s32 *difficulty, char *label, s32 labelcap);
+
 #endif

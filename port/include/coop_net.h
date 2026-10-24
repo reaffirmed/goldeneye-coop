@@ -44,6 +44,7 @@ const char *coopSteamSelfName(void);
 const char *coopSteamPeerName(void);
 const char *coopSteamPeerNameAt(int peer);
 unsigned long long coopSteamPeerIdAt(int peer);
+unsigned long long coopSteamPeerId(void);  /* 0 until known */
 int  coopSteamFriendsRefresh(void);     /* online friends, hosting ones first */
 const char *coopSteamFriendName(int i);
 int  coopSteamFriendHosting(int i);

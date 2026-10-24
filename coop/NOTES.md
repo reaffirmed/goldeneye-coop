@@ -136,3 +136,22 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscen
   12 (Brutal) / 6 (Hard) extras on the host, all mirrored on the joiner; a PPK
   chest shot from the joiner kills in 1 on Normal, 2 on Brutal; a guard's hit on
   the partner 0.062 on Normal, 0.081 on Brutal (x1.3).
+
+## Mission stats and campaign record (2026-10-24)
+
+- src/game/coop_stats.c. Per player: kills, shots, hits (accuracy), head hits,
+  deaths, revives given, respawns. Each game counts its own shots and deaths;
+  the host owns kills and hits on guards. The joiner's forwarded shots (and
+  blasts set off for it, explosion.c) run between coopStatsBlameBegin/End,
+  which moves what they add to the host's counters into the partner's column,
+  so the host's own solo numbers stay its own.
+- Back in the menus each game sends its final column once (COOPEV_STATS); the
+  host's carries the joiner's kills and hits. The statistics page (menu0D,
+  shown after a win and after a failure) draws both columns with the players'
+  names in place of the solo hit table; a number not in yet shows "-".
+- coop_campaign.txt next to the game: one line per partner and mission won
+  together, `<steam:id | name:Name> <mission> <agent|secret|00|007> <name>`.
+  coopCampaignNext() gives the lobby the mission after the furthest one won
+  with the current partner. GE_COOP_TESTWIN=1 counts any end as a win (harness).
+- The joiner keeps its own save folder when it follows the host (it used to be
+  forced to folder 1), so a co-op win unlocks the next mission in its folder.

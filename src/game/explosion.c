@@ -356,6 +356,12 @@ explosionCreate(PropRecord *arg0, struct coord3d *target_pos, StandTile *target_
             sp40->prop = sp30;
             sp40->source = arg0;
             sp40->player = (s8) player;
+#ifndef TARGET_N64
+            {   /* co-op stats: remember the blasts set off for the partner */
+                extern void coopStatsExplosionMade(void *explosion);
+                coopStatsExplosionMade(sp40);
+            }
+#endif
 
             if (arg4 != 0)
             {
@@ -655,7 +661,17 @@ void explosionInflictDamage(PropRecord *arg0, f32 horiz_range, f32 vert_range)
 
                         if (temp_s0->type == PROP_TYPE_CHR)
                         {
+#ifndef TARGET_N64
+                            /* co-op stats: the partner's blast, the partner's kill */
+                            extern void coopStatsBlameBegin(s32 partner);
+                            extern void coopStatsBlameEnd(void);
+                            extern s32 coopStatsExplosionIsPartner(void *explosion);
+                            coopStatsBlameBegin(coopStatsExplosionIsPartner(temp_s2));
+#endif
                             chrlvExplosionDamage(temp_s0->chr, &arg0->pos, minfrac, 1);
+#ifndef TARGET_N64
+                            coopStatsBlameEnd();
+#endif
                         }
                         else
                         {

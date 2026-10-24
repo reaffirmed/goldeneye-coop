@@ -781,6 +781,12 @@ unsigned long long coopSteamPeerIdAt(int peer)
     return (sReady && coopSteamPeerConnected(peer)) ? (unsigned long long) sPeers[peer] : 0;
 }
 
+/* the partner's SteamID, 0 until known (keys the co-op campaign record) */
+unsigned long long coopSteamPeerId(void)
+{
+    return coopSteamPeerIdAt(0);
+}
+
 /* Online friends, those hosting first. Returns how many. */
 int coopSteamFriendsRefresh(void)
 {
