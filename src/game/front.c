@@ -8834,7 +8834,7 @@ extern int atoi(const char *);
 extern void portConLogf(const char *fmt, ...);
 
 enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLROW_CANCEL,
-       CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE };
+       CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY };
 #define COOP_LOBBY_ROWS     16
 #define COOP_LOBBY_X        PORT_SHEET_LABEL_X
 #define COOP_LOBBY_VALUE_X  0xFA
@@ -9005,6 +9005,12 @@ static void coopLobbyBuild(void)
         coopLobbyAdd(coopLobbyIsHost() ? CLROW_DOWNRULE : CLROW_TEXT, 0, "When Down\n",
                      downrules[(rule >= 0 && rule <= COOPDOWN_REVIVE) ? rule : 0]);
     }
+    {
+        char diff[24];
+
+        snprintf(diff, sizeof(diff), "%s\n", coopDifficultyName(coopSetting(COOPSET_DIFFICULTY)));
+        coopLobbyAdd(coopLobbyIsHost() ? CLROW_DIFFICULTY : CLROW_TEXT, 0, "Guards\n", diff);
+    }
 
     if (coopLobbyIsHost() && coopLobbyIsSteam() && !coopLobbyHasPartner())
     {
@@ -9059,6 +9065,9 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
             break;
         case CLROW_DOWNRULE:
             coopSetDownRule((coopDownRule() + 1) % (COOPDOWN_REVIVE + 1));
+            break;
+        case CLROW_DIFFICULTY:
+            coopSetSetting(COOPSET_DIFFICULTY, (coopSetting(COOPSET_DIFFICULTY) + 1) % coopDifficultyCount());
             break;
         default:
             break;
