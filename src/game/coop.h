@@ -65,7 +65,7 @@ enum
     COOPSET_SPARE4,
     COOPSET_SPARE5,
     COOPSET_SPARE6,
-    COOPSET_SPARE7,
+    COOPSET_HOSTLEAVES,     /* 0: the next player hosts and the mission goes on; 1: everyone back to the lobby */
     COOPSET_MAX = 8
 };
 s32  coopSetting(s32 which);
@@ -141,6 +141,16 @@ void coopLobbyInvite(s32 i);
 void coopLobbyInviteOverlay(void);
 s32  coopSessionActive(void);
 
+/* when the host or a joiner leaves (coop.c, host migration) */
+s32  coopHostAbortAsks(void);           /* the watch's Abort, confirmed by a host with partners: ask first */
+const char *coopHostAbortNextName(void);
+void coopHostAbort(s32 handoff);        /* 1: hand the mission over and leave; 0: end it for everyone */
+s32  coopHudSessionBanner(char *line1, char *line2, s32 cap);   /* "host not responding" and the like */
+s32  coopHudPlayerLost(s32 p);          /* player p's connection dropped: its Bond stands idle */
+const char *coopLobbyNotice(void);      /* a line for the lobby screen, NULL when none */
+s32  coopHostLeavesCount(void);         /* COOPSET_HOSTLEAVES's rules */
+const char *coopHostLeavesName(s32 rule);
+
 /* end-of-mission stats and the campaign record (coop_stats.c) */
 enum { COOPSTAT_KILLS, COOPSTAT_SHOTS, COOPSTAT_HITS, COOPSTAT_HEAD, COOPSTAT_DEATHS, COOPSTAT_REVIVED, COOPSTAT_RESPAWNS, COOPSTAT_COUNT };
 void coopStatsMissionStart(void);
@@ -153,6 +163,7 @@ void coopStatsBlameEnd(void);
 void coopStatsExplosionMade(void *explosion);
 s32  coopStatsExplosionIsPartner(void *explosion);
 void coopStatsApply(const void *payload, s32 from);
+void coopStatsRemap(const s32 *newof);  /* host migration: newof[old player] = new number, -1 gone */
 s32  coopStatsShown(void);              /* 1: the debrief shows the co-op columns */
 s32  coopStatsColumns(void);            /* the debrief's columns (players), up to COOP_MAX_PLAYERS */
 s32  coopStatsGet(s32 col, s32 stat);    /* -1 not in yet */

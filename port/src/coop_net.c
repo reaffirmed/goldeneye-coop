@@ -322,6 +322,39 @@ void coopNetShutdown(void)
     sIsHost = 0;
 }
 
+/* see coop_net.h; a UDP peer id is its address << 16 | its port */
+void coopNetMigrate(int ashost, const unsigned long long *ids, int n)
+{
+    int i;
+
+    if (sSteam)
+    {
+        coopSteamMigrate(ashost, ids, n);
+        return;
+    }
+    memset(sHasPeer, 0, sizeof(sHasPeer));
+    sIsHost = ashost;
+    for (i = 0; i < n && i < COOP_NET_MAX_PEERS && (ashost || i == 0); i++)
+    {
+        if (ids[i] == 0)
+        {
+            continue;
+        }
+        memset(&sPeer[i], 0, sizeof(sPeer[i]));
+        sPeer[i].sin_family = AF_INET;
+        sPeer[i].sin_addr.s_addr = htonl((unsigned int) (ids[i] >> 16));
+        sPeer[i].sin_port = htons((unsigned short) (ids[i] & 0xFFFF));
+        sHasPeer[i] = 1;
+        portConLogf("ge: coop: %s %s:%d (slot %d)\n", ashost ? "keeping a slot for" : "new host at",
+                    inet_ntoa(sPeer[i].sin_addr), ntohs(sPeer[i].sin_port), i);
+    }
+}
+
+int coopNetHostLeft(void)
+{
+    return sSteam ? coopSteamHostLeft() : 0;
+}
+
 int coopNetIsSteam(void)
 {
     return sSteam;

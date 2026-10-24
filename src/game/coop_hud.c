@@ -9,6 +9,9 @@
  *     lobby's When Down rule), with the revive's progress
  *   - a downed partner who can be revived: red on the radar and a red
  *     REVIVE tag over where they fell
+ *   - a partner whose connection dropped: LOST on their tag and status, and
+ *     a banner across the top while the host is not answering or after a
+ *     new host takes over (coop.c, host migration)
  *   - the mission's objectives in the top-right corner, solo too
  *     ([display] objectives_hud, toggled in play by the objectives_hud key)
  *
@@ -213,7 +216,11 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
 
     coopHudText(name, sizeof(name), p->name);
     name[strlen(name) - 1] = '\0';
-    if (p->dead)
+    if (coopHudPlayerLost(p->player))
+    {
+        snprintf(text, sizeof(text), "%s - LOST\n", name);
+    }
+    else if (p->dead)
     {
         snprintf(text, sizeof(text), "REVIVE %s %dM\n", name, (int) (dist / 100.0f + 0.5f));
     }
@@ -328,7 +335,12 @@ static Gfx *coopHudPartnerStatus(Gfx *gdl, CoopHudPartner *p, s32 row)
     coopHudFit(name, 0x70);
     gdl = coopHudPrint(gdl, x, y, name, p->dead ? COOP_HUD_COL_DIM : COOP_HUD_COL_TEXT);
     y += 0x0B;
-    if (p->dead)
+    if (coopHudPlayerLost(p->player))
+    {
+        snprintf(text, sizeof(text), "CONNECTION LOST\n");
+        gdl = coopHudPrint(gdl, x, y, text, COOP_HUD_COL_DIM);
+    }
+    else if (p->dead)
     {
         s32 secs = (p->respawn + 59) / 60;
 
@@ -417,6 +429,45 @@ static Gfx *coopHudRespawn(Gfx *gdl, s32 eta)
     {
         gdl = coopHudBar(gdl, viGetViewLeft() + (viGetViewWidth() - 0x50) / 2, y + th + 3, 0x50,
                          (f32) hold / (f32) COOP_REVIVE_HOLD, COOP_HUD_COL_DONE);
+    }
+    return combiner_bayer_lod_perspective(gdl);
+}
+
+/* the session banner (coop.c coopHudSessionBanner): two centred lines a
+ * quarter of the way down, the first in red */
+static Gfx *coopHudBanner(Gfx *gdl)
+{
+    char l1[56], l2[56], t1[64], t2[64];
+    s32 th = 0, tw = 0, w2 = 0;
+    s32 x, y;
+
+    if (!coopHudSessionBanner(l1, l2, sizeof(l1)))
+    {
+        return gdl;
+    }
+    coopHudText(t1, sizeof(t1), l1);
+    coopHudText(t2, sizeof(t2), l2);
+    gdl = microcode_constructor(gdl);
+    y = viGetViewTop() + viGetViewHeight() * 3 / 8;
+    if (l2[0] != '\0')
+    {
+        textMeasure(&th, &w2, t2, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+    }
+    textMeasure(&th, &tw, t1, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+    {   /* a dark band behind it, to read over the objectives and the scene */
+        s32 w = (tw > w2 ? tw : w2) + 16;
+        s32 bx = viGetViewLeft() + (viGetViewWidth() - w) / 2;
+
+        gdl = microcode_constructor_related_to_menus(gdl, bx, y - 4, bx + w, y + (l2[0] != '\0' ? 2 * th + 7 : th + 4), 0x000000A0);
+        gdl = microcode_constructor(gdl);
+    }
+    x = viGetViewLeft() + (viGetViewWidth() - tw) / 2;
+    gdl = coopHudPrint(gdl, x, y, t1, COOP_HUD_COL_FAIL);
+    if (l2[0] != '\0')
+    {
+        textMeasure(&th, &tw, t2, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+        x = viGetViewLeft() + (viGetViewWidth() - tw) / 2;
+        gdl = coopHudPrint(gdl, x, y + th + 3, t2, COOP_HUD_COL_TEXT);
     }
     return combiner_bayer_lod_perspective(gdl);
 }
@@ -541,6 +592,7 @@ Gfx *coopHudRender(Gfx *gdl)
     {
         return gdl;   /* solo missions only, and not over the watch */
     }
+    gdl = coopHudBanner(gdl);
     memset(&p, 0, sizeof(p));
     partner = coopHudPartner(&p);
     if (partner)

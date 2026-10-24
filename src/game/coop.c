@@ -66,13 +66,17 @@ void objApplyDamage(ObjectRecord *obj, f32 damage, coord3d *pos, ITEM_IDS itemnu
 void chrSetFiring(ChrRecord *self, s32 hand, s32 firing);
 void sub_GAME_7F02BFE4(ChrRecord *self, s32 arg1, s32 arg2);
 PropRecord *chrSpawnAtCoord(s32 bodynum, s32 headnum, coord3d *pos, StandTile *stan, f32 angle, AIListRecord *ailist, s32 spawnflags);
+s32 chraiGetAIListID(AIRecord *AIList, bool *isGlobalAIList);
+void chrStopFiring(ChrRecord *self);
+void set_missionstate(MISSION_STATE_ID state);
 
 extern void portConLogf(const char *fmt, ...);
 
 #define COOP_MAGIC   0x50434547u /* "GECP" */
-#define COOP_VERSION 5 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters */
+#define COOP_VERSION 6 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
+                          6: host migration (AI sync, bye, addresses in the roster) */
 
-enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7 };
+enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7, COOPPKT_AISYNC = 8, COOPPKT_BYE = 9 };
 
 typedef struct
 {
@@ -101,7 +105,7 @@ typedef struct
 /* the host's roster in each hello: who is in the session */
 typedef struct
 {
-    unsigned long long id;  /* SteamID, or the address; 0 when not known */
+    unsigned long long id;  /* SteamID, or the UDP address (coopNetPeerId); 0 when not known */
     char name[24];
     u8 present;
     u8 ready;
@@ -150,7 +154,8 @@ typedef struct
 /* Reliable, in-order events (hits, shots, doors, ...). Every EVENTS packet
  * carries all unacked events plus an ack of what we have received. */
 enum { COOPEV_HIT = 1, COOPEV_SHOTCHR = 2, COOPEV_DOOR = 3, COOPEV_OBJDMG = 4, COOPEV_PICKUP = 5, COOPEV_MISSIONEND = 6, COOPEV_EXPLODE = 7, COOPEV_AICMD = 8,
-       COOPEV_STATS = 9, COOPEV_GIVE = 10, COOPEV_GIVEBACK = 11 };
+       COOPEV_STATS = 9, COOPEV_GIVE = 10, COOPEV_GIVEBACK = 11,
+       COOPEV_PLAYERNOTE = 12, COOPEV_ENDALL = 13 /* 14, 15: kept for host migration */ };
 
 typedef struct
 {
@@ -170,6 +175,7 @@ typedef struct
         struct { s16 chrnum; u8 len; u8 cmd[25]; } ai;                          /* host -> client */
         /* COOPEV_STATS: a CoopStatsMsg (coop_stats.c) in raw, both ways */
         CoopGive give;                                                          /* both ways (coop_give.c) */
+        struct { u8 player; u8 what; u8 pad[2]; char name[24]; } note;          /* host -> all: COOPNOTE_* about a player */
         u8 raw[28];
     } u;
 } CoopEvent;
@@ -221,6 +227,61 @@ typedef struct
     CoopGuardEnt ent[COOP_GUARDS_PER_PKT];
 } CoopGuardsPkt;
 
+/* host -> joiners once a second: what each chr's AI is doing and how hurt it
+ * is, so a joiner that takes over as host (coopMigrate*) carries on from
+ * there instead of starting every script again */
+typedef struct
+{
+    s16 chrnum;
+    u16 ailist;     /* chraiGetAIListID, 0xFFFF none */
+    u16 aioffset;
+    s16 aireturnlist;
+    u8 actiontype;
+    u8 morale;
+    u8 alertness;
+    u8 flags2;
+    u8 random;
+    u8 pad[3];
+    u32 chrflags;
+    u16 hidden;
+    s16 padpreset1;
+    s16 chrpreset1;
+    s16 pad2;
+    s32 timer60;
+    f32 damage;
+    f32 maxdamage;
+} CoopAiEnt;
+
+#define COOP_AI_PER_PKT 32
+
+typedef struct
+{
+    u32 magic;
+    u16 version;
+    u16 type;
+    u16 first;
+    u16 count;
+    CoopAiEnt ent[COOP_AI_PER_PKT];
+} CoopAiPkt;
+
+/* "I am leaving": sent a few times, unreliable, by a game that leaves the
+ * session on purpose (the menus, the watch, closing the game) */
+enum { COOPBYE_LEAVE = 1, COOPBYE_HANDOFF = 2 };
+typedef struct
+{
+    u32 magic;
+    u16 version;
+    u16 type;
+    u32 session;
+    u8 reason;      /* COOPBYE_* */
+    u8 player;      /* the sender's player number */
+    u8 newhost;     /* HANDOFF: the player that takes over */
+    u8 pad;
+} CoopByePkt;
+
+/* COOPEV_PLAYERNOTE: what happened to a joiner, from the host to everyone */
+enum { COOPNOTE_LOST = 1, COOPNOTE_BACK, COOPNOTE_GONE, COOPNOTE_LEFT, COOPNOTE_LEFTMISSION };
+
 
 static s32 sEnabled = -1;
 #define COOP_MAX_PEERHELD 32
@@ -259,6 +320,9 @@ typedef struct
     s32 puppetGhost;
     s32 resync;         /* host: it restarted; resend doors when it is back in */
     CoopLookPuppet look;    /* the puppet's guns, animation and shots played (coop_look.c) */
+    s32 lost;           /* its connection dropped: the Bond stands idle, guards and scripts leave it be */
+    u32 lostMs;         /* when */
+    u32 seenMs;         /* the newest STATE, wall clock */
 } CoopRemote;
 static CoopRemote sR[COOP_MAX_PLAYERS];
 
@@ -276,6 +340,7 @@ typedef struct
     CoopHelloPkt hello; /* its last hello */
     u32 helloTick;
     s32 helloSeen;
+    u32 heardMs;        /* anything from it, wall clock (coopNowMs) */
 } CoopChan;
 static CoopChan sChan[COOP_NET_MAX_PEERS];
 
@@ -328,6 +393,25 @@ static void coopReapGuards(void);
 static void coopClientGunfire(void);
 static void coopHarnessTick(void);
 static void coopPuppetRemove(CoopRemote *r);
+static u32 coopNowMs(void);
+static void coopSessionTick(void);
+static void coopRecvBye(s32 c, CoopByePkt *b);
+static void coopRecvAiSync(CoopAiPkt *p);
+static void coopSendAiSync(void);
+static void coopApplyNote(CoopEvent *ev);
+static void coopApplyEndAll(void);
+static void coopKeepAlive(void);
+static void coopPendingEndTick(void);
+static void coopRemoteWatch(s32 p);
+static void coopMigrateReset(void);
+static s32 sHostWaiting;    /* joiner: the host went quiet or left; see coopSessionTick */
+static s32 sMigrated;        /* this session has been through a migration: stay in the lobby after */
+static s32 sPendingEnd;      /* end our mission at the next tick: 1 back to the lobby */
+static void coopEndMissionLocal(void);
+static CoopAiEnt sAiSync[COOP_MAX_CHRS];    /* joiner: the host's AI state per chr slot (COOPPKT_AISYNC) */
+static u8 sAiSyncHave[COOP_MAX_CHRS];
+static void coopSayBye(void);
+static s32 coopLobbyStart(const char *spec);
 
 static s32 coopLocalBody(void)
 {
@@ -392,7 +476,7 @@ static s32 coopRemoteHere(s32 p)
 
 static s32 coopRemoteAliveHere(s32 p)
 {
-    return coopRemoteHere(p) && !sR[p].st.dead && sR[p].puppet != NULL && sR[p].puppet->chr != NULL
+    return coopRemoteHere(p) && !sR[p].st.dead && !sR[p].lost && sR[p].puppet != NULL && sR[p].puppet->chr != NULL
         && sR[p].puppet->stan != NULL;
 }
 
@@ -624,6 +708,7 @@ static void coopRecvState(s32 c, CoopStatePkt *p)
     r->st = *p;
     r->valid = 1;
     r->seenTick = sTick;
+    r->seenMs = coopNowMs();
     r->calmTick = sTick;
 }
 
@@ -640,6 +725,23 @@ static void coopPollNet(void)
         if (n < (s32) sizeof(u32) * 2 || p->magic != COOP_MAGIC || p->version != COOP_VERSION
             || c < 0 || c >= COOP_NET_MAX_PEERS)
         {
+            continue;
+        }
+        sChan[c].heardMs = coopNowMs();
+        if (p->type == COOPPKT_BYE && n >= (s32) sizeof(CoopByePkt))
+        {
+            coopRecvBye(c, (CoopByePkt *) buf);
+            continue;
+        }
+        if (p->type == COOPPKT_AISYNC && !coopNetIsHost())
+        {
+            CoopAiPkt *a = (CoopAiPkt *) buf;
+            s32 hdr = (s32) ((u8 *) &a->ent[0] - (u8 *) a);
+
+            if (n >= hdr && a->count <= COOP_AI_PER_PKT && n >= hdr + a->count * (s32) sizeof(CoopAiEnt))
+            {
+                coopRecvAiSync(a);
+            }
             continue;
         }
         if (p->type == COOPPKT_EVENTS)
@@ -865,6 +967,7 @@ void coopStageStart(void)
         sChrFiring[i] = 0;
     }
     sLastSnapTick = 0;
+    memset(sAiSyncHave, 0, sizeof(sAiSyncHave));
     sMissionTicks = 0;
     sNumPeerHeld = 0;
     sLastHurtTick = sLastFightTick = sDeadSince = 0;
@@ -878,6 +981,7 @@ void coopStageStart(void)
         sR[i].puppetGhost = 0;
         sR[i].puppetAnim = -1;
         sR[i].valid = 0;
+        sR[i].lost = 0;
     }
     coopDifficultyStageStart();
 }
@@ -888,15 +992,22 @@ void coopTick(void)
     {
         sEnabled = coopNetInit();
     }
-    if (!sEnabled || g_ClockTimer <= 0)
+    if (!sEnabled)
     {
+        return;
+    }
+    if (g_ClockTimer <= 0)
+    {
+        coopKeepAlive();    /* paused, or a cutscene has the controls: still here */
         return;
     }
 
     sTick++;
     coopPollNet();
+    coopSessionTick();
     coopFlushEvents();
     coopSendHello();
+    coopPendingEndTick();
 
     if (!coopInMission())
     {
@@ -935,6 +1046,10 @@ void coopTick(void)
     {
         coopSendGuards();
     }
+    if (coopNetIsHost() && coopNetHasPeer() && coopPartnerHere() && (sTick % 60) == 30)
+    {
+        coopSendAiSync();   /* what a joiner needs to take over (coopMigrate) */
+    }
     if (coopIsMirroringClient())
     {
         coopReapGuards();
@@ -959,15 +1074,7 @@ static void coopRemotesTick(void)
         {
             continue;
         }
-        if (r->valid && sTick - r->seenTick > 300)
-        {
-            portConLogf("ge: coop: nothing from player %d for 5 s, dropping its Bond\n", p + 1);
-            if (coopInMission())
-            {
-                hudmsgBottomShow("Lost contact with a partner.\n");
-            }
-            r->valid = 0;
-        }
+        coopRemoteWatch(p);     /* lost, back or gone (host migration section) */
         if (r->puppet != NULL && !coopRemoteHere(p))
         {
             coopPuppetRemove(r);
@@ -1197,6 +1304,24 @@ static void coopHarnessTick(void)
     if (coopPartnerHere() && coopInMission())
     {
         coopLookTestTick((s32) sMissionTicks);   /* GE_COOP_TESTFIRE, GE_COOP_TESTLOOK (coop_look.c) */
+    }
+    if (coopHostAbortAsks())
+    {   /* GE_COOP_TESTABORT=<s>:handover|endall: the host aborts from the watch that far into the mission, and answers (harness only) */
+        static s32 testabort = -2;
+        static s32 handover;
+        if (testabort == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTABORT");
+            testabort = (e != NULL) ? atoi(e) * 60 : -1;
+            handover = (e != NULL && strstr(e, "end") == NULL);
+        }
+        if (testabort > 0 && (s32) sMissionTicks >= testabort)
+        {
+            testabort = -1;
+            portConLogf("ge: coop: testabort (%s)\n", handover ? "hand over" : "end all");
+            coopHostAbort(handover);
+            coopEndMissionLocal();  /* the watch's own abort */
+        }
     }
     if (coopNetIsHost() && coopPartnerHere())
     {   /* GE_COOP_TESTSPAWN=<chrnum>: once, at 15 s, spawn a copy of that chr next to Bond (harness only) */
@@ -2151,6 +2276,12 @@ static void coopApplyEvent(CoopEvent *ev)
         case COOPEV_GIVEBACK:
             coopGiveReturned(&ev->u.give, ev->from);
             break;
+        case COOPEV_PLAYERNOTE:
+            coopApplyNote(ev);
+            break;
+        case COOPEV_ENDALL:
+            coopApplyEndAll();
+            break;
     }
 }
 
@@ -2931,7 +3062,7 @@ static void coopSendHello(void)
         {
             continue;
         }
-        e->id = coopPlayerId(i);
+        e->id = (i == 0) ? coopPlayerId(0) : coopNetPeerId(i - 1);   /* where to reach them if we go (coopMigrate) */
         snprintf(e->name, sizeof(e->name), "%s", coopPlayerName(i));
         e->ready = (i == 0) ? (u8) sLobbyReady : sChan[i - 1].hello.ready;
         e->inlobby = (i == 0) ? (u8) sOnLobbyScreen : sChan[i - 1].hello.inlobby;
@@ -2953,10 +3084,15 @@ s32 coopFrontTick(void)
         {
             const char *e = getenv("GE_COOP_DIFFICULTY");
             const char *f = getenv("GE_COOP_FRIENDLYFIRE");
+            const char *h = getenv("GE_COOP_HOSTLEAVES");
             testdiff = 0;
             if (f != NULL)
             {
                 sSettings[COOPSET_FRIENDLYFIRE] = (u8) atoi(f);
+            }
+            if (h != NULL)
+            {
+                sSettings[COOPSET_HOSTLEAVES] = (u8) atoi(h);
             }
             if (e != NULL)
             {
@@ -2975,6 +3111,7 @@ s32 coopFrontTick(void)
     }
     sTick++;
     coopPollNet();
+    coopSessionTick();
     coopStatsFrontTick();   /* back from a mission: send our stats column */
     coopFlushEvents();
     coopSendHello();
@@ -3029,7 +3166,9 @@ static void coopSessionReset(void)
     for (i = 0; i < COOP_MAX_PLAYERS; i++)
     {
         sR[i].valid = 0;
+        sR[i].lost = 0;
     }
+    coopMigrateReset();
 }
 
 static s32 coopLobbyStart(const char *spec)
@@ -3320,6 +3459,7 @@ void coopLobbyJoinFriend(s32 i)
 /* back to Host / Join; Steam stays up for the friend list */
 void coopLobbyLeave(void)
 {
+    coopSayBye();   /* the others hear it now; a host hands the lobby to the next player */
     coopLobbyStart(coopLobbyIsSteam() ? "steam:idle" : NULL);
 }
 
@@ -3355,8 +3495,890 @@ void coopLobbyInviteOverlay(void)
 
 /* a co-op game is going: after a mission the menus come back to the lobby */
 s32 coopSessionActive(void)
+{   /* after a migration that left us alone we still host the lobby */
+    return sEnabled > 0 && coopNetIsOpen() && (coopNetHasPeer() || (sMigrated && coopNetIsHost()));
+}
+
+
+/* ---- when someone leaves: host migration -------------------------------------
+ * The host runs the world (guards, scripts, doors, objects), so losing it is
+ * the hard case. A joiner that hears nothing from the host for
+ * COOP_SILENT_MS shows a banner and waits COOP_HOST_WAIT_MS for it to come
+ * back (a hitch, a slow load). After that, or at once when the host says
+ * goodbye (COOPPKT_BYE) or leaves the Steam lobby, the players still here
+ * pick a new host: the lowest player number left in the host's last roster.
+ * Everyone renumbers in that order (the new host 0, the rest 1..), the new
+ * host keeps a transport slot for each of them and takes over its own copy
+ * of the world, which has been mirroring the old host's all along: guard
+ * positions and animations from the snapshots, doors, objects, pickups,
+ * stage flags and alarm from the events, and from the AI sync below each
+ * chr's script position, health and AI state. If the player picked does not
+ * answer within COOP_NEWHOST_WAIT_MS the next one is tried.
+ *
+ * The lobby's Host Leaves rule (COOPSET_HOSTLEAVES) picks between carrying
+ * on with the new host and everyone going back to the lobby, which the new
+ * host then runs. A joiner that drops is kept as an idle Bond guards ignore
+ * for COOP_DROP_MS and then removed; it can come back in that time or later
+ * through the lobby (rejoin, coopChanSession). The host leaving on purpose
+ * (the watch's Abort) is asked whether to hand the mission over or end it
+ * for everyone. */
+
+#define COOP_SILENT_MS        3000    /* nothing from the host this long: say so */
+#define COOP_HOST_WAIT_MS     12000   /* and wait this much longer for it to come back */
+#define COOP_NEWHOST_WAIT_MS  8000    /* the player picked to host must answer within this */
+#define COOP_LOST_MS          3000    /* host: a joiner quiet this long has lost its connection */
+#define COOP_DROP_MS          30000   /* and is gone after this long lost */
+#define COOP_REMOTE_GONE_MS   40000   /* joiner: a relayed partner silent this long is gone */
+#define COOP_BANNER_MS        6000
+#define COOP_HOSTTITLE_MS     2000    /* joiner: the host back in the menus this long, mid-mission */
+
+enum { HOSTW_NONE, HOSTW_SILENT, HOSTW_NEWHOST };
+
+static u32 sHostWaitMs;         /* when the current wait began */
+static s32 sHostLeftHow;        /* 0 went quiet, else COOPBYE_* (a lobby leave counts as COOPBYE_LEAVE) */
+static CoopRosterEnt sMigRoster[COOP_MAX_PLAYERS];   /* the old host's roster when it went */
+static s32 sMigSelf;            /* our player number then */
+static s32 sMigNewHost;         /* HOSTW_NEWHOST: the old player number we wait on */
+static char sGoneHostName[24];
+static u32 sHostTitleMs;        /* joiner: the host's hellos have said "menus" since */
+static char sBanner[2][56];
+static u32 sBannerMs;
+static char sLobbyNotice[56];
+static u32 sLobbyNoticeMs;
+static s32 sAtExitSet;
+
+static u32 coopNowMs(void)
 {
-    return sEnabled > 0 && coopNetIsOpen() && coopNetHasPeer();
+    return (u32) (osGetTime() / 46875ull);
+}
+
+static s32 coopHostLeavesRule(void)
+{
+    return sSettings[COOPSET_HOSTLEAVES];
+}
+
+/* a timed two-line banner on the HUD, and the same news on the lobby screen */
+static void coopBanner(const char *line1, const char *line2)
+{
+    snprintf(sBanner[0], sizeof(sBanner[0]), "%s", line1);
+    snprintf(sBanner[1], sizeof(sBanner[1]), "%s", line2 != NULL ? line2 : "");
+    sBannerMs = coopNowMs();
+    snprintf(sLobbyNotice, sizeof(sLobbyNotice), "%s", line1);  /* one line fits the lobby row */
+    sLobbyNoticeMs = sBannerMs;
+    portConLogf("ge: coop: banner: %s / %s\n", sBanner[0], sBanner[1]);
+}
+
+static void coopMigrateReset(void)
+{
+    sHostWaiting = HOSTW_NONE;
+    sHostLeftHow = 0;
+    sMigNewHost = -1;
+    sMigrated = 0;
+    sPendingEnd = 0;
+    sHostTitleMs = 0;
+}
+
+static void coopNote(s32 p, s32 what);
+
+/* ---- leaving on purpose ---- */
+
+static void coopSendBye(s32 reason, s32 newhost)
+{
+    CoopByePkt b;
+    s32 i;
+
+    if (sEnabled <= 0 || !coopNetIsOpen() || !coopNetHasPeer())
+    {
+        return;
+    }
+    memset(&b, 0, sizeof(b));
+    b.magic = COOP_MAGIC;
+    b.version = COOP_VERSION;
+    b.type = COOPPKT_BYE;
+    b.session = coopSelfSession();
+    b.reason = (u8) reason;
+    b.player = (u8) coopSelf();
+    b.newhost = (u8) newhost;
+    for (i = 0; i < 3; i++)
+    {   /* unreliable: a few copies, the lobby leave or the silence covers the rest */
+        coopNetSend(&b, sizeof(b));
+    }
+    portConLogf("ge: coop: said goodbye (%s)\n", reason == COOPBYE_HANDOFF ? "handing over" : "leaving");
+}
+
+/* the player a leaving host hands over to: the next one in the roster */
+static s32 coopNextHost(void)
+{
+    s32 p;
+
+    for (p = 1; p < COOP_MAX_PLAYERS; p++)
+    {
+        if (coopLobbyPlayerHere(p))
+        {
+            return p;
+        }
+    }
+    return -1;
+}
+
+/* the game is closing: whoever is still connected hears it now, not after
+ * the silence */
+static void coopAtExit(void)
+{
+    if (sEnabled > 0 && coopNetIsOpen() && coopNetHasPeer())
+    {
+        if (coopNetIsHost())
+        {
+            coopSendAiSync();
+        }
+        coopSendBye(coopNetIsHost() ? COOPBYE_HANDOFF : COOPBYE_LEAVE, coopNetIsHost() ? coopNextHost() : 0);
+    }
+}
+
+/* the lobby's Leave (a host hands the lobby to the next player) */
+static void coopSayBye(void)
+{
+    if (coopNetIsHost())
+    {
+        coopSendBye(COOPBYE_HANDOFF, coopNextHost());
+    }
+    else
+    {
+        coopSendBye(COOPBYE_LEAVE, 0);
+    }
+}
+
+/* The watch's Abort, confirmed (options.c). For a host with partners in the
+ * mission it is a question first: 1 = ask (hand over or end for everyone). */
+s32 coopHostAbortAsks(void)
+{
+    return sEnabled > 0 && coopNetIsHost() && coopInMission() && coopPartnerHere();
+}
+
+const char *coopHostAbortNextName(void)
+{
+    s32 p = coopNextHost();
+
+    return (p > 0) ? coopPlayerName(p) : "";
+}
+
+/* the answer: handoff 1 gives the mission to the next player and leaves the
+ * session; 0 ends it for everyone, who all go back to the lobby. The watch
+ * then aborts our own mission as usual. */
+void coopHostAbort(s32 handoff)
+{
+    if (!coopHostAbortAsks())
+    {
+        return;
+    }
+    if (handoff)
+    {
+        s32 next = coopNextHost();
+
+        coopSendAiSync();
+        coopFlushEvents();
+        coopSendBye(COOPBYE_HANDOFF, next);
+        portConLogf("ge: coop: host aborted, handing the mission to player %d\n", next + 1);
+        coopLobbyStart(coopLobbyIsSteam() ? "steam:idle" : NULL);
+    }
+    else
+    {
+        CoopEvent ev;
+
+        memset(&ev, 0, sizeof(ev));
+        ev.kind = COOPEV_ENDALL;
+        coopQueueEvent(&ev);
+        coopFlushEvents();
+        portConLogf("ge: coop: host ended the mission for everyone\n");
+    }
+}
+
+/* our mission ends without a win: the vanilla Abort, minus its save reset */
+static void coopEndMissionLocal(void)
+{
+    if (!coopInMission())
+    {
+        return;
+    }
+    set_missionstate(MISSION_STATE_0);
+    bossRunTitleStage();
+    mission_failed_or_aborted = TRUE;
+    portConLogf("ge: coop: mission ended, back to the lobby\n");
+}
+
+static void coopPendingEndTick(void)
+{
+    if (sPendingEnd)
+    {
+        sPendingEnd = 0;
+        coopEndMissionLocal();
+    }
+}
+
+static void coopApplyEndAll(void)
+{
+    if (coopNetIsHost() || !coopInMission())
+    {
+        return;
+    }
+    coopBanner("THE HOST ENDED THE MISSION", "BACK TO THE LOBBY");
+    sPendingEnd = 1;
+}
+
+/* while paused (the watch) or in a cutscene coopTick does not run: keep
+ * saying hello so nobody takes the quiet for a dropped game */
+static void coopKeepAlive(void)
+{
+    static u32 last;
+    u32 now = coopNowMs();
+    u32 t = sTick;
+
+    if (sEnabled <= 0 || !coopNetHasPeer() || now - last < 500)
+    {
+        return;
+    }
+    last = now;
+    sTick = 0;  /* coopSendHello sends when sTick is a multiple of its period */
+    coopSendHello();
+    sTick = t;
+}
+
+/* ---- the AI sync: host sends, joiners keep ---- */
+
+static void coopSendAiSync(void)
+{
+    CoopAiPkt pkt;
+    s32 hdr = (s32) ((u8 *) &pkt.ent[0] - (u8 *) &pkt);
+    s32 i, index = 0;
+
+    if (g_ChrSlots == NULL || !coopNetHasPeer())
+    {
+        return;
+    }
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.magic = COOP_MAGIC;
+    pkt.version = COOP_VERSION;
+    pkt.type = COOPPKT_AISYNC;
+    for (i = 0; i < g_NumChrSlots; i++)
+    {
+        ChrRecord *chr = &g_ChrSlots[i];
+        CoopAiEnt *e;
+        bool global;
+        s32 id;
+
+        if (chr->model == NULL || chr->prop == NULL || coopIsPuppet(chr->prop))
+        {
+            continue;
+        }
+        if (pkt.count == 0)
+        {
+            pkt.first = (u16) index;
+        }
+        e = &pkt.ent[pkt.count++];
+        index++;
+        id = (chr->ailist != NULL) ? chraiGetAIListID(chr->ailist, &global) : -1;
+        e->chrnum = chr->chrnum;
+        e->ailist = (id >= 0) ? (u16) id : 0xFFFF;
+        e->aioffset = chr->aioffset;
+        e->aireturnlist = chr->aireturnlist;
+        e->actiontype = chr->actiontype;
+        e->morale = chr->morale;
+        e->alertness = chr->alertness;
+        e->flags2 = chr->flags2;
+        e->random = chr->random;
+        e->chrflags = (u32) chr->chrflags;
+        e->hidden = chr->hidden;
+        e->padpreset1 = chr->padpreset1;
+        e->chrpreset1 = chr->chrpreset1;
+        e->timer60 = chr->timer60;
+        e->damage = chr->damage;
+        e->maxdamage = chr->maxdamage;
+        if (pkt.count == COOP_AI_PER_PKT)
+        {
+            coopNetSend(&pkt, hdr + pkt.count * (s32) sizeof(CoopAiEnt));
+            pkt.count = 0;
+        }
+    }
+    if (pkt.count > 0)
+    {
+        coopNetSend(&pkt, hdr + pkt.count * (s32) sizeof(CoopAiEnt));
+    }
+}
+
+static void coopRecvAiSync(CoopAiPkt *p)
+{
+    s32 k;
+
+    if (!coopInMission() || g_ChrSlots == NULL)
+    {
+        return;
+    }
+    for (k = 0; k < p->count; k++)
+    {
+        ChrRecord *chr = chrFindByLiteralId(p->ent[k].chrnum);
+        s32 slot;
+
+        if (chr == NULL || chr->prop == NULL || coopIsPuppet(chr->prop))
+        {
+            continue;
+        }
+        slot = chr - g_ChrSlots;
+        if (slot >= 0 && slot < COOP_MAX_CHRS)
+        {
+            sAiSync[slot] = p->ent[k];
+            sAiSyncHave[slot] = 1;
+        }
+    }
+}
+
+#define COOP_AI_HIDDEN_BITS (CHRHIDDEN_TIMER_ACTIVE | CHRHIDDEN_BACKGROUND_AI | CHRHIDDEN_ALERT_GUARD_RELATED | CHRHIDDEN_0400)
+
+/* We are the host now: our guards stop mirroring and run their own AI from
+ * where the old host's were. */
+static void coopTakeOverWorld(void)
+{
+    s32 i, n = 0, dead = 0;
+
+    for (i = 0; g_ChrSlots != NULL && i < g_NumChrSlots && i < COOP_MAX_CHRS; i++)
+    {
+        ChrRecord *chr = &g_ChrSlots[i];
+        CoopAiEnt *e = &sAiSync[i];
+
+        sChrTarget[i].target = -1;
+        sChrTarget[i].lastupdate60 = -1;
+        sChrTarget[i].laststimulus60 = -1;
+        if (!sAiSyncHave[i] || chr->model == NULL || chr->prop == NULL || coopIsPuppet(chr->prop) || chr->chrnum != e->chrnum)
+        {
+            continue;
+        }
+        if (e->ailist != 0xFFFF && ailistFindById(e->ailist) != NULL)
+        {
+            chr->ailist = ailistFindById(e->ailist);
+            chr->aioffset = e->aioffset;
+            chr->aireturnlist = e->aireturnlist;
+        }
+        chr->morale = e->morale;
+        chr->alertness = e->alertness;
+        chr->flags2 = e->flags2;
+        chr->random = e->random;
+        chr->chrflags = (CHRFLAG) e->chrflags;
+        chr->hidden = (chr->hidden & ~COOP_AI_HIDDEN_BITS) | (e->hidden & COOP_AI_HIDDEN_BITS);
+        chr->padpreset1 = e->padpreset1;
+        chr->chrpreset1 = e->chrpreset1;
+        chr->timer60 = e->timer60;
+        chr->damage = e->damage;
+        chr->maxdamage = e->maxdamage;
+        chr->sleep = 0;
+        if (e->actiontype == ACT_DIE || e->actiontype == ACT_DEAD)
+        {   /* dead on the host: stays down and fades as a body does */
+            chrStopFiring(chr);
+            chr->actiontype = ACT_DEAD;
+            chr->act_dead.allowfade = -1;
+            chr->act_init.padding[0] = 0;
+            dead++;
+        }
+        else
+        {
+            chr->actiontype = ACT_INIT;     /* stands, then its script picks up from aioffset */
+        }
+        n++;
+    }
+    sLastSnapTick = 0;
+    sTickChr = NULL;
+    g_CoopPropOverride = NULL;
+    portConLogf("ge: coop: took over %d chrs (%d dead) from the old host\n", n, dead);
+}
+
+/* ---- renumbering ---- */
+
+/* newof[old player number] = new number, -1 for players no longer in the session */
+static void coopRenumber(const s32 *newof)
+{
+    CoopRemote old[COOP_MAX_PLAYERS];
+    CoopRosterEnt roster[COOP_MAX_PLAYERS];
+    u32 now = coopNowMs();
+    s32 p, c;
+
+    memcpy(old, sR, sizeof(old));
+    memset(sR, 0, sizeof(sR));
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        sR[p].puppetAnim = -1;
+    }
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        CoopRemote *r;
+
+        if (p == sMigSelf)
+        {
+            continue;
+        }
+        if (newof[p] < 0)
+        {
+            if (old[p].puppet != NULL)
+            {
+                coopPuppetRemove(&old[p]);  /* the old host's Bond goes with it */
+            }
+            continue;
+        }
+        r = &sR[newof[p]];
+        *r = old[p];
+        r->st.player = (u8) newof[p];
+        r->seenMs = now;
+        r->seenTick = sTick;
+        if (r->puppet != NULL && r->puppet->chr != NULL)
+        {
+            r->puppet->chr->chrnum = COOP_PUPPET_CHRNUM + newof[p];
+        }
+    }
+    memset(roster, 0, sizeof(roster));
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        if (newof[p] >= 0)
+        {
+            roster[newof[p]] = sMigRoster[p];
+        }
+    }
+    memcpy(sHostHello.roster, roster, sizeof(roster));
+    sHostHello.youare = (u8) newof[sMigSelf];
+    memset(sChan, 0, sizeof(sChan));
+    for (c = 0; c < COOP_NET_MAX_PEERS; c++)
+    {
+        coopChanReset(&sChan[c]);
+        sChan[c].heardMs = now;
+    }
+    coopStatsRemap(newof);
+}
+
+/* The host is gone: pick the next one and go over to it. */
+static void coopMigrate(void)
+{
+    s32 list[COOP_MAX_PLAYERS], newof[COOP_MAX_PLAYERS];
+    unsigned long long ids[COOP_NET_MAX_PEERS];
+    s32 n = 0, p, i;
+    char line[56];
+
+    for (p = 1; p < COOP_MAX_PLAYERS; p++)
+    {
+        if (sMigRoster[p].present || p == sMigSelf)
+        {
+            list[n++] = p;
+        }
+    }
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        newof[p] = -1;
+    }
+    for (i = 0; i < n; i++)
+    {
+        newof[list[i]] = i;
+    }
+    if (n == 0 || newof[sMigSelf] < 0)
+    {   /* cannot happen (we are always in the list); start over alone */
+        list[0] = sMigSelf;
+        n = 1;
+        newof[sMigSelf] = 0;
+    }
+    portConLogf("ge: coop: host migration: player %d hosts (we were %d, now %d; %d players)\n",
+                list[0] + 1, sMigSelf + 1, newof[sMigSelf] + 1, n);
+
+    if (list[0] == sMigSelf)
+    {
+        for (i = 1; i < n && i <= COOP_NET_MAX_PEERS; i++)
+        {
+            ids[i - 1] = sMigRoster[list[i]].id;
+        }
+        sMissionSerial = sHostHello.mission;    /* the joiners have followed this one already */
+        coopNetMigrate(1, ids, n - 1);
+        coopRenumber(newof);
+        if (coopInMission())
+        {
+            coopTakeOverWorld();
+        }
+        sHostWaiting = HOSTW_NONE;
+        snprintf(line, sizeof(line), "%s %s", sGoneHostName, sHostLeftHow == COOPBYE_HANDOFF ? "HANDED OVER" : "LEFT");
+        coopBanner("YOU ARE THE HOST NOW", line);
+        hudmsgBottomShow("You are the host now.\n");
+    }
+    else
+    {
+        ids[0] = sMigRoster[list[0]].id;
+        coopNetMigrate(0, ids, 1);
+        coopRenumber(newof);
+        sHostWaiting = HOSTW_NEWHOST;
+        sHostWaitMs = coopNowMs();
+        sMigNewHost = list[0];
+    }
+    sMigrated = 1;
+    if (coopHostLeavesRule() == 1 && coopInMission())
+    {
+        sPendingEnd = 1;    /* the lobby's rule: back to the lobby, with the new host */
+    }
+}
+
+/* the roster to pick from: the host's last word on who is here; player 0 is
+ * the one that is gone */
+static void coopMigrateFromRoster(void)
+{
+    memcpy(sMigRoster, sHostHello.roster, sizeof(sMigRoster));
+    sMigSelf = coopSelf();
+    sMigRoster[sMigSelf].present = 1;
+    coopMigrate();
+}
+
+static void coopUpper(char *s)
+{
+    for (; *s != '\0'; s++)
+    {
+        if (*s >= 'a' && *s <= 'z')
+        {
+            *s -= 'a' - 'A';
+        }
+    }
+}
+
+/* the host is gone (how: 0 went quiet, else COOPBYE_*) */
+static void coopHostGone(s32 how)
+{
+    if (coopNetIsHost() || !sChan[0].helloSeen)
+    {
+        return;
+    }
+    snprintf(sGoneHostName, sizeof(sGoneHostName), "%s", coopPlayerName(0));
+    coopUpper(sGoneHostName);
+    sHostLeftHow = how;
+    portConLogf("ge: coop: the host %s\n", how == COOPBYE_HANDOFF ? "handed over" : how ? "left" : "went quiet");
+    coopMigrateFromRoster();
+}
+
+static void coopRecvBye(s32 c, CoopByePkt *b)
+{
+    s32 p = coopPlayerOfChan(c);
+
+    if (coopNetIsHost())
+    {
+        if (sR[p].valid || coopLobbyPlayerHere(p))
+        {
+            portConLogf("ge: coop: player %d left the session\n", p + 1);
+            coopNote(p, COOPNOTE_LEFT);
+        }
+        sR[p].valid = 0;
+        sR[p].lost = 0;
+        sChan[c].helloSeen = 0;
+        coopNetDropPeer(c);
+        return;
+    }
+    if (c == 0 && sHostWaiting != HOSTW_NEWHOST)
+    {
+        coopHostGone(b->reason == COOPBYE_HANDOFF ? COOPBYE_HANDOFF : COOPBYE_LEAVE);
+    }
+}
+
+/* ---- joiners that drop (host), and notes about them (everyone) ---- */
+
+static void coopNote(s32 p, s32 what)
+{
+    CoopEvent ev;
+
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = COOPEV_PLAYERNOTE;
+    ev.u.note.player = (u8) p;
+    ev.u.note.what = (u8) what;
+    snprintf(ev.u.note.name, sizeof(ev.u.note.name), "%s", coopPlayerName(p));
+    coopQueueEventTo(&ev, COOP_ALL);
+    coopApplyNote(&ev);
+}
+
+static void coopApplyNote(CoopEvent *ev)
+{
+    s32 p = ev->u.note.player;
+    char msg[64];
+    const char *name = ev->u.note.name[0] ? ev->u.note.name : "A partner";
+
+    if (p >= COOP_MAX_PLAYERS)
+    {
+        return;
+    }
+    switch (ev->u.note.what)
+    {
+        case COOPNOTE_LOST:
+            sR[p].lost = 1;
+            sR[p].lostMs = coopNowMs();
+            snprintf(msg, sizeof(msg), "%s lost connection.\n", name);
+            break;
+        case COOPNOTE_BACK:
+            sR[p].lost = 0;
+            snprintf(msg, sizeof(msg), "%s is back.\n", name);
+            break;
+        case COOPNOTE_GONE:
+            sR[p].valid = 0;
+            sR[p].lost = 0;
+            snprintf(msg, sizeof(msg), "%s disconnected.\n", name);
+            break;
+        case COOPNOTE_LEFT:
+            sR[p].valid = 0;
+            sR[p].lost = 0;
+            snprintf(msg, sizeof(msg), "%s left the game.\n", name);
+            break;
+        case COOPNOTE_LEFTMISSION:
+            sR[p].valid = 0;
+            sR[p].lost = 0;
+            snprintf(msg, sizeof(msg), "%s left the mission.\n", name);
+            break;
+        default:
+            return;
+    }
+    portConLogf("ge: coop: %s", msg);
+    if (coopInMission())
+    {
+        hudmsgBottomShow(msg);
+    }
+    else
+    {
+        snprintf(sLobbyNotice, sizeof(sLobbyNotice), "%s", msg);
+        sLobbyNoticeMs = coopNowMs();
+    }
+}
+
+static void coopRemoteWatch(s32 p)
+{
+    CoopRemote *r = &sR[p];
+    u32 now = coopNowMs();
+    s32 c;
+
+    if (!r->valid)
+    {
+        return;
+    }
+    if (!coopNetIsHost())
+    {   /* the host: coopSessionTick. Other joiners: the host's notes, and
+         * silence long past the host's own drop as a last resort */
+        if (p != 0 && sHostWaiting == HOSTW_NONE && now - r->seenMs > COOP_REMOTE_GONE_MS)
+        {
+            portConLogf("ge: coop: nothing from player %d for %d s, dropping its Bond\n", p + 1, COOP_REMOTE_GONE_MS / 1000);
+            r->valid = 0;
+            r->lost = 0;
+        }
+        return;
+    }
+    c = coopChanOfPlayer(p);
+    if (c < 0)
+    {
+        return;
+    }
+    if (!coopNetPeerConnected(c))
+    {   /* the transport let it go (it left the Steam lobby) */
+        coopNote(p, COOPNOTE_LEFT);
+        return;
+    }
+    if (sChan[c].helloSeen && (s32) (sChan[c].helloTick - r->seenTick) > 0 && sChan[c].hello.stage != r->st.stage)
+    {   /* its newest hello is from somewhere else: it left this mission (Abort, or its game failed it) */
+        if (coopInMission() && r->st.stage == bossGetStageNum())
+        {
+            coopNote(p, COOPNOTE_LEFTMISSION);
+        }
+        r->valid = 0;
+        r->lost = 0;
+        return;
+    }
+    if (!r->lost && now - sChan[c].heardMs > COOP_LOST_MS)
+    {
+        coopNote(p, COOPNOTE_LOST);
+    }
+    else if (r->lost && now - sChan[c].heardMs < 1000)
+    {
+        coopNote(p, COOPNOTE_BACK);
+    }
+    else if (r->lost && now - r->lostMs > COOP_DROP_MS)
+    {
+        coopNote(p, COOPNOTE_GONE);
+        sChan[c].helloSeen = 0;
+        coopNetDropPeer(c);
+    }
+}
+
+/* ---- every tick, menus and missions ---- */
+
+static void coopSessionTick(void)
+{
+    u32 now = coopNowMs();
+    u32 quiet;
+    s32 c;
+
+    if (!sAtExitSet)
+    {
+        sAtExitSet = 1;
+        atexit(coopAtExit);
+    }
+    if (sEnabled <= 0 || !coopNetIsOpen())
+    {
+        return;
+    }
+    if (coopNetIsHost())
+    {   /* a slot nobody has spoken from for a long time (the lobby, or a
+         * joiner kept for after a migration that never came) is freed */
+        for (c = 0; c < COOP_NET_MAX_PEERS; c++)
+        {
+            if (coopNetPeerConnected(c) && sChan[c].heardMs != 0 && now - sChan[c].heardMs > COOP_LOST_MS + COOP_DROP_MS
+                && !sR[coopPlayerOfChan(c)].valid)
+            {
+                portConLogf("ge: coop: freeing slot %d (silent)\n", c);
+                sChan[c].helloSeen = 0;
+                coopNetDropPeer(c);
+            }
+        }
+        return;
+    }
+    if (!sChan[0].helloSeen && sHostWaiting != HOSTW_NEWHOST)
+    {
+        return;     /* not connected to a host yet */
+    }
+    quiet = now - sChan[0].heardMs;
+    switch (sHostWaiting)
+    {
+        case HOSTW_NONE:
+            if (coopNetHostLeft())
+            {
+                coopHostGone(COOPBYE_LEAVE);
+            }
+            else if (quiet > COOP_SILENT_MS)
+            {
+                sHostWaiting = HOSTW_SILENT;
+                sHostWaitMs = now;
+                portConLogf("ge: coop: nothing from the host for %d s, waiting for it\n", (int) (quiet / 1000));
+            }
+            else if (coopInMission() && sHostHello.stage == LEVELID_TITLE && sMissionTicks > 300 && !sPendingEnd)
+            {   /* the host is in the menus while we play on: it left the mission */
+                if (sHostTitleMs == 0)
+                {
+                    sHostTitleMs = now;
+                }
+                else if (now - sHostTitleMs > COOP_HOSTTITLE_MS)
+                {
+                    coopBanner("THE HOST LEFT THE MISSION", "BACK TO THE LOBBY");
+                    sPendingEnd = 1;
+                    sHostTitleMs = 0;
+                }
+            }
+            else
+            {
+                sHostTitleMs = 0;
+            }
+            break;
+        case HOSTW_SILENT:
+            if (quiet < 1000)
+            {
+                sHostWaiting = HOSTW_NONE;
+                portConLogf("ge: coop: the host is back\n");
+                coopBanner("THE HOST IS BACK", "");
+            }
+            else if (coopNetHostLeft())
+            {
+                coopHostGone(COOPBYE_LEAVE);
+            }
+            else if (now - sHostWaitMs > COOP_HOST_WAIT_MS)
+            {
+                coopHostGone(0);
+            }
+            break;
+        case HOSTW_NEWHOST:
+            if (sChan[0].helloSeen)
+            {
+                char line[56];
+
+                sHostWaiting = HOSTW_NONE;
+                snprintf(line, sizeof(line), "%s IS THE HOST NOW", sMigRoster[sMigNewHost].name);
+                coopUpper(line);
+                coopBanner(line, sHostLeftHow == COOPBYE_HANDOFF ? "THE OLD HOST HANDED OVER" : "THE OLD HOST LEFT");
+                portConLogf("ge: coop: connected to the new host, we are player %d now\n", coopSelf() + 1);
+            }
+            else if (now - sHostWaitMs > COOP_NEWHOST_WAIT_MS)
+            {   /* it did not take over: it is player 0 in our renumbered
+                 * roster now, so go round again without it */
+                portConLogf("ge: coop: the player picked did not take over, trying the next\n");
+                coopMigrateFromRoster();
+            }
+            break;
+    }
+}
+
+/* ---- for the HUD and the lobby screen ---- */
+
+/* the banner's two lines (capitals), 1 when there is one to show */
+s32 coopHudSessionBanner(char *line1, char *line2, s32 cap)
+{
+    u32 now = coopNowMs();
+
+    if (sEnabled <= 0)
+    {
+        return 0;
+    }
+    if (sHostWaiting == HOSTW_SILENT)
+    {
+        s32 left = (s32) (COOP_HOST_WAIT_MS - (now - sHostWaitMs) + 999) / 1000;
+
+        snprintf(line1, cap, "HOST NOT RESPONDING: %s", coopPlayerName(0));
+        snprintf(line2, cap, coopHostLeavesRule() == 1 ? "BACK TO THE LOBBY IN %d" : "WAITING FOR THE HOST %d",
+                 left < 0 ? 0 : (int) left);
+        return 1;
+    }
+    if (sHostWaiting == HOSTW_NEWHOST)
+    {
+        snprintf(line1, cap, "%s %s", sGoneHostName, sHostLeftHow == COOPBYE_HANDOFF ? "HANDED OVER" : "LEFT");
+        snprintf(line2, cap, "CONNECTING TO THE NEW HOST...");
+        return 1;
+    }
+    if (sBannerMs != 0 && now - sBannerMs < COOP_BANNER_MS)
+    {
+        snprintf(line1, cap, "%s", sBanner[0]);
+        snprintf(line2, cap, "%s", sBanner[1]);
+        return 1;
+    }
+    return 0;
+}
+
+/* a line for the lobby screen about who came and went, NULL when none */
+const char *coopLobbyNotice(void)
+{
+    static char text[64];
+    char l1[56], l2[56];
+
+    if (sEnabled > 0 && sHostWaiting != HOSTW_NONE && coopHudSessionBanner(l1, l2, sizeof(l1)))
+    {
+        snprintf(text, sizeof(text), "%s\n", l2);
+        return text;
+    }
+    if (sLobbyNoticeMs != 0 && coopNowMs() - sLobbyNoticeMs < 15000)
+    {
+        snprintf(text, sizeof(text), "%s", sLobbyNotice);
+        if (text[0] != '\0' && text[strlen(text) - 1] != '\n')
+        {
+            strcat(text, "\n");
+        }
+        return text;
+    }
+    return NULL;
+}
+
+/* player p's Bond stands idle: its game stopped talking (name tags, status) */
+s32 coopHudPlayerLost(s32 p)
+{
+    if (p == 0 && !coopNetIsHost())
+    {
+        return sHostWaiting == HOSTW_SILENT;
+    }
+    return p >= 0 && p < COOP_MAX_PLAYERS && sR[p].lost;
+}
+
+/* the lobby's rule for a host that leaves: 0 the next player hosts, 1 everyone back to the lobby */
+s32 coopHostLeavesCount(void)
+{
+    return 2;
+}
+
+const char *coopHostLeavesName(s32 rule)
+{
+    return (rule == 1) ? "Back to Lobby\n" : "Next Player Hosts\n";
 }
 
 

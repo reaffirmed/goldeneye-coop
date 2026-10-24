@@ -11,6 +11,11 @@
  * held until AcceptSessionWithUser, a message's sender identity sits at byte
  * 12 (the real 32-bit DLL's layout), and LobbyCreated arrives twice.
  *
+ * A member's <id>.lobby file names the lobby it is in, so friends see it
+ * there (as Steam's GetFriendGamePlayed does); <lobby>.owner and
+ * <lobby>.gehost hold SetLobbyOwner's and SetLobbyData("gehost")'s values
+ * (any member may set them here; real Steam lets only the owner).
+ *
  * Build: gcc -m32 -shared -fPIC -O1 -o libsteam_api.so steam_mock.c
  */
 #include <stdio.h>
@@ -301,6 +306,10 @@ API u64 SteamAPI_ISteamMatchmaking_JoinLobby(void *self, u64 lobby)
     f = fopen(p, "a");
     fprintf(f, "%llu\n", sSelf);
     fclose(f);
+    path(p, sizeof(p), sSelf, "lobby");
+    f = fopen(p, "w");
+    fprintf(f, "%llu\n", lobby);
+    fclose(f);
     memset(r, 0, sizeof(r));
     memcpy(r, &lobby, 8);
     memcpy(r + 16, &resp, 4);
@@ -312,24 +321,73 @@ API void SteamAPI_ISteamMatchmaking_LeaveLobby(void *self, u64 lobby)
 {
     char p[320];
     (void) self;
-    if ((lobby & 0xFFFFFFFFFFFFULL) == (sSelf & 0xFFFFFFFFFFFFULL))
+    (void) lobby;
+    path(p, sizeof(p), sSelf, "lobby");
+    unlink(p);
+}
+
+static u64 readId(u64 id, const char *ext)
+{
+    char p[320];
+    FILE *f;
+    u64 v = 0;
+
+    path(p, sizeof(p), id, ext);
+    f = fopen(p, "r");
+    if (f != NULL)
     {
-        path(p, sizeof(p), sSelf, "lobby");
-        unlink(p);
+        if (fscanf(f, "%llu", &v) != 1)
+        {
+            v = 0;
+        }
+        fclose(f);
+    }
+    return v;
+}
+
+static void writeId(u64 id, const char *ext, u64 v)
+{
+    char p[320];
+    FILE *f;
+
+    path(p, sizeof(p), id, ext);
+    f = fopen(p, "w");
+    if (f != NULL)
+    {
+        fprintf(f, "%llu\n", v);
+        fclose(f);
     }
 }
 
 API sbool SteamAPI_ISteamMatchmaking_SetLobbyData(void *self, u64 l, const char *k, const char *v)
 {
-    (void) self; (void) l; (void) k; (void) v;
+    (void) self;
+    if (strcmp(k, "gehost") == 0)
+    {
+        writeId(l, "gehost", strtoull(v, NULL, 10));
+        log_("lobby data gehost set");
+    }
     return 1;
 }
 
 API const char *SteamAPI_ISteamMatchmaking_GetLobbyData(void *self, u64 l, const char *k)
 {
-    (void) self; (void) l;
+    (void) self;
+    if (strcmp(k, "gehost") == 0 && readId(l, "gehost") != 0)
+    {
+        snprintf(sValue, sizeof(sValue), "%llu", readId(l, "gehost"));
+        return sValue;
+    }
     snprintf(sValue, sizeof(sValue), "%s", strcmp(k, "gecoop") == 0 ? "1" : "");
     return sValue;
+}
+
+API sbool SteamAPI_ISteamMatchmaking_SetLobbyOwner(void *self, u64 l, u64 owner)
+{
+    (void) self;
+    writeId(l, "owner", owner);
+    log_("lobby owner set");
+    return 1;
 }
 
 static u64 ownerOf(u64 lobby)
@@ -337,6 +395,10 @@ static u64 ownerOf(u64 lobby)
     /* mock ids keep the owner's low 48 bits; the high bits are the usual 7656119... */
     int i;
 
+    if (readId(lobby, "owner") != 0)
+    {
+        return readId(lobby, "owner");
+    }
     for (i = 0; i < sNumFriends; i++)
     {
         if ((sFriend[i] & 0xFFFFFFFFFFFFULL) == (lobby & 0xFFFFFFFFFFFFULL))
@@ -539,5 +601,21 @@ API sbool SteamAPI_ISteamNetworkingMessages_AcceptSessionWithUser(void *self, co
     return 1;
 }
 
-API sbool SteamAPI_ISteamNetworkingMessages_CloseSessionWithUser(void *self, const unsigned char *ident) { (void) self; (void) ident; return 1; }
+/* like Steam, a closed session must be asked for and accepted again */
+API sbool SteamAPI_ISteamNetworkingMessages_CloseSessionWithUser(void *self, const unsigned char *ident)
+{
+    u64 id = SteamAPI_SteamNetworkingIdentity_GetSteamID64(ident);
+    int i;
+
+    (void) self;
+    for (i = 0; i < sNumAccepted; i++)
+    {
+        if (sAccepted[i] == id)
+        {
+            sAccepted[i] = sAccepted[--sNumAccepted];
+            break;
+        }
+    }
+    return 1;
+}
 API void SteamAPI_SteamNetworkingMessage_t_Release(void *msg) { free(msg); }

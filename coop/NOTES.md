@@ -279,3 +279,46 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscen
   slower than wall time under Xvfb, so give the shots time. Verified: host
   sees Natalya with PP7 then KF7, muzzle flash and wall sparks from her
   shots; 3 and 4 player lobbies list each character.
+
+## Host leaving and migration (2026-10-24, COOP_VERSION 6)
+
+- Ids: COOPPKT_AISYNC 8, COOPPKT_BYE 9; COOPEV_PLAYERNOTE 12, COOPEV_ENDALL 13
+  (14, 15 kept for this); COOPSET_HOSTLEAVES (was SPARE7). Other threads
+  claimed COOPEV 16 (ping), 20..31 and COOPPKT 10..11 (feature batch),
+  COOPSET_SPARE2..6, COOPEV 32+ and COOPPKT 16 (versus).
+- Detection is wall clock (coopNowMs = osGetTime()/46875), so a paused or
+  cutscene-locked game still counts: while g_ClockTimer <= 0, coopKeepAlive
+  sends a hello every 500 ms. A joiner that hears nothing from the host for
+  3 s shows a banner, waits 12 s more, then migrates. A COOPPKT_BYE (3
+  copies, sent from atexit, Leave Lobby and the watch Abort) or Steam
+  reporting the owner left the lobby migrates at once.
+- Election: lowest player number left in the old host's roster. Everyone
+  renumbers in roster order (new host = player 0) with coopRenumber, which
+  remaps sR, puppet chrnums (30000+p), roster, channels and coopStatsRemap.
+  The new host reserves transport slots from the roster ids (UDP:
+  addr<<16|port, Steam: SteamID) via coopNetMigrate. A follower with no
+  hello from the new host in 8 s elects again without that player.
+- World: the host sends COOPPKT_AISYNC every 60 ticks (ailist id, aioffset,
+  action, damage and a few AI fields per chr). coopTakeOverWorld rebuilds AI
+  from it on the new host: dead chrs ACT_DEAD, live ones ACT_INIT so their
+  scripts restart from the synced offset. Doors, objects and objectives were
+  already mirrored on joiners, so they carry over.
+- Steam: optional SetLobbyOwner; lobby data "gehost" names the host so a
+  rejoiner finds the right player even before ownership moves. The mock
+  stores owner and gehost in /tmp/gecoop-mock, and CloseSessionWithUser now
+  drops the peer like real Steam (needed for rejoin).
+- Joiner drop, on the host: 3 s silence = lost (Bond idle, coopRemoteAliveHere
+  false so guards and scripts ignore it), 30 s = slot freed. The host
+  broadcasts COOPEV_PLAYERNOTE (LOST/BACK/GONE/LEFT/LEFTMISSION). A joiner
+  whose hello is on another stage left the mission.
+- Watch Abort as host with partners: first confirm turns the row into
+  "HOST: END ALL / HAND OVER". Hand Over sends a fresh AI sync and BYE
+  HANDOFF; End All sends reliable COOPEV_ENDALL and everyone goes to the
+  lobby (coopEndMissionLocal: mission state 0, title stage, no save reset).
+- Harness: coop/docker/host_drop.sh (PLAYERS, KILL, KILLAT, REJOIN, SHOTS,
+  RUNSECS, ALLENV/HOSTENV/P<i>ENV); GE_COOP_HOSTLEAVES=0|1,
+  GE_COOP_TESTABORT=<s>:handover|endall, GE_COOP_TESTABORTUI=1 (shows the
+  host prompt on the watch). Verified with the Steam mock: host killed with
+  3 and 2 players (mission goes on, guards keep fighting, dead guards stay
+  dead), old host rejoins as a late joiner, joiner killed (lost, then
+  removed at 30 s), Hand Over, End All, and Back to Lobby.

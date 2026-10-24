@@ -8835,7 +8835,7 @@ extern void portConLogf(const char *fmt, ...);
 
 enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLROW_CANCEL,
        CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE, CLROW_FRIENDLYFIRE,
-       CLROW_CHARACTER };
+       CLROW_CHARACTER, CLROW_HOSTLEAVES };
 #define COOP_LOBBY_ROWS     22
 #define COOP_LOBBY_X        PORT_SHEET_LABEL_X
 #define COOP_LOBBY_VALUE_X  0xFA
@@ -8955,6 +8955,14 @@ static void coopLobbyBuild(void)
     }
 
     /* in a lobby: the players, host first */
+    if (coopLobbyNotice() != NULL)
+    {   /* who just came or went, a new host */
+        r = coopLobbyAdd(CLROW_TEXT, 0, coopLobbyNotice(), "");
+        if (r != NULL)
+        {
+            r->colour = COOP_LOBBY_COL_OK;
+        }
+    }
     coopLobbyAdd(CLROW_HEAD, 0, "Players\n", "");
     if (coopLobbyIsHost() || coopLobbyHasPartner())
     {
@@ -9044,7 +9052,14 @@ static void coopLobbyBuild(void)
         coopLobbyAdd(CLROW_READY, 0, coopLobbySelfReady() ? "Cancel Ready\n" : "Ready Up\n", "");
         coopLobbyAdd(CLROW_TEXT, 0, "The host picks the mission.\n", "");
     }
-    coopLobbyAdd(CLROW_LEAVE, 0, "Leave Lobby\n", "");
+    if (coopLobbyIsHost() && coopLobbyHasPartner())
+    {   /* the lobby goes on without us: the next player hosts */
+        coopLobbyAdd(CLROW_LEAVE, 0, "Leave Lobby\n", "Hand Over\n");
+    }
+    else
+    {
+        coopLobbyAdd(CLROW_LEAVE, 0, "Leave Lobby\n", "");
+    }
 
     /* the host's rules; the joiner sees them as the host sets them */
     coopLobbyAdd(CLROW_HEAD, 0, "Rules\n", "");
@@ -9063,6 +9078,8 @@ static void coopLobbyBuild(void)
     }
     coopLobbyAdd(coopLobbyIsHost() ? CLROW_FRIENDLYFIRE : CLROW_TEXT, 0, "Friendly Fire\n",
                  coopSetting(COOPSET_FRIENDLYFIRE) ? "On\n" : "Off\n");
+    coopLobbyAdd(coopLobbyIsHost() ? CLROW_HOSTLEAVES : CLROW_TEXT, 0, "Host Leaves\n",
+                 coopHostLeavesName(coopSetting(COOPSET_HOSTLEAVES)));
 
     for (i = 0, k = 0; i < COOP_MAX_PLAYERS; i++)
     {
@@ -9140,6 +9157,9 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
             break;
         case CLROW_FRIENDLYFIRE:
             coopSetSetting(COOPSET_FRIENDLYFIRE, !coopSetting(COOPSET_FRIENDLYFIRE));
+            break;
+        case CLROW_HOSTLEAVES:
+            coopSetSetting(COOPSET_HOSTLEAVES, (coopSetting(COOPSET_HOSTLEAVES) + 1) % coopHostLeavesCount());
             break;
         default:
             break;

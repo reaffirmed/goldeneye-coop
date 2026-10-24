@@ -46,6 +46,7 @@ typedef unsigned char sbool; /* C++ bool in the DLL: only the low byte is set */
 
 #define APPID_SPACEWAR 480
 #define LOBBY_KEY "gecoop"
+#define LOBBY_HOST_KEY "gehost"   /* the host's SteamID, once the host is not the lobby's creator */
 
 /* callback ids */
 enum
@@ -102,6 +103,7 @@ static int (*pReceiveMessagesOnChannel)(void *self, int channel, void **out, int
 static sbool (*pAcceptSessionWithUser)(void *self, const void *ident);
 static sbool (*pCloseSessionWithUser)(void *self, const void *ident);
 static void (*pMessageRelease)(void *msg);
+static sbool (*pSetLobbyOwner)(void *self, u64s lobby, u64s owner);   /* optional */
 
 static void *sLib;
 static void *sUser, *sMM, *sFriends, *sNM;
@@ -119,6 +121,8 @@ static unsigned int sPolls;
 static int sSenderOfs;      /* 12 or 16, see coopSteamRecv */
 static int sReady;          /* the library is loaded and SteamAPI is up */
 static int sOverlay;        /* host: open Steam's invite overlay with the lobby */
+static int sHostLeft;       /* joiner: the host left the lobby (the game picks a new one) */
+static int sHostTagged;     /* host after a migration: the lobby says who hosts */
 
 /* the lobby screen's friend list, see coopSteamFriendsRefresh */
 #define MAX_FRIENDS 48
@@ -199,6 +203,7 @@ static int loadAll(void)
     L(pCloseSessionWithUser, "SteamAPI_ISteamNetworkingMessages_CloseSessionWithUser");
     L(pMessageRelease, "SteamAPI_SteamNetworkingMessage_t_Release");
 #undef L
+    pSetLobbyOwner = (sbool (*)(void *, u64s, u64s)) LIB_SYM(sLib, "SteamAPI_ISteamMatchmaking_SetLobbyOwner");
     pSteamFriends = (void *(*)(void)) LIB_SYM(sLib, "SteamAPI_SteamFriends_v018");
     if (pSteamFriends == NULL)
     {
@@ -312,6 +317,20 @@ static int isLobbyMember(u64s id)
     return 0;
 }
 
+/* Who hosts a lobby: its owner, unless a migration moved the game to
+ * another member (LOBBY_HOST_KEY, set by the owner once it is the host). */
+static u64s lobbyHost(u64s lobby)
+{
+    const char *h = pGetLobbyData(sMM, lobby, LOBBY_HOST_KEY);
+    u64s id = (h != NULL && h[0] != '\0') ? strtoull(h, NULL, 10) : 0;
+
+    if (id != 0 && id != sSelf && isLobbyMember(id))
+    {
+        return id;
+    }
+    return pGetLobbyOwner(sMM, lobby);
+}
+
 static void joinLobby(u64s lobby)
 {
     if (sLobby == lobby || lobby == 0)
@@ -407,7 +426,7 @@ static void onLobbyEnter(const unsigned char *p)
     }
     sLobby = lobby;
     dropAllPeers();
-    setPeer(0, pGetLobbyOwner(sMM, lobby));
+    setPeer(0, lobbyHost(lobby));
     pSetRichPresence(sFriends, "status", "Playing GoldenEye co-op");
     portConLogf("ge: steam: in lobby %llu, host %s\n", lobby, pGetFriendPersonaName(sFriends, sPeers[0]));
 }
@@ -425,11 +444,38 @@ static void onChatUpdate(const unsigned char *p)
         return;
     }
     portConLogf("ge: steam: %s left\n", pGetFriendPersonaName(sFriends, who));
-    dropPeer(slot);
     if (!sIsHost)
+    {   /* the host: keep the lobby and the slot, the game picks a new host
+         * among those still here (coopNetMigrate) */
+        sHostLeft = 1;
+        return;
+    }
+    dropPeer(slot);
+}
+
+/* After a migration Steam's owner of the lobby (whoever it handed it to
+ * when the old host left) may not be the game's host: an owner that is not
+ * hosting passes it on, and the host says in the lobby that it hosts. */
+static void fixOwner(void)
+{
+    u64s owner;
+    char buf[64];
+
+    if (sLobby == 0 || (sPolls % 60) != 0)
     {
-        sLobby = 0;
-        sJoinWanted = 1; /* the host may come back with a new lobby */
+        return;
+    }
+    owner = pGetLobbyOwner(sMM, sLobby);
+    if (!sIsHost && owner == sSelf && sPeers[0] != 0 && pSetLobbyOwner != NULL && isLobbyMember(sPeers[0]))
+    {
+        portConLogf("ge: steam: passing the lobby to the host\n");
+        pSetLobbyOwner(sMM, sLobby, sPeers[0]);
+    }
+    if (sIsHost && !sHostTagged && owner == sSelf)
+    {
+        snprintf(buf, sizeof(buf), "%llu", sSelf);
+        pSetLobbyData(sMM, sLobby, LOBBY_HOST_KEY, buf);
+        sHostTagged = 1;
     }
 }
 
@@ -535,6 +581,7 @@ static void pump(void)
     {
         findHostingFriend();
     }
+    fixOwner();
     sPolls++;
 }
 
@@ -599,6 +646,8 @@ int coopSteamInit(const char *spec)
     sLobby = 0;
     sOverlay = 0;
     sJoinCall = 0;
+    sHostLeft = 0;
+    sHostTagged = 1;
 
     /* "steam" hosts and opens the invite overlay; "steam:host" hosts (the
      * lobby screen invites in game); "steam:idle" only brings Steam up;
@@ -633,6 +682,51 @@ int coopSteamInit(const char *spec)
 int coopSteamIsHost(void)
 {
     return sIsHost;
+}
+
+/* see coopNetMigrate: the lobby stays, the peers change */
+void coopSteamMigrate(int ashost, const unsigned long long *ids, int n)
+{
+    char buf[64];
+    int i;
+
+    if (!sReady)
+    {
+        return;
+    }
+    dropAllPeers();
+    sIsHost = ashost;
+    sHostLeft = 0;
+    sJoinWanted = 0;
+    for (i = 0; i < n && i < COOP_NET_MAX_PEERS && (ashost || i == 0); i++)
+    {
+        if (ids[i] != 0)
+        {
+            setPeer(i, ids[i]);
+        }
+    }
+    if (!ashost)
+    {
+        portConLogf("ge: steam: new host %s\n", pGetFriendPersonaName(sFriends, sPeers[0]));
+        return;
+    }
+    portConLogf("ge: steam: hosting lobby %llu now\n", sLobby);
+    sHostTagged = 0;    /* fixOwner tags the lobby once Steam makes us its owner */
+    if (sLobby != 0)
+    {
+        if (pSetLobbyOwner != NULL && pGetLobbyOwner(sMM, sLobby) != sSelf)
+        {
+            pSetLobbyOwner(sMM, sLobby, sSelf);   /* refused unless we own it; the owner passes it on */
+        }
+        snprintf(buf, sizeof(buf), "+connect_lobby %llu", sLobby);
+        pSetRichPresence(sFriends, "connect", buf);
+        pSetRichPresence(sFriends, "status", "Hosting GoldenEye co-op");
+    }
+}
+
+int coopSteamHostLeft(void)
+{
+    return sReady && !sIsHost && sHostLeft;
 }
 
 int coopSteamHasPeer(void)
