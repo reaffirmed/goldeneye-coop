@@ -39,10 +39,19 @@ typedef struct
     f32 health;
     f32 armour;
     s32 respawn;        /* ticks, -1 = not waiting */
+    s32 revivable;      /* down, and walking over them brings them back */
     const char *name;
 } CoopHudPartner;
 s32  coopHudPartner(CoopHudPartner *out);
 s32  coopHudRespawnEta(void);
+s32  coopHudDownRule(void);
+s32  coopHudReviveHold(void);
+s32  coopHudBledOut(void);
+
+/* what happens when a player goes down (the host picks in the lobby) */
+enum { COOPDOWN_BOTH, COOPDOWN_TIMER, COOPDOWN_REVIVE };
+s32  coopDownRule(void);
+void coopSetDownRule(s32 rule);
 Gfx *coopHudRender(Gfx *gdl);
 
 /* the weapon menu (weapon_menu.c) */

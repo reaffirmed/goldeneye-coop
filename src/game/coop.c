@@ -81,7 +81,8 @@ typedef struct
     s32 dead;
     f32 health;     /* 0..1 */
     f32 armour;     /* 0..1 */
-    s32 respawn;    /* dead and waiting: ticks to the respawn at the latest, else -1 */
+    s32 respawn;    /* dead and waiting: ticks to the respawn (bleed-out under revive only), else -1 */
+    s32 downrule;   /* the rule the sender plays by */
 } CoopStatePkt;
 
 /* Where each game is, both ways once a second, menus included: the joiner
@@ -96,7 +97,8 @@ typedef struct
     u32 mission;        /* host: counts missions started */
     u8 ready;           /* the lobby screen's Ready */
     u8 inlobby;         /* on the lobby screen */
-    u8 pad[2];
+    u8 downrule;        /* host: the lobby's down rule */
+    u8 pad;
     u32 session;        /* as in CoopEventsPkt */
     u32 missionticks;   /* how long the sender has been in this mission */
 } CoopHelloPkt;
@@ -197,6 +199,7 @@ static s32 sHelloSeen;
 static u32 sMissionSerial;      /* host: missions started */
 static u32 sFollowedMission;    /* joiner: last host mission we launched into */
 static s32 sLobbyReady;         /* our Ready on the lobby screen */
+static s32 sDownRule = COOPDOWN_BOTH; /* the host's down rule (lobby): COOPDOWN_BOTH, _TIMER or _REVIVE */
 static u32 sSelfSession;        /* ours, new each run and each lobby session */
 static u32 sPeerSession;        /* the partner's, 0 until heard */
 static u32 sMissionTicks;       /* ticks in this mission */
@@ -323,6 +326,7 @@ static void coopSendState(void)
     p.health = g_CurrentPlayer->bondhealth;
     p.armour = g_CurrentPlayer->bondarmour;
     p.respawn = coopRespawnEta();
+    p.downrule = sDownRule;
     coopNetSend(&p, sizeof(p));
 
     if ((sTick % 300) == 1)
@@ -461,6 +465,10 @@ static void coopPollNet(void)
         {
             coopPeerSession(((CoopHelloPkt *) buf)->session);
             sHostHello = *(CoopHelloPkt *) buf;
+            if (!coopNetIsHost() && sHostHello.downrule <= COOPDOWN_REVIVE)
+            {
+                sDownRule = sHostHello.downrule;   /* the host's lobby decides */
+            }
             sHelloTick = sTick;
             if (!sHelloSeen)
             {
@@ -2224,6 +2232,29 @@ static s32 coopLocalCalm(void)
     return (calm > COOP_CALM_CAP) ? COOP_CALM_CAP : (s32) calm;
 }
 
+static coord3d sDeathPos;
+static StandTile *sDeathStan;
+static f32 sDeathYaw;
+static s32 sReviveHold;     /* ticks the partner has stood over us */
+static s32 sBledOut;
+
+#define COOP_REVIVE_DIST   140.0f  /* the partner within this of where we fell (xz) */
+#define COOP_REVIVE_HOLD   45      /* ...for 3/4 s */
+#define COOP_BLEED_OUT     3600    /* revive only: 60 s down and you are out of this mission */
+
+s32 coopDownRule(void)
+{
+    return sDownRule;
+}
+
+void coopSetDownRule(s32 rule)
+{
+    if (rule >= COOPDOWN_BOTH && rule <= COOPDOWN_REVIVE && coopLobbyIsHost())
+    {
+        sDownRule = rule;
+    }
+}
+
 s32 coopDeadTick(void)
 {
     u32 dead, calm;
@@ -2235,11 +2266,59 @@ s32 coopDeadTick(void)
     }
     if (sDeadSince == 0)
     {
+        PropRecord *bond = getCurrentPlayerProp();
+
         sDeadSince = sTick;
-        hudmsgBottomShow("Waiting for your partner to get clear...\n");
-        portConLogf("ge: coop: dead, waiting to respawn\n");
+        sReviveHold = 0;
+        sBledOut = 0;
+        sDeathStan = (bond != NULL) ? bond->stan : NULL;
+        if (bond != NULL)
+        {
+            sDeathPos = bond->pos;
+        }
+        sDeathYaw = 6.2831855f - bondviewGetPlayerYawRadians();
+        hudmsgBottomShow(sDownRule == COOPDOWN_TIMER ? "Waiting for your partner to get clear...\n"
+                                                     : "Down! Your partner can revive you.\n");
+        portConLogf("ge: coop: dead, rule %d\n", sDownRule);
     }
     dead = sTick - sDeadSince;
+
+    /* revive: the partner stands where we fell */
+    if (sDownRule != COOPDOWN_TIMER && !sBledOut && sDeathStan != NULL)
+    {
+        f32 dx = sRemote.pos[0] - sDeathPos.f[0];
+        f32 dz = sRemote.pos[2] - sDeathPos.f[2];
+        f32 dy = sRemote.pos[1] - sDeathPos.f[1];
+
+        if (dx * dx + dz * dz < COOP_REVIVE_DIST * COOP_REVIVE_DIST && dy < 250.0f && dy > -250.0f)
+        {
+            if (++sReviveHold >= COOP_REVIVE_HOLD)
+            {
+                portConLogf("ge: coop: revived by the partner after %.1f s\n", dead / 60.0f);
+                sPuppetGhost = 1;
+                coopRespawnPlayerAt(&sDeathPos, sDeathStan, sDeathYaw, sLastWeapon);
+                hudmsgBottomShow("Revived!\n");
+                sLastHealth = g_CurrentPlayer->bondhealth;
+                sDeadSince = 0;
+                return 1;
+            }
+        }
+        else
+        {
+            sReviveHold = 0;
+        }
+    }
+    if (sDownRule == COOPDOWN_REVIVE)
+    {
+        if (!sBledOut && dead >= COOP_BLEED_OUT)
+        {
+            sBledOut = 1;
+            hudmsgBottomShow("You bled out. You are out until the mission ends.\n");
+            portConLogf("ge: coop: bled out\n");
+        }
+        return 1;   /* no timer: down until revived, or out */
+    }
+
     calm = sRemoteCalm + (sTick - sRemoteCalmTick);
     if (coopNetIsHost())
     {   /* the partner is fighting our guards: we see that first-hand */
@@ -2269,11 +2348,15 @@ static s32 coopRespawnEta(void)
     u32 dead, calm;
     s32 eta;
 
-    if (sDeadSince == 0)
+    if (sDeadSince == 0 || sBledOut)
     {
         return -1;
     }
     dead = sTick - sDeadSince;
+    if (sDownRule == COOPDOWN_REVIVE)
+    {
+        return ((s32) COOP_BLEED_OUT - (s32) dead > 0) ? (s32) COOP_BLEED_OUT - (s32) dead : 0;
+    }
     calm = sRemoteCalm + (sTick - sRemoteCalmTick);
     if (coopNetIsHost())
     {
@@ -2311,11 +2394,27 @@ s32 coopHudPartner(CoopHudPartner *out)
     out->health = sRemote.health;
     out->armour = sRemote.armour;
     out->respawn = sRemote.respawn;
+    out->revivable = sRemote.dead && sRemote.downrule != COOPDOWN_TIMER && (sRemote.downrule != COOPDOWN_REVIVE || sRemote.respawn > 0);
     out->name = coopLobbyPartnerName();
     return 1;
 }
 
 /* our own wait to respawn, -1 when not waiting */
+s32 coopHudDownRule(void)
+{
+    return sDownRule;
+}
+
+s32 coopHudReviveHold(void)
+{
+    return (sDeadSince != 0) ? sReviveHold : 0;
+}
+
+s32 coopHudBledOut(void)
+{
+    return sDeadSince != 0 && sBledOut;
+}
+
 s32 coopHudRespawnEta(void)
 {
     return (sEnabled > 0) ? coopRespawnEta() : -1;
@@ -2341,6 +2440,7 @@ static void coopSendHello(void)
     p.ready = (u8) sLobbyReady;
     p.session = coopSelfSession();
     p.inlobby = (u8) sOnLobbyScreen;
+    p.downrule = (u8) sDownRule;
     p.missionticks = coopInMission() ? sMissionTicks : 0;
     coopNetSend(&p, sizeof(p));
 }
