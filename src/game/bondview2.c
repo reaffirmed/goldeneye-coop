@@ -8907,6 +8907,7 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         extern s32 portJoyPortObjectiveListPressed(void);
         extern void portObjectivesHudToggle(void);
         extern s32 portJoyPortGivePartnerPressed(void);
+        extern s32 portJoyPortPingPressed(void);
         extern s32 portJoyPortChatPressed(void);
         s32 step = portJoyPortWeaponStep();
 
@@ -8918,6 +8919,10 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         if (portJoyPortGivePartnerPressed())
         {
             coopGivePress();   /* co-op: ammo and the gun in hand to the partner (coop_give.c) */
+        }
+        if (portJoyPortPingPressed())
+        {
+            coopPingPress();   /* co-op: mark what the crosshair is on for the partners (coop_ping.c) */
         }
         if (portJoyPortChatPressed())
         {

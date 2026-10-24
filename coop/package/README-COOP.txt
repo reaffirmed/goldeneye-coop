@@ -52,6 +52,13 @@ Rules
   rounds (at least one magazine's worth), and the gun too if they don't have
   it. Stand next to them and face them. You keep your gun. The key can be
   changed in the controls menu (Give To Partner).
+- The middle mouse button pings: aim at a spot and press it, and a diamond
+  in your colour marks that spot for everyone, with your name and how far
+  away it is, plus a square on the radar. Aim at a guard and it is marked
+  in red as ENEMY and the marker follows that guard. A ping lasts 10
+  seconds; your next ping moves it. When it is off screen the diamond
+  sits at the edge of the screen, on the side to turn to. The key can be
+  changed in the controls menu (Ping).
 - When you go down, what happens depends on the host's When Down rule.
   Revive: a partner stands over you for a moment to bring you back. Timer:
   you come back next to a partner once they have been out of combat for 4

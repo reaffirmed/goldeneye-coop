@@ -151,7 +151,8 @@ typedef struct
 /* Reliable, in-order events (hits, shots, doors, ...). Every EVENTS packet
  * carries all unacked events plus an ack of what we have received. */
 enum { COOPEV_HIT = 1, COOPEV_SHOTCHR = 2, COOPEV_DOOR = 3, COOPEV_OBJDMG = 4, COOPEV_PICKUP = 5, COOPEV_MISSIONEND = 6, COOPEV_EXPLODE = 7, COOPEV_AICMD = 8,
-       COOPEV_STATS = 9, COOPEV_GIVE = 10, COOPEV_GIVEBACK = 11 };
+       COOPEV_STATS = 9, COOPEV_GIVE = 10, COOPEV_GIVEBACK = 11,
+       COOPEV_PING = 16 };   /* 12..15 the host-leaving work, 32+ versus */
 /* 20..31 (COOPEV_EXT_FIRST..LAST in coop.h) belong to coop_ext.c's features:
  * chat, objective credit, team times, cross-save */
 
@@ -173,6 +174,7 @@ typedef struct
         struct { s16 chrnum; u8 len; u8 cmd[25]; } ai;                          /* host -> client */
         /* COOPEV_STATS: a CoopStatsMsg (coop_stats.c) in raw, both ways */
         CoopGive give;                                                          /* both ways (coop_give.c) */
+        CoopPing ping;                                                          /* to all (coop_ping.c) */
         u8 raw[28];
     } u;
 } CoopEvent;
@@ -332,6 +334,7 @@ static void coopReapGuards(void);
 static void coopClientGunfire(void);
 static void coopHarnessTick(void);
 static void coopPuppetRemove(CoopRemote *r);
+static s32 coopNetInitFirst(void);
 
 static s32 coopLocalBody(void)
 {
@@ -890,13 +893,14 @@ void coopStageStart(void)
         sR[i].valid = 0;
     }
     coopDifficultyStageStart();
+    coopPingStageStart();
 }
 
 void coopTick(void)
 {
     if (sEnabled < 0)
     {
-        sEnabled = coopNetInit();
+        sEnabled = coopNetInitFirst();
     }
     if (!sEnabled || g_ClockTimer <= 0)
     {
@@ -921,6 +925,7 @@ void coopTick(void)
     coopStatsMissionTick(coopPartnerHere());
     coopSendState();
     coopTrackCombat();
+    coopPingTick();
     if ((sTick % 30) == 0 && coopPartnerHere())
     {
         coopSendWorld();
@@ -1206,6 +1211,29 @@ static void coopHarnessTick(void)
         if (testgive > 0 && (s32) sMissionTicks == testgive)
         {
             coopGiveTestPress();
+        }
+    }
+    if (coopPartnerHere() && coopInMission())
+    {   /* GE_COOP_TESTPING=<s>[:<pitch>]: <s> seconds into the mission press ping,
+         * looking <pitch> degrees up (default -20, down) for the second before;
+         * GE_COOP_TESTPINGCHR=<chrnum> (-1 the nearest) aims at that guard instead,
+         * GE_COOP_TESTPINGSTEP=<units> from it (coop_ping.c; harness only) */
+        static s32 testping = -2;
+        static s32 testpitch;
+        if (testping == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTPING");
+            testping = (e != NULL) ? atoi(e) * 60 : -1;
+            testpitch = (e != NULL && strchr(e, ':') != NULL) ? atoi(strchr(e, ':') + 1) : -20;
+        }
+        if (testping > 60 && (s32) sMissionTicks >= testping - 60 && (s32) sMissionTicks < testping)
+        {
+            coopPingTestPress(testpitch);   /* hold the aim until the view has caught up */
+        }
+        if (testping > 0 && (s32) sMissionTicks == testping)
+        {
+            portConLogf("ge: coop: testping: pressing ping\n");
+            coopPingPress();
         }
     }
     if (coopPartnerHere() && coopInMission())
@@ -2166,6 +2194,12 @@ static void coopApplyEvent(CoopEvent *ev)
         case COOPEV_GIVEBACK:
             coopGiveReturned(&ev->u.give, ev->from);
             break;
+        case COOPEV_PING:
+            if (coopInMission())
+            {
+                coopPingReceive(&ev->u.ping, ev->from);
+            }
+            break;
         default:
             if (ev->kind >= COOPEV_EXT_FIRST && ev->kind <= COOPEV_EXT_LAST)
             {
@@ -2195,6 +2229,17 @@ void coopGiveSend(s32 answer, s32 to, CoopGive *give)
     ev.kind = answer ? COOPEV_GIVEBACK : COOPEV_GIVE;
     ev.u.give = *give;
     coopQueueEventTo(&ev, to);
+}
+
+/* coop_ping.c: our ping, for everyone */
+void coopPingSend(CoopPing *ping)
+{
+    CoopEvent ev;
+
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = COOPEV_PING;
+    ev.u.ping = *ping;
+    coopQueueEvent(&ev);
 }
 
 
@@ -3003,7 +3048,7 @@ s32 coopFrontTick(void)
     }
     if (sEnabled < 0)
     {
-        sEnabled = coopNetInit();
+        sEnabled = coopNetInitFirst();
     }
     if (sEnabled <= 0)
     {
@@ -3069,6 +3114,15 @@ static void coopSessionReset(void)
     }
 }
 
+/* The first start of the network (GE_COOP, -coophost / -coopjoin, the
+ * lobby): the channels' numbering starts at 1 as after a reset, or the first
+ * event queued on each would sit at seq 0, which is never sent. */
+static s32 coopNetInitFirst(void)
+{
+    coopSessionReset();
+    return coopNetInit();
+}
+
 static s32 coopLobbyStart(const char *spec)
 {
     coopSessionReset();
@@ -3082,7 +3136,7 @@ s32 coopLobbyOpen(void)
     sOnLobbyScreen = 1;
     if (sEnabled < 0)
     {
-        sEnabled = coopNetInit();
+        sEnabled = coopNetInitFirst();
     }
     if (sEnabled > 0 && coopNetIsOpen())
     {

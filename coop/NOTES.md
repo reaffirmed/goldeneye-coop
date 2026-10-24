@@ -279,3 +279,37 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscen
   slower than wall time under Xvfb, so give the shots time. Verified: host
   sees Natalya with PP7 then KF7, muzzle flash and wall sparks from her
   shots; 3 and 4 player lobbies list each character.
+
+## Pings (2026-10-24)
+
+- src/game/coop_ping.c. Key `ping` (default Mouse Middle, unbound on pads;
+  PORTACT_PING and pad map +31, appended; bind row "Ping"). The crosshair's
+  line (bullet_path_from_screen_center, right hand) is traced like a shot:
+  stan tiles for where the floor runs out, then the standing room and every
+  drawn room with bgTestBulletHitBackground, nearest wins; then on-screen
+  living chrs (not puppets) as 35-wide, 190-tall cylinders from chr->ground,
+  if nearer. Nothing is damaged. 20-tick cooldown; 200 m range.
+- COOPEV_PING = 16 (12..15 are the host-leaving work's, 20+ the next
+  feature batch's, 32+ versus) to everyone: pos, room, chrnum, stage, kind
+  (spot / enemy). One ping per player, 10 s, the last 2 s fading. An enemy
+  ping follows chrFindByLiteralId(chrnum) (mirrored guards keep chrnums) and
+  ends a second after the guard dies. A ping from another stage is dropped.
+- HUD (coop_hud.c coopHudPing): diamond in the pinger's colour (red edge for
+  an enemy), a closing ring for the first half second, "NAME 12M" or
+  "ENEMY 12M" at 0.6 scale; off screen or behind, clamped to the view's
+  edge toward it. Radar: hollow square, blinking for the first second.
+  Receivers get a BEEP_SFX and "<name> pinged a spot." / "spotted an enemy.".
+- Bug found on the way: a channel's numbering only started at 1 after
+  coopSessionReset, which GE_COOP / -coophost / -coopjoin (the .bat
+  launchers) never called, so the first event on each channel sat at seq 0
+  and was never sent (a first door or pickup could be lost). coopNetInitFirst
+  now resets before the first coopNetInit.
+- Harness: GE_COOP_TESTPING=<s>[:<pitch>] presses ping <s> seconds into the
+  mission, looking <pitch> degrees (default -20, negative is down) for the
+  second before; GE_COOP_TESTPINGCHR=<chrnum> (-1 the nearest living guard)
+  aims at that guard instead, GE_COOP_TESTPINGSTEP=<units> first moves that
+  far from it. Verified on Dam with the mock: joiner's floor ping 4 m ahead
+  on both games; host's enemy ping on guard 6 (TESTPINGCHR=-1 STEP=500)
+  shown as ENEMY on both, the joiner's through the rock; 3 copies, player
+  3's ping relayed by the host to 1 and 2, on player 2's screen held to the
+  bottom edge (it lay at their feet).

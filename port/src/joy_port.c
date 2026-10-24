@@ -129,6 +129,9 @@ enum {
     PORTACT_GIVE_PARTNER,
     /* Appended for the co-op build: the weapon menu's mission item slot. */
     PORTACT_WEAPON_SLOT6,
+    /* Appended for the co-op build: ping the spot or guard under the
+     * crosshair for the partners (coop_ping.c). */
+    PORTACT_PING,
     /* Appended for the co-op build: open the chat line (coop_chat.c). */
     PORTACT_CHAT,
     /* Appended for the co-op build: photo mode (coop_photo.c). */
@@ -191,6 +194,7 @@ static const struct {
     [PORTACT_WEAPON_SLOT5]     = { "weapon_slot_5",    "5",        1 },
     [PORTACT_GIVE_PARTNER]     = { "give_partner",     "G",        1 },
     [PORTACT_WEAPON_SLOT6]     = { "weapon_slot_6",    "6",        1 },
+    [PORTACT_PING]             = { "ping",             "Mouse Middle", 1 },
     [PORTACT_CHAT]             = { "chat",             "T",        1 },
     [PORTACT_PHOTO]            = { "photo_mode",       "P",        1 },
 };
@@ -784,6 +788,14 @@ s32 portJoyPortGivePartnerPressed(void)
     s32 pad = joyPortPad();
 
     return pad >= 0 && portJoyPortTake(pad, PORTACT_GIVE_PARTNER) && joyPortPermitted();
+}
+
+/** coop_ping.c: a fresh ping press for this tick's player. */
+s32 portJoyPortPingPressed(void)
+{
+    s32 pad = joyPortPad();
+
+    return pad >= 0 && portJoyPortTake(pad, PORTACT_PING) && joyPortPermitted();
 }
 
 /** coop_chat.c: a fresh chat press for this tick's player. */

@@ -9,6 +9,9 @@
  *     lobby's When Down rule), with the revive's progress
  *   - a downed partner who can be revived: red on the radar and a red
  *     REVIVE tag over where they fell
+ *   - partners' pings (coop_ping.c): a diamond in the pinger's colour where
+ *     they pinged, with their name and the distance, held to the edge of the
+ *     screen when it is off it, and a square on the radar
  *   - the mission's objectives in the top-right corner, solo too
  *     ([display] objectives_hud, toggled in play by the objectives_hud key)
  *
@@ -248,6 +251,151 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
     return combiner_bayer_lod_perspective(gdl);
 }
 
+/* a filled diamond of radius r about (px, py), as rows of rectangles */
+static Gfx *coopHudDiamond(Gfx *gdl, s32 px, s32 py, s32 r, u32 colour)
+{
+    s32 k;
+
+    for (k = -r; k <= r; k++)
+    {
+        s32 w = r - (k < 0 ? -k : k);
+
+        gdl = microcode_constructor_related_to_menus(gdl, px - w, py + k, px + w + 1, py + k + 1, colour);
+    }
+    return gdl;
+}
+
+/* A ping: the diamond where it is (or at the edge of the screen toward it),
+ * a ring that shrinks onto it for its first half second, and the pinger's
+ * name and the distance over it. It fades out over its last two seconds. */
+#define COOP_PING_FADE   120
+#define COOP_PING_RING   30
+#define COOP_PING_MARGIN 12
+static Gfx *coopHudPing(Gfx *gdl, CoopPingMark *m)
+{
+    PropRecord *self = g_CurrentPlayer->prop;
+    coord3d v;
+    coord2d s;
+    char name[40];
+    char text[64];
+    f32 dx, dy, dz, dist, alpha;
+    s32 th = 0, tw = 0;
+    s32 left = viGetViewLeft(), top = viGetViewTop();
+    s32 right = left + viGetViewWidth(), bottom = top + viGetViewHeight();
+    s32 px, py, x, y;
+    s32 edge = 0;
+    u32 colour = coopHudPlayerColour(m->player);
+
+    if (self == NULL)
+    {
+        return gdl;
+    }
+    dx = m->pos.f[0] - self->pos.f[0];
+    dy = m->pos.f[1] - self->pos.f[1];
+    dz = m->pos.f[2] - self->pos.f[2];
+    dist = sqrtf(dx * dx + dy * dy + dz * dz);
+    alpha = (m->age > COOP_PING_LIFE - COOP_PING_FADE) ? (f32) (COOP_PING_LIFE - m->age) / (f32) COOP_PING_FADE : 1.0f;
+
+    v = m->pos;
+    mtx4TransformVecInPlace(camGetWorldToScreenMtxf(), &v);
+    if (v.f[2] < -10.0f)
+    {
+        transform3Dto2DCoords(&v, &s);
+        s.f[0] = bondviewAimPinX(s.f[0]);
+        px = (s32) s.f[0];
+        py = (s32) s.f[1];
+        edge = px < left + COOP_PING_MARGIN || px > right - COOP_PING_MARGIN || py < top + COOP_PING_MARGIN
+            || py > bottom - COOP_PING_MARGIN;
+    }
+    else
+    {
+        edge = 1;   /* behind us */
+    }
+    if (edge)
+    {   /* on the edge of the view, the way to turn to face it */
+        f32 cx = (f32) (left + right) * 0.5f, cy = (f32) (top + bottom) * 0.5f;
+        f32 ex = v.f[0], ey = -v.f[1];
+        f32 hw = (f32) (right - left) * 0.5f - COOP_PING_MARGIN, hh = (f32) (bottom - top) * 0.5f - COOP_PING_MARGIN;
+        f32 t;
+
+        if (ex * ex + ey * ey < 1.0e-4f)
+        {
+            ey = 1.0f;   /* straight behind: along the bottom */
+        }
+        t = 1.0e30f;
+        if (ex != 0.0f)
+        {
+            t = hw / (ex < 0.0f ? -ex : ex);
+        }
+        if (ey != 0.0f && hh / (ey < 0.0f ? -ey : ey) < t)
+        {
+            t = hh / (ey < 0.0f ? -ey : ey);
+        }
+        px = (s32) (cx + ex * t);
+        py = (s32) (cy + ey * t);
+    }
+
+    gdl = microcode_constructor(gdl);
+    if (m->age < COOP_PING_RING && !edge)
+    {   /* a square ring closing in on it */
+        s32 r = 6 + (COOP_PING_RING - m->age) / 2;
+        u32 rc = coopHudWithAlpha(colour, 0.8f);
+
+        gdl = microcode_constructor_related_to_menus(gdl, px - r, py - r, px + r + 1, py - r + 1, rc);
+        gdl = microcode_constructor_related_to_menus(gdl, px - r, py + r, px + r + 1, py + r + 1, rc);
+        gdl = microcode_constructor_related_to_menus(gdl, px - r, py - r, px - r + 1, py + r + 1, rc);
+        gdl = microcode_constructor_related_to_menus(gdl, px + r, py - r, px + r + 1, py + r + 1, rc);
+    }
+    gdl = coopHudDiamond(gdl, px, py, 6, coopHudWithAlpha(m->kind == COOPPING_ENEMY ? COOP_HUD_COL_FAIL : COOP_HUD_COL_SHADOW, alpha));
+    gdl = coopHudDiamond(gdl, px, py, 4, coopHudWithAlpha(colour, alpha));
+    gdl = coopHudDiamond(gdl, px, py, 1, coopHudWithAlpha(COOP_HUD_COL_SHADOW, alpha));
+
+    coopHudText(name, sizeof(name), m->name);
+    name[strlen(name) - 1] = '\0';
+    if (m->kind == COOPPING_ENEMY)
+    {
+        snprintf(text, sizeof(text), "ENEMY %dM\n", (int) (dist / 100.0f + 0.5f));
+    }
+    else
+    {
+        snprintf(text, sizeof(text), "%s %dM\n", name, (int) (dist / 100.0f + 0.5f));
+    }
+    textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+    /* the label at 0.6 scale, its bottom centre just over the diamond, kept on screen */
+    {
+        const f32 scale = 0.6f;
+        s32 sw = (s32) (tw * scale), sh = (s32) (th * scale);
+        s32 lx = px, ly = py - 8;
+        s32 x4, y4;
+
+        if (lx - sw / 2 < left + 2)
+        {
+            lx = left + 2 + sw / 2;
+        }
+        if (lx + sw / 2 > right - 2)
+        {
+            lx = right - 2 - sw / 2;
+        }
+        if (ly - sh < top + 2)
+        {
+            ly = py + 8 + sh;   /* no room over it: under it */
+        }
+        x = lx - tw / 2;
+        y = ly - th;
+        x4 = lx * 4;
+        y4 = ly * 4;
+        x4 = (x4 < 0) ? 0 : (x4 > 0xFFE) ? 0xFFE : x4;
+        y4 = (y4 < 0) ? 0 : (y4 > 0xFFE) ? 0xFFE : y4;
+        gDPNoOpTag(gdl++, 0x5A000000u | (u32) (scale * 256.0f + 0.5f));
+        gDPNoOpTag(gdl++, 0x58000000u | ((u32) x4 << 12) | (u32) y4);
+        gdl = textRenderOutlined(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic,
+                                 coopHudWithAlpha(m->kind == COOPPING_ENEMY ? COOP_HUD_COL_FAIL : colour, alpha),
+                                 coopHudWithAlpha(COOP_HUD_COL_SHADOW, alpha), (s32) viGetX(), viGetY(), 0, 0);
+        gDPNoOpTag(gdl++, 0x58FFFFFFu);
+    }
+    return combiner_bayer_lod_perspective(gdl);
+}
+
 /* the multiplayer radar with a dot per partner */
 static Gfx *coopHudRadar(Gfx *gdl)
 {
@@ -277,6 +425,34 @@ static Gfx *coopHudRadar(Gfx *gdl)
     gdl = microcode_constructor_related_to_menus(gdl, left - 0x10, top - 0x10, left + 0x10, top + 0x10, 0x00000080);
     gdl = microcode_constructor_related_to_menus(gdl, left - 2, top - 2, left + 2, top + 2, 0x40);
     gdl = microcode_constructor_related_to_menus(gdl, left - 1, top - 1, left + 1, top + 1, -0x60);
+    {   /* pings: a hollow square in the pinger's colour (red edge for an enemy), under the partners' dots */
+        CoopPingMark m;
+
+        for (i = 0; coopPingAt(i, &m); i++)
+        {
+            u32 edge = (m.kind == COOPPING_ENEMY) ? 0xFF3030E0 : 0x000000C0;
+
+            dx = m.pos.f[0] - self->pos.f[0];
+            dz = m.pos.f[2] - self->pos.f[2];
+            ang = ((atan2f(dx, dz) * 180.0f) / M_PI_F) + g_CurrentPlayer->vv_theta + 180.0f;
+            r = sqrtf(dx * dx + dz * dz) * (16.0f / 4000.0f);
+            colour = (coopHudPlayerColour(m.player) & ~0xFF) | 0xF0;
+            if (r >= 16.0f)
+            {
+                r = 16.0f;
+                colour = (colour & ~0xFF) | 0x80;
+            }
+            if ((m.age / 8) % 2 == 1 && m.age < 64)
+            {
+                continue;   /* blinks for its first second */
+            }
+            px = (s32) (sinf(ang * 0.017453292f) * r) + left;
+            py = (s32) (cosf(ang * 0.017453292f) * r) + top;
+            gdl = microcode_constructor_related_to_menus(gdl, px - 3, py - 3, px + 3, py + 3, edge);
+            gdl = microcode_constructor_related_to_menus(gdl, px - 2, py - 2, px + 2, py + 2, colour);
+            gdl = microcode_constructor_related_to_menus(gdl, px - 1, py - 1, px + 1, py + 1, edge);
+        }
+    }
     for (i = 0; coopHudPartnerAt(i, p); i++)
     {
         if (p->dead && !p->revivable)
@@ -581,6 +757,17 @@ Gfx *coopHudRender(Gfx *gdl)
                 gdl = coopHudPartnerStatus(gdl, &p, i);   /* the menu draws there */
             }
         }
+    }
+    {
+        CoopPingMark m;
+
+        for (i = 0; coopPingAt(i, &m); i++)
+        {
+            gdl = coopHudPing(gdl, &m);
+        }
+    }
+    if (partner)
+    {
         gdl = coopHudRadar(gdl);
     }
     if (coopSpectateTarget() >= 0)
