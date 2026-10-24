@@ -70,6 +70,16 @@ jobs:
       - name: Pack the zip
         run: coop/package/make_zip.sh "$RUNNER_TEMP/steam_api.dll" GoldenEye-Coop-win32.zip
 
+      # checksums to compare a download or a local build against; the exe's
+      # code and data sections, unlike the whole file, carry no build times
+      - name: List the zip's checksums
+        run: |
+          mkdir zipcheck && unzip -q GoldenEye-Coop-win32.zip -d zipcheck
+          (cd zipcheck && find . -type f | sort | xargs -d '\n' sha256sum)
+          for sec in .text .data .idata .rsrc; do
+            echo "ProjectMidas.exe $sec $(i686-w64-mingw32-objcopy -O binary -j $sec zipcheck/GoldenEye-Coop/ProjectMidas.exe /dev/stdout | sha256sum | cut -d' ' -f1)"
+          done
+
       - name: Upload the zip
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
