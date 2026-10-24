@@ -5,6 +5,9 @@
 #include "chr.h"
 #include "chrobjdata.h"
 #include "initguards.h"
+#ifndef TARGET_N64
+#include "coop.h"
+#endif
 
 void init_guards(void) {
     animation_rate = 1.0f;
@@ -28,6 +31,9 @@ void alloc_init_GUARDdata_entries(s32 count)
     s32 i;
     
     g_NumChrSlots = count + 10; //special guards?
+#ifndef TARGET_N64
+    g_NumChrSlots += coopDifficultyExtraSlots(); /* co-op difficulty: room for extra guards */
+#endif
 
     g_ChrSlots = mempAllocBytesInBank(align_addr_zero(g_NumChrSlots * sizeof(ChrRecord)), MEMPOOL_STAGE);
     for(i = 0; g_NumChrSlots > i; i++)

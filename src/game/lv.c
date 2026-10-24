@@ -1944,6 +1944,9 @@ void lvlTick(void)
     {
         sub_GAME_7F09BBBC();
         lvlSetMultipliersForDifficulty();
+#ifndef TARGET_N64
+        coopDifficultyTick(); /* co-op difficulty: scale on top, extra guards */
+#endif
         updateRoomStatusFlags();
 
 #ifndef TARGET_N64
