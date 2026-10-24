@@ -31,4 +31,30 @@ s32  coopDeadTick(void); /* 1: co-op owns this death (waiting or respawned) */
 void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon);
 s32  coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid);
 
+/* the lobby screen (front.c MENU_COOP_LOBBY) */
+enum { COOPLOBBY_OFF, COOPLOBBY_IDLE, COOPLOBBY_BUSY, COOPLOBBY_HOSTING, COOPLOBBY_JOINED };
+s32  coopLobbyOpen(void);   /* 1: co-op usable */
+void coopLobbyClose(void);
+s32  coopLobbyIsSteam(void);
+s32  coopLobbyState(void);
+s32  coopLobbyIsHost(void);
+s32  coopLobbyHasPartner(void);
+s32  coopLobbyPartnerReady(void);
+s32  coopLobbyPartnerOnScreen(void);
+s32  coopLobbySelfReady(void);
+void coopLobbySetReady(s32 ready);
+const char *coopLobbySelfName(void);
+const char *coopLobbyPartnerName(void);
+void coopLobbyHost(void);
+void coopLobbyJoinAny(void);
+void coopLobbyJoinFriend(s32 i);
+void coopLobbyLeave(void);
+s32  coopLobbyFriends(void); /* refreshes the list; how many */
+const char *coopLobbyFriendName(s32 i);
+s32  coopLobbyFriendHosting(s32 i);
+s32  coopLobbyFriendIsPartner(s32 i);
+void coopLobbyInvite(s32 i);
+void coopLobbyInviteOverlay(void);
+s32  coopSessionActive(void);
+
 #endif

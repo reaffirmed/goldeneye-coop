@@ -125,6 +125,23 @@ static void poll_(void)
 {
     unsigned char buf[1600];
     int n;
+    char ip[320];
+    FILE *inv;
+
+    path(ip, sizeof(ip), sSelf, "invite");
+    inv = fopen(ip, "r");
+    if (inv != NULL)
+    {   /* GameLobbyJoinRequested_t: lobby, then who invited */
+        u64 v[2] = { 0, 0 };
+
+        if (fscanf(inv, "%llu %llu", &v[0], &v[1]) == 2)
+        {
+            pushCb(333, v, 16);
+            log_("invite received");
+        }
+        fclose(inv);
+        unlink(ip);
+    }
 
     while ((n = (int) recv(sSock, buf, sizeof(buf), 0)) > 8)
     {
@@ -374,6 +391,27 @@ API sbool SteamAPI_ISteamFriends_GetFriendGamePlayed(void *self, u64 user, unsig
     memset(info, 0, 24);
     memcpy(info, &game, 8);
     memcpy(info + 16, &lobby, 8);
+    return 1;
+}
+
+API int SteamAPI_ISteamFriends_GetFriendPersonaState(void *self, u64 user) { (void) self; (void) user; return 1; /* online */ }
+
+/* an invite is a file the friend's poll_ picks up as GameLobbyJoinRequested */
+API sbool SteamAPI_ISteamMatchmaking_InviteUserToLobby(void *self, u64 lobby, u64 user)
+{
+    char p[320];
+    FILE *f;
+
+    (void) self;
+    path(p, sizeof(p), user, "invite");
+    f = fopen(p, "w");
+    if (f == NULL)
+    {
+        return 0;
+    }
+    fprintf(f, "%llu %llu\n", lobby, sSelf);
+    fclose(f);
+    log_("invite sent");
     return 1;
 }
 

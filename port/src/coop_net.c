@@ -4,6 +4,8 @@
  * GE_COOP=steam              host over Steam (lobby + invite, see coop_steam.c)
  * GE_COOP=steam:join[:<id>]  join a friend's Steam lobby (found by itself
  *                            when no id is given)
+ * steam:idle                 Steam up for the lobby screen's friend list,
+ *                            no lobby yet (the screen hosts or joins)
  * GE_COOP=host:<port>        plain UDP: listen on <port>, reply to whoever writes first
  * GE_COOP=join:<ip>:<port>   plain UDP: send to the host at <ip>:<port>
  *
@@ -42,14 +44,16 @@ static struct sockaddr_in sPeer;
 
 int coopNetInit(void)
 {
-    const char *e = getenv("GE_COOP");
+    return coopNetStart(getenv("GE_COOP"));
+}
+
+/* the lobby screen's host and join land here; any open session is closed first */
+int coopNetStart(const char *e)
+{
     struct sockaddr_in bindaddr;
     int port;
 
-    if (sSock != INVALID_SOCKET)
-    {
-        return 1;
-    }
+    coopNetShutdown();
     if (e == NULL || e[0] == '\0')
     {
         return 0;
@@ -210,4 +214,15 @@ void coopNetShutdown(void)
         sSock = INVALID_SOCKET;
     }
     sHasPeer = 0;
+    sIsHost = 0;
+}
+
+int coopNetIsSteam(void)
+{
+    return sSteam;
+}
+
+int coopNetIsOpen(void)
+{
+    return sSteam || sSock != INVALID_SOCKET;
 }

@@ -98,3 +98,23 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscen
 - Tested over the mock (coop/mock/steam_mock.c, coop/docker/two_player_steam.sh): lobby, friend discovery, session accept, follow into Dam, full game sync. steam_api.dll exports checked against the code: all present (Steamworks.NET Standalone 2025.164.1, Windows-x86, SHA-256 fdafb7c6...).
 - Not yet tested on real Steam: needs two accounts on two PCs (the owner).
 - Package: coop/package (bat launchers, README-COOP.txt) + Release mingw build + steam_api.dll + steam_appid.txt.
+
+## Lobby screen (2026-10-24)
+
+- Mode select (Files menu) gains "3. CO-OP" (cheats move to row 4). It opens
+  MENU_COOP_LOBBY (front.c menu1D), drawn on the Options paper with the sheet
+  row metrics. Logic lives in coop.c (coopLobby*), Steam calls in
+  coop_steam.c.
+- Steam now comes up as "steam:idle" when the screen opens (friend list, no
+  lobby); Host = "steam:host" (no overlay), Join = first hosting friend or a
+  picked friend's lobby. SteamAPI is never shut down mid-run, Leave only
+  leaves the lobby. coopNetStart() replaces the env-only init.
+- HELLO carries ready + inlobby. Host's Select Mission needs a Ready partner,
+  then the normal mission/difficulty screens; the joiner follows as before.
+- After a co-op mission, the failed/complete screens go back to the lobby
+  (coopLobbyAfterMission). Ready resets when a mission starts.
+- Friend names are squashed to ASCII for the menu font.
+- Test: coop/docker/two_player_lobby.sh (GE_MENU=lobby, GE_COOP_LOBBY=
+  host|invite|join|wait, GE_COOP_LOBBY_DELAY). Verified with the mock: join
+  from list, invite + accept, Ready, start Dam, mission end back to the
+  lobby, second mission started from the lobby. Real Steam not yet tested.

@@ -91,6 +91,9 @@ typedef struct
     s32 stage;          /* LEVELID_TITLE in the menus */
     s32 difficulty;
     u32 mission;        /* host: counts missions started */
+    u8 ready;           /* the lobby screen's Ready */
+    u8 inlobby;         /* on the lobby screen */
+    u8 pad[2];
 } CoopHelloPkt;
 
 /* Mission state, both ways twice a second. Everything in it is a level
@@ -187,6 +190,8 @@ static u32 sHelloTick;
 static s32 sHelloSeen;
 static u32 sMissionSerial;      /* host: missions started */
 static u32 sFollowedMission;    /* joiner: last host mission we launched into */
+static s32 sLobbyReady;         /* our Ready on the lobby screen */
+static s32 sOnLobbyScreen;      /* front.c: the lobby screen is up */
 static u32 sRemoteCalm;     /* the partner's calm at sRemoteCalmTick */
 static u32 sRemoteCalmTick;
 static u32 sLastHurtTick;   /* local Bond lost health */
@@ -584,6 +589,7 @@ void coopStageStart(void)
     if (bossGetStageNum() != LEVELID_TITLE)
     {
         sMissionSerial++;
+        sLobbyReady = 0; /* ready again in the lobby for the next one */
     }
 
     for (i = 0; i < COOP_MAX_CHRS; i++)
@@ -2142,7 +2148,7 @@ static void coopSendHello(void)
 {
     CoopHelloPkt p;
 
-    if ((sTick % 60) != 0 || !coopNetHasPeer())
+    if ((sTick % (sOnLobbyScreen ? 15 : 60)) != 0 || !coopNetHasPeer())
     {
         return;
     }
@@ -2153,6 +2159,8 @@ static void coopSendHello(void)
     p.stage = bossGetStageNum();
     p.difficulty = selected_difficulty;
     p.mission = sMissionSerial;
+    p.ready = (u8) sLobbyReady;
+    p.inlobby = (u8) sOnLobbyScreen;
     coopNetSend(&p, sizeof(p));
 }
 
@@ -2192,6 +2200,192 @@ s32 coopFrontTick(void)
         return 1;
     }
     return 0;
+}
+
+
+/* ---- the lobby screen ---------------------------------------------------------
+ * front.c draws it (menu MENU_COOP_LOBBY) and calls these. Steam is brought
+ * up when the screen opens so the friend list can show; hosting creates a
+ * lobby with no overlay (friends are invited from the list), joining takes a
+ * friend's lobby or the first one found. A session started by GE_COOP or the
+ * .bat files shows here too, it just has no Host / Join rows. */
+
+static void coopSessionReset(void)
+{
+    sOutNext = 1;
+    sOutAcked = 0;
+    sInDone = 0;
+    sEvLastSend = 0;
+    sAckDirty = 0;
+    sHelloSeen = 0;
+    sHelloTick = 0;
+    memset(&sHostHello, 0, sizeof(sHostHello));
+    sFollowedMission = 0;
+    sLobbyReady = 0;
+    sRemoteValid = 0;
+}
+
+static s32 coopLobbyStart(const char *spec)
+{
+    coopSessionReset();
+    sEnabled = coopNetStart(spec);
+    return sEnabled;
+}
+
+/* 1: co-op can be used here (Steam is up, or GE_COOP opened a session) */
+s32 coopLobbyOpen(void)
+{
+    sOnLobbyScreen = 1;
+    if (sEnabled < 0)
+    {
+        sEnabled = coopNetInit();
+    }
+    if (sEnabled > 0 && coopNetIsOpen())
+    {
+        return 1;
+    }
+    return coopLobbyStart("steam:idle");
+}
+
+void coopLobbyClose(void)
+{
+    sOnLobbyScreen = 0;
+}
+
+s32 coopLobbyIsSteam(void)
+{
+    return sEnabled > 0 && coopNetIsSteam();
+}
+
+s32 coopLobbyState(void)
+{
+    if (sEnabled <= 0 || !coopNetIsOpen())
+    {
+        return COOPLOBBY_OFF;
+    }
+    if (!coopNetIsSteam())
+    {   /* a UDP session from GE_COOP: always "in" */
+        return coopNetIsHost() ? COOPLOBBY_HOSTING : COOPLOBBY_JOINED;
+    }
+    switch (coopSteamLobbyState())
+    {
+        case 1:  return COOPLOBBY_BUSY;
+        case 2:  return coopNetIsHost() ? COOPLOBBY_HOSTING : COOPLOBBY_JOINED;
+        default: return COOPLOBBY_IDLE;
+    }
+}
+
+s32 coopLobbyIsHost(void)
+{
+    return sEnabled > 0 && coopNetIsHost();
+}
+
+/* the other game is talking to us (hellos in the last 3 s) */
+s32 coopLobbyHasPartner(void)
+{
+    return sEnabled > 0 && coopNetHasPeer() && sHelloSeen && sTick - sHelloTick < 180;
+}
+
+s32 coopLobbyPartnerReady(void)
+{
+    return coopLobbyHasPartner() && sHostHello.ready;
+}
+
+s32 coopLobbyPartnerOnScreen(void)
+{
+    return coopLobbyHasPartner() && sHostHello.inlobby;
+}
+
+s32 coopLobbySelfReady(void)
+{
+    return sLobbyReady;
+}
+
+void coopLobbySetReady(s32 ready)
+{
+    sLobbyReady = ready != 0;
+}
+
+const char *coopLobbySelfName(void)
+{
+    return coopLobbyIsSteam() ? coopSteamSelfName() : "You";
+}
+
+const char *coopLobbyPartnerName(void)
+{
+    const char *n = coopLobbyIsSteam() ? coopSteamPeerName() : "";
+
+    return (n != NULL && n[0] != '\0') ? n : "Partner";
+}
+
+void coopLobbyHost(void)
+{
+    const char *e = getenv("GE_COOP");
+
+    /* a UDP GE_COOP is a test setup: the lobby's Host uses it */
+    coopLobbyStart((e != NULL && strncmp(e, "host:", 5) == 0) ? e : "steam:host");
+}
+
+void coopLobbyJoinAny(void)
+{
+    const char *e = getenv("GE_COOP");
+
+    coopLobbyStart((e != NULL && strncmp(e, "join:", 5) == 0) ? e : "steam:join");
+}
+
+void coopLobbyJoinFriend(s32 i)
+{
+    char spec[48];
+    unsigned long long lobby = coopSteamFriendLobby(i);
+
+    if (lobby == 0)
+    {
+        return;
+    }
+    sprintf(spec, "steam:join:%llu", lobby);
+    coopLobbyStart(spec);
+}
+
+/* back to Host / Join; Steam stays up for the friend list */
+void coopLobbyLeave(void)
+{
+    coopLobbyStart(coopLobbyIsSteam() ? "steam:idle" : NULL);
+}
+
+s32 coopLobbyFriends(void)
+{
+    return coopLobbyIsSteam() ? coopSteamFriendsRefresh() : 0;
+}
+
+const char *coopLobbyFriendName(s32 i)
+{
+    return coopSteamFriendName(i);
+}
+
+s32 coopLobbyFriendHosting(s32 i)
+{
+    return coopSteamFriendHosting(i);
+}
+
+s32 coopLobbyFriendIsPartner(s32 i)
+{
+    return coopSteamFriendIsPeer(i);
+}
+
+void coopLobbyInvite(s32 i)
+{
+    coopSteamFriendInvite(i);
+}
+
+void coopLobbyInviteOverlay(void)
+{
+    coopSteamInviteOverlay();
+}
+
+/* a co-op game is going: after a mission the menus come back to the lobby */
+s32 coopSessionActive(void)
+{
+    return sEnabled > 0 && coopNetIsOpen() && coopNetHasPeer();
 }
 
 

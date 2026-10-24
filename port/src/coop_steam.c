@@ -90,6 +90,8 @@ static int (*pGetFriendCount)(void *self, int flags);
 static u64s (*pGetFriendByIndex)(void *self, int i, int flags);
 static sbool (*pGetFriendGamePlayed)(void *self, u64s user, void *info);
 static const char *(*pGetFriendPersonaName)(void *self, u64s user);
+static int (*pGetFriendPersonaState)(void *self, u64s user);
+static sbool (*pInviteUserToLobby)(void *self, u64s lobby, u64s user);
 static void (*pIdentSetSteamID64)(void *ident, u64s id);
 static u64s (*pIdentGetSteamID64)(void *ident);
 static int (*pSendMessageToUser)(void *self, const void *ident, const void *data, unsigned int len, int flags, int channel);
@@ -110,6 +112,19 @@ static u64s sCreateCall, sJoinCall;
 static int sJoinWanted;     /* joiner: still looking for a lobby */
 static unsigned int sPolls;
 static int sSenderOfs;      /* 12 or 16, see coopSteamRecv */
+static int sReady;          /* the library is loaded and SteamAPI is up */
+static int sOverlay;        /* host: open Steam's invite overlay with the lobby */
+
+/* the lobby screen's friend list, see coopSteamFriendsRefresh */
+#define MAX_FRIENDS 48
+typedef struct
+{
+    u64s id;
+    u64s lobby;     /* playing Spacewar with a lobby open, else 0 */
+    char name[32];
+} SteamFriend;
+static SteamFriend sFriendList[MAX_FRIENDS];
+static int sNumFriends;
 
 static u64s rd64(const unsigned char *p)
 {
@@ -169,6 +184,8 @@ static int loadAll(void)
     L(pGetFriendByIndex, "SteamAPI_ISteamFriends_GetFriendByIndex");
     L(pGetFriendGamePlayed, "SteamAPI_ISteamFriends_GetFriendGamePlayed");
     L(pGetFriendPersonaName, "SteamAPI_ISteamFriends_GetFriendPersonaName");
+    L(pGetFriendPersonaState, "SteamAPI_ISteamFriends_GetFriendPersonaState");
+    L(pInviteUserToLobby, "SteamAPI_ISteamMatchmaking_InviteUserToLobby");
     L(pIdentSetSteamID64, "SteamAPI_SteamNetworkingIdentity_SetSteamID64");
     L(pIdentGetSteamID64, "SteamAPI_SteamNetworkingIdentity_GetSteamID64");
     L(pSendMessageToUser, "SteamAPI_ISteamNetworkingMessages_SendMessageToUser");
@@ -295,8 +312,11 @@ static void onLobbyCreated(const unsigned char *p)
     snprintf(buf, sizeof(buf), "+connect_lobby %llu", lobby);
     pSetRichPresence(sFriends, "connect", buf);
     pSetRichPresence(sFriends, "status", "Hosting GoldenEye co-op");
-    portConLogf("ge: steam: lobby %llu open, inviting friends\n", lobby);
-    pInviteDialog(sFriends, lobby);
+    portConLogf("ge: steam: lobby %llu open\n", lobby);
+    if (sOverlay)
+    {
+        pInviteDialog(sFriends, lobby);
+    }
 }
 
 static void onLobbyEnter(const unsigned char *p)
@@ -305,8 +325,13 @@ static void onLobbyEnter(const unsigned char *p)
     unsigned int response = rd32(p + 16);
     const char *tag;
 
+    sJoinCall = 0;
     if (sIsHost)
     {
+        if (lobby != sLobby)
+        {   /* the callback can beat LobbyCreated: take the lobby from here */
+            sLobby = lobby;
+        }
         return; /* our own lobby */
     }
     if (response != 1)
@@ -445,11 +470,15 @@ static void pump(void)
     sPolls++;
 }
 
-int coopSteamInit(const char *spec)
+static int steamOpen(void)
 {
     char err[1024];
     int r;
 
+    if (sReady)
+    {
+        return 1;
+    }
     sLib = LIB_OPEN(STEAM_LIB);
     if (sLib == NULL)
     {
@@ -485,8 +514,31 @@ int coopSteamInit(const char *spec)
         return 0;
     }
     sSelf = pUserGetSteamID(sUser);
+    sReady = 1;
+    portConLogf("ge: steam: ready as %s (%llu)\n", pGetFriendPersonaName(sFriends, sSelf), sSelf);
+    return 1;
+}
 
-    /* "steam" hosts; "steam:join" finds a friend; "steam:join:<id>" joins that lobby */
+int coopSteamInit(const char *spec)
+{
+    if (!steamOpen())
+    {
+        return 0;
+    }
+    sIsHost = 0;
+    sJoinWanted = 0;
+    sPeer = 0;
+    sLobby = 0;
+    sOverlay = 0;
+    sJoinCall = 0;
+
+    /* "steam" hosts and opens the invite overlay; "steam:host" hosts (the
+     * lobby screen invites in game); "steam:idle" only brings Steam up;
+     * "steam:join" finds a friend; "steam:join:<id>" joins that lobby */
+    if (strcmp(spec, "steam:idle") == 0)
+    {
+        return 1;
+    }
     if (strncmp(spec, "steam:join", 10) == 0)
     {
         sIsHost = 0;
@@ -503,10 +555,10 @@ int coopSteamInit(const char *spec)
     else
     {
         sIsHost = 1;
+        sOverlay = strcmp(spec, "steam:host") != 0;
         sCreateCall = pCreateLobby(sMM, 1 /* friends only */, 2);
         portConLogf("ge: steam: creating a lobby\n");
     }
-    portConLogf("ge: steam: ready as %s (%llu)\n", pGetFriendPersonaName(sFriends, sSelf), sSelf);
     return 1;
 }
 
@@ -573,9 +625,12 @@ int coopSteamRecv(void *buf, int cap)
     }
 }
 
+/* Leaves the lobby and closes the session. SteamAPI itself stays up for the
+ * rest of the run: the lobby screen hosts and joins again without a restart,
+ * and Steam tidies up when the process exits. */
 void coopSteamShutdown(void)
 {
-    if (sLib == NULL)
+    if (!sReady)
     {
         return;
     }
@@ -588,6 +643,117 @@ void coopSteamShutdown(void)
         pLeaveLobby(sMM, sLobby);
     }
     pClearRichPresence(sFriends);
-    pShutdown();
     sPeer = sLobby = 0;
+    sJoinCall = 0;
+    sIsHost = 0;
+    sJoinWanted = 0;
+}
+
+/* ---- the lobby screen ------------------------------------------------------- */
+
+/* 0: no lobby, 1: creating one or looking for one, 2: in a lobby */
+int coopSteamLobbyState(void)
+{
+    if (!sReady)
+    {
+        return 0;
+    }
+    if (sLobby != 0)
+    {
+        return 2;
+    }
+    return (sIsHost || sJoinWanted || sJoinCall != 0) ? 1 : 0;
+}
+
+const char *coopSteamSelfName(void)
+{
+    return sReady ? pGetFriendPersonaName(sFriends, sSelf) : "";
+}
+
+const char *coopSteamPeerName(void)
+{
+    return (sReady && sPeer != 0) ? pGetFriendPersonaName(sFriends, sPeer) : "";
+}
+
+/* Online friends, those hosting first. Returns how many. */
+int coopSteamFriendsRefresh(void)
+{
+    unsigned char info[32];
+    int n, i, k;
+
+    sNumFriends = 0;
+    if (!sReady)
+    {
+        return 0;
+    }
+    n = pGetFriendCount(sFriends, 4 /* immediate */);
+    for (i = 0; i < n && sNumFriends < MAX_FRIENDS; i++)
+    {
+        u64s f = pGetFriendByIndex(sFriends, i, 4);
+        SteamFriend *e;
+
+        if (pGetFriendPersonaState(sFriends, f) == 0 /* offline */)
+        {
+            continue;
+        }
+        e = &sFriendList[sNumFriends++];
+        e->id = f;
+        e->lobby = 0;
+        memset(info, 0, sizeof(info));
+        if (pGetFriendGamePlayed(sFriends, f, info) && (rd64(info) & 0xFFFFFF) == APPID_SPACEWAR)
+        {
+            e->lobby = rd64(info + 16);
+        }
+        snprintf(e->name, sizeof(e->name), "%s", pGetFriendPersonaName(sFriends, f));
+    }
+    /* hosting friends to the top, keeping Steam's order otherwise */
+    for (i = 1; i < sNumFriends; i++)
+    {
+        SteamFriend t = sFriendList[i];
+
+        for (k = i; k > 0 && t.lobby != 0 && sFriendList[k - 1].lobby == 0; k--)
+        {
+            sFriendList[k] = sFriendList[k - 1];
+        }
+        sFriendList[k] = t;
+    }
+    return sNumFriends;
+}
+
+const char *coopSteamFriendName(int i)
+{
+    return (i >= 0 && i < sNumFriends) ? sFriendList[i].name : "";
+}
+
+int coopSteamFriendHosting(int i)
+{
+    return i >= 0 && i < sNumFriends && sFriendList[i].lobby != 0;
+}
+
+int coopSteamFriendIsPeer(int i)
+{
+    return i >= 0 && i < sNumFriends && sPeer != 0 && sFriendList[i].id == sPeer;
+}
+
+void coopSteamFriendInvite(int i)
+{
+    if (sIsHost && sLobby != 0 && i >= 0 && i < sNumFriends)
+    {
+        pInviteUserToLobby(sMM, sLobby, sFriendList[i].id);
+        portConLogf("ge: steam: invited %s\n", sFriendList[i].name);
+    }
+}
+
+/* the lobby a friend is hosting, 0 if none */
+unsigned long long coopSteamFriendLobby(int i)
+{
+    return (i >= 0 && i < sNumFriends) ? sFriendList[i].lobby : 0;
+}
+
+void coopSteamInviteOverlay(void)
+{
+    if (sIsHost && sLobby != 0)
+    {
+        pInviteDialog(sFriends, sLobby);
+    }
 }

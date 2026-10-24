@@ -14,13 +14,20 @@ You need
 
 Playing
 -------
-1. The host double-clicks "Host co-op.bat", then picks a folder, a mission and a
-   difficulty as usual.
-2. The friend double-clicks "Join co-op.bat" and waits on the title screen. Their
-   game finds the host by itself and follows them into the mission. It does
-   the same for every later mission.
-   (Accepting a Steam invite from the host also works if the game is already
-   running.)
+1. Both players start ProjectMidas.exe, pick a folder and choose
+   "3. CO-OP".
+2. The host picks "Host a Game". Your online Steam friends are listed under
+   "Invite a Friend"; pick one to invite them (or use "Steam Invite Window").
+3. The friend either accepts the Steam invite, or picks the host's name
+   (marked "Join") on their own CO-OP screen, then picks "Ready Up".
+4. When the friend shows as Ready, the host picks "Select Mission", then
+   the mission and difficulty as usual. The friend's game follows into the
+   mission by itself.
+5. After each mission both games return to the lobby, and the host picks the
+   next one.
+
+"Host co-op.bat" and "Join co-op.bat" still work as a shortcut: the joiner
+waits on the title screen and follows the host into each mission.
 
 Rules
 -----
