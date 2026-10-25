@@ -2619,6 +2619,12 @@ void chrpropUpdateAutoaimTarget(void)
                 continue;
             }
 
+            // co-op: a partner's Bond is never an auto-aim target (still hittable with Friendly Fire On)
+            if (coopPropIsPartner(candidate_prop))
+            {
+                continue;
+            }
+
             candidate_chr = candidate_prop->chr;
 
             // Characters not holding a weapon are exempt from being a target.
