@@ -1097,6 +1097,7 @@ void coopStageStart(void)
     coopVersusStageStart();
     coopHoldStart();        /* after coopVersusStageStart: versus never holds */
     coopPingStageStart();
+    coopAudioStageStart();
     coopItemsStageStart();
 }
 
@@ -1162,6 +1163,7 @@ static void coopTickBody(void)
         return;
     }
     coopStatsMissionTick(coopPartnerHere());
+    coopAudioTick();        /* the downed and revived stings (coop_audio.c) */
     coopSendState();
     coopTrackCombat();
     coopPingTick();

@@ -42,6 +42,9 @@
 #include "bondinv.h"
 #include "stan.h"
 #include "gbi_extension.h"
+#ifndef TARGET_N64
+#include "coop.h"   /* coopAudioCue */
+#endif
 
 
 #ifdef REFRESH_PAL
@@ -4266,6 +4269,9 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
 #endif
                )
             {
+#ifndef TARGET_N64
+                coopAudioCue(COOPCUE_DRAW, var_s1);   /* partners hear it from where we stand (coop_audio.c) */
+#endif
                 switch (var_s1)
                 {
                     case ITEM_LASER:
@@ -4467,6 +4473,9 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
                         break;
                     }
                 }
+#endif
+#ifndef TARGET_N64
+                coopAudioCue(COOPCUE_RELOAD, var_s1);
 #endif
                 sndPlaySfx((struct ALBankAlt_s *) g_musicSfxBufferPtr, GUN_RIFLECOCK_SFX, NULL);
                 break;

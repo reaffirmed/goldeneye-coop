@@ -300,7 +300,7 @@ typedef struct
     u8 headanim;        /* the player's run flag (headanim): run animation past 0.4 */
     u8 shotseq;         /* the number of shot[0], the newest; shot[i] is shotseq - i */
     u8 character;       /* the lobby's pick (coopCharacter) */
-    u8 pad;
+    u8 cue;             /* the newest gun sound cue (coop_audio.c): bits 0-4 its number, 5-6 COOPCUE_* (was padding, 0) */
     CoopShot shot[COOP_SHOTS_KEPT];
 } CoopLook;
 
@@ -310,6 +310,8 @@ typedef struct
     s8 held[2];         /* the item each hand's gun is, ITEM_UNARMED none */
     u8 shotseq;         /* the newest shot already played */
     u8 seqvalid;
+    u8 cue;             /* the newest sound cue already played (CoopLook.cue) */
+    u8 cuevalid;
     s32 anim;           /* the animation set (as bondview2.c players_cur_animation) */
     f32 rate;
     f32 lean;           /* the sidestep lean (bondview2.c field_1280) */
@@ -326,6 +328,20 @@ void coopLookShotEnd(void);
 s32  coopPropIsPartner(PropRecord *prop);
 void coopLookTestTick(s32 missionticks);   /* harness: GE_COOP_TESTFIRE, GE_COOP_TESTLOOK */
 u16  coopLookTestButtons(u16 buttons);
+
+/* partners' audio (coop_audio.c): their gun handling played where they are,
+ * a ping's click from its direction, and a sting when a partner goes down
+ * and a softer one when they are back up. Original sounds only, at the
+ * game's own sound and music volumes. */
+enum { COOPCUE_NONE, COOPCUE_DRAW, COOPCUE_RELOAD };
+void coopAudioCue(s32 kind, s32 item);      /* gunfire.c: our Bond drew a gun or reloaded (the sound it played) */
+u8   coopAudioCueByte(void);                /* coop_look.c coopLookFill: CoopLook.cue */
+void coopAudioPuppetCue(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look);   /* coop_look.c: play a partner's new cue there */
+void coopAudioPing(coord3d *pos, s32 self);         /* coop_ping.c: a ping arrived */
+void coopAudioPartnerDowned(s32 player);
+void coopAudioPartnerRevived(s32 player);
+void coopAudioTick(void);                   /* coop.c coopTick, in a mission: the stings */
+void coopAudioStageStart(void);
 
 /* the lobby's character pick: 0 the mission's own Bond, else 1 + an
  * mp_chr_setup index (the multiplayer roster) */

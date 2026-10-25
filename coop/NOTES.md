@@ -712,3 +712,38 @@ satellite-console work and the Runway plane did nothing on the host.
   (panel, then migration); PLAYERS=2 with GE_COOP_HOSTLEAVES=1 (panel with
   the countdown, then the lobby with the error panel). Shots in the project
   files under goldeneye-coop/screens/loading/.
+
+## Partners' audio (2026-10-25)
+
+- src/game/coop_audio.c. Original sounds only, at the game's sound and music
+  volumes, through the guards' positional path (chrobjSndCreatePostEvent:
+  distance volume and the port's stereo pan, re-panned as we turn).
+- Already positional before this: a partner's gunfire (coop_look.c plays it
+  through the guards' gun sound at the puppet), thrown items
+  (gunCoopSpawnThrown), impacts and blasts.
+- Gun handling: gunfire.c calls coopAudioCue where our Bond's draw sound
+  (SWITCH_RAISE: pickup clack, or the knife's, mine's or laser's) and reload
+  sound (RELOAD_SWAP: rifle cock) play. The cue rides every STATE in
+  CoopLook.cue (formerly the pad byte: bits 0-4 a counter, 5-6 the kind), so
+  the packet keeps its size and an older build sends 0, which plays nothing.
+  Puppets play a new cue at their position (coopAudioPuppetCue). A downed
+  Bond sends none: its hands cycle through draws while it is down.
+- Ping: the BEEP now comes from the ping's direction, full volume to 60 m,
+  fading to 300 m but never under a third. Our own ping still beeps centred.
+- Stings: coopAudioTick watches CoopHudPartner.dead per partner (a dropped
+  connection doesn't count). Down: the game's short death sting
+  (M_SHORT_SOLO_DEATH) on the X music track (track 2, what the alarm and exit
+  music use), only when that track is free and we are not dead ourselves,
+  faded out after 3 s; the level's music on track 1 keeps playing. Back up
+  (revived or respawned): OBJ_REGEN_SFX at half volume. coopAudioPartnerDowned
+  and coopAudioPartnerRevived are public for the revive work to call
+  directly if it ever stops using .dead.
+- No footsteps: GoldenEye has no footstep sounds at all (neither Bond nor
+  the guards make any), so there was nothing original to play.
+- Verified with the mock Steam and SDL's disk audio driver on the host
+  (SDL_AUDIODRIVER=disk, music at 0 to hear the effects alone): the
+  partner's draw and reload logged and heard; with the host turned 90
+  degrees (GE_COOP_TESTAIM=3:90:0) the joiner's ping 18 m away came out
+  L 861 / R 223 (RMS), against L 810 / R 820 for a sound at our own spot.
+  GE_COOP_TESTDIE with the timer rule: the downed sting on the X track,
+  then the revived sting at the respawn; no draw sounds while down.

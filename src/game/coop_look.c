@@ -186,6 +186,7 @@ void coopLookFill(CoopLook *out)
     out->aimyaw = g_CurrentPlayer->field_2A0C;
     out->headanim = g_CurrentPlayer->headanim != 0;
     out->character = (u8) coopCharacter();
+    out->cue = coopAudioCueByte();      /* drawing and reloading, for the others to hear (coop_audio.c) */
     out->shotseq = sShotSeq;
     memcpy(out->shot, sShots, sizeof(sShots));
 }
@@ -699,6 +700,7 @@ void coopLookPuppetTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look
     {
         lp->shotseq = look->shotseq;
     }
+    coopAudioPuppetCue(lp, chr, look);  /* their draw and reload sounds, from where they stand (coop_audio.c) */
 }
 
 /* ---- test harness (coop.c coopHarnessTick, bondview2.c MoveBond) ---------

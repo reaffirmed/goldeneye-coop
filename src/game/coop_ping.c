@@ -299,7 +299,14 @@ void coopPingReceive(CoopPing *ping, s32 from)
     s->ping = *ping;
     s->live = 1;
     s->age = 0;
-    sndPlaySfx((struct ALBankAlt_s *) g_musicSfxBufferPtr, BEEP_SFX, NULL);
+    {   /* the click from where the ping is, so one off screen is heard from its side (coop_audio.c) */
+        coord3d at;
+
+        at.f[0] = ping->pos[0];
+        at.f[1] = ping->pos[1];
+        at.f[2] = ping->pos[2];
+        coopAudioPing(&at, from == coopLobbySelfPlayer());
+    }
     portConLogf("ge: coop: ping from player %d: %s at %.0f %.0f %.0f\n", from + 1,
                 ping->kind == COOPPING_ENEMY ? "enemy" : "spot", ping->pos[0], ping->pos[1], ping->pos[2]);
     if (from == coopLobbySelfPlayer())
