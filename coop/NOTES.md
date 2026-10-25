@@ -673,3 +673,42 @@ satellite-console work and the Runway plane did nothing on the host.
   and both games finish the mission, with the plane taking off on both
   screens; on Surface the joiner's Use on the dish console runs the host's
   script, and the joiner shooting it reaches the host as OBJDMG.
+
+## Mission card, reconnecting panel, error panel (2026-10-25)
+
+- src/game/coop_screens.c, drawn from lv.c lvlRender (after the views) and
+  the lobby's constructor.
+- Mission card: a co-op mission holds still on every game until everyone who
+  was in the session has loaded in. coop.c coopHoldStart (from
+  coopStageStart): the host waits for each present joiner's hello in this
+  stage (after the hold began), 30 s at most, dropping anyone who leaves;
+  joiners wait for the host's word, 35 s at most, or until the host goes
+  quiet. lv.c lvlTick treats coopHoldWorld() as a pause (g_ClockTimer 0), and
+  coopTickBody runs coopHoldTick instead of coopKeepAlive: poll, session tick,
+  events, a hello every 15 ticks. The host's hello carries it in the old pad
+  byte after youare (CoopHelloPkt.hold: bit 0 holding, bits 4-7 who is in),
+  so the wire size and COOP_VERSION are unchanged; an older build reads 0 and
+  never holds. Late joiners and versus never hold. GE_COOP_NOHOLD turns it off.
+- The card: black over the whole frame, CO-OP MISSION, the mission name at
+  2x, the difficulty, the objectives for it (one line each), each player with
+  their colour as IN or LOADING..., a bar of who is in and the host's
+  countdown. It fades over 20 frames when everyone is in.
+- Reconnecting: while coopHudSessionBanner has something (host silent, or a
+  new host being reached), the view dims under a panel with its two lines, a
+  sweep of blocks and what happens if the host stays gone (by the Host Leaves
+  rule). It replaces the toast that used to sit under the chat
+  (coop_chat.c). Hidden while the watch is up.
+- Error panel (coopScreenError(title, text up to three lines)): the lobby
+  shows the newest over its paper until A / Start / B / Z dismisses it (the
+  rows don't take input meanwhile; not in the first 20 ticks, so a held
+  press from the mission doesn't close it). Raised by: the host ended the
+  mission for everyone, the host left the mission, the Host Leaves rule
+  sent everyone back, a wrong password, Steam keeping us out of a lobby, and
+  a peer on another COOP_VERSION (its packets used to be dropped silently,
+  which left a joiner on "Connecting to the host..." for good).
+  GE_COOP_ERRSHOT=<ticks> dismisses it by itself (harness).
+- Verified with the mock Steam: two_player_lobby.sh (host held 3.8 s for the
+  joiner, the joiner 0.6 s for the host's go); host_drop.sh PLAYERS=3 KILL=1
+  (panel, then migration); PLAYERS=2 with GE_COOP_HOSTLEAVES=1 (panel with
+  the countdown, then the lobby with the error panel). Shots in the project
+  files under goldeneye-coop/screens/loading/.

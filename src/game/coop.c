@@ -139,7 +139,8 @@ typedef struct
     u8 settings[COOPSET_MAX];   /* host: the lobby's other settings (coopSetting) */
     u32 missionticks;   /* how long the sender has been in this mission */
     u8 youare;          /* host: the player number of the game it is sent to */
-    u8 pad2[3];
+    u8 hold;            /* host: bit 0, the mission card holds everyone still; bits 4-7, who has loaded in (coop_screens.c) */
+    u8 pad2[2];
     CoopRosterEnt roster[COOP_MAX_PLAYERS];     /* host: every player, by number */
 } CoopHelloPkt;
 
@@ -437,6 +438,14 @@ static void coopSendAiSync(void);
 static void coopApplyNote(CoopEvent *ev);
 static void coopApplyEndAll(void);
 static void coopKeepAlive(void);
+static void coopHoldStart(void);
+static void coopHoldTick(void);
+/* the mission card (coopHoldStart) */
+static s32 sHold;           /* holding the world still */
+static u32 sHoldMs;         /* since when (coopNowMs) */
+static u32 sHoldTick;       /* sTick at the start: only hellos after it count */
+static u8 sHoldExpect;      /* host: the players (bits) it waits for */
+static u8 sHoldArrived;     /* who has loaded in, the host's bit included */
 static void coopPendingEndTick(void);
 static void coopRemoteWatch(s32 p);
 static void coopMigrateReset(void);
@@ -772,6 +781,30 @@ static void coopRecvVersus(s32 c, u8 *buf, s32 n)
     }
 }
 
+/* a game on another build: its packets are dropped, so say why nothing
+ * happens (once per peer and version) instead of "Connecting..." forever */
+static void coopVersionMismatch(s32 c, s32 theirs)
+{
+    static u16 told[COOP_NET_MAX_PEERS];
+    char text[96];
+
+    if (told[c] == (u16) theirs)
+    {
+        return;
+    }
+    told[c] = (u16) theirs;
+    portConLogf("ge: coop: player on channel %d runs co-op version %d, we run %d\n", c, theirs, COOP_VERSION);
+    if (coopNetIsHost())
+    {
+        snprintf(text, sizeof(text), "A player tried to join with\nanother version of the game\n(theirs %d, yours %d).", theirs, COOP_VERSION);
+    }
+    else
+    {
+        snprintf(text, sizeof(text), "The host runs another version\n(theirs %d, yours %d). You both\nneed the same co-op build.", theirs, COOP_VERSION);
+    }
+    coopScreenError("Different Versions", text);
+}
+
 static void coopPollNet(void)
 {
     u8 buf[1500];
@@ -782,6 +815,11 @@ static void coopPollNet(void)
     {
         CoopStatePkt *p = (CoopStatePkt *) buf;
 
+        if (n >= (s32) sizeof(u32) * 2 && p->magic == COOP_MAGIC && p->version != COOP_VERSION
+            && c >= 0 && c < COOP_NET_MAX_PEERS)
+        {
+            coopVersionMismatch(c, p->version);
+        }
         if (n < (s32) sizeof(u32) * 2 || p->magic != COOP_MAGIC || p->version != COOP_VERSION
             || c < 0 || c >= COOP_NET_MAX_PEERS)
         {
@@ -1057,6 +1095,7 @@ void coopStageStart(void)
     }
     coopDifficultyStageStart();
     coopVersusStageStart();
+    coopHoldStart();        /* after coopVersusStageStart: versus never holds */
     coopPingStageStart();
     coopItemsStageStart();
 }
@@ -1090,6 +1129,11 @@ static void coopTickBody(void)
     }
     if (g_ClockTimer <= 0)
     {
+        if (sHold)
+        {
+            coopHoldTick(); /* the mission card: everyone loads in first */
+            return;
+        }
         coopKeepAlive();    /* paused, or a cutscene has the controls: still here */
         return;
     }
@@ -3575,6 +3619,7 @@ static void coopSendHello(void)
     p.character = (u8) coopCharacter();
     memcpy(p.settings, sSettings, sizeof(p.settings));
     p.missionticks = coopInMission() ? sMissionTicks : 0;
+    p.hold = (u8) ((sHold ? 1 : 0) | (sHoldArrived << 4));
     if (!coopNetIsHost())
     {
         coopNetSend(&p, sizeof(p));
@@ -4266,6 +4311,7 @@ static void coopApplyEndAll(void)
         return;
     }
     coopBanner("THE HOST ENDED THE MISSION", "BACK TO THE LOBBY");
+    coopScreenError("Mission Ended", "The host ended the mission\nfor everyone.");
     sPendingEnd = 1;
 }
 
@@ -4285,6 +4331,153 @@ static void coopKeepAlive(void)
     sTick = 0;  /* coopSendHello sends when sTick is a multiple of its period */
     coopSendHello();
     sTick = t;
+}
+
+/* ---- the mission card: everyone starts together (coop_screens.c draws it) ----
+ * A co-op mission holds still on every game (lv.c lvlTick takes it as a pause)
+ * until each player who was in the session when it started has loaded in, so
+ * nobody plays the first seconds alone. The host decides: it waits for a fresh
+ * hello from each of them in this stage (or 30 s, or until they drop) and its
+ * hello's hold byte lets the joiners go. A late joiner, and versus, never hold. */
+#define COOP_HOLD_MS      30000
+#define COOP_HOLD_JOIN_MS 35000     /* a joiner gives up on the host's word a little later */
+
+static void coopHoldStart(void)
+{
+    s32 p;
+
+    sHold = 0;
+    sHoldExpect = 0;
+    sHoldArrived = 1;
+    if (sEnabled <= 0 || !coopNetHasPeer() || coopVersus() || bossGetStageNum() == LEVELID_TITLE
+        || getenv("GE_COOP_NOHOLD") != NULL)
+    {
+        return;
+    }
+    if (coopNetIsHost())
+    {
+        for (p = 1; p < COOP_MAX_PLAYERS; p++)
+        {
+            if (coopLobbyPlayerHere(p))
+            {
+                sHoldExpect |= (u8) (1 << p);
+            }
+        }
+        sHold = sHoldExpect != 0;
+    }
+    else
+    {
+        sHold = !sLateJoin && sChan[0].helloSeen;
+    }
+    if (sHold)
+    {
+        sHoldMs = coopNowMs();
+        sHoldTick = sTick;
+        portConLogf("ge: coop: mission card up, waiting for %s\n", coopNetIsHost() ? "the others to load in" : "the host's go");
+    }
+}
+
+static void coopHoldEnd(const char *why)
+{
+    u32 t = sTick;
+
+    sHold = 0;
+    portConLogf("ge: coop: mission card down after %d ms (%s)\n", (int) (coopNowMs() - sHoldMs), why);
+    if (coopNetIsHost())
+    {   /* tell them at once, not at the next hello */
+        sTick = 0;
+        coopSendHello();
+        sTick = t;
+    }
+}
+
+/* the held world's tick: the network keeps going, the mission does not */
+static void coopHoldTick(void)
+{
+    const u32 now = coopNowMs();
+    s32 p;
+
+    sTick++;
+    coopPollNet();
+    coopSessionTick();
+    coopFlushEvents();
+    if ((sTick % 15) == 0)
+    {
+        u32 t = sTick;
+
+        sTick = 0;
+        coopSendHello();
+        sTick = t;
+    }
+    if (coopNetIsHost())
+    {
+        for (p = 1; p < COOP_MAX_PLAYERS; p++)
+        {
+            const s32 c = coopChanOfPlayer(p);
+
+            if (!(sHoldExpect & (1 << p)))
+            {
+                continue;
+            }
+            if (!coopLobbyPlayerHere(p))
+            {   /* dropped while loading: don't wait for them */
+                sHoldExpect &= (u8) ~(1 << p);
+                portConLogf("ge: coop: player %d dropped before loading in\n", p + 1);
+            }
+            else if (c >= 0 && sChan[c].helloTick > sHoldTick && sChan[c].hello.stage == bossGetStageNum())
+            {
+                if (!(sHoldArrived & (1 << p)))
+                {
+                    portConLogf("ge: coop: player %d has loaded in\n", p + 1);
+                }
+                sHoldArrived |= (u8) (1 << p);
+            }
+        }
+        if ((sHoldArrived & sHoldExpect) == sHoldExpect)
+        {
+            coopHoldEnd("everyone is in");
+        }
+        else if (now - sHoldMs > COOP_HOLD_MS)
+        {
+            coopHoldEnd("gave up waiting");
+        }
+        return;
+    }
+    if (sChan[0].helloTick > sHoldTick && sHostHello.stage == bossGetStageNum())
+    {
+        sHoldArrived = (u8) (sHostHello.hold >> 4);
+        if (!(sHostHello.hold & 1))
+        {
+            coopHoldEnd("the host's go");
+            return;
+        }
+    }
+    if (now - sHoldMs > COOP_HOLD_JOIN_MS || sHostWaiting != HOSTW_NONE)
+    {
+        coopHoldEnd("no word from the host");
+    }
+}
+
+/* lv.c lvlTick: 1 while the card holds the stage still */
+s32 coopHoldWorld(void)
+{
+    return sHold;
+}
+
+/* the card's state: who is in (bits, by player) and the seconds the host
+ * still waits; 0 when it is not up */
+s32 coopHoldInfo(u8 *arrived, s32 *secs)
+{
+    s32 left;
+
+    if (!sHold)
+    {
+        return 0;
+    }
+    left = (s32) (COOP_HOLD_MS - (coopNowMs() - sHoldMs) + 999) / 1000;
+    *arrived = (u8) (sHoldArrived | (1 << coopSelf()));
+    *secs = (left < 0) ? 0 : left;
+    return 1;
 }
 
 /* ---- the AI sync: host sends, joiners keep ---- */
@@ -4557,6 +4750,8 @@ static void coopMigrate(void)
     if (coopHostLeavesRule() == 1 && coopInMission())
     {
         sPendingEnd = 1;    /* the lobby's rule: back to the lobby, with the new host */
+        coopScreenError("The Host Left", coopNetIsHost() ? "The lobby's Host Leaves rule\nsends everyone back here.\nYou are the host now."
+                                                         : "The lobby's Host Leaves rule\nsends everyone back here.\nThe next player hosts now.");
     }
 }
 
@@ -4800,6 +4995,7 @@ static void coopSessionTick(void)
                 else if (now - sHostTitleMs > COOP_HOSTTITLE_MS)
                 {
                     coopBanner("THE HOST LEFT THE MISSION", "BACK TO THE LOBBY");
+                    coopScreenError("Back to the Lobby", "The host left the mission,\nso it ended for everyone.");
                     sPendingEnd = 1;
                     sHostTitleMs = 0;
                 }

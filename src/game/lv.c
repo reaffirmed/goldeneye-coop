@@ -1355,6 +1355,12 @@ Gfx* lvlRender(Gfx* DL)
     }
 
     gDPSetScissor(DL++, G_SC_NON_INTERLACE, 0, 0, viGetX(), viGetY());
+#ifndef TARGET_N64
+    if (g_CurrentStageToLoad != LEVELID_TITLE)
+    {
+        DL = coopScreensRender(DL); /* co-op's mission card and reconnecting panel (coop_screens.c) */
+    }
+#endif
 
     return DL;
 }
@@ -1511,6 +1517,13 @@ void lvlTick(void)
         portRunning = 0;
 #endif
     }
+#ifndef TARGET_N64
+    else if (coopHoldWorld())
+    {   /* co-op's mission card: still until every player has loaded in (coop.c) */
+        g_ClockTimer = 0;
+        portRunning = 0;
+    }
+#endif
     else
     {
         g_ClockTimer = speedgraphframes;

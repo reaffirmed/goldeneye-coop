@@ -18,7 +18,7 @@
  * the chat lines, newest lowest, for COOPTOAST_SHOW ticks, fading in and
  * out: the lead in the player's colour and the rest after it in white,
  * word-wrapped to three fifths of the screen, at most three rows. While the host is not
- * answering (coop.c coopHudSessionBanner) that notice sits under them.
+ * answering (coop.c coopHudSessionBanner) coop_screens.c's panel says so.
  *
  * The HUD font has no lowercase, so everything shows in capitals.
  */
@@ -669,17 +669,7 @@ static Gfx *coopToastsRender(Gfx *gdl, s32 left, s32 y)
     s32 n, rows;
     s32 i;
 
-    {   /* the host not answering, or a new one being reached: held under the rest */
-        char l1[56], l2[56], both[112];
-
-        if (coopHudSessionBanner(l1, l2, sizeof(l1)))
-        {
-            snprintf(both, sizeof(both), "%s|%s", l1, l2);
-            n = coopToastLayout(both, maxw, pc, &rows);
-            y -= rows * COOPTOAST_LINE + 3;
-            gdl = coopToastDraw(gdl, left, y + 3, pc, n, rows, COOPTOAST_ALERTCOL, 0xFF);
-        }
-    }
+    /* the host not answering, or a new one being reached: coop_screens.c's panel */
     for (i = sToastCount - 1; i >= 0; i--)
     {
         u32 age = sNow - sToast[i].tick;
@@ -708,14 +698,13 @@ Gfx *coopFeedRender(Gfx *gdl)
     s32 y;
     s32 i;
     s32 any;
-    char l1[56], l2[56];
 
     while (sToastCount > 0 && sNow - sToast[0].tick >= COOPTOAST_SHOW)
     {
         memmove(&sToast[0], &sToast[1], sizeof(sToast[0]) * (COOPTOAST_MAX - 1));
         sToastCount--;
     }
-    any = sTyping || sToastCount > 0 || coopHudSessionBanner(l1, l2, sizeof(l1));
+    any = sTyping || sToastCount > 0;
     for (i = 0; i < sFeedCount && !any; i++)
     {
         any = sNow - sFeed[i].tick < COOPFEED_SHOW;

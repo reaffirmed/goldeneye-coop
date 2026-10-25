@@ -303,6 +303,14 @@ void coopBrowseTick(s32 inmission)
         {
             sRefused = (why == 2) ? 2 * COOPBROWSE_REFUSED : COOPBROWSE_REFUSED;
             sRefusedWhy = why;
+            if (why == 2)
+            {   /* a panel too (coop_screens.c): the rows' red line is easy to miss */
+                coopScreenError("Couldn't Join", "Steam kept us out of that game.\nIt's full, or friends only.");
+            }
+            else
+            {
+                coopScreenError("Wrong Password", "The host's game has a password,\nand that wasn't it.");
+            }
         }
     }
     if (inmission)

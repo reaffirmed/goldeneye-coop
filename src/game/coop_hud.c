@@ -61,6 +61,12 @@ static u32 coopHudPlayerColour(s32 player)
     return colours[(player >= 0 && player < COOP_MAX_PLAYERS) ? player : 0];
 }
 
+/* coop_screens.c: a player's colour */
+u32 coopHudColour(s32 player)
+{
+    return coopHudPlayerColour(player);
+}
+
 /* the radar's centre, as radar.c lays it out for one player */
 #define COOP_RADAR_TOP   0x1a
 #define COOP_RADAR_RIGHT 0x29

@@ -10017,6 +10017,11 @@ void interface_menu1D_cooplobby(void)
         return;   /* the harness started a mission */
     }
 
+    if (coopScreenErrorInput())
+    {   /* an error panel is up (coop_screens.c): the rows wait until it is dismissed */
+        frontUpdateControlStickPosition();
+        return;
+    }
     {   /* the chat key types a line here too (coop_chat.c) */
         extern s32 portJoyPortChatPressed(void);   /* joy_port.c */
 
@@ -10164,6 +10169,7 @@ Gfx *constructor_menu1D_cooplobby(Gfx *DL)
     }
 
     DL = frontAddPreviousTabText(DL);
+    DL = coopScreenErrorRender(DL);     /* why we are back here, or a join that failed (coop_screens.c) */
     DL = frontDrawCursor(DL);
     return DL;
 }

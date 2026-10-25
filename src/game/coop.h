@@ -86,6 +86,17 @@ enum { COOPDOWN_BOTH, COOPDOWN_TIMER, COOPDOWN_REVIVE };
 s32  coopDownRule(void);
 void coopSetDownRule(s32 rule);
 Gfx *coopHudRender(Gfx *gdl);
+u32  coopHudColour(s32 player);         /* each player's colour, as their tag and radar dot */
+
+/* co-op screens (coop_screens.c): the mission card while everyone loads in,
+ * the reconnecting panel, and the lobby's error panel */
+s32  coopHoldWorld(void);               /* coop.c: 1 while the card holds the stage still (lv.c lvlTick) */
+s32  coopHoldInfo(u8 *arrived, s32 *secs);  /* coop.c: 1 while it is up; who is in (bits) and the host's seconds left */
+Gfx *coopScreensRender(Gfx *gdl);       /* lv.c lvlRender, after the views */
+void coopScreenError(const char *title, const char *text);  /* text: up to three lines split at '\n' */
+s32  coopScreenErrorUp(void);
+s32  coopScreenErrorInput(void);        /* the lobby's input: 1 while the panel takes the keys */
+Gfx *coopScreenErrorRender(Gfx *gdl);
 
 /* giving ammo and guns to the partner (coop_give.c). A give and its answer
  * ride the reliable events (COOPEV_GIVE, COOPEV_GIVEBACK). */
