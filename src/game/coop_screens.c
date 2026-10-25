@@ -32,6 +32,7 @@
 #include "boss.h"
 #include "objective_status.h"
 #include "coop.h"
+#include "menu_glyphs.h"
 #include <joy.h>
 #include <snd.h>
 #include <music.h>
@@ -436,10 +437,16 @@ Gfx *coopScreenErrorRender(Gfx *gdl)
         y = py + 0x1A + i * 0x0F;
         gdl = frontPrintText(gdl, &x, &y, (s8 *) t, (s32) ptrFontZurichBoldChars, (s32) ptrFontZurichBold, 0x000000FF, viGetX(), viGetY(), 0, 0);
     }
-    x = px + pw - 0x30;
-    y = py + ph - 0x12;
-    gdl = frontPrintText(gdl, &x, &y, (s8 *) "OK\n", (s32) ptrFontZurichBoldChars, (s32) ptrFontZurichBold,
-                         ((sFrames / 20) & 1) ? 0x8A1414FF : 0x000000FF, viGetX(), viGetY(), 0, 0);
+    {   /* OK, with the button that says it (menu_glyphs.c) */
+        const s32 gw = menuGlyphWidth(MENUGLYPH_ACCEPT);
+
+        x = px + pw - 0x1C - gw;
+        y = py + ph - 0x12;
+        gdl = menuGlyphDraw(gdl, x, y + 1, MENUGLYPH_ACCEPT, 0xFF);
+        x += gw + 4;
+        gdl = frontPrintText(gdl, &x, &y, (s8 *) "OK\n", (s32) ptrFontZurichBoldChars, (s32) ptrFontZurichBold,
+                             ((sFrames / 20) & 1) ? 0x8A1414FF : 0x000000FF, viGetX(), viGetY(), 0, 0);
+    }
     sFrames++;
     return combiner_bayer_lod_perspective(gdl);
 }

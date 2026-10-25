@@ -22,6 +22,17 @@
  *     detonate_use_reload=1            ; padN_detonate_use_reload
  *     [multiplayer]
  *     character=12                     ; the MP setup's pick, Rare's mp_chr_setup index
+ *     coop_character=0                 ; player 1 only: the co-op lobby's pick (v5)
+ *     [settings]                       ; player 1 only (v5): their own Port Options
+ *     hfov_wide=100                    ; ... the rows in sProfSettings, in midas.ini's spelling
+ *
+ * SETTINGS (v5): the Port Options are one set for the whole game, so the
+ * profile in player 1's seat - the person at the keyboard, who owns the menus
+ * and the co-op lobby - carries the ones that are a person's taste rather
+ * than the machine's or the match's: field of view, the HUD, mouse and stick
+ * feel, volumes. Not the display hardware rows, the pad count, the world
+ * rules (Unlock All, the shoot-through fix) or the MP sheet's. Loading that
+ * profile into seat 1 applies them; a profile in another seat leaves them be.
  *
  * RULE: a profile holds everything on the Player Options panel, plus the
  * character. A row added to the panel needs its key added in both
@@ -92,11 +103,48 @@ extern s32 portMpCharCount(void);
 /* joy_port.c */
 extern s32 portJoyPortPadOptGet(s32 pad, s32 which);
 extern void portJoyPortPadOptSet(s32 pad, s32 which, s32 v);
+/* port_options.c */
+extern s32 portOptFind(const char *key);
+extern s32 portOptValueIni(s32 i, char *buf, s32 n);
+extern s32 portOptSetIni(s32 i, const char *text);
+extern void portOptSaveHold(s32 on);
+/* coop_look.c: the co-op lobby's character pick */
+extern s32 coopCharacter(void);
+extern void coopSetCharacter(s32 c);
+
+/* v5 [settings]: the Port Options a person takes with them (see SETTINGS above) */
+static const char *const sProfSettings[] = {
+    "hfov_wide", "weapon_fov",
+    "show_fps", "mission_timer", "objectives_hud", "weapon_menu", "pause_pillars",
+    "health_wide", "hud_wide", "hud_scale", "armor_hud", "setting_help",
+    "scope_steady", "distance_fading", "always_crosshair", "aim_lock", "head_roll",
+    "mouse_auto_aim", "watch_static", "fast_pause",
+    "aim_control", "sight_on_screen", "ammo_on_screen",
+    "mouse", "smart_mouse_lock", "mouse_sens_x", "mouse_sens_y", "mouse_sens_aim",
+    "deadzone", "deadzone_look", "trigger_threshold", "stick_scale", "rumble",
+    "shoot_next_prev", "no_aim_crouch",
+    "music_volume", "sfx_volume", "stereo_pan", "mute_unfocused",
+};
+#define PROFILE_SETTINGS ((s32) (sizeof(sProfSettings) / sizeof(sProfSettings[0])))
+
+static s32 profIsSetting(const char *key)
+{
+    s32 k;
+
+    for (k = 0; k < PROFILE_SETTINGS; k++)
+    {
+        if (strcmp(sProfSettings[k], key) == 0)
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
 
 #define PROFILE_DIR      "Data/Profiles"   /* under Data, with the saves */
 #define PROFILE_DIR_OLD  "Profiles"        /* older builds: next to ge.exe */
 #define PROFILE_EXT      ".geprofile"
-#define PROFILE_VERSION  4   /* 2: look_ahead; 3: auto_aim; 4: crosshair_color */
+#define PROFILE_VERSION  5   /* 2: look_ahead; 3: auto_aim; 4: crosshair_color; 5: [settings], coop_character */
 #define PROFILE_MAX      32
 /* TEN characters: the name replaces "P1" over the in-match KILLS and LOSSES
  * columns (mpmenu.c), where "<ten wide letters> LOSSES" is what still fits. The
@@ -685,6 +733,23 @@ static void profFormat(s32 player, const char *clean, char *out, size_t size)
      * lineup. */
     PROF_PUT("character=%d\n", (int) ((player_char[player] >= 0) ? player_char[player]
                                       : (sCarry[player].character >= 0) ? sCarry[player].character : player));
+    if (player == 0)
+    {   /* v5: seat 1's own co-op pick and Port Options (SETTINGS above) */
+        s32 k;
+
+        PROF_PUT("coop_character=%d\n", (int) coopCharacter());
+        PROF_PUT("[settings]\n");
+        for (k = 0; k < PROFILE_SETTINGS; k++)
+        {
+            char v[32];
+            const s32 i = portOptFind(sProfSettings[k]);
+
+            if (i >= 0 && portOptValueIni(i, v, sizeof(v)))
+            {
+                PROF_PUT("%s=%s\n", sProfSettings[k], v);
+            }
+        }
+    }
 #undef PROF_PUT
 }
 
@@ -836,6 +901,7 @@ s32 portProfileLoad(s32 player, s32 i)
 {
     char name[PROFILE_NAME_MAX];
     char line[256];
+    s32 settings = 0;   /* in the [settings] section */
     s32 dev;
     FILE *f;
 
@@ -866,6 +932,7 @@ s32 portProfileLoad(s32 player, s32 i)
         return 0;
     }
     dev = portInputSlotDevice(player);
+    portOptSaveHold(1);     /* [settings]: midas.ini written once, after the lot */
     while (fgets(line, sizeof(line), f) != NULL)
     {
         char *eq;
@@ -876,12 +943,25 @@ s32 portProfileLoad(s32 player, s32 i)
         {
             line[--n] = '\0';
         }
-        if (line[0] == ';' || line[0] == '#' || line[0] == '[' || (eq = strchr(line, '=')) == NULL)
+        if (line[0] == '[')
+        {
+            settings = (strncmp(line, "[settings]", 10) == 0);
+            continue;
+        }
+        if (line[0] == ';' || line[0] == '#' || (eq = strchr(line, '=')) == NULL)
         {
             continue;
         }
         *eq = '\0';
         val = eq + 1;
+        if (settings)
+        {   /* seat 1 only, and only the listed rows: a hand-edited file can't reach the rest */
+            if (player == 0 && profIsSetting(line) && !portOptSetIni(portOptFind(line), val))
+            {
+                portConLogf("ge: profiles: %s: %s=%s not understood - left as it is\n", name, line, val);
+            }
+            continue;
+        }
         if (strcmp(line, "version") == 0)
         {
             if (atoi(val) > PROFILE_VERSION)
@@ -965,8 +1045,16 @@ s32 portProfileLoad(s32 player, s32 i)
                 player_char[player] = c;
             }
         }
+        else if (strcmp(line, "coop_character") == 0)
+        {
+            if (player == 0)
+            {
+                coopSetCharacter(atoi(val));    /* out of range = the mission's Bond */
+            }
+        }
     }
     fclose(f);
+    portOptSaveHold(0);
     if (dev > 0)
     {   /* inputmode=port from an older profile on an n64 layout that was
          * already on: the layout step above was skipped, and so was the reset

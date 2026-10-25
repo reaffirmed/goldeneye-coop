@@ -747,3 +747,25 @@ satellite-console work and the Runway plane did nothing on the host.
   L 861 / R 223 (RMS), against L 810 / R 820 for a sound at our own spot.
   GE_COOP_TESTDIE with the timer rule: the downed sting on the X track,
   then the revived sting at the respawn; no draw sounds while down.
+
+## Profiles carry your settings; button prompts (2026-10-25)
+
+- **Per-profile settings** (`port/src/port_profiles.c`, profile version 5). The
+  profile in player 1's seat now also holds that person's Port Options in a
+  `[settings]` section (field of view, the HUD rows, mouse and stick feel,
+  rumble, volumes; the list is `sProfSettings`) and their co-op lobby
+  character (`coop_character`). Loading it into seat 1 applies them;
+  midas.ini is written once after the lot. Display hardware rows, the pad
+  count, world rules (Unlock All, the shoot-through fix) and the MP sheet's
+  rows stay the machine's. Other seats' profiles are unchanged. Older
+  profiles load as before; a v5 file in an older build ignores the new keys.
+- **Profile row in the co-op lobby** (Your Controls): steps player 1 through
+  the saved profiles and None.
+- **Button prompts** (`src/game/menu_glyphs.c`). A bar on the felt above the
+  folder paper names Select and Back (and Change, Chat, Continue or OK where
+  they apply) with the buttons of whatever was pressed last: keycaps for the
+  keyboard and mouse, Xbox's coloured A and B, PlayStation's cross and
+  circle, a Switch pad's A and B, or the N64's blue A and green B for a pad in
+  N64 mode (`input_pc.c portInputGlyphStyle`). The co-op error panel's OK
+  shows the same button. `GE_GLYPHS=0..4` pins a style, `GE_NOHINTS` hides
+  the bar (harness).

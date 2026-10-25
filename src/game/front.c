@@ -42,6 +42,9 @@
 #include "matrixmath.h"
 #include "coop.h"
 #include "coop_net.h"
+#ifndef TARGET_N64
+#include "menu_glyphs.h"
+#endif
 #include "bg.h"
 #include "chrai.h"
 #include "title.h"
@@ -8838,7 +8841,7 @@ enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLRO
        CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE, CLROW_FRIENDLYFIRE,
        CLROW_CHARACTER, CLROW_CHAT, CLROW_PUBLIC, CLROW_PASSWORD, CLROW_JOINPUBLIC, CLROW_LAYOUT, CLROW_OPTION,
        CLROW_HOSTLEAVES, CLROW_VSMODE, CLROW_VSARENA, CLROW_VSSCENARIO, CLROW_VSLENGTH, CLROW_VSWEAPONS, CLROW_VSSTART,
-       CLROW_DISCORDYES, CLROW_DISCORDNO };
+       CLROW_DISCORDYES, CLROW_DISCORDNO, CLROW_PROFILE };
 #define COOP_LOBBY_ROWS     48
 #define COOP_LOBBY_VISIBLE  PORT_SHEET_PAGE_ROWS  /* rows down to Rare's last line (293); more scroll (coop_lobby_scroll) */
 #define COOP_LOBBY_CHAT_LINES 3
@@ -9179,6 +9182,14 @@ static const char *const coop_lobby_opts[][2] = {
     { "mouse_sens_x", "Mouse Speed\n" },
 };
 
+/* port_profiles.c: player 1's profile carries these rows and the character (its [settings]) */
+extern s32 portProfileCount(void);
+extern void portProfileRescan(void);
+extern const char *portProfileName(s32 i);
+extern const char *portProfileActive(s32 player);
+extern s32 portProfileLoad(s32 player, s32 i);
+extern void portProfileClear(s32 player);
+
 static void coopLobbyAddControls(void)
 {
     struct CoopLobbyRow *r;
@@ -9186,6 +9197,16 @@ static void coopLobbyAddControls(void)
     s32 i;
 
     coopLobbyAdd(CLROW_HEAD, 0, "Your Controls\n", "");
+    {   /* whose settings these are: loading a profile brings its controls, options and character */
+        const char *active = portProfileActive(0);
+
+        snprintf(value, sizeof(value), "%.20s\n", (active != NULL && active[0] != '\0') ? active : "None");
+        r = coopLobbyAdd((portProfileCount() > 0) ? CLROW_PROFILE : CLROW_TEXT, 0, "Profile\n", value);
+        if (r != NULL && portProfileCount() <= 0)
+        {
+            r->colour = PORT_SHEET_COL_DIM;
+        }
+    }
     if (portInputDeviceCount() > 1 && portInputLayoutCount() > 0)
     {
         const char *shown = portInputLayoutShown(1);
@@ -9710,6 +9731,30 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
         case CLROW_HOSTLEAVES:
             coopSetSetting(COOPSET_HOSTLEAVES, (coopSetting(COOPSET_HOSTLEAVES) + 1) % coopHostLeavesCount());
             break;
+        case CLROW_PROFILE:
+        {   /* the next profile in the list, then none, then round */
+            const char *active = portProfileActive(0);
+            const s32 n = portProfileCount();
+            s32 i, cur = -1;
+
+            for (i = 0; active != NULL && active[0] != '\0' && i < n; i++)
+            {
+                if (strcmp(portProfileName(i), active) == 0)
+                {
+                    cur = i;
+                    break;
+                }
+            }
+            for (i = cur + 1; i < n && !portProfileLoad(0, i); i++)
+            {
+                ;   /* one in another seat is theirs: past it */
+            }
+            if (i >= n)
+            {
+                portProfileClear(0);
+            }
+            break;
+        }
         case CLROW_DISCORDYES:
         case CLROW_DISCORDNO:
             coopDiscordRespond(r->arg, r->kind == CLROW_DISCORDYES);
@@ -21279,6 +21324,74 @@ void menu_init(void)
 }
 
 
+#ifndef TARGET_N64
+/* the folder menus' button prompts along the top, in the style of the pad
+ * last pressed (menu_glyphs.c). Not on the intro screens, the cast roll or
+ * the Spectrum. */
+static Gfx *frontHintBar(Gfx *DL)
+{
+    extern s32 portInputGlyphStyle(void);   /* input_pc.c: 0 the keyboard */
+    struct MenuHint h[4];
+    s32 n = 0;
+
+    if (getenv("GE_NOHINTS") != NULL || maybe_prev_menu > MENU_INVALID || menu_update > MENU_INVALID)
+    {
+        return DL;  /* none while a screen change is under way */
+    }
+    switch (current_menu)
+    {
+        case MENU_FILE_SELECT:
+            h[n].action = MENUGLYPH_ACCEPT; h[n++].word = "SELECT";
+            break;
+        case MENU_MISSION_FAILED:
+        case MENU_MISSION_COMPLETE:
+            h[n].action = MENUGLYPH_ACCEPT; h[n++].word = "CONTINUE";
+            break;
+        case MENU_COOP_LOBBY:
+            if (coopScreenErrorUp())
+            {
+                h[n].action = MENUGLYPH_ACCEPT; h[n++].word = "OK";
+                break;
+            }
+            if (coop_lobby_hot >= 0 && portInputGlyphStyle() != 0   /* the keyboard's click is Select, which changes it */
+                && (coop_lobby_rows[coop_lobby_hot].kind == CLROW_CHARACTER
+                                        || (coop_lobby_rows[coop_lobby_hot].kind >= CLROW_VSARENA
+                                            && coop_lobby_rows[coop_lobby_hot].kind <= CLROW_VSWEAPONS)))
+            {
+                h[n].action = MENUGLYPH_LEFT; h[n++].word = "CHANGE";
+            }
+            h[n].action = MENUGLYPH_ACCEPT; h[n++].word = "SELECT";
+            h[n].action = MENUGLYPH_BACK; h[n++].word = "BACK";
+            if (coopLobbyHasPartner() && !coopChatTyping())
+            {
+                h[n].action = MENUGLYPH_CHAT; h[n++].word = "CHAT";
+            }
+            break;
+        case MENU_MODE_SELECT:
+        case MENU_PORT_OPTIONS:
+        case MENU_PORT_SHEET:
+        case MENU_MISSION_SELECT:
+        case MENU_DIFFICULTY:
+        case MENU_007_OPTIONS:
+        case MENU_BRIEFING:
+        case MENU_MP_OPTIONS:
+        case MENU_MP_SCENARIO_SELECT:
+        case MENU_MP_CHAR_SELECT:
+        case MENU_MP_TEAMS:
+        case MENU_MP_HANDICAP:
+        case MENU_MP_CONTROL_STYLE:
+        case MENU_MP_STAGE_SELECT:
+        case MENU_CHEAT:
+            h[n].action = MENUGLYPH_ACCEPT; h[n++].word = "SELECT";
+            h[n].action = MENUGLYPH_BACK; h[n++].word = "BACK";
+            break;
+        default:
+            return DL;
+    }
+    return menuHintBar(DL, h, n);
+}
+#endif
+
 Gfx * menu_jump_constructor_handler(Gfx *DL)
 {
     switch(current_menu) {
@@ -21369,6 +21482,9 @@ Gfx * menu_jump_constructor_handler(Gfx *DL)
             DL = constructor_menu19_spectrum(DL);
             break;
     }
+#ifndef TARGET_N64
+    DL = frontHintBar(DL);
+#endif
 
     return DL;
 }
