@@ -34,6 +34,14 @@ static const struct PortOptHelp sHelp[] = {
     { "high_lod",           "Always draws the most detailed models." },
     { "setting_help",       "Shows this help box." },
 
+    /* Accessibility */
+    { "captions",           "Shows gunfire, blasts, alarms and doors as text." },
+    { "colorblind",         "Player colours you can tell apart." },
+    { "screen_shake",       "Explosions shake the view." },
+    { "text_size",          "Size of co-op text, captions and messages." },
+    { "crouch_key",         "Crouch key: hold it, or press on and off." },
+    { "walk_key",           "Walk key: hold it, or press on and off." },
+
     /* HUD */
     { "sight_on_screen",    "Shows the aiming sight." },
     { "always_crosshair",   "Small target at the gun's aim point." },
@@ -149,6 +157,7 @@ static const struct PortOptHelp sHelp[] = {
     { "@page_general",      "Look, aim and view options." },
     { "@page_hud",          "What the in-game HUD shows and where." },
     { "@page_portopts",     "The port's own gameplay switches." },
+    { "@page_access",       "Captions, colours, shake, text size, hold or toggle." },
     { "@page_video",        "Display mode, resolution and picture quality." },
     { "@page_audio",        "Volume and sound options." },
 };

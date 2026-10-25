@@ -51,14 +51,11 @@ extern s32 portVideoShowFps(void);          /* video.c: [display] show_fps */   
 #define COOP_HUD_COL_DONE   0x60FF60D0
 #define COOP_HUD_COL_FAIL   0xFF4040FF
 #define COOP_HUD_COL_SHADOW 0x000000A0
-#define COOP_HUD_COL_TAG    0xFFFF80FF  /* the first partner's yellow, as their radar dot */
 
 /* each player's colour (by player number) for their tag and radar dot, alpha 0xFF */
 static u32 coopHudPlayerColour(s32 player)
 {
-    static const u32 colours[COOP_MAX_PLAYERS] = { 0xFFFF80FF, 0x80E0FFFF, 0xFF90E0FF, 0x90FF90FF };
-
-    return colours[(player >= 0 && player < COOP_MAX_PLAYERS) ? player : 0];
+    return coopPlayerColour(player);    /* coop_access.c: the colour-blind set when it is on */
 }
 
 /* the radar's centre, as radar.c lays it out for one player */
@@ -236,7 +233,7 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
 
         x4 = (x4 < 0) ? 0 : (x4 > 0xFFE) ? 0xFFE : x4;
         y4 = (y4 < 0) ? 0 : (y4 > 0xFFE) ? 0xFFE : y4;
-        gDPNoOpTag(gdl++, 0x5A000000u | (u32) (scale * 256.0f + 0.5f));
+        gDPNoOpTag(gdl++, 0x5A000000u | (u32) (scale * coopTextScale() * 256.0f + 0.5f));   /* times Text Size */
         gDPNoOpTag(gdl++, 0x58000000u | ((u32) x4 << 12) | (u32) y4);
     }
     gdl = textRenderOutlined(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic,
@@ -381,7 +378,7 @@ static Gfx *coopHudPing(Gfx *gdl, CoopPingMark *m)
         y4 = ly * 4;
         x4 = (x4 < 0) ? 0 : (x4 > 0xFFE) ? 0xFFE : x4;
         y4 = (y4 < 0) ? 0 : (y4 > 0xFFE) ? 0xFFE : y4;
-        gDPNoOpTag(gdl++, 0x5A000000u | (u32) (scale * 256.0f + 0.5f));
+        gDPNoOpTag(gdl++, 0x5A000000u | (u32) (scale * coopTextScale() * 256.0f + 0.5f));   /* times Text Size */
         gDPNoOpTag(gdl++, 0x58000000u | ((u32) x4 << 12) | (u32) y4);
         gdl = textRenderOutlined(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic,
                                  coopHudWithAlpha(m->kind == COOPPING_ENEMY ? COOP_HUD_COL_FAIL : colour, alpha),
@@ -498,7 +495,7 @@ static Gfx *coopHudPartnerStatus(Gfx *gdl, CoopHudPartner *p, s32 row)
     {
         PORT_HUD_ANCHOR(gdl, PORT_HUD_ANCHOR_LEFT);
     }
-    gdl = portHudScaleBegin(gdl, (f32) viGetViewLeft(), (f32) viGetViewTop());
+    gdl = coopTextScaleBegin(gdl, (f32) viGetViewLeft(), (f32) viGetViewTop());   /* HUD Scale and Text Size */
     gdl = microcode_constructor(gdl);
     coopHudText(name, sizeof(name), p->name);
     coopHudFit(name, 0x70);
@@ -548,7 +545,7 @@ static Gfx *coopHudPartnerStatus(Gfx *gdl, CoopHudPartner *p, s32 row)
         }
     }
     gdl = combiner_bayer_lod_perspective(gdl);
-    gdl = portHudScaleEnd(gdl);
+    gdl = coopTextScaleEnd(gdl);
     if (hudAnchorsToEdges())
     {
         PORT_HUD_ANCHOR_OFF(gdl);
@@ -623,7 +620,7 @@ static Gfx *coopHudSpectating(Gfx *gdl, s32 who)
     x = viGetViewLeft() + (viGetViewWidth() - tw) / 2;
     y = viGetViewTop() + 0x18;
     gdl = microcode_constructor(gdl);
-    gdl = coopHudPrint(gdl, x, y, text, COOP_HUD_COL_TAG);
+    gdl = coopHudPrint(gdl, x, y, text, coopHudPlayerColour(who));
     return combiner_bayer_lod_perspective(gdl);
 }
 
@@ -644,7 +641,7 @@ static Gfx *coopHudObjectives(Gfx *gdl, s32 below)
     {
         PORT_HUD_ANCHOR(gdl, PORT_HUD_ANCHOR_RIGHT);
     }
-    gdl = portHudScaleBegin(gdl, (f32) (viGetViewLeft() + viGetViewWidth()), (f32) viGetViewTop());
+    gdl = coopTextScaleBegin(gdl, (f32) (viGetViewLeft() + viGetViewWidth()), (f32) viGetViewTop());   /* HUD Scale and Text Size */
     gdl = microcode_constructor(gdl);
     for (i = 0; i < objectiveGetCount() && i < OBJECTIVES_MAX; i++)
     {
@@ -728,7 +725,7 @@ static Gfx *coopHudObjectives(Gfx *gdl, s32 below)
         y += 2;
     }
     gdl = combiner_bayer_lod_perspective(gdl);
-    gdl = portHudScaleEnd(gdl);
+    gdl = coopTextScaleEnd(gdl);
     if (hudAnchorsToEdges())
     {
         PORT_HUD_ANCHOR_OFF(gdl);
@@ -788,6 +785,8 @@ Gfx *coopHudRender(Gfx *gdl)
     {
         gdl = coopHudObjectives(gdl, partner ? COOP_RADAR_TOP + 0x16 : 0x10);
     }
+    coopCaptionHarness();
+    gdl = coopCaptionsRender(gdl);   /* Sound Captions (coop_access.c) */
     gdl = coopFeedRender(gdl);   /* chat lines and toasts (coop_chat.c) */
     gdl = weapmenuRender(gdl);
     return gdl;

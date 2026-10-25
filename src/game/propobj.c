@@ -14444,6 +14444,11 @@ void doorSetOpenState(DoorRecord *door, s32 newstate)
 {
 #ifndef TARGET_N64
     coopDoorStateChanged(door, newstate); /* co-op: mirror to the peer */
+    if (newstate == DOORSTATE_OPENING && door->prop != NULL
+        && (door->openstate == DOORSTATE_STATIONARY || door->openstate == DOORSTATE_WAITING))
+    {
+        coopCaption(COOPCAP_DOOR, &door->prop->pos);   /* Sound Captions (coop_access.c) */
+    }
 #endif
     if (newstate == DOORSTATE_OPENING)
     {

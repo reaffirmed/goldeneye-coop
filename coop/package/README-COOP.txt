@@ -204,6 +204,18 @@ to ProjectMidas.exe. Without the file, or without Discord running, the game
 plays as before. Steam starts with the game now so the status shows from
 the first menu; put GE_NO_PRESENCE=1 in the environment to turn both off.
 
+Accessibility
+-------------
+Options > Gameplay > Accessibility:
+- Sound Captions: gunfire, explosions, doors opening and alarms show as a
+  line such as "[ GUNFIRE - BEHIND ]", with the side they came from. (The
+  game has no spoken dialogue to subtitle; briefings are already text.)
+- Colour Blind: Red-Green or Blue-Yellow player colours for name tags, the
+  radar and the chat feed.
+- Text Size: 100% to 200% for co-op text, captions and mission messages.
+- Screen Shake: Off stops explosions shaking the view.
+- Crouch Key and Walk Key: Hold or Toggle (press once on, again off).
+
 If something goes wrong
 -----------------------
 - Something looks wrong: press F8 (anywhere, in a mission or the menus). The

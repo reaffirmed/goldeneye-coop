@@ -137,6 +137,11 @@ static int s_CfgFastPause = 0;     /* [display] fast_pause: the watch opens and 
 static int s_CfgMouseAutoAim = 0;   /* [display] mouse_auto_aim: 1 lets a mouse player use Auto-Aim (default: never) */
 static int s_CfgMuteUnfocused = 0; /* [display] mute_unfocused: audio_pc.c plays silence while the window has no focus */
 static int s_CfgArmorHud = 0;       /* [display] armor_hud: the health / armour arcs show on a body armour pickup (bondview2.c) */
+/* Accessibility (src/game/coop_access.c) */
+static int s_CfgCaptions = 0;       /* [display] captions: sound captions (gunfire, explosions, alarms, doors) */
+static int s_CfgColorblind = 0;     /* [display] colorblind: player colours, 0 standard, 1 red-green, 2 blue-yellow */
+static int s_CfgScreenShake = 1;    /* [display] screen_shake: explosions shake the view (vanilla on) */
+static int s_CfgTextSize = 100;     /* [display] text_size: co-op text, captions and messages, percent */
 static int s_CfgWeaponFov = 0;      /* [display] weapon_fov: 1 = the gun draws at the default FOV (gunfire.c), 0 = Match View */
 static int s_CfgSettingHelp = 1;   /* [display] setting_help: the folder sheets' help box (front.c), default on */
 /* Classic Mode's NTSC composite filter (gfx_opengl.cpp vi_prog[3]) is a Classic
@@ -378,6 +383,12 @@ s32 portArmorHud(void)
 {
     return s_CfgArmorHud;
 }
+
+/** Accessibility (src/game/coop_access.c): captions, colours, shake, text size */
+s32 portAccessCaptions(void)   { return s_CfgCaptions; }
+s32 portAccessColorblind(void) { return s_CfgColorblind; }
+s32 portAccessScreenShake(void) { return s_CfgScreenShake; }
+s32 portAccessTextSize(void)   { return s_CfgTextSize; }
 
 /** [display] weapon_fov: gunfire.c gunWeaponFovY draws the gun at the default FOV, not the view's */
 s32 portWeaponFov(void)
@@ -1253,6 +1264,10 @@ static int videoSetDisplayOption(const char *key, const char *value)
     if (SDL_strcasecmp(key, "watch_static") == 0) { s_CfgWatchStatic = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "fast_pause") == 0)   { s_CfgFastPause = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "armor_hud") == 0)    { s_CfgArmorHud = SDL_atoi(value) != 0; return 1; }
+    if (SDL_strcasecmp(key, "captions") == 0)     { s_CfgCaptions = SDL_atoi(value) != 0; return 1; }
+    if (SDL_strcasecmp(key, "colorblind") == 0)   { s_CfgColorblind = SDL_clamp(SDL_atoi(value), 0, 2); return 1; }
+    if (SDL_strcasecmp(key, "screen_shake") == 0) { s_CfgScreenShake = SDL_atoi(value) != 0; return 1; }
+    if (SDL_strcasecmp(key, "text_size") == 0)    { s_CfgTextSize = SDL_clamp(SDL_atoi(value), 100, 200); return 1; }
     if (SDL_strcasecmp(key, "weapon_fov") == 0)   { s_CfgWeaponFov = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "setting_help") == 0) { s_CfgSettingHelp = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "mouse_auto_aim") == 0) { s_CfgMouseAutoAim = SDL_atoi(value) != 0; return 1; }
@@ -1521,6 +1536,10 @@ s32 portVideoOptionGet(const char *key, s32 *out)
     if (SDL_strcasecmp(key, "watch_static") == 0) { *out = s_CfgWatchStatic; return 1; }
     if (SDL_strcasecmp(key, "fast_pause") == 0)   { *out = s_CfgFastPause; return 1; }
     if (SDL_strcasecmp(key, "armor_hud") == 0)    { *out = s_CfgArmorHud; return 1; }
+    if (SDL_strcasecmp(key, "captions") == 0)     { *out = s_CfgCaptions; return 1; }
+    if (SDL_strcasecmp(key, "colorblind") == 0)   { *out = s_CfgColorblind; return 1; }
+    if (SDL_strcasecmp(key, "screen_shake") == 0) { *out = s_CfgScreenShake; return 1; }
+    if (SDL_strcasecmp(key, "text_size") == 0)    { *out = s_CfgTextSize; return 1; }
     if (SDL_strcasecmp(key, "weapon_fov") == 0)   { *out = s_CfgWeaponFov; return 1; }
     if (SDL_strcasecmp(key, "setting_help") == 0) { *out = s_CfgSettingHelp; return 1; }
     if (SDL_strcasecmp(key, "mouse_auto_aim") == 0) { *out = s_CfgMouseAutoAim; return 1; }
@@ -1799,7 +1818,7 @@ void videoMouseWheel(int dy)
  * only parses the key names and reports "down" per action each poll). */
 /* Bigger than PORTACT_COUNT with room to append; the poll loop silently clips to it, so
  * videoBindCountCheck below complains if it is ever too small. */
-#define PORT_BIND_MAX 32
+#define PORT_BIND_MAX 48
 static SDL_Scancode sPortBindings[PORT_BIND_MAX][BIND_MAX_KEYS];
 
 /* [controls] mouse_unlock (default F1): the key that frees / re-grabs the
@@ -2233,6 +2252,12 @@ static void videoWriteDefaultIni(void)
         extern s32 portJoyPortNoAimCrouch(void);
         fprintf(f, "no_aim_crouch=%d\n", portJoyPortNoAimCrouch());
     }
+    {
+        extern s32 portJoyPortCrouchKey(void);
+        extern s32 portJoyPortWalkKey(void);
+        fprintf(f, "crouch_key=%d\n", portJoyPortCrouchKey());
+        fprintf(f, "walk_key=%d\n", portJoyPortWalkKey());
+    }
     fprintf(f, "background_input=0\n");
     fprintf(f, "mouse=1\n");
     {   /* the live value, so the file can never drift from input_pc.c's
@@ -2350,6 +2375,10 @@ static void videoWriteDefaultIni(void)
     fprintf(f, "watch_static=%d\n", s_CfgWatchStatic);
     fprintf(f, "fast_pause=%d\n", s_CfgFastPause);
     fprintf(f, "armor_hud=%d\n", s_CfgArmorHud);
+    fprintf(f, "captions=%d\n", s_CfgCaptions);
+    fprintf(f, "colorblind=%d\n", s_CfgColorblind);
+    fprintf(f, "screen_shake=%d\n", s_CfgScreenShake);
+    fprintf(f, "text_size=%d\n", s_CfgTextSize);
     fprintf(f, "setting_help=%d\n", s_CfgSettingHelp);
     fprintf(f, "mouse_auto_aim=%d\n", s_CfgMouseAutoAim);
     fprintf(f, "mute_unfocused=%d\n", s_CfgMuteUnfocused);

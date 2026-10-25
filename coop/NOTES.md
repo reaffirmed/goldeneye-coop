@@ -738,3 +738,34 @@ satellite-console work and the Runway plane did nothing on the host.
   exe were backed up (3 files with eeprom.bin) and moved in on first read;
   a co-op win on the mock Steam wrote the campaign with the v2 header and
   Continue read it back ("Continue: Facility (Agent)").
+
+## Accessibility (2026-10-25)
+
+- Options > Gameplay > Accessibility (PORT_SHEET_ACCESS, GE_MENU=access):
+  Sound Captions, Colour Blind, Text Size, Screen Shake, then the existing
+  Stamina Sway (head_roll) and Aim Control, then Crouch Key and Walk Key.
+- GoldenEye has no spoken lines (briefings are text and in-game speech is
+  grunts), so "subtitles" are sound captions: src/game/coop_access.c.
+  coopCaption(kind, pos) from chraction.c (a guard's gun; partner puppets are
+  skipped), explosion.c and propobj.c doorSetOpenState (a door starting to
+  open, not one within 300 units: your own). Each line says which side
+  (ahead/right/behind/left, the radar's convention); the same kind and side
+  within 1.5 s merges; lines last 2.5 s, up to 4. "[ ALARM ]" stays while
+  alarmIsActive(). Drawn by coop_hud.c above the bottom message line.
+- [display] colorblind 0/1/2: coopPlayerColour (coop_access.c) is the one
+  palette for name tags, the radar, the feed and WATCHING. Red-green and
+  blue-yellow sets are from the Okabe-Ito colours.
+- [display] text_size 100..200: coopTextScale; coopTextScaleBegin/End wrap
+  the co-op text (partner status, objectives list, feed and chat, captions)
+  and the bottom mission message in a 0x5A/0x58 scale bracket; name tag and
+  ping labels multiply their own 0x5A scale.
+- [display] screen_shake 0: fr.c viShake gets intensity 0.
+- [input] crouch_key / walk_key 1 = Toggle: joy_port.c turns the hold key's
+  press into a toggle press (crouch) or flips a latch (walk).
+- Fix on the way: PORT_BIND_MAX in video.c was 32 with 34 actions, so the
+  chat and photo keys could not be bound, and the keyboard poll read past its
+  32-byte array: under Xvfb chat read as held and a "SAY: _" line opened by
+  itself mid-mission. Now 48.
+- Harness: GE_CAPTEST=<s> adds one of each caption <s> s after the first
+  mission HUD frame and refreshes them for 10 s (logs "ge: captions: test
+  caption").

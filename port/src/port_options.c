@@ -102,6 +102,12 @@ static const s32 sMsaaVals[] = { 1, 2, 4, 8 };
 static const char *const sHudScaleText[] = { "Normal\n", "High\n" };
 /* weapon_fov: off = the gun follows the view FOV (vanilla), on = the default FOV */
 static const char *const sWeaponFovText[] = { "Match View\n", "Default\n" };
+/* accessibility (src/game/coop_access.c) */
+static const s32 sColorblindVals[] = { 0, 1, 2 };
+static const char *const sColorblindText[] = { "Off\n", "Red-Green\n", "Blue-Yellow\n" };
+static const s32 sTextSizeVals[] = { 100, 125, 150, 200 };
+static const char *const sTextSizeText[] = { "100%\n", "125%\n", "150%\n", "200%\n" };
+static const char *const sHoldToggleText[] = { "Hold\n", "Toggle\n" };
 static const char *const sMsaaText[] = { "OFF\n", "2x\n", "4x\n", "8x\n" };
 
 /* -1 = "hardware": the N64's own frame pacing on the 60 Hz sim (tickhz=hw in the ini) */
@@ -342,6 +348,13 @@ static const struct PortOpt sOpts[] = {
     TOGGLE("background_input",  "[input]", "BG Input\n", PORTOPT_CAT_CONTROLLER),
     /* the folder sheets' help box (front.c portSheetDrawHelp), Port Options */
     TOGGLE("setting_help",      "[display]", "Setting Help\n", PORTOPT_CAT_GAMEPLAY),
+    /* accessibility (the Accessibility sheet, src/game/coop_access.c) */
+    TOGGLE("captions",          "[display]", "Sound Captions\n", PORTOPT_CAT_GAMEPLAY),
+    ENUMR ("colorblind",        "[display]", "Colour Blind\n",  PORTOPT_CAT_GAMEPLAY, sColorblindVals, sColorblindText, NULL),
+    TOGGLE("screen_shake",      "[display]", "Screen Shake\n",  PORTOPT_CAT_GAMEPLAY),
+    ENUMR ("text_size",         "[display]", "Text Size\n",     PORTOPT_CAT_GAMEPLAY, sTextSizeVals, sTextSizeText, NULL),
+    TOGGLET("crouch_key",       "[input]",   "Crouch Key\n",    PORTOPT_CAT_CONTROLLER, sHoldToggleText),
+    TOGGLET("walk_key",         "[input]",   "Walk Key\n",      PORTOPT_CAT_CONTROLLER, sHoldToggleText),
 };
 
 #define PORTOPT_COUNT ((s32)(sizeof(sOpts) / sizeof(sOpts[0])))

@@ -119,13 +119,11 @@ static s32 sToastCount;
 
 static u32 coopFeedColour(s32 player)
 {
-    static const u32 colours[COOP_MAX_PLAYERS] = { 0xFFFF80FF, 0x80E0FFFF, 0xFF90E0FF, 0x90FF90FF };
-
     if (player == COOPTOAST_ALERT)
     {
         return COOPTOAST_ALERTCOL;
     }
-    return (player >= 0 && player < COOP_MAX_PLAYERS) ? colours[player] : 0xFFFFFFFF;
+    return (player >= 0 && player < COOP_MAX_PLAYERS) ? coopPlayerColour(player) : 0xFFFFFFFF;   /* coop_access.c */
 }
 
 static u32 coopFeedAlpha(u32 colour, s32 a)
@@ -729,7 +727,7 @@ Gfx *coopFeedRender(Gfx *gdl)
     {
         PORT_HUD_ANCHOR(gdl, PORT_HUD_ANCHOR_LEFT);
     }
-    gdl = portHudScaleBegin(gdl, (f32) viGetViewLeft(), (f32) (viGetViewTop() + viGetViewHeight()));
+    gdl = coopTextScaleBegin(gdl, (f32) viGetViewLeft(), (f32) (viGetViewTop() + viGetViewHeight()));   /* HUD Scale and Text Size */
     gdl = microcode_constructor(gdl);
     y = bottom;
     if (sTyping)
@@ -763,7 +761,7 @@ Gfx *coopFeedRender(Gfx *gdl)
     }
     gdl = coopToastsRender(gdl, left, y + 0x0B - 4);
     gdl = combiner_bayer_lod_perspective(gdl);
-    gdl = portHudScaleEnd(gdl);
+    gdl = coopTextScaleEnd(gdl);
     if (hudAnchorsToEdges())
     {
         PORT_HUD_ANCHOR_OFF(gdl);

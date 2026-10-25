@@ -215,6 +215,10 @@ static s32 sShootTap[4];    /* shoot went down this tick */
 /* [input] no_aim_crouch (default OFF = vanilla): 1 = aim + down no longer
  * crouches (bondview2.c); the crouch binds still do. */
 static s32 sNoAimCrouch = 0;
+/* [input] crouch_key / walk_key (accessibility, default 0 = hold): 1 = the
+ * crouch_hold and walk keys toggle instead, one press on, the next off */
+static s32 sCrouchKeyToggles = 0;
+static s32 sWalkKeyToggles = 0;
 static s32 joyPortPad(void);
 
 /* Per pad: the keyboard feeds pad 0 (video.c portJoyPortPoll) and a controller
@@ -323,6 +327,14 @@ s32 portJoyPortSetOption(const char *key, const char *value)
     }
     if (strcmp(key, "no_aim_crouch") == 0) {
         sNoAimCrouch = atoi(value) != 0;
+        return 1;
+    }
+    if (strcmp(key, "crouch_key") == 0) {
+        sCrouchKeyToggles = atoi(value) != 0;
+        return 1;
+    }
+    if (strcmp(key, "walk_key") == 0) {
+        sWalkKeyToggles = atoi(value) != 0;
         return 1;
     }
     /* padN_<the same two>: input_pc.c's padN_ arm is asked first and turns
@@ -452,6 +464,14 @@ s32 portJoyPortOptionGet(const char *key, s32 *out)
         *out = sNoAimCrouch;
         return 1;
     }
+    if (strcmp(key, "crouch_key") == 0) {
+        *out = sCrouchKeyToggles;
+        return 1;
+    }
+    if (strcmp(key, "walk_key") == 0) {
+        *out = sWalkKeyToggles;
+        return 1;
+    }
     return 0;
 }
 
@@ -473,8 +493,19 @@ s32 portJoyPortOptionSet(const char *key, s32 v)
         sNoAimCrouch = v != 0;
         return 1;
     }
+    if (strcmp(key, "crouch_key") == 0) {
+        sCrouchKeyToggles = v != 0;
+        return 1;
+    }
+    if (strcmp(key, "walk_key") == 0) {
+        sWalkKeyToggles = v != 0;
+        return 1;
+    }
     return 0;
 }
+
+s32 portJoyPortCrouchKey(void) { return sCrouchKeyToggles; }
+s32 portJoyPortWalkKey(void)   { return sWalkKeyToggles; }
 
 /* ---- harness: GE_JOYPORT_AUTO ------------------------------------------- */
 
@@ -822,6 +853,16 @@ s32 portJoyPortWalkActive(void)
     if (pad < 0) {
         return 0;
     }
+    if (sWalkKeyToggles) {
+        /* Walk Key: Toggle (accessibility) - each press flips walking */
+        static s32 walkWas[PORT_PADS], walkOn[PORT_PADS];
+
+        if (sHeld[pad][PORTACT_WALK] && !walkWas[pad]) {
+            walkOn[pad] = !walkOn[pad];
+        }
+        walkWas[pad] = sHeld[pad][PORTACT_WALK];
+        return walkOn[pad];
+    }
     return sAlwaysWalk[pad] ? !sHeld[pad][PORTACT_RUN] : sHeld[pad][PORTACT_WALK];
 }
 
@@ -1110,6 +1151,7 @@ typedef struct {
     s32 standPending; /* stand-up owed (toggle off / hold release) */
     s32 wasSquat;     /* we have seen crouchpos == SQUAT while active */
     s32 holdEaten;    /* this hold press was spent clearing the latch, not crouching */
+    s32 keyWas;       /* crouch_key toggle: the hold key was down on the previous tick */
 } JoyPortCrouch;
 static JoyPortCrouch sCrouch[PORT_PADS];
 
@@ -1128,6 +1170,15 @@ s32 portJoyPortCrouchStep(void)
     c = &sCrouch[pad];
     toggle = portJoyPortTake(pad, PORTACT_CROUCH_TOGGLE);
     hold = sHeld[pad][PORTACT_CROUCH_HOLD];
+    if (sCrouchKeyToggles) {
+        /* Crouch Key: Toggle (accessibility): the hold key's press is a toggle
+         * press, and it is never held */
+        if (hold && !c->keyWas) {
+            toggle = 1;
+        }
+        c->keyWas = hold;
+        hold = 0;
+    }
     if (g_PlayerIsInTank) {
         c->wanted = 0;
         c->wasSquat = 0;
