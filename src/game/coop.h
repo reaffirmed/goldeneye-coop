@@ -227,10 +227,12 @@ s32  coopBrowseCount(void);             /* -1 still looking */
 const char *coopBrowseName(s32 i);
 s32  coopBrowseMembers(s32 i);
 s32  coopBrowseLocked(s32 i);
+s32  coopBrowseInMission(s32 i);
 void coopBrowseJoin(s32 i);
 s32  coopBrowseChecking(void);
 s32  coopBrowseRefused(void);
 const char *coopBrowseRefusedText(void);
+const char *coopBrowseRefusedHint(void);
 void coopBrowseTypeStart(s32 kind, s32 forgame);
 s32  coopBrowseTyping(void);
 s32  coopBrowseTypingFor(void);
@@ -261,6 +263,7 @@ Gfx *coopPhotoRender(Gfx *gdl);
 /* watching a partner while we are down (coop_spectate.c) */
 void coopSpectateTick(void);
 void coopSpectateStop(void);
+void coopSpectateDropIn(s32 on);
 s32  coopSpectateTarget(void);
 s32  coopSpectateCamera(struct coord3d *pos, struct coord3d *look, struct coord3d *up);
 s32  coopSpectateRoom(u8 *room);
@@ -503,5 +506,21 @@ void coopObjNoteSelf(void);     /* this game's own Bond did it: a photo, a room,
 void coopObjStatusChanged(s32 index, s32 letter, s32 status);  /* objective_status.c */
 void coopObjTick(s32 inmission);
 void coopObjApply(s32 kind, const u8 *raw, s32 from);
+
+/* crash and bug reports (port/src/port_report.c): the co-op state as text */
+s32  coopDebugDump(char *buf, s32 cap);
+void coopCrashBye(void);   /* port_report.c: the game crashed, tell the partners */
+
+/* accessibility (coop_access.c) */
+enum { COOPCAP_GUNFIRE, COOPCAP_EXPLOSION, COOPCAP_DOOR, COOPCAP_ALARM, COOPCAP_COUNT };
+u32  coopPlayerColour(s32 player);              /* RGBA, alpha 0xFF; the colour-blind set when it is on */
+f32  coopTextScale(void);                       /* Text Size: 1.0 to 2.0 */
+Gfx *coopTextScaleBegin(Gfx *gdl, f32 x, f32 y);   /* co-op text scaled about (x, y); HUD Scale included */
+Gfx *coopTextScaleEnd(Gfx *gdl);
+s32  coopScreenShakeOn(void);
+void coopCaption(s32 kind, coord3d *pos);       /* a sound worth a caption happened at pos */
+void coopCaptionChrGunfire(ChrRecord *chr);     /* chraction.c: a chr's gun went off */
+Gfx *coopCaptionsRender(Gfx *gdl);
+void coopCaptionHarness(void);
 
 #endif

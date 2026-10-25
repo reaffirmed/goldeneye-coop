@@ -30,7 +30,7 @@
 #include "coop_net.h"
 
 extern void portConLogf(const char *fmt, ...);
-extern const char *portRootPath(const char *name);
+#include "port_save.h"
 
 /* ---- mission stats --------------------------------------------------------- */
 
@@ -453,6 +453,7 @@ const char *coopStatsName(s32 col)
  * The key is steam:<SteamID> over Steam, else name:<name>. */
 
 #define COOP_CAMPAIGN_FILE  "coop_campaign.txt"
+#define COOP_CAMPAIGN_VERSION 2     /* 1: beside the game, no header (port_save.h) */
 #define COOP_CAMPAIGN_MAX   256
 #define COOP_MISSIONS       20
 
@@ -498,16 +499,24 @@ static void coopCampaignLoad(void)
 {
     char line[160];
     FILE *f;
+    int version;
 
     if (sCampaignCount >= 0)
     {
         return;
     }
     sCampaignCount = 0;
-    f = fopen(portRootPath(COOP_CAMPAIGN_FILE), "r");
+    /* v1 sat beside the game with no header; v2 is in Data/Saves. The lines
+     * are the same in both. */
+    f = portSaveOpenRead(COOP_CAMPAIGN_FILE, COOP_CAMPAIGN_FILE, &version);
     if (f == NULL)
     {
         return;
+    }
+    if (version > COOP_CAMPAIGN_VERSION)
+    {
+        portConLogf("ge: coop: campaign: %s is from a newer build (v%d); reading what this one knows\n",
+                    COOP_CAMPAIGN_FILE, (int) version);
     }
     while (fgets(line, sizeof(line), f) != NULL && sCampaignCount < COOP_CAMPAIGN_MAX)
     {
@@ -543,7 +552,7 @@ static u8 sCampaignSent[COOP_MAX_PLAYERS];  /* host: told this player our furthe
 
 static void coopCampaignSave(void)
 {
-    FILE *f = fopen(portRootPath(COOP_CAMPAIGN_FILE), "w");
+    FILE *f = portSaveOpenWrite(COOP_CAMPAIGN_FILE, "coop-campaign", COOP_CAMPAIGN_VERSION);
     s32 i;
 
     if (f == NULL)
@@ -558,7 +567,7 @@ static void coopCampaignSave(void)
         fprintf(f, "%s %s %s %s\n", sCampaign[i].key, sMissionKeys[(s32) sCampaign[i].mission],
                 sDiffKeys[(s32) sCampaign[i].difficulty], sCampaign[i].name);
     }
-    fclose(f);
+    portSaveCommit(f);
 }
 
 /* partner p's key; 0 when p is not one */

@@ -838,3 +838,154 @@ on the paper) and scroll as before.
   rate and chunk sizes are Steam's own). While the game is paused or in a
   cutscene coopTick does not poll the network, so voice waits until play
   resumes. Split-screen co-op hears voice centred.
+
+## Crash and bug reports (2026-10-25)
+
+- port/src/port_report.c. A crash (SEH filter on Windows, the signal handler
+  on Linux) or the stall watchdog's exit writes Data/Crashes/crash-<date>-<time>/:
+  info.txt (build string, commit, branch, OS, menu, stage), log.txt (the last
+  64 KB of portConLogf lines: port_console.c taps every line into
+  portReportTap, since the console ring is only 128 rows), coop.txt
+  (coopDebugDump in coop.c: role, player, stage, ticks, host hello, migration
+  state, settings, each partner's last STATE, each channel's seq/ack and
+  silence), crash.log, midas.ini, and on Windows minidump.dmp
+  (MiniDumpWithIndirectlyReferencedMemory | ScanMemory, about 40 KB; .bss is
+  23 MB so no data segments) and the last 512 KB of ge_direct.log. Linux adds
+  backtrace.txt. The newest 10 folders are kept.
+- Windows asks at once (MessageBox, game window minimised first): Yes zips
+  the folder to the Desktop (SHGetFolderPath CSIDL_DESKTOPDIRECTORY, so
+  OneDrive desktops work), puts the zip on the clipboard as CF_HDROP (Ctrl+V
+  in Discord or Explorer attaches the file) and opens Explorer on it.
+  Anything unanswered (No, Linux, a stall, GE_NOMSGBOX) leaves
+  Data/Crashes/pending.txt, and the next start asks before the window opens
+  (Save to Desktop / Don't send / Ask me later).
+- The zip is stored, not deflated: the writer allocates nothing and uses
+  fixed buffers, since it runs in a dying process.
+- F8 (a fixed key in input_pc.c, like ~; also `bugreport` in the console):
+  the same files minus the dump, plus screenshot.bmp (gfx_sdl2.cpp's forced
+  shot, halved until 1280 wide or less, about 2.7 MB), under
+  Data/Reports/bug-<date>-<time>/, zipped to the Desktop and copied
+  (Linux: the path as text). The console's flash rows say where.
+  portReportTick runs once a frame beside portConRender (boss.c).
+- Harness: GE_BUGTEST=<frame>, GE_CRASHTEST=<frame> (writes to address 16),
+  GE_REPORT_AUTOSAVE=1 (answer Save without a box), GE_REPORT_DESKTOP=<dir>
+  (Linux: where the Desktop is). Verified: F8 in a two-copy Dam run on the
+  mock Steam (zip opens, five files, coop.txt lists the host's channel);
+  a crash on the host mid-mission (coop.txt has the partner's position and
+  channel); the next start's box (screens/reports/crash-next-start.png) and
+  its autosave; the Windows build under Wine: the stall path wrote the
+  minidump and put the zip on the Wine Desktop.
+
+## Versioned saves (2026-10-25)
+
+- port/include/port_save.h, port/src/port_save.c. A text save in Data/Saves
+  starts `#ge-save <kind> <version> <commit>`; portSaveOpenRead returns the
+  file past that line with the version (1 for no header: written before
+  versioning), so the owner reads old layouts and its next write is current.
+  portSaveOpenWrite / portSaveCommit write <name>.tmp and swap it in
+  (rename; MoveFileEx REPLACE_EXISTING | WRITE_THROUGH on Windows), so a
+  crash mid-write keeps the last good save.
+- A legacy path given to portSaveOpenRead is the file's older place: found
+  only there, it is moved into Data/Saves (rename; if that fails it is read
+  in place and the next write lands in Data/Saves).
+- coop_campaign.txt (coop_stats.c) and coop_character.txt (coop_look.c) are
+  version 2: same lines as before, now in Data/Saves with the header. v1 was
+  beside the exe.
+- Backups: Data/Saves/build.txt holds the commit that last ran. A different
+  one (or none, with saves present) copies every plain file in Data/Saves plus
+  the two legacy co-op files to Data/Saves/Backups/<old commit or
+  "older">-<date>-<time>/ before anything reads them (main.c, before the
+  crash-report check). Newest 5 kept. eeprom.bin keeps the retail format
+  (no header); the backups cover it.
+- New save kinds (other threads): pick a name, start at version 1, read with
+  portSaveOpenRead, write with portSaveOpenWrite + portSaveCommit.
+- Verified: legacy coop_campaign.txt and coop_character.txt beside the
+  exe were backed up (3 files with eeprom.bin) and moved in on first read;
+  a co-op win on the mock Steam wrote the campaign with the v2 header and
+  Continue read it back ("Continue: Facility (Agent)").
+
+## Accessibility (2026-10-25)
+
+- Options > Gameplay > Accessibility (PORT_SHEET_ACCESS, GE_MENU=access):
+  Sound Captions, Colour Blind, Text Size, Screen Shake, then the existing
+  Stamina Sway (head_roll) and Aim Control, then Crouch Key and Walk Key.
+- GoldenEye has no spoken lines (briefings are text and in-game speech is
+  grunts), so "subtitles" are sound captions: src/game/coop_access.c.
+  coopCaption(kind, pos) from chraction.c (a guard's gun; partner puppets are
+  skipped), explosion.c and propobj.c doorSetOpenState (a door starting to
+  open, not one within 300 units: your own). Each line says which side
+  (ahead/right/behind/left, the radar's convention); the same kind and side
+  within 1.5 s merges; lines last 2.5 s, up to 4. "[ ALARM ]" stays while
+  alarmIsActive(). Drawn by coop_hud.c above the bottom message line.
+- [display] colorblind 0/1/2: coopPlayerColour (coop_access.c) is the one
+  palette for name tags, the radar, the feed and WATCHING. Red-green and
+  blue-yellow sets are from the Okabe-Ito colours.
+- [display] text_size 100..200: coopTextScale; coopTextScaleBegin/End wrap
+  the co-op text (partner status, objectives list, feed and chat, captions)
+  and the bottom mission message in a 0x5A/0x58 scale bracket; name tag and
+  ping labels multiply their own 0x5A scale.
+- [display] screen_shake 0: fr.c viShake gets intensity 0.
+- [input] crouch_key / walk_key 1 = Toggle: joy_port.c turns the hold key's
+  press into a toggle press (crouch) or flips a latch (walk).
+- Fix on the way: PORT_BIND_MAX in video.c was 32 with 34 actions, so the
+  chat and photo keys could not be bound, and the keyboard poll read past its
+  32-byte array: under Xvfb chat read as held and a "SAY: _" line opened by
+  itself mid-mission. Now 48.
+- Harness: GE_CAPTEST=<s> adds one of each caption <s> s after the first
+  mission HUD frame and refreshes them for 10 s (logs "ge: captions: test
+  caption").
+
+## "Update needed" on a version mismatch (2026-10-25)
+
+- The host's lobby carries gever (COOP_VERSION, already used to filter
+  Public Games) and now gebuild (PORT_BUILD_COMMIT). A joiner arriving by
+  invite, friend list or Discord compares gever in onLobbyEntered
+  (coop_steam.c): another version leaves the lobby at once (coop.c would drop
+  every packet of it anyway) and the lobby screen shows "Update needed to
+  join." with "Host <build>, you <build>" under it (coopSteamJoinRefused 3,
+  coopBrowseRefusedHint).
+- Copy a GetLobbyData answer before the next call: the mock (and possibly
+  Steam) reuses one buffer.
+- Harness: GE_COOP_FAKEVER=<n> makes this copy claim co-op version <n>
+  (two_player_lobby.sh with JOINENV="GE_COOP_FAKEVER=8").
+
+## Drop-in (2026-10-25)
+
+- A joiner that follows the host into a mission over 10 s old (sLateJoin,
+  as before) no longer jumps straight onto the host. coopDropInTick (coop.c)
+  watches a partner through coop_spectate.c (coopSpectateDropIn: alive, no
+  red wash) and comes in by the respawn rules: beside the calmest partner
+  once they have been out of a fight for 4 s, at most 20 s, never before 2 s
+  of watching, and after coopReplSnapshotDone() (a weak default returns 1;
+  the netcode thread's coop_repl.c overrides it with the join snapshot).
+  Nobody standing for 60 s: it plays from the level's start.
+- Until it arrives it sends no STATE, so the host has no puppet of it at the
+  level's start for guards to shoot. The HUD banner says "DROPPING IN BESIDE
+  <name>" with a countdown; the feed says "Dropped in beside <name>".
+- Public Games: the host sets lobby data gemission=1 while in a mission
+  (coopSteamSetInMission from coopBrowseTick) and the row's action reads
+  "Drop In" instead of "Join". Invites and Join a Friend's Game drop in the
+  same way.
+- Harness: coop/docker/drop_in.sh (the joiner is killed at KILLAT and comes
+  back), coop/docker/public_drop_in.sh (a third copy, nobody's friend, finds
+  the game under Public Games at LATE s; THIRD=browse joins it).
+  GE_COOP_TESTDROPIN=<s> holds the watch at least <s> s for screenshots.
+  Verified: rejoiner and a fresh third player both dropped in mid-mission
+  on the mock Steam.
+
+## Faster host migration (2026-10-25)
+
+- A crashed or stalled host says goodbye from its crash report
+  (port_report.c portReportCrash calls coopCrashBye after the text files,
+  before the minidump and the question): BYE HANDOFF to the next player, so
+  the partners migrate at once. Verified with GE_CRASHTEST on the host in
+  host_drop.sh (KILLAT=none): "the host handed over", the new host took
+  over 36 chrs.
+- A host that just goes silent (killed, cable pulled): COOP_SILENT_MS 3 s ->
+  2 s, then COOP_HOST_WAIT_MS 12 s -> 3.5 s once we have played the same
+  mission together for 10 s (coopHostWaitMs); early in a mission or in the
+  menus the old 12 s stays (COOP_HOST_WAIT_LOAD_MS) so a slower PC's load is
+  not taken for a crash. About 5.5 s instead of 15 s (host_drop.sh KILL=1).
+- The world the new host takes over is unchanged here (AI sync each second,
+  mirrored doors and objects); the netcode thread's coop_repl.c adds its
+  snapshot through coopReplMigrated.

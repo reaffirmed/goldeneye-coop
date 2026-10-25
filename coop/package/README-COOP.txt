@@ -127,17 +127,18 @@ Rules
 
 When someone leaves
 -------------------
-- If the host's game quits, crashes or loses its connection, everyone else
-  sees "HOST NOT RESPONDING" with a countdown, so a host whose connection
-  only hiccuped can come back. After about 15 seconds without the host (at
-  once if the host quit on purpose), the next player in the lobby list
-  becomes the host and the mission carries
+- If the host's game quits or crashes, the next player in the lobby list
+  becomes the host straight away. If the host just loses its connection,
+  everyone else sees "HOST NOT RESPONDING" with a countdown, so a host
+  whose connection only hiccuped can come back; after about 5 seconds
+  (15 while a mission is still loading) the next player takes over. Either
+  way the mission carries
   on from where it was: guards, doors, objectives and everyone's position
   stay as they were. The others connect to the new host by themselves.
 - With the Host Leaves rule on Back to Lobby, everyone returns to the lobby
   instead, with the next player as host.
 - The old host can come back: start co-op again and join the lobby, or
-  accept an invite, and you join the mission beside the others.
+  accept an invite, and you drop in to the mission beside the others.
 - When the host wants to quit, the watch's Abort asks first:
   HAND OVER: you leave, the next player becomes host and the others play on.
   END ALL: the mission ends for everyone and you all go back to the lobby.
@@ -211,11 +212,40 @@ to ProjectMidas.exe. Without the file, or without Discord running, the game
 plays as before. Steam starts with the game now so the status shows from
 the first menu; put GE_NO_PRESENCE=1 in the environment to turn both off.
 
+Dropping in
+-----------
+You can join a game that is already in a mission: from an invite, Join a
+Friend's Game, or Public Games (the row says "Drop In"). You watch a
+partner for a moment and come in beside them once things are quiet (at
+most 20 seconds).
+
+Accessibility
+-------------
+Options > Gameplay > Accessibility:
+- Sound Captions: gunfire, explosions, doors opening and alarms show as a
+  line such as "[ GUNFIRE - BEHIND ]", with the side they came from. (The
+  game has no spoken dialogue to subtitle; briefings are already text.)
+- Colour Blind: Red-Green or Blue-Yellow player colours for name tags, the
+  radar and the chat feed.
+- Text Size: 100% to 200% for co-op text, captions and mission messages.
+- Screen Shake: Off stops explosions shaking the view.
+- Crouch Key and Walk Key: Hold or Toggle (press once on, again off).
+
 If something goes wrong
 -----------------------
-Press ~ (tilde) in game to open the console. The co-op lines start with
-"ge: steam:", "ge: coop:", "ge: versus:", "ge: presence:" and "ge: discord:".
-Send those lines along with what happened.
+- Something looks wrong: press F8 (anywhere, in a mission or the menus). The
+  game saves a bug report zip on your Desktop with its log, the co-op state,
+  your settings and a screenshot, and copies it, so Ctrl+V in Discord
+  attaches it. Send it with a line on what happened. (Typing "bugreport" in
+  the ~ console does the same.)
+- The game crashes: it saves a crash report (log, co-op state, settings and
+  a memory dump) in Data\Crashes and asks whether to put it on your Desktop
+  as a zip. Say yes and paste it into Discord: it is on the clipboard too.
+  If you say no, or the game froze instead, it asks again the next time you
+  start it.
+- Press ~ (tilde) in game to open the console. The co-op lines start with
+  "ge: steam:", "ge: coop:", "ge: versus:", "ge: presence:" and
+  "ge: discord:".
 
 Known gaps in this build
 ------------------------

@@ -794,7 +794,9 @@ void bossMainloop(void)
                                * last so it covers every screen, and a no-op
                                * until opened or while fonts are unloaded. */
                                 extern Gfx *portConRender(Gfx *gdl);
+                                extern void portReportTick(void);
                                 gdl = portConRender(gdl);
+                                portReportTick();   /* F8's bug report (port_report.c) */
                             }
 #endif
                             gDPFullSync(gdl++); // 0xe9000000, 0x00000000

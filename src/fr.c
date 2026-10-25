@@ -623,6 +623,14 @@ void video_related_8(void)
 
 void viShake(f32 intensity)
 {
+#ifndef TARGET_N64
+    extern s32 coopScreenShakeOn(void);
+
+    if (!coopScreenShakeOn())
+    {
+        intensity = 0.0f;   /* Screen Shake off (Accessibility) */
+    }
+#endif
     if (intensity > 14.0f)
     {
         intensity = 14.0f;

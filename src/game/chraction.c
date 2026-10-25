@@ -5862,6 +5862,9 @@ void sub_GAME_7F02BFE4(ChrRecord *self, s32 arg1, s32 arg2)
 
     if (phi_a1 != 0)
     {
+#ifndef TARGET_N64
+        coopCaptionChrGunfire(self);   /* Sound Captions (coop_access.c) */
+#endif
         if (self->field_160[arg1].ptr_SEbuffer1 != NULL)
         {
             if (sndGetPlayingState(self->field_160[arg1].ptr_SEbuffer1) != 0)

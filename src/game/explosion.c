@@ -7,6 +7,7 @@
 #include <limits.h>
 #include "bg.h"
 #include "bondview.h"
+#include "coop.h"
 #include "cheat.h"
 #include "chrai.h"
 #include "chraction.h"
@@ -270,6 +271,7 @@ explosionCreate(PropRecord *arg0, struct coord3d *target_pos, StandTile *target_
     { /* co-op: the joiner's own grenades, mines and rockets go off on the host too */
         extern void coopExplosionCreated(PropRecord *source, coord3d *pos, s32 type, u8 *rooms);
         coopExplosionCreated(arg0, target_pos, explosion_type, rooms);
+        coopCaption(COOPCAP_EXPLOSION, target_pos);   /* Sound Captions (coop_access.c) */
     }
 #endif
 

@@ -4012,7 +4012,9 @@ enum { PORT_SHEET_GAMEPLAY, PORT_SHEET_CONTROL, PORT_SHEET_DISPLAY, PORT_SHEET_C
         * it back there. The settings multiplayer keeps apart from solo. */
        PORT_SHEET_MPOPTS,
        /* CLASSIC: which parts Classic Mode applies, opened from VIDEO's middle tab */
-       PORT_SHEET_CLASSIC, PORT_SHEET_COUNT };
+       PORT_SHEET_CLASSIC,
+       /* ACCESSIBILITY: GAMEPLAY's last page (src/game/coop_access.c) */
+       PORT_SHEET_ACCESS, PORT_SHEET_COUNT };
 /* The Options folder's rows, top to bottom, at the Files menu's own row
  * coordinates (y 0xDC, pitch 0x20). Each is a submenu:
  *
@@ -4033,7 +4035,7 @@ static const char *const port_sheet_title[PORT_SHEET_COUNT] = { "GAMEPLAY\n", "C
         "CREDITS\n", "PLAYER\n", "REBIND\n", "VIDEO\n", "AUDIO\n", "GRAPHICS\n",
         "GENERAL SETTINGS\n", "HUD\n",
         "MOUSE AND KEYBOARD\n", "CONTROLLER\n", "GENERAL CONTROL OPTIONS\n", "PORT OPTIONS\n",
-        "GAMEPLAY OPTIONS\n", "CLASSIC\n" };   /* GAMEPLAY OPTIONS is not drawn: the two-column sheet has no heading */
+        "GAMEPLAY OPTIONS\n", "CLASSIC\n", "ACCESSIBILITY\n" };   /* GAMEPLAY OPTIONS is not drawn: the two-column sheet has no heading */
 static s32 port_options_row_highlighted = -1; /* row under the cursor, -1 = on a tab */
 /* The folder's hubs: GAMEPLAY and AUDIO VISUAL reuse this folder screen to list
  * their pages, numbered; -1 means the folder's own three rows. A page's
@@ -4066,6 +4068,7 @@ s32 portMenuHarnessSheet(char first, char second)
                                       : (second == 'e') ? PORT_SHEET_GENERAL : PORT_SHEET_GAMEPLAY;
     else if (first == 'h') port_sheet_kind = PORT_SHEET_HUD;
     else if (first == 'd') port_sheet_kind = PORT_SHEET_DISPLAY;
+    else if (first == 'a' && second == 'c') port_sheet_kind = PORT_SHEET_ACCESS;   /* GE_MENU=access */
     else if (first == 'a') port_sheet_kind = PORT_SHEET_AUDIO;   /* the aiming page was removed */
     else if (first == 'v') port_sheet_kind = PORT_SHEET_VIDEO;
     else if (first == 'm') port_sheet_kind = PORT_SHEET_MOUSEKB;
@@ -4620,6 +4623,13 @@ static const struct PortSheetRow port_sheet_rows_portopts[] = {
     { SHROW_OPT, "high_lod", "High Detail Models\n" },   /* moved from GRAPHICS */
     { SHROW_OPT, "setting_help" },   /* the help box under the folder sheets, default ON */
 };
+/* ACCESSIBILITY: captions, colours, shake and text size (coop_access.c), and
+ * every hold-or-toggle choice in one place (Aim Control is Rare's own row) */
+static const struct PortSheetRow port_sheet_rows_access[] = {
+    { SHROW_OPT, "captions" }, { SHROW_OPT, "colorblind" }, { SHROW_OPT, "text_size" },
+    { SHROW_OPT, "screen_shake" }, { SHROW_OPT, "head_roll" },
+    { SHROW_OPT, "aim_control" }, { SHROW_OPT, "crouch_key" }, { SHROW_OPT, "walk_key" },
+};
 static const struct PortSheetRow port_sheet_rows_hud[] = {
     { SHROW_OPT, "sight_on_screen" }, { SHROW_OPT, "always_crosshair" },
     { SHROW_XHAIR, NULL },   /* under Always Crosshair */
@@ -4712,7 +4722,7 @@ static const struct PortSheetRow port_sheet_rows_ctlgeneral[] = {
  * Mouse and Keyboard or Controller page. */
 /* THE TWO PICKERS: each folder row that is a submenu, and its pages top to
  * bottom. A SHROW_GOSHEET row carries the page it opens in port_sheet_row_bind. */
-static const s32 port_sheet_gameplay_pages[] = { PORT_SHEET_GENERAL, PORT_SHEET_HUD, PORT_SHEET_PORTOPTS };
+static const s32 port_sheet_gameplay_pages[] = { PORT_SHEET_GENERAL, PORT_SHEET_HUD, PORT_SHEET_PORTOPTS, PORT_SHEET_ACCESS };
 static const s32 port_sheet_display_pages[] = { PORT_SHEET_VIDEO, PORT_SHEET_AUDIO };   /* GRAPHICS is empty */
 
 /** The Options folder screen's rows: its own three, or a hub's pages. */
@@ -4750,6 +4760,7 @@ static const char *portSheetPageLabel(s32 kind)
         case PORT_SHEET_GENERAL:  return "General Settings\n";
         case PORT_SHEET_HUD:      return "HUD\n";
         case PORT_SHEET_PORTOPTS: return "Port Options\n";
+        case PORT_SHEET_ACCESS:   return "Accessibility\n";
         case PORT_SHEET_VIDEO:    return "Video\n";
         case PORT_SHEET_AUDIO:    return "Audio\n";
         case PORT_SHEET_GRAPHICS: return "Graphics\n";
@@ -5092,6 +5103,7 @@ static void portSheetBuild(s32 kind)
     if (kind == PORT_SHEET_GENERAL)  { src = port_sheet_rows_general;  n = sizeof(port_sheet_rows_general)  / sizeof(port_sheet_rows_general[0]);  }
     if (kind == PORT_SHEET_HUD)      { src = port_sheet_rows_hud;      n = sizeof(port_sheet_rows_hud)      / sizeof(port_sheet_rows_hud[0]);      }
     if (kind == PORT_SHEET_PORTOPTS) { src = port_sheet_rows_portopts; n = sizeof(port_sheet_rows_portopts) / sizeof(port_sheet_rows_portopts[0]); }
+    if (kind == PORT_SHEET_ACCESS)   { src = port_sheet_rows_access;   n = sizeof(port_sheet_rows_access)   / sizeof(port_sheet_rows_access[0]);   }
     if (kind == PORT_SHEET_MPOPTS)   { src = port_sheet_rows_mpopts;   n = sizeof(port_sheet_rows_mpopts)   / sizeof(port_sheet_rows_mpopts[0]);   }
     if (kind == PORT_SHEET_MOUSEKB)    { src = port_sheet_rows_mousekb;    n = sizeof(port_sheet_rows_mousekb)    / sizeof(port_sheet_rows_mousekb[0]);    }
     if (kind == PORT_SHEET_PAD)        { src = port_sheet_rows_pad;        n = sizeof(port_sheet_rows_pad)        / sizeof(port_sheet_rows_pad[0]);        }
@@ -7456,6 +7468,7 @@ static const char *portSheetHelpKey(s32 row)
                 case PORT_SHEET_GENERAL:    return "@page_general";
                 case PORT_SHEET_HUD:        return "@page_hud";
                 case PORT_SHEET_PORTOPTS:   return "@page_portopts";
+                case PORT_SHEET_ACCESS:     return "@page_access";
                 case PORT_SHEET_VIDEO:      return "@page_video";
                 case PORT_SHEET_AUDIO:      return "@page_audio";
             }
@@ -9274,10 +9287,9 @@ static void coopLobbyBuild(void)
             {
                 r->colour = 0xA00000FF;
             }
-            if (strncmp(coopBrowseRefusedText(), "Couldn't", 8) == 0)
-            {   /* Steam kept us out: friends only (a Discord join from someone
-                 * who isn't the host's Steam friend), full, or gone */
-                r = coopLobbyAdd(CLROW_TEXT, 0, "It's full, or friends only.\n", "");
+            if (coopBrowseRefusedHint()[0] != '\0')
+            {   /* why: friends only or full, or which build the host has */
+                r = coopLobbyAdd(CLROW_TEXT, 0, coopBrowseRefusedHint(), "");
                 if (r != NULL)
                 {
                     r->colour = PORT_SHEET_COL_DIM;
@@ -9299,7 +9311,8 @@ static void coopLobbyBuild(void)
             coopLobbyCopyName(name, sizeof(name), coopBrowseName(i));
             name[strlen(name) - 1] = '\0';
             snprintf(label, sizeof(label), "%.30s  %d/%d\n", name, (int) coopBrowseMembers(i), COOP_MAX_PLAYERS);
-            r = coopLobbyAdd(CLROW_JOINPUBLIC, i, label, coopBrowseLocked(i) ? "Password\n" : "Join\n");
+            r = coopLobbyAdd(CLROW_JOINPUBLIC, i, label,
+                             coopBrowseLocked(i) ? "Password\n" : coopBrowseInMission(i) ? "Drop In\n" : "Join\n");
             if (r != NULL && coopBrowseMembers(i) >= COOP_MAX_PLAYERS)
             {
                 r->dim = TRUE;

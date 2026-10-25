@@ -42,6 +42,11 @@ static int portPtrReadable(const void *p, size_t n)
     return (const char *) p + n <= (const char *) mbi.BaseAddress + mbi.RegionSize;
 }
 
+/* port_report.c: the crash folder, and the offer to send it */
+void portReportCrash(void *ctx, const char *what);
+void portReportCrashAsk(void);
+FILE *portReportCrashFile(const char *name);
+
 /* Crash output tee: a launch with no console (the GUI-subsystem exe) would
  * lose the whole dump. Mirror every crash line into Data/Logs/crash.log
  * (unbuffered, as the process is dying). */
@@ -205,6 +210,14 @@ static LONG WINAPI portSehHandler(EXCEPTION_POINTERS *ep)
         ebp = fp[0];
     }
     fflush(NULL);
+    {
+        char what[96];
+
+        snprintf(what, sizeof(what), "crash: exception 0x%08lx at eip 0x%08lx",
+                 (unsigned long) ep->ExceptionRecord->ExceptionCode, faultEip);
+        portReportCrash(ep, what);
+        portReportCrashAsk();
+    }
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
@@ -444,6 +457,8 @@ static DWORD WINAPI portStallWatchdog(LPVOID param)
         }
         crashPrintf("ge: STALL: frame counter frozen - exiting after dump\n");
         fflush(NULL);
+        portReportCrash(NULL, "stall: the game stopped responding");
+        portReportCrashAsk();
         _exit(3);
     }
 }
@@ -515,6 +530,9 @@ static void portArmWatchpoints(void)
 #else
 #include <execinfo.h>
 
+void portReportCrash(void *ctx, const char *what);
+FILE *portReportCrashFile(const char *name);
+
 /* Bring-up crash handler: print a raw backtrace (addresses decode with
  * addr2line -e build_pc/ge) so crashes are diagnosable without gdb. */
 static void portCrashHandler(int sig)
@@ -524,6 +542,21 @@ static void portCrashHandler(int sig)
     fprintf(stderr, "\nge: fatal signal %d, backtrace (%d frames):\n", sig, n);
     backtrace_symbols_fd(frames, n, 2);
     fflush(NULL);
+    {   /* the crash folder (port_report.c); the next start offers to send it */
+        char what[64];
+        FILE *bt;
+
+        snprintf(what, sizeof(what), "crash: signal %d", sig);
+        portReportCrash(NULL, what);
+        bt = portReportCrashFile("backtrace.txt");
+        if (bt != NULL)
+        {
+            fprintf(bt, "%s\n", what);
+            fflush(bt);
+            backtrace_symbols_fd(frames, n, fileno(bt));
+            fclose(bt);
+        }
+    }
     _exit(128 + sig);
 }
 #endif
@@ -875,6 +908,15 @@ int main(int argc, char **argv)
     {
         extern void portAnimDataInit(void);
         portAnimDataInit();
+    }
+
+    {   /* a new build backs the saves up before it touches them (port_save.c) */
+        extern void portSaveBootCheck(void);
+        portSaveBootCheck();
+    }
+    {   /* a crash report from last time nobody answered for (port_report.c) */
+        extern void portReportBootCheck(void);
+        portReportBootCheck();
     }
 
 #ifdef GE_VIDEO

@@ -1860,6 +1860,17 @@ static int inputFixedKeyDown(const SDL_KeyboardEvent *key)
         return 1; /* console open: the keyboard is the prompt's, not the game's */
     }
 
+    if (sc == SDL_SCANCODE_F8)
+    {   /* bug report: logs, co-op state and a screenshot, zipped to the
+         * Desktop (port_report.c) */
+        extern void portReportBugRequest(void);
+        if (!repeat)
+        {
+            portReportBugRequest();
+        }
+        return 1;
+    }
+
     if (sc == SDL_SCANCODE_F1)
     {
         /* F1 is only the default mouse-unlock key: while [controls]

@@ -14095,13 +14095,13 @@ Gfx* hudmsgBottomRender(Gfx* arg0)
             {
                 PORT_HUD_ANCHOR(arg0, PORT_HUD_ANCHOR_LEFT);
             }
-            /* HUD Scale: the message is laid out from the view's bottom-left */
-            arg0 = portHudScaleBegin(arg0, (f32) viGetViewLeft(), (f32) (viGetViewTop() + viGetViewHeight()));
+            /* HUD Scale and Text Size (coop_access.c): the message is laid out from the view's bottom-left */
+            arg0 = coopTextScaleBegin(arg0, (f32) viGetViewLeft(), (f32) (viGetViewTop() + viGetViewHeight()));
 #endif
             arg0 = draw_blackbox_to_screen(arg0, (s32) &view_left, (s32) &view_vert, (s32) &view_horiz, (s32) &view_top);
             arg0 = combiner_bayer_lod_perspective(textRenderOutlined(arg0, &view_left, &view_vert, stringbuffer_lowerleft[status_bar_text_buffer_index], BONDVIEW_2ND_FONTTABLE(status_bar_text_buffer_index), BONDVIEW_1ST_FONTTABLE(status_bar_text_buffer_index), -1, 0x646464FFU, (s16) (s32) viGetX(), (s16) viGetY(), 0, 0));
 #ifndef TARGET_N64
-            arg0 = portHudScaleEnd(arg0);
+            arg0 = coopTextScaleEnd(arg0);
             if (portMsgAnchor)
             {
                 PORT_HUD_ANCHOR_OFF(arg0);

@@ -322,6 +322,8 @@ static u32 sSelfSession;        /* ours, new each run and each lobby session */
 static s32 sSelfPlayer;         /* our player number: 0 the host, a joiner's from the host's hello */
 static u32 sMissionTicks;       /* ticks in this mission */
 static s32 sLateJoin;           /* joiner: followed the host into a mission under way */
+static u32 sDropInSince;        /* sLateJoin: sTick we started watching for a safe moment, 0 not yet */
+static void coopDropInTick(void);
 static s32 sOnLobbyScreen;      /* front.c: the lobby screen is up */
 static u32 sLastHurtTick;   /* local Bond lost health */
 static u32 sLastFightTick;  /* host: a guard was attacking someone */
@@ -1194,7 +1196,10 @@ static void coopTickBody(void)
     }
     coopStatsMissionTick(coopPartnerHere());
     coopAudioTick();        /* the downed and revived stings (coop_audio.c) */
-    coopSendState();
+    if (!sLateJoin)
+    {   /* dropping in: nothing of ours until we arrive (coopDropInTick) */
+        coopSendState();
+    }
     coopTrackCombat();
     coopPingTick();
     if ((sTick % 15) == 0)
@@ -1302,13 +1307,9 @@ static void coopRemotesTick(void)
             coopFeedToast("A partner rejoined", p);
         }
     }
-    if (sLateJoin && coopRemoteAliveHere(0) && sMissionTicks > 30 && !g_CurrentPlayer->bonddead)
-    {   /* joined a mission under way: go to the host, not the level's start */
-        sLateJoin = 0;
-        sR[0].puppetGhost = 1;
-        coopRespawnPlayerAt(&sR[0].puppet->pos, sR[0].puppet->stan, 6.2831855f - sR[0].st.yaw, sLastWeapon);
-        coopFeedToast("Joined your partners", -1);
-        portConLogf("ge: coop: late join, moved beside the host\n");
+    if (sLateJoin && sMissionTicks > 30 && !g_CurrentPlayer->bonddead)
+    {   /* joined a mission under way: in beside a partner, not at the level's start */
+        coopDropInTick();
     }
 }
 
@@ -3561,6 +3562,115 @@ static s32 coopRespawnEta(void)
     return (eta < 0) ? 0 : eta;
 }
 
+/* netcode (coop_repl.c): 1 once the host's join snapshot is in. Without that
+ * module the world is already the host's (doors, objects and AI sync). */
+__attribute__((weak)) s32 coopReplSnapshotDone(void)
+{
+    return 1;
+}
+
+#define COOP_DROPIN_MIN     120   /* 2 s of watching first: the puppets and the world settle */
+#define COOP_DROPIN_GIVEUP  3600  /* 60 s with nobody standing: start at the level's start */
+
+/* Drop-in: a joiner who followed the host into a mission under way watches
+ * a partner until it is safe to come in, by the respawn rules (the calmest
+ * partner out of a fight for 4 s, at most 20 s, and the join snapshot in),
+ * then arrives beside them. Until then no STATE of ours goes out, so no
+ * puppet of us stands at the level's start for the host's guards to shoot. */
+static s32 coopDropInMin(void)
+{
+    static s32 minwait = -1;
+
+    if (minwait < 0)
+    {   /* GE_COOP_TESTDROPIN=<s>: watch at least <s> s, for screenshots (harness only) */
+        const char *e = getenv("GE_COOP_TESTDROPIN");
+
+        minwait = (e != NULL) ? atoi(e) * 60 : COOP_DROPIN_MIN;
+    }
+    return minwait;
+}
+
+static void coopDropInTick(void)
+{
+    u32 calm, waited;
+    s32 partner;
+    CoopRemote *r;
+
+    if (sDropInSince == 0)
+    {
+        sDropInSince = sTick;
+        coopSpectateDropIn(1);
+        portConLogf("ge: coop: dropping in, waiting for a quiet moment\n");
+    }
+    waited = sTick - sDropInSince;
+    coopSpectateTick();
+    partner = coopRespawnPartner(&calm);
+    if (partner < 0)
+    {
+        if (waited >= COOP_DROPIN_GIVEUP)
+        {   /* everyone is down: play from where the level put us */
+            sLateJoin = 0;
+            coopSpectateDropIn(0);
+            coopFeedToast("Joined at the start", -1);
+            portConLogf("ge: coop: nobody standing to drop in beside, starting at the level's start\n");
+        }
+        return;
+    }
+    if (waited < (u32) coopDropInMin() || (!coopReplSnapshotDone() && waited < COOP_RESPAWN_MAX)
+        || (calm < COOP_RESPAWN_CALM && waited < COOP_RESPAWN_MAX))
+    {
+        return;
+    }
+    r = &sR[partner];
+    sLateJoin = 0;
+    coopSpectateDropIn(0);
+    r->puppetGhost = 1; /* we arrive inside the partner */
+    coopRespawnPlayerAt(&r->puppet->pos, r->puppet->stan, 6.2831855f - r->st.yaw, sLastWeapon); /* view yaw runs the other way */
+    sLastHealth = g_CurrentPlayer->bondhealth;
+    {
+        char text[48];
+
+        snprintf(text, sizeof(text), "Dropped in beside %s", coopPlayerName(partner));
+        coopFeedToast(text, partner);
+    }
+    portConLogf("ge: coop: dropped in beside player %d after %.1f s (calm %.1f s)\n",
+                partner + 1, waited / 60.0f, calm / 60.0f);
+}
+
+/* the HUD's drop-in line: who we will come in beside and roughly when */
+static s32 coopDropInBanner(char *line1, char *line2, s32 cap)
+{
+    u32 calm, waited;
+    s32 partner, eta;
+
+    if (!sLateJoin || sDropInSince == 0 || !coopInMission())
+    {
+        return 0;
+    }
+    waited = sTick - sDropInSince;
+    partner = coopRespawnPartner(&calm);
+    if (partner < 0)
+    {
+        snprintf(line1, cap, "DROPPING IN");
+        snprintf(line2, cap, "WAITING FOR A PARTNER TO GET UP");
+        return 1;
+    }
+    /* the calm still needed (if they stay calm from now), capped by the
+     * maximum, and never before the minimum watch */
+    eta = (s32) COOP_RESPAWN_CALM - (s32) calm;
+    if ((s32) COOP_RESPAWN_MAX - (s32) waited < eta)
+    {
+        eta = (s32) COOP_RESPAWN_MAX - (s32) waited;
+    }
+    if (coopDropInMin() - (s32) waited > eta)
+    {
+        eta = coopDropInMin() - (s32) waited;
+    }
+    snprintf(line1, cap, "DROPPING IN BESIDE %s", coopPlayerName(partner));
+    snprintf(line2, cap, calm < COOP_RESPAWN_CALM ? "WHEN IT GOES QUIET %d" : "IN %d", (int) ((eta < 0 ? 0 : eta) + 59) / 60);
+    return 1;
+}
+
 /* ---- HUD (coop_hud.c) ------------------------------------------------------- */
 
 /* 1 when there is an i-th partner (from 0) in this mission; fills what the
@@ -3743,7 +3853,8 @@ s32 coopFrontTick(void)
             coopVsStartMatch(sHostHello.stage);
             return 1;
         }
-        sLateJoin = sHostHello.missionticks > 600;   /* the host is well into it: start beside them */
+        sLateJoin = sHostHello.missionticks > 600;   /* the host is well into it: drop in beside a partner */
+        sDropInSince = 0;
         portConLogf("ge: coop: following the host into stage %d (difficulty %d)\n", sHostHello.stage, diff);
         if (selected_folder_num < FOLDER1 || selected_folder_num >= MAX_FOLDER_COUNT)
         {   /* a win saves to our own folder, as solo; folder 1 only if none is picked */
@@ -4128,7 +4239,9 @@ s32 coopSessionActive(void)
  * The host runs the world (guards, scripts, doors, objects), so losing it is
  * the hard case. A joiner that hears nothing from the host for
  * COOP_SILENT_MS shows a banner and waits COOP_HOST_WAIT_MS for it to come
- * back (a hitch, a slow load). After that, or at once when the host says
+ * back (a hitch), COOP_HOST_WAIT_LOAD_MS early in a mission or in the menus
+ * (a slow load). A host that crashes says goodbye from its crash report
+ * (coopCrashBye), so its partners do not wait at all. After that, or at once when the host says
  * goodbye (COOPPKT_BYE) or leaves the Steam lobby, the players still here
  * pick a new host: the lowest player number left in the host's last roster.
  * Everyone renumbers in that order (the new host 0, the rest 1..), the new
@@ -4147,8 +4260,9 @@ s32 coopSessionActive(void)
  * (the watch's Abort) is asked whether to hand the mission over or end it
  * for everyone. */
 
-#define COOP_SILENT_MS        3000    /* nothing from the host this long: say so */
-#define COOP_HOST_WAIT_MS     12000   /* and wait this much longer for it to come back */
+#define COOP_SILENT_MS        2000    /* nothing from the host this long: say so */
+#define COOP_HOST_WAIT_MS     3500    /* and, mid-mission, wait this much longer for it to come back */
+#define COOP_HOST_WAIT_LOAD_MS 12000  /* or this long while it may still be loading (a slower PC) */
 #define COOP_NEWHOST_WAIT_MS  8000    /* the player picked to host must answer within this */
 #define COOP_LOST_MS          3000    /* host: a joiner quiet this long has lost its connection */
 #define COOP_DROP_MS          30000   /* and is gone after this long lost */
@@ -4156,6 +4270,17 @@ s32 coopSessionActive(void)
 #define COOP_HOSTTITLE_MS     2000    /* joiner: the host back in the menus this long, mid-mission */
 
 enum { HOSTW_NONE, HOSTW_SILENT, HOSTW_NEWHOST };
+
+/* how long a silent host gets: short once we both play the same mission
+ * (it was there a moment ago: a crash or a lost connection, not a load) */
+static u32 coopHostWaitMs(void)
+{
+    if (coopInMission() && sMissionTicks > 600 && sHostHello.stage == bossGetStageNum())
+    {
+        return COOP_HOST_WAIT_MS;
+    }
+    return COOP_HOST_WAIT_LOAD_MS;
+}
 
 static u32 sHostWaitMs;         /* when the current wait began */
 static s32 sHostLeftHow;        /* 0 went quiet, else COOPBYE_* (a lobby leave counts as COOPBYE_LEAVE) */
@@ -4254,6 +4379,20 @@ static void coopAtExit(void)
         }
         coopSendBye(coopNetIsHost() ? COOPBYE_HANDOFF : COOPBYE_LEAVE, coopNetIsHost() ? coopNextHost() : 0);
     }
+}
+
+/* port_report.c, the game crashed or stalled (its report's text is written):
+ * the same goodbye, without the AI sync, which may be what broke. Once. */
+void coopCrashBye(void)
+{
+    static s32 done;
+
+    if (done || sEnabled <= 0 || !coopNetIsOpen() || !coopNetHasPeer())
+    {
+        return;
+    }
+    done = 1;
+    coopSendBye(coopNetIsHost() ? COOPBYE_HANDOFF : COOPBYE_LEAVE, coopNetIsHost() ? coopNextHost() : 0);
 }
 
 /* the lobby's Leave (a host hands the lobby to the next player) */
@@ -5049,7 +5188,7 @@ static void coopSessionTick(void)
             {
                 coopHostGone(COOPBYE_LEAVE);
             }
-            else if (now - sHostWaitMs > COOP_HOST_WAIT_MS)
+            else if (now - sHostWaitMs > coopHostWaitMs())
             {
                 coopHostGone(0);
             }
@@ -5087,9 +5226,13 @@ s32 coopHudSessionBanner(char *line1, char *line2, s32 cap)
     {
         return 0;
     }
+    if (sHostWaiting == HOSTW_NONE && coopDropInBanner(line1, line2, cap))
+    {
+        return 1;
+    }
     if (sHostWaiting == HOSTW_SILENT)
     {
-        s32 left = (s32) (COOP_HOST_WAIT_MS - (now - sHostWaitMs) + 999) / 1000;
+        s32 left = (s32) (coopHostWaitMs() - (now - sHostWaitMs) + 999) / 1000;
 
         snprintf(line1, cap, "HOST NOT RESPONDING: %s", coopPlayerName(0));
         snprintf(line2, cap, coopHostLeavesRule() == 1 ? "BACK TO THE LOBBY IN %d" : "WAITING FOR THE HOST %d",
@@ -5667,4 +5810,65 @@ void coopAsciiName(char *out, s32 cap, const char *in, s32 upper)
         out[n++] = '?';
     }
     out[n] = '\0';
+}
+
+/* ---- crash and bug reports ---------------------------------------------- */
+
+/* The co-op state for a crash or bug report (port/src/port_report.c): who we
+ * are, the session, each partner and each channel. It only reads this file's
+ * own copies (no props), so it is safe to call from the crash handler. */
+s32 coopDebugDump(char *buf, s32 cap)
+{
+    u32 now = coopNowMs();
+    s32 n = 0;
+    s32 i;
+
+#define DUMP(...) do { if (n < cap) { n += snprintf(buf + n, cap - n, __VA_ARGS__); } } while (0)
+    DUMP("co-op protocol %d, %s\n", COOP_VERSION, sEnabled > 0 ? "on" : "off");
+    if (sEnabled > 0)
+    {
+        DUMP("transport: %s, %s, %s\n", coopNetIsSteam() ? "steam" : "udp",
+             coopNetIsOpen() ? "open" : "closed", coopNetIsHost() ? "host" : "joiner");
+        DUMP("self: player %d (%s), session %08x\n", (int) coopSelf(), coopLobbySelfName(), (unsigned) sSelfSession);
+        DUMP("stage %d, tick %u, mission ticks %u, late join %d, lobby screen %d\n",
+             (int) bossGetStageNum(), (unsigned) sTick, (unsigned) sMissionTicks, (int) sLateJoin, (int) sOnLobbyScreen);
+        DUMP("host hello: stage %d, difficulty %d, mission %u; our serial %u, followed %u\n",
+             (int) sHostHello.stage, (int) sHostHello.difficulty, (unsigned) sHostHello.mission,
+             (unsigned) sMissionSerial, (unsigned) sFollowedMission);
+        DUMP("host waiting %d, migrated %d, pending end %d, down rule %d, settings",
+             (int) sHostWaiting, (int) sMigrated, (int) sPendingEnd, (int) sDownRule);
+        for (i = 0; i < COOPSET_MAX; i++)
+        {
+            DUMP(" %d", (int) sSettings[i]);
+        }
+        DUMP("\n");
+        for (i = 0; i < COOP_MAX_PLAYERS; i++)
+        {
+            CoopRemote *r = &sR[i];
+
+            if (i == coopSelf() || !r->valid)
+            {
+                continue;
+            }
+            DUMP("player %d %s: stage %d, pos %.0f %.0f %.0f, health %.2f, dead %d, lost %d, last heard %u ms ago, puppet %s\n",
+                 i, coopPlayerName(i), (int) r->st.stage, r->st.pos[0], r->st.pos[1], r->st.pos[2],
+                 r->st.health, (int) r->st.dead, (int) r->lost, (unsigned) (now - r->seenMs),
+                 r->puppet != NULL ? "yes" : "no");
+        }
+        for (i = 0; i < COOP_NET_MAX_PEERS; i++)
+        {
+            CoopChan *c = &sChan[i];
+
+            if (!coopNetPeerConnected(i) && c->session == 0)
+            {
+                continue;
+            }
+            DUMP("channel %d (%s): connected %d, session %08x, out %u acked %u, in %u, heard %u ms ago\n",
+                 i, coopNetPeerName(i), coopNetPeerConnected(i), (unsigned) c->session,
+                 (unsigned) c->outNext, (unsigned) c->outAcked, (unsigned) c->inDone,
+                 (unsigned) (now - c->heardMs));
+        }
+    }
+#undef DUMP
+    return n < cap ? n : cap - 1;
 }
