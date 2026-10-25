@@ -136,6 +136,8 @@ enum {
     PORTACT_CHAT,
     /* Appended for the co-op build: photo mode (coop_photo.c). */
     PORTACT_PHOTO,
+    /* Appended for the co-op build: push to talk, held (coop_voice.c). */
+    PORTACT_PUSH_TO_TALK,
     PORTACT_COUNT
 };
 
@@ -197,6 +199,7 @@ static const struct {
     [PORTACT_PING]             = { "ping",             "Mouse Middle", 1 },
     [PORTACT_CHAT]             = { "chat",             "T",        1 },
     [PORTACT_PHOTO]            = { "photo_mode",       "P",        1 },
+    [PORTACT_PUSH_TO_TALK]     = { "push_to_talk",     "V",        0 },
 };
 
 /* [input] detonate_use_reload (default ON): with remote mines in the right
@@ -813,6 +816,13 @@ s32 portJoyPortPhotoPressed(void)
     s32 pad = joyPortPad();
 
     return pad >= 0 && portJoyPortTake(pad, PORTACT_PHOTO);
+}
+
+/** coop_voice.c: push to talk is held. Player 1's (pad 0's), in menus too:
+ * the lobby talks as well, and no tick's player is set there. */
+s32 portJoyPortPushToTalkHeld(void)
+{
+    return sHeld[0][PORTACT_PUSH_TO_TALK] != 0;
 }
 
 /** MoveBond: 1 while Bond should move at half speed. */

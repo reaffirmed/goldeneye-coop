@@ -673,3 +673,54 @@ satellite-console work and the Runway plane did nothing on the host.
   and both games finish the mission, with the plane taking off on both
   screens; on Surface the joiner's Use on the dish console runs the host's
   script, and the joiner shooting it reaches the host as OBJDMG.
+
+## Voice chat (2026-10-25, packet 30, COOP_VERSION stays 9)
+
+- Steam Voice: coop_steam.c loads SteamAPI_ISteamUser_StartVoiceRecording /
+  StopVoiceRecording / GetAvailableVoice / GetVoice / DecompressVoice as
+  optional exports (the shipped steam_api.dll has all of them); without them
+  the log says "voice chat is off" and the voice rows stay hidden.
+- Transport: COOPPKT_VOICE = 30 (30..31 reserved for voice; the netcode
+  thread has 20..23), unreliable, one compressed GetVoice chunk per packet
+  (at most 1100 bytes; a bigger read is a stale backlog and is dropped). The
+  host stamps the sender's player number and relays a joiner's packets to the
+  other joiners. Older builds ignore the type, so no version bump.
+- Playback (port/src/voice_pc.c): decoded at 22050 Hz into a 2 s ring per
+  player, 100 ms prebuffer, skips ahead to 150 ms when more than 400 ms is
+  queued, mixed into audio_pc.c's output before the mute-in-background step.
+  Gains glide over 20 ms. Every 10 s of output it logs "player N's stream ran
+  dry X times, Y ms skipped to catch up" when either is non-zero.
+- Position (coop_voice.c coopVoiceGains): in a mission, the distance from the
+  local view to the partner gives the gain through the guards' sound curve
+  (sub_GAME_7F0537B8 with 5000/6000, as chrobjSndCreatePostEventDefault;
+  0.86 at 4 m), never below 0.3 so a far partner is still heard, and
+  portSndPanForPos the pan (solo viewport with Stereo Pan on; centred
+  otherwise). Equal-power pan scaled so the centre is full volume. In menus
+  and the lobby voice is centred at full volume. Logs "player N at Xm, pan P,
+  gain L R" every 2 s per talking player.
+- Options: [audio] voice_mode (0 push to talk, 1 open mic, 2 off),
+  voice_volume (0..200 %); bind push_to_talk (default V, input_pc pad map
+  +34). Mic is never open while the chat line, a password or other text
+  input is being typed. Per-player mutes (lobby Voice row, watch Audio page
+  "Mute <name>") last for the session, are not saved, and follow host
+  migration; a muted player's packets are dropped before decoding.
+- HUD (coop_hud.c): speaker icon left of a talking partner's name tag and
+  after their name in the partner list (red bar when muted); "TALK" with the
+  icon top centre while your mic is open. Lobby: "<name> - Talking".
+- Mock Steam: no GE_MOCK_VOICE = no mic (GetVoice reports no data, as Steam
+  does without a microphone). GE_MOCK_VOICE=<hz> makes a tone pulsing at 4 Hz
+  (8-bit 8 kHz behind an "MV" tag; DecompressVoice resamples to the asked
+  rate). Harness: GE_COOP_TESTVOICE=1 talks all the time, GE_COOP_TESTMUTE=<n>
+  mutes player n (1-based) at session start. Record a copy's output with
+  SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE=<file> (s16 stereo 22050).
+- Verified with the mock (2026-10-25): lobby, the host's 330 Hz tone reaches
+  the joiner centred; Dam, 4 m apart gain 0.86, after the host turned 90°
+  "pan 17, gain L 0.86 R 0.25" and the recording's 440 Hz went from L/R 2576
+  to L 2577 R 767; mute, the muted player's tone is absent from the
+  recording; no mic, nothing sent and nothing breaks; 3 players, each hears
+  the other two through the host's relay in the lobby and in the mission.
+  Screens in project files goldeneye-coop/screens/voice/.
+- Known gaps: not tried on real Steam or a real microphone yet (the sample
+  rate and chunk sizes are Steam's own). While the game is paused or in a
+  cutscene coopTick does not poll the network, so voice waits until play
+  resumes. Split-screen co-op hears voice centred.

@@ -129,6 +129,13 @@ static u64s (*pGetLobbyByIndex)(void *self, int i);
 static sbool (*pSetLobbyType)(void *self, u64s lobby, int type);
 static int (*pGetFriendRelationship)(void *self, u64s user);
 static sbool (*pSetLobbyOwner)(void *self, u64s lobby, u64s owner);   /* optional */
+/* Steam Voice (ISteamUser), optional: voice chat is off without them */
+static void (*pStartVoice)(void *self);
+static void (*pStopVoice)(void *self);
+static int (*pGetAvailableVoice)(void *self, unsigned int *compressed, unsigned int *uncompressedDeprecated, unsigned int rateDeprecated);
+static int (*pGetVoice)(void *self, sbool wantCompressed, void *dest, unsigned int cap, unsigned int *written,
+                        sbool wantUncompressedDeprecated, void *udest, unsigned int ucap, unsigned int *uwritten, unsigned int urate);
+static int (*pDecompressVoice)(void *self, const void *in, unsigned int len, void *dest, unsigned int cap, unsigned int *written, unsigned int rate);
 
 static void *sLib;
 static void *sUser, *sMM, *sFriends, *sNM;
@@ -264,6 +271,16 @@ static int loadAll(void)
     L(pGetFriendRelationship, "SteamAPI_ISteamFriends_GetFriendRelationship");
 #undef L
     pSetLobbyOwner = (sbool (*)(void *, u64s, u64s)) LIB_SYM(sLib, "SteamAPI_ISteamMatchmaking_SetLobbyOwner");
+    *(void **) &pStartVoice = LIB_SYM(sLib, "SteamAPI_ISteamUser_StartVoiceRecording");
+    *(void **) &pStopVoice = LIB_SYM(sLib, "SteamAPI_ISteamUser_StopVoiceRecording");
+    *(void **) &pGetAvailableVoice = LIB_SYM(sLib, "SteamAPI_ISteamUser_GetAvailableVoice");
+    *(void **) &pGetVoice = LIB_SYM(sLib, "SteamAPI_ISteamUser_GetVoice");
+    *(void **) &pDecompressVoice = LIB_SYM(sLib, "SteamAPI_ISteamUser_DecompressVoice");
+    if (pStartVoice == NULL || pStopVoice == NULL || pGetAvailableVoice == NULL || pGetVoice == NULL || pDecompressVoice == NULL)
+    {
+        portConLogf("ge: steam: no Steam Voice exports in %s; voice chat is off\n", STEAM_LIB);
+        pStartVoice = NULL;
+    }
     pSteamFriends = (void *(*)(void)) LIB_SYM(sLib, "SteamAPI_SteamFriends_v018");
     if (pSteamFriends == NULL)
     {
@@ -942,6 +959,7 @@ void coopSteamMigrate(int ashost, const unsigned long long *ids, int n)
     {
         return;
     }
+    coopSteamVoiceRecord(0);
     dropAllPeers();
     sIsHost = ashost;
     sHostLeft = 0;
@@ -1408,4 +1426,76 @@ int coopSteamJoinRefused(void)
 
     sJoinRefused = 0;
     return r;
+}
+
+/* ---- voice (Steam Voice, src/game/coop_voice.c) ----------------------------
+ * Steam records the microphone and compresses it itself, and only hands over
+ * data while someone is talking (it drops silence). The game moves the
+ * compressed bytes in its own packets and asks Steam here to decode them. */
+
+static int sRecording;
+
+/* 1 when Steam is up and has the voice calls */
+int coopSteamVoiceAvailable(void)
+{
+    return sReady && pStartVoice != NULL;
+}
+
+void coopSteamVoiceRecord(int on)
+{
+    on = on != 0;
+    if (!coopSteamVoiceAvailable() || on == sRecording)
+    {
+        return;
+    }
+    sRecording = on;
+    if (on)
+    {
+        pStartVoice(sUser);
+    }
+    else
+    {
+        pStopVoice(sUser);  /* Steam keeps the last words coming for a moment */
+    }
+}
+
+/* compressed voice recorded since the last call: bytes, 0 none */
+int coopSteamVoiceRead(void *buf, int cap)
+{
+    unsigned int avail = 0, written = 0;
+    int r;
+
+    if (!coopSteamVoiceAvailable() || cap <= 0)
+    {
+        return 0;
+    }
+    r = pGetAvailableVoice(sUser, &avail, NULL, 0);
+    if (r != 0 || avail == 0)
+    {
+        return 0;   /* 2 not recording, 3 no data: nobody is talking */
+    }
+    r = pGetVoice(sUser, 1, buf, (unsigned int) cap, &written, 0, NULL, 0, NULL, 0);
+    if (r != 0 || written > (unsigned int) cap)
+    {
+        return 0;
+    }
+    return (int) written;
+}
+
+/* decode a partner's voice to 16-bit mono at `rate`: samples, 0 on a fault */
+int coopSteamVoiceDecode(const void *in, int len, short *out, int cap, int rate)
+{
+    unsigned int written = 0;
+    int r;
+
+    if (!coopSteamVoiceAvailable() || len <= 0 || cap <= 0)
+    {
+        return 0;
+    }
+    r = pDecompressVoice(sUser, in, (unsigned int) len, out, (unsigned int) cap * 2, &written, (unsigned int) rate);
+    if (r != 0)
+    {
+        return 0;
+    }
+    return (int) (written / 2);
 }

@@ -149,6 +149,37 @@ static u32 coopHudWithAlpha(u32 colour, f32 a)
     return (colour & ~0xFFu) | (alpha > 0xFF ? 0xFF : alpha);
 }
 
+/* A speaker, 10 x 7 with its top left at (x, y): the box and cone, and while
+ * `waves` the sound coming off it, the outer wave blinking. Voice chat's
+ * marker (coop_voice.c); a muted partner's is dim with a red bar through it. */
+static Gfx *coopHudSpeaker(Gfx *gdl, s32 x, s32 y, u32 colour, s32 waves, s32 muted)
+{
+    s32 k;
+
+    if (muted)
+    {
+        colour = COOP_HUD_COL_DIM;
+    }
+    gdl = microcode_constructor_related_to_menus(gdl, x, y + 2, x + 2, y + 5, colour);
+    for (k = 0; k < 3; k++)
+    {   /* the cone widens away from the box */
+        gdl = microcode_constructor_related_to_menus(gdl, x + 2 + k, y + 2 - k, x + 3 + k, y + 5 + k, colour);
+    }
+    if (waves)
+    {
+        gdl = microcode_constructor_related_to_menus(gdl, x + 6, y + 2, x + 7, y + 5, colour);
+        if ((osGetTime() / 46875ull / 250ull) & 1)
+        {
+            gdl = microcode_constructor_related_to_menus(gdl, x + 8, y + 1, x + 9, y + 6, colour);
+        }
+    }
+    if (muted)
+    {
+        gdl = microcode_constructor_related_to_menus(gdl, x - 1, y + 3, x + 10, y + 4, COOP_HUD_COL_FAIL);
+    }
+    return gdl;
+}
+
 /* the partner's name and distance over their head, when they are in front of us */
 static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
 {
@@ -243,7 +274,15 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
                              coopHudWithAlpha(p->dead ? COOP_HUD_COL_FAIL : coopHudPlayerColour(p->player), alpha),
                              coopHudWithAlpha(COOP_HUD_COL_SHADOW, alpha), (s32) viGetX(), viGetY(), 0, 0);
     gDPNoOpTag(gdl++, 0x58FFFFFFu);
-    return combiner_bayer_lod_perspective(gdl);
+    gdl = combiner_bayer_lod_perspective(gdl);
+    if (coopVoiceTalking(p->player))
+    {   /* talking: a speaker just left of the tag, unscaled */
+        gdl = microcode_constructor(gdl);
+        gdl = coopHudSpeaker(gdl, px - (s32) (tw * scale) / 2 - 13, py - (s32) (th * scale) / 2 - 4,
+                             coopHudPlayerColour(p->player), 1, 0);
+        gdl = combiner_bayer_lod_perspective(gdl);
+    }
+    return gdl;
 }
 
 /* a filled diamond of radius r about (px, py), as rows of rectangles */
@@ -503,6 +542,14 @@ static Gfx *coopHudPartnerStatus(Gfx *gdl, CoopHudPartner *p, s32 row)
     coopHudText(name, sizeof(name), p->name);
     coopHudFit(name, 0x70);
     gdl = coopHudPrint(gdl, x, y, name, p->dead ? COOP_HUD_COL_DIM : COOP_HUD_COL_TEXT);
+    if (coopVoiceTalking(p->player) || coopVoiceMuted(p->player))
+    {   /* voice chat: talking now, or muted on our game */
+        s32 th = 0, tw = 0;
+
+        textMeasure(&th, &tw, name, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+        gdl = coopHudSpeaker(gdl, x + tw + 4, y + 1, coopHudPlayerColour(p->player), coopVoiceTalking(p->player),
+                             coopVoiceMuted(p->player));
+    }
     y += 0x0B;
     if (coopHudPlayerLost(p->player))
     {
@@ -554,6 +601,25 @@ static Gfx *coopHudPartnerStatus(Gfx *gdl, CoopHudPartner *p, s32 row)
         PORT_HUD_ANCHOR_OFF(gdl);
     }
     return gdl;
+}
+
+/* our mic is open (push to talk held, or open mic): a speaker and TALK at the
+ * top, in the middle; the waves while Steam is actually sending our words */
+static Gfx *coopHudSelfVoice(Gfx *gdl)
+{
+    char text[8] = "TALK\n";
+    s32 th = 0, tw = 0;
+    s32 x, y;
+
+    textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+    x = viGetViewLeft() + viGetViewWidth() / 2 - (tw + 14) / 2;
+    y = viGetViewTop() + 0x0E;
+    gdl = portHudScaleBegin(gdl, (f32) viGetViewLeft(), (f32) viGetViewTop());
+    gdl = microcode_constructor(gdl);
+    gdl = coopHudSpeaker(gdl, x, y + 1, coopHudPlayerColour(coopExtSelf()), coopVoiceSelfTalking(), 0);
+    gdl = coopHudPrint(gdl, x + 14, y, text, COOP_HUD_COL_TEXT);
+    gdl = combiner_bayer_lod_perspective(gdl);
+    return portHudScaleEnd(gdl);
 }
 
 /* our own wait, centred low on the screen, and a revive's progress under it */
@@ -774,6 +840,10 @@ Gfx *coopHudRender(Gfx *gdl)
     if (partner)
     {
         gdl = coopHudRadar(gdl);
+    }
+    if (partner && coopVoiceSelfOpen())
+    {
+        gdl = coopHudSelfVoice(gdl);
     }
     if (coopSpectateTarget() >= 0)
     {

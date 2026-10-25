@@ -18,7 +18,13 @@
  * <lobby>.owner holds SetLobbyOwner's value (any member may set it here, and
  * any member may set lobby data; real Steam lets only the owner).
  *
- * Build: gcc -m32 -shared -fPIC -O1 -o libsteam_api.so steam_mock.c
+ * Voice: no microphone by default (GetAvailableVoice says no data, as Steam
+ * does for a silent or missing mic). GE_MOCK_VOICE=<hz> makes a "voice"
+ * while recording: a <hz> tone pulsing four times a second, "compressed" as
+ * 8-bit 8000 Hz samples behind a "MV" tag (8 KB/s, about what Steam's codec
+ * sends at its busiest), which DecompressVoice widens and resamples.
+ *
+ * Build: gcc -m32 -shared -fPIC -O1 -o libsteam_api.so steam_mock.c -lm
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,6 +36,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <math.h>
+#include <time.h>
 
 typedef unsigned long long u64;
 typedef unsigned char sbool;
@@ -822,3 +830,144 @@ API sbool SteamAPI_ISteamNetworkingMessages_CloseSessionWithUser(void *self, con
     return 1;
 }
 API void SteamAPI_SteamNetworkingMessage_t_Release(void *msg) { free(msg); }
+
+/* ---- voice ---- */
+#define MOCK_VOICE_RATE 8000
+static int sVoiceRec;
+static double sVoiceT;          /* the tone's clock, seconds */
+static double sVoiceLast;       /* wall clock of the last read */
+
+static double nowSec(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double) ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+static int voiceHz(void)
+{
+    const char *e = getenv("GE_MOCK_VOICE");
+    return e ? atoi(e) : 0;
+}
+
+API void SteamAPI_ISteamUser_StartVoiceRecording(void *self)
+{
+    (void) self;
+    if (!sVoiceRec)
+    {
+        sVoiceLast = nowSec();
+        log_(voiceHz() > 0 ? "voice recording (tone)" : "voice recording (no microphone)");
+    }
+    sVoiceRec = 1;
+}
+
+API void SteamAPI_ISteamUser_StopVoiceRecording(void *self)
+{
+    (void) self;
+    if (sVoiceRec)
+    {
+        log_("voice stopped");
+    }
+    sVoiceRec = 0;
+}
+
+API unsigned int SteamAPI_ISteamUser_GetVoiceOptimalSampleRate(void *self) { (void) self; return 11025; }
+
+static unsigned int voicePending(void)
+{
+    double dt = nowSec() - sVoiceLast;
+    unsigned int n;
+
+    if (dt > 0.25)
+    {
+        dt = 0.25;
+    }
+    n = (unsigned int) (dt * MOCK_VOICE_RATE);
+    return n;
+}
+
+API int SteamAPI_ISteamUser_GetAvailableVoice(void *self, unsigned int *compressed, unsigned int *u, unsigned int rate)
+{
+    (void) self; (void) u; (void) rate;
+    if (compressed != NULL)
+    {
+        *compressed = 0;
+    }
+    if (!sVoiceRec)
+    {
+        return 2;   /* k_EVoiceResultNotRecording */
+    }
+    if (voiceHz() <= 0 || voicePending() == 0)
+    {
+        return 3;   /* k_EVoiceResultNoData */
+    }
+    if (compressed != NULL)
+    {
+        *compressed = 2 + voicePending();
+    }
+    return 0;
+}
+
+API int SteamAPI_ISteamUser_GetVoice(void *self, sbool wantCompressed, void *dest, unsigned int cap, unsigned int *written,
+                                     sbool wantU, void *ud, unsigned int ucap, unsigned int *uw, unsigned int urate)
+{
+    unsigned char *out = dest;
+    unsigned int n, i;
+    const int hz = voiceHz();
+    (void) self; (void) wantU; (void) ud; (void) ucap; (void) uw; (void) urate;
+
+    *written = 0;
+    if (!sVoiceRec || hz <= 0 || !wantCompressed)
+    {
+        return sVoiceRec ? 3 : 2;
+    }
+    n = voicePending();
+    if (n == 0)
+    {
+        return 3;
+    }
+    if (2 + n > cap)
+    {
+        return 4;   /* k_EVoiceResultBufferTooSmall, as Steam: the data waits */
+    }
+    sVoiceLast = nowSec();
+    out[0] = 'M';
+    out[1] = 'V';
+    for (i = 0; i < n; i++)
+    {
+        /* a tone that swells and fades four times a second, like syllables */
+        double env = 0.5 - 0.5 * cos(sVoiceT * 2.0 * M_PI * 4.0);
+        out[2 + i] = (unsigned char) (signed char) (96.0 * env * sin(sVoiceT * 2.0 * M_PI * hz));
+        sVoiceT += 1.0 / MOCK_VOICE_RATE;
+    }
+    *written = 2 + n;
+    return 0;
+}
+
+API int SteamAPI_ISteamUser_DecompressVoice(void *self, const void *in, unsigned int len, void *dest, unsigned int cap,
+                                            unsigned int *written, unsigned int rate)
+{
+    const unsigned char *src = in;
+    short *out = dest;
+    unsigned int n, m, i;
+    (void) self;
+
+    *written = 0;
+    if (len < 2 || src[0] != 'M' || src[1] != 'V' || rate < 11025 || rate > 48000)
+    {
+        return 5;   /* k_EVoiceResultDataCorrupted */
+    }
+    n = len - 2;
+    m = (unsigned int) ((unsigned long long) n * rate / MOCK_VOICE_RATE);
+    if (m * 2 > cap)
+    {
+        return 4;
+    }
+    for (i = 0; i < m; i++)
+    {
+        unsigned int k = (unsigned int) ((unsigned long long) i * MOCK_VOICE_RATE / rate);
+        out[i] = (short) ((signed char) src[2 + (k < n ? k : n - 1)] * 128);
+    }
+    *written = m * 2;
+    return 0;
+}

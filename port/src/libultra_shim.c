@@ -250,6 +250,18 @@ __attribute__((weak)) s32 portStereoPan(void)
     return 1;
 }
 
+/** Weak defaults: co-op voice chat on push to talk at full volume; video.c
+ * overrides ([display] voice_mode, voice_volume). */
+__attribute__((weak)) s32 portVideoVoiceMode(void)
+{
+    return 0;
+}
+
+__attribute__((weak)) s32 portVideoVoiceVolume(void)
+{
+    return 100;
+}
+
 /** Weak default: no aim lock (vanilla aiming); video.c overrides. */
 __attribute__((weak)) s32 portAimLock(void)
 {

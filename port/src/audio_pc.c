@@ -1168,6 +1168,13 @@ void portAudioPump(void)
             }
         }
 
+        { /* co-op voice chat (voice_pc.c): partners' voices on top of the
+           * game's mix, before the unfocused mute so that covers them too */
+            extern void portVoiceMix(short *stereo, int frames);
+
+            portVoiceMix(frameBuf, (int)samples);
+        }
+
         { /* [display] mute_unfocused: silence at the output, so the game's
            * own volumes and the saved ones are never touched */
             extern s32 portVideoMuteUnfocused(void);

@@ -4797,6 +4797,8 @@ static const struct PortSheetRow port_sheet_rows_audio[] = {
     /* not one of the requested rows, but it is audio, so it lives here */
     { SHROW_OPT, "stereo_pan" },
     { SHROW_OPT, "mute_unfocused" },   /* silence while the window has no focus */
+    { SHROW_OPT, "voice_mode" },       /* co-op voice chat (coop_voice.c) */
+    { SHROW_OPT, "voice_volume" },
 };
 static const struct PortSheetRow port_sheet_rows_graphics[] = {
     /* EMPTY: FOV went to VIDEO, High Detail Models to PORT
@@ -8838,7 +8840,7 @@ enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLRO
        CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE, CLROW_FRIENDLYFIRE,
        CLROW_CHARACTER, CLROW_CHAT, CLROW_PUBLIC, CLROW_PASSWORD, CLROW_JOINPUBLIC, CLROW_LAYOUT, CLROW_OPTION,
        CLROW_HOSTLEAVES, CLROW_VSMODE, CLROW_VSARENA, CLROW_VSSCENARIO, CLROW_VSLENGTH, CLROW_VSWEAPONS, CLROW_VSSTART,
-       CLROW_DISCORDYES, CLROW_DISCORDNO };
+       CLROW_DISCORDYES, CLROW_DISCORDNO, CLROW_VOICEMUTE };
 #define COOP_LOBBY_ROWS     48
 #define COOP_LOBBY_VISIBLE  PORT_SHEET_PAGE_ROWS  /* rows down to Rare's last line (293); more scroll (coop_lobby_scroll) */
 #define COOP_LOBBY_CHAT_LINES 3
@@ -9177,6 +9179,8 @@ static const char *const coop_lobby_opts[][2] = {
     { "hfov_wide", "Field of View\n" },
     { "mouse", "Mouse Look\n" },
     { "mouse_sens_x", "Mouse Speed\n" },
+    { "voice_mode", "Voice Chat\n" },     /* co-op voice (coop_voice.c) */
+    { "voice_volume", "Voice Volume\n" },
 };
 
 static void coopLobbyAddControls(void)
@@ -9345,6 +9349,12 @@ static void coopLobbyBuild(void)
                 continue;
             }
             coopLobbyCopyName(name, sizeof(name), coopPlayerName(i));
+            if ((i == coopLobbySelfPlayer()) ? coopVoiceSelfTalking() : coopVoiceTalking(i))
+            {   /* their voice is coming through (coop_voice.c) */
+                name[strcspn(name, "\n")] = '\0';
+                name[(strlen(name) > 34) ? 34 : strlen(name)] = '\0';
+                strcat(name, " - Talking\n");
+            }
             r = coopLobbyAdd(CLROW_TEXT, 0, name, (i == 0) ? "Host\n" : coopLobbyPlayerReady(i) ? "Ready\n" : "Not Ready\n");
             if (r != NULL && i != 0 && coopLobbyPlayerReady(i))
             {
@@ -9360,6 +9370,18 @@ static void coopLobbyBuild(void)
                 if (i != coopLobbySelfPlayer())
                 {
                     r->colour = PORT_SHEET_COL_DIM;
+                }
+            }
+            if (i != coopLobbySelfPlayer() && coopVoiceMuteRowMask() != 0)
+            {   /* hearing them or not, on this game alone */
+                r = coopLobbyAdd(CLROW_VOICEMUTE, i, "Voice\n", coopVoiceMuted(i) ? "Muted\n" : "On\n");
+                if (r != NULL)
+                {
+                    r->indent = 0xC;
+                    if (coopVoiceMuted(i))
+                    {
+                        r->colour = 0xA00000FF;
+                    }
                 }
             }
         }
@@ -9713,6 +9735,9 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
         case CLROW_DISCORDYES:
         case CLROW_DISCORDNO:
             coopDiscordRespond(r->arg, r->kind == CLROW_DISCORDYES);
+            break;
+        case CLROW_VOICEMUTE:
+            coopVoiceSetMuted(r->arg, !coopVoiceMuted(r->arg));
             break;
         default:
             break;

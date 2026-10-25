@@ -34,6 +34,9 @@ extern s32 portInputOptionGet(const char *key, s32 *out);
 extern s32 portInputOptionSet(const char *key, s32 value);
 extern s32 portJoyPortOptionGet(const char *key, s32 *out);
 extern s32 portJoyPortOptionSet(const char *key, s32 value);
+extern s32 portVoiceOptionGet(const char *key, s32 *out);   /* coop_voice.c: the watch's per-player mute rows */
+extern s32 portVoiceOptionSet(const char *key, s32 value);
+extern char g_coopVoiceMuteLabel[3][40];                    /* coop_voice.c: "Mute <name>" */
 extern s32 portIniWriteStrs(const char *section, const char *const *keys, const char *const *vals, s32 n);
 
 enum {
@@ -121,6 +124,11 @@ static const char *const sWideText[] = { "Stretch\n", "Wide\n", "4:3\n" };
  * list reads in ascending order. */
 static const s32 sLowResVals[] = { 240, 480, 720, 1080, 0 };
 static const char *const sLowResText[] = { "Hardware\n", "480\n", "720\n", "1080\n", "Native\n" };
+
+/* co-op voice chat (coop_voice.c): how we talk */
+static const s32 sVoiceModeVals[] = { 0, 1, 2 };
+static const char *const sVoiceModeText[] = { "Push to Talk\n", "Open Mic\n", "Off\n" };
+static const char *const sVoiceMuteText[] = { "Off\n", "Muted\n" };
 
 /* Rare's own two-way rows that are not on/off (video.c s_CfgPlayerOpt) */
 /* 1 = UPRIGHT (stick up looks up), 0 = REVERSE, matching what game_options_entries[0]
@@ -336,6 +344,14 @@ static const struct PortOpt sOpts[] = {
     TOGGLE("stereo_pan",        "[display]", "Stereo Pan\n",    PORTOPT_CAT_AUDIO),
     /* silence while the window has no focus (audio_pc.c); the volumes are untouched */
     TOGGLE("mute_unfocused",    "[display]", "Mute in Background\n", PORTOPT_CAT_AUDIO),
+    /* co-op voice chat (coop_voice.c): push to talk is its own bind (push_to_talk, V) */
+    ENUMR ("voice_mode",        "[display]", "Voice Chat\n",   PORTOPT_CAT_AUDIO, sVoiceModeVals, sVoiceModeText, NULL),
+    INTR  ("voice_volume",      "[display]", "Voice Volume\n", PORTOPT_CAT_AUDIO, 0, 200, 10, "%"),
+    /* this session's partners, muted on this game alone: never saved (portOptSave),
+     * labelled with their names, and only on the watch while they are here */
+    TOGGLET("voice_mute_1",     "[display]", g_coopVoiceMuteLabel[0], PORTOPT_CAT_AUDIO, sVoiceMuteText),
+    TOGGLET("voice_mute_2",     "[display]", g_coopVoiceMuteLabel[1], PORTOPT_CAT_AUDIO, sVoiceMuteText),
+    TOGGLET("voice_mute_3",     "[display]", g_coopVoiceMuteLabel[2], PORTOPT_CAT_AUDIO, sVoiceMuteText),
     /* aim + down = crouch off (joy_port.c), General Control Options */
     TOGGLE("no_aim_crouch",     "[input]", "No Aim+Dn Crouch\n", PORTOPT_CAT_CONTROLLER),
     /* pads while the window is unfocused (input_pc.c), General Control Options */
@@ -355,14 +371,16 @@ void portOptSave(void);
 
 static s32 optGet(const char *key, s32 *out)
 {
-    return portVideoOptionGet(key, out) || portInputOptionGet(key, out) || portJoyPortOptionGet(key, out);
+    return portVideoOptionGet(key, out) || portInputOptionGet(key, out) || portJoyPortOptionGet(key, out)
+        || portVoiceOptionGet(key, out);
 }
 
 static void classicPartChanged(const char *key, s32 on);   /* "classic mode" below */
 
 static s32 optSet(const char *key, s32 v)
 {
-    if (portVideoOptionSet(key, v) || portInputOptionSet(key, v) || portJoyPortOptionSet(key, v))
+    if (portVideoOptionSet(key, v) || portInputOptionSet(key, v) || portJoyPortOptionSet(key, v)
+        || portVoiceOptionSet(key, v))
     {
         classicPartChanged(key, v != 0);
         return 1;
@@ -685,6 +703,10 @@ void portOptSave(void)
         n = 0;
         for (i = 0; i < PORTOPT_COUNT; i++)
         {
+            if (strncmp(sOpts[i].key, "voice_mute_", 11) == 0)
+            {
+                continue;   /* a session's mutes are not settings */
+            }
             if (strcmp(sOpts[i].section, sSections[sec]) == 0 && optIniText(&sOpts[i], bufs[n], sizeof(bufs[n])))
             {
                 keys[n] = sOpts[i].key;
