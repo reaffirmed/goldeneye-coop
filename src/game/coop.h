@@ -31,6 +31,8 @@ void coopScriptSetsFlags(void *script);        /* that script sets stage flags: 
 void coopAiCommand(u8 *list, s32 offset, ChrRecord *self);
 s32  coopDeadTick(void); /* 1: co-op owns this death (waiting or respawned) */
 void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon);
+void coopTeleportPlayerTo(coord3d *pos, StandTile *stan, f32 yaw);    /* bondview2.c */
+s32  coopCinemaFocus(coord3d *out);                                     /* bondview2.c: a scripted cinema's pad */
 s32  coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid);
 s32  coopShotPuppet(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, s32 isPlayer);
 
@@ -59,6 +61,33 @@ s32  coopHudReviveHold(void);   /* ticks of COOP_REVIVE_HOLD */
 #define COOP_BLEED_OUT   3600      /* revive only: 60 s down and you are out of this mission */
 s32  coopHudBledOut(void);
 s32  coopHudBleedOut(void);     /* revive only: ticks left before we bleed out, -1 none */
+
+/* revive, cutscenes and the results screen: their own events (coop.c carries
+ * them; coopDesignApply in coop_cutscene.c hands them out) */
+#define COOPEV_DESIGN_FIRST 56
+#define COOPEV_DESIGN_LAST  63
+enum
+{
+    COOPEV_CINEMA = 56,     /* host -> all: CoopCinemaMsg, the host's intro is over */
+    COOPEV_RESULTS = 57     /* to all: a player's extra results (coop_stats.c) */
+};
+#define COOP_ALL_PLAYERS 0xFF   /* coopDesignSend's `to`: everyone */
+void coopDesignSend(s32 kind, s32 to, const void *payload, s32 len);
+void coopRunHostScript(u8 *list);   /* host: run script commands as the level would (relayed) */
+void coopCutsceneStandUp(coord3d *pos, StandTile *stan, f32 yaw);
+void coopResultsApply(const u8 *raw, s32 from);
+void coopDesignApply(s32 kind, const u8 *raw, s32 from);
+s32  coopDesignSelf(void);
+s32  coopDesignIsHost(void);
+
+/* cutscenes (coop_cutscene.c) */
+s32  coopCutsceneTick(void);    /* every tick: 1 while an intro or a scripted cinema runs */
+s32  coopCutsceneActive(void);  /* partners play our Bond's cinema animation */
+s32  coopCutscenePuppetPos(s32 player, coord3d *pos, f32 *yaw);   /* 1: stand the puppet here instead */
+void coopCutscenePuppetAnim(ChrRecord *chr);
+s32  coopCutsceneCameraNear(const coord3d *pos);  /* the swirl's camera is about to pass through pos */
+void coopCutsceneApply(const u8 *raw, s32 from);
+s32  coopIntroHostDone(void);   /* bondview2.c: end our intro, the host's is over */
 
 /* reviving a downed partner (coop_revive.c) */
 void coopReviveTick(s32 missionticks);

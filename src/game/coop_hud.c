@@ -786,6 +786,10 @@ Gfx *coopHudRender(Gfx *gdl)
     {
         return gdl;   /* solo missions only, and not over the watch */
     }
+    if (coopCutsceneActive())
+    {
+        return gdl;   /* the partners are in the shot, not tagged */
+    }
     memset(&p, 0, sizeof(p));
     partner = coopHudPartner(&p);
     if (partner)

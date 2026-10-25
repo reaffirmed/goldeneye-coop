@@ -87,7 +87,7 @@ Each item verified with two copies in Dam using the harness switches listed belo
 - Mission end: completing the mission (bossReturnTitleStage) ends it for both (GE_COOP_TESTEND). The peer's Bond is removed when it leaves the stage or goes silent for 5 s.
 - Death (owner's choice): a dead player respawns beside the partner, with full health and the same inventory, once the partner has been out of combat for 4 s (at least 3 s after the death fade, at most 20 s). If both players are dead, the mission fails as usual (GE_COOP_TESTDIE).
 
-Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscenes (intro and exit) only play on the host; guard tracers; vehicles (Runway plane, tank) run on both sides; and only the host can trigger level exits that check "Bond's" position.
+Known gaps: grenades and mines thrown by the joiner don't hurt anything; (cutscenes: see "Synced cutscenes" below); guard tracers; vehicles (Runway plane, tank) run on both sides; and only the host can trigger level exits that check "Bond's" position.
 
 ## Milestone 4, Steam (2026-10-24)
 
@@ -673,3 +673,40 @@ satellite-console work and the Runway plane did nothing on the host.
   and both games finish the mission, with the plane taking off on both
   screens; on Surface the joiner's Use on the dish console runs the host's
   script, and the joiner shooting it reaches the host as OBJDMG.
+
+## Revive by holding Use, bleed-out (2026-10-25, COOP_VERSION 10)
+
+- Revive is now an action: a living partner holds Use within 1.6 m of where
+  you fell for 2.5 s (COOP_REVIVE_HOLD). Their HUD says "HOLD USE TO REVIVE
+  NAME", then "REVIVING NAME" with a green bar; your downed screen shows a red
+  bar draining over 60 s (COOP_BLEED_OUT) next to "BEING REVIVED". Back with
+  half health. The mission fails only when everyone is down (unchanged).
+- Wire: the STATE spare byte is now `revive`: standing, whom we hold Use over
+  (player + 1); down, our hold count. The downed game decides (coop.c
+  coopDeadTick); the reviver gets COOPSTAT_REVIVES when the partner stands.
+- Harness: GE_COOP_TESTREVIVE=<s> walks to a downed partner and holds Use.
+- Files: coop_revive.c (reviver side), coop_hud.c, joy_port.c
+  portJoyPortUseHeldInPlay.
+
+## Synced cutscenes (2026-10-25)
+
+- Before: coopInMission() needs CAMERAMODE_FP, so the whole session (state,
+  guards, puppets) paused in intros and cinemas; cinema chrs lived on the host.
+- Now (coop_cutscene.c): while a stage intro or scripted cinema (POSEND) runs
+  the session keeps going (coop.c coopInStage / coopCinemaTick), partners'
+  puppets play what our own Bond plays, guns away, and our HUD is off.
+- Intro: everyone's swirl shows every Bond, partners in slots beside ours;
+  the host's intro ending (skip or not) ends everyone's (COOPEV_CINEMA
+  INTRODONE, bondview2.c coopIntroHostDone).
+- Scripted cinemas (endings, Runway/Dam style AI camera scripts): the star is
+  the player nearest the cinema's pad; everyone else stands up (if down) and
+  is moved to a slot beside them, including their cinema body
+  (coopTeleportPlayerTo, as AI_TRYTeleportingChrToPad). The host's AI
+  relay still drives the camera commands on every game.
+- Player chrs (our Bond as a cinema chr, puppets) never go into guard
+  snapshots or AI sync (coopIsPlayerChr); before, the host's cinema Bond was
+  applied to the joiner's own Bond and crashed it.
+- Harness: GE_COOP_TESTCINEMA=<s> (host runs a 5 s orbit cinema around the
+  partner), GE_COOP_CINEMASHOT=<ticks> (cine_p<player>_<n>.bmp).
+- Event ids: this feature set owns COOPEV 56..63 (COOPEV_DESIGN_FIRST/LAST)
+  and COOPPKT 24..25.

@@ -330,6 +330,7 @@ static f32 sLastHealth;
 static s32 sLastWeapon = ITEM_UNARMED;
 static u32 sDeadSince;      /* sTick our Bond's death fade finished, 0 alive */
 static s32 sReviveHold;     /* while down: ticks a partner has held Use over us */
+static s32 sBledOut;        /* revive only: down too long, out until the mission ends */
 static s32 sDefsBytes;  /* size of the stage's setup prop defs */
 static void *sDefsBase;
 static u32 sTick;
@@ -480,6 +481,17 @@ static s32 coopInMission(void)
     return bond != NULL && bond->stan != NULL && (g_CameraMode == CAMERAMODE_FP || coopVersus());
 }
 
+static s32 sInCinema;   /* the intro or a scripted cinema runs (coop_cutscene.c) */
+
+/* in the stage, playing it or watching its intro or a cutscene: the world
+ * (guards, objects, puppets) keeps up with the host's */
+static s32 coopInStage(void)
+{
+    PropRecord *bond = getCurrentPlayerProp();
+
+    return coopInMission() || (sInCinema && bond != NULL && bond->stan != NULL && !coopVersus());
+}
+
 static s32 coopRespawnEta(void);
 
 /* ---- players ------------------------------------------------------------- */
@@ -556,9 +568,17 @@ static s32 coopIsPuppet(PropRecord *prop)
     return coopPlayerOfProp(prop) >= 0;
 }
 
+/* a puppet, or our own Bond's body (the intro swirl and cutscenes give it a
+ * chr slot): never a guard to mirror, send or remove */
+static s32 coopIsPlayerChr(ChrRecord *chr)
+{
+    return coopIsPuppet(chr->prop) || (g_CurrentPlayer != NULL && chr->prop == g_CurrentPlayer->prop);
+}
+
 static s32 coopRespawnEta(void);
 static s32 coopLocalCalm(void);
 static void coopRemotesTick(void);
+static void coopCinemaTick(void);
 static void coopQueueEventTo(CoopEvent *ev, s32 to);
 
 static void coopSendState(void)
@@ -831,7 +851,7 @@ static void coopPollNet(void)
             {
                 continue;
             }
-            if (coopInMission() && coopRemoteHere(0))
+            if (coopInStage() && coopRemoteHere(0))
             {
                 for (k = 0; k < g->count; k++)
                 {
@@ -866,7 +886,7 @@ static void coopPollNet(void)
         }
         if (p->type == COOPPKT_WORLD && n >= (s32) sizeof(CoopWorldPkt))
         {
-            if (coopInMission() && coopRemoteHere(coopPlayerOfChan(c)))
+            if (coopInStage() && coopRemoteHere(coopPlayerOfChan(c)))
             {
                 sWorldFrom = coopPlayerOfChan(c);
                 coopApplyWorld((CoopWorldPkt *) buf);
@@ -950,9 +970,12 @@ static void coopPuppetUpdate(CoopRemote *r)
     coord3d pos;
     StandTile *stan;
 
+    f32 yaw = r->st.yaw;
+
     pos.f[0] = r->st.pos[0];
     pos.f[1] = r->st.pos[1];
     pos.f[2] = r->st.pos[2];
+    coopCutscenePuppetPos(r->st.player, &pos, &yaw);   /* the intro's line beside our Bond */
 
     stan = coopFindStan(&pos, r->puppet->stan, &r->puppet->pos);
     if (stan == NULL)
@@ -964,10 +987,16 @@ static void coopPuppetUpdate(CoopRemote *r)
     r->puppet->stan = stan;
     r->puppet->pos = pos;
     setsuboffset(chr->model, &pos);
-    setsubroty(chr->model, r->st.yaw);
+    setsubroty(chr->model, yaw);
     sub_GAME_7F01FC10(chr->model, &r->puppet->pos, &r->puppet->pos, &chr->ground);
     chrDetectRooms(chr);
 
+    if (coopCutsceneActive())
+    {   /* our Bond's cinema animation, no guns; the MP animations start over after */
+        coopCutscenePuppetAnim(chr);
+        r->look.anim = 0;
+        return;
+    }
     /* the guns in their hands, the MP body animations, their shots (coop_look.c) */
     coopLookPuppetTick(&r->look, chr, &r->st.look, r->st.dead, COOP_PUPPET_CHRNUM + coopSelf());
 }
@@ -989,9 +1018,13 @@ static void coopPuppetUpdateGhost(CoopRemote *r)
     {
         r->puppetGhost = 0;
     }
+    if (coopCutsceneActive())
+    {
+        r->puppetGhost = 1;     /* in the shot, and in nobody's way */
+    }
     /* our camera inside their body (both start on one pad, or we watch
      * them while we are down): don't draw it */
-    if (d2 < 45.0f * 45.0f || coopSpectateTarget() == r->st.player)
+    if (d2 < 45.0f * 45.0f || coopSpectateTarget() == r->st.player || coopCutsceneCameraNear(&r->puppet->pos))
     {
         r->puppet->chr->chrflags |= CHRFLAG_HIDDEN;
     }
@@ -1100,6 +1133,7 @@ static void coopTickBody(void)
     }
 
     sTick++;
+    sInCinema = coopCutsceneTick();     /* before the packets: they ask coopInStage */
     coopPollNet();
     coopSessionTick();
     if (bossGetStageNum() != LEVELID_TITLE)
@@ -1112,6 +1146,10 @@ static void coopTickBody(void)
 
     if (!coopInMission())
     {
+        if (coopInStage())
+        {
+            coopCinemaTick();
+        }
         return;
     }
 
@@ -1172,6 +1210,35 @@ static void coopTickBody(void)
 
     coopHarnessTick();
 
+    coopRemotesTick();
+}
+
+/* The intro or a scripted cinema runs (coop_cutscene.c): no play, but the
+ * session goes on, so the host's actors keep moving on every screen and
+ * every player's Bond is in the shot. */
+static void coopCinemaTick(void)
+{
+    coopSendState();
+    if (coopNetIsHost() && coopNetHasPeer() && coopPartnerHere())
+    {
+        if ((sTick % 3) == 0)
+        {
+            coopSendGuards();
+        }
+        if ((sTick % 30) == 0)
+        {
+            coopSendWorld();
+        }
+        if ((sTick % 60) == 30)
+        {
+            coopSendAiSync();
+        }
+    }
+    if (coopIsMirroringClient())
+    {
+        coopReapGuards();
+        coopClientGunfire();
+    }
     coopRemotesTick();
 }
 
@@ -1798,7 +1865,7 @@ s32 coopChrTickBegin(ChrRecord *chr)
     sTickChr = NULL;
     g_CoopPropOverride = NULL;
 
-    if (!sEnabled || coopIsPuppet(chr->prop))
+    if (!sEnabled || coopIsPlayerChr(chr))
     {
         return 1;
     }
@@ -1951,7 +2018,7 @@ static void coopSendGuards(void)
         CoopGuardEnt *e;
         ModelAnimation *anim;
 
-        if (chr->model == NULL || chr->prop == NULL || coopIsPuppet(chr->prop))
+        if (chr->model == NULL || chr->prop == NULL || coopIsPlayerChr(chr))
         {
             continue;
         }
@@ -2094,7 +2161,7 @@ static void coopApplyGuard(CoopGuardEnt *e)
     {
         chr = coopMirrorSpawn(e);
     }
-    if (chr == NULL || chr->prop == NULL || coopIsPuppet(chr->prop))
+    if (chr == NULL || chr->prop == NULL || coopIsPlayerChr(chr))
     {
         return;
     }
@@ -2211,7 +2278,7 @@ static void coopReapGuards(void)
     {
         ChrRecord *chr = &g_ChrSlots[i];
 
-        if (chr->model == NULL || chr->prop == NULL || coopIsPuppet(chr->prop))
+        if (chr->model == NULL || chr->prop == NULL || coopIsPlayerChr(chr))
         {
             continue;
         }
@@ -2473,7 +2540,11 @@ static void coopApplyEvent(CoopEvent *ev)
             }
             break;
         default:
-            if (ev->kind >= COOPEV_VSHIT)
+            if (ev->kind >= COOPEV_DESIGN_FIRST && ev->kind <= COOPEV_DESIGN_LAST)
+            {
+                coopDesignApply(ev->kind, ev->u.raw, ev->from);
+            }
+            else if (ev->kind >= COOPEV_VSHIT)
             {
                 coopVersusApplyEvent(ev->kind, ev->from, ev->u.raw);
             }
@@ -2483,6 +2554,79 @@ static void coopApplyEvent(CoopEvent *ev)
             }
             break;
     }
+}
+
+/* ---- revive, cutscenes and the results (coop_revive.c, coop_cutscene.c,
+ * coop_stats.c): their events, COOPEV_DESIGN_FIRST..LAST ------------------ */
+
+void coopDesignSend(s32 kind, s32 to, const void *payload, s32 len)
+{
+    CoopEvent ev;
+
+    if (sEnabled <= 0 || !coopNetHasPeer() || kind < COOPEV_DESIGN_FIRST || kind > COOPEV_DESIGN_LAST)
+    {
+        return;
+    }
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = (u8) kind;
+    memcpy(ev.u.raw, payload, (len < (s32) sizeof(ev.u.raw)) ? len : (s32) sizeof(ev.u.raw));
+    coopQueueEventTo(&ev, to);
+}
+
+s32 coopDesignSelf(void)
+{
+    return (sEnabled > 0) ? coopSelf() : 0;
+}
+
+s32 coopDesignIsHost(void)
+{
+    return sEnabled > 0 && coopNetIsHost();
+}
+
+/* host: run script commands (AI_EndList ended) as a level script would, on
+ * any chr, so the presentation ones are relayed as usual (harness only) */
+void coopRunHostScript(u8 *list)
+{
+    ChrRecord *chr = NULL;
+    AIRecord *savedlist;
+    s32 savedofs;
+    s32 i;
+
+    for (i = 0; chr == NULL && i < g_NumChrSlots; i++)
+    {
+        if (g_ChrSlots[i].model != NULL && g_ChrSlots[i].prop != NULL && coopPlayerOfProp(g_ChrSlots[i].prop) < 0)
+        {
+            chr = &g_ChrSlots[i];
+        }
+    }
+    if (chr == NULL || !coopNetIsHost())
+    {
+        return;
+    }
+    savedlist = chr->ailist;
+    savedofs = chr->aioffset;
+    chr->ailist = (AIRecord *) list;
+    chr->aioffset = 0;
+    ai((PropDefHeaderRecord *) chr, PROP_TYPE_CHR);
+    chr->ailist = savedlist;
+    chr->aioffset = savedofs;
+}
+
+/* a scripted cinema puts us beside its star (coop_cutscene.c): if we were
+ * down, we stand up for it */
+void coopCutsceneStandUp(coord3d *pos, StandTile *stan, f32 yaw)
+{
+    if (g_CurrentPlayer->bonddead)
+    {
+        coopRespawnPlayerAt(pos, stan, yaw, sLastWeapon);
+        sLastHealth = g_CurrentPlayer->bondhealth;
+        sDeadSince = 0;
+        sBledOut = 0;
+        coopSpectateStop();
+        portConLogf("ge: coop: cutscene: up again for it\n");
+        return;
+    }
+    coopTeleportPlayerTo(pos, stan, yaw);
 }
 
 /* ---- versus (coop_versus.c) --------------------------------------------- */
@@ -3279,7 +3423,6 @@ static s32 coopLocalCalm(void)
 static coord3d sDeathPos;
 static StandTile *sDeathStan;
 static f32 sDeathYaw;
-static s32 sBledOut;
 
 
 /* A lobby setting (COOPSET_*): the host sets them on the lobby screen, the
@@ -3499,7 +3642,7 @@ s32 coopHudPartnerAt(s32 i, CoopHudPartner *out)
     s32 p;
     CoopStatePkt *st;
 
-    if (sEnabled <= 0 || !coopInMission())
+    if (sEnabled <= 0 || !coopInStage())
     {
         return 0;
     }
@@ -4328,7 +4471,7 @@ static void coopSendAiSync(void)
         bool global;
         s32 id;
 
-        if (chr->model == NULL || chr->prop == NULL || coopIsPuppet(chr->prop))
+        if (chr->model == NULL || chr->prop == NULL || coopIsPlayerChr(chr))
         {
             continue;
         }
@@ -4371,7 +4514,7 @@ static void coopRecvAiSync(CoopAiPkt *p)
 {
     s32 k;
 
-    if (!coopInMission() || g_ChrSlots == NULL)
+    if (!coopInStage() || g_ChrSlots == NULL)
     {
         return;
     }
@@ -4380,7 +4523,7 @@ static void coopRecvAiSync(CoopAiPkt *p)
         ChrRecord *chr = chrFindByLiteralId(p->ent[k].chrnum);
         s32 slot;
 
-        if (chr == NULL || chr->prop == NULL || coopIsPuppet(chr->prop))
+        if (chr == NULL || chr->prop == NULL || coopIsPlayerChr(chr))
         {
             continue;
         }
@@ -4409,7 +4552,7 @@ static void coopTakeOverWorld(void)
         sChrTarget[i].target = -1;
         sChrTarget[i].lastupdate60 = -1;
         sChrTarget[i].laststimulus60 = -1;
-        if (!sAiSyncHave[i] || chr->model == NULL || chr->prop == NULL || coopIsPuppet(chr->prop) || chr->chrnum != e->chrnum)
+        if (!sAiSyncHave[i] || chr->model == NULL || chr->prop == NULL || coopIsPlayerChr(chr) || chr->chrnum != e->chrnum)
         {
             continue;
         }

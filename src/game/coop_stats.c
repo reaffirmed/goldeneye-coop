@@ -876,3 +876,9 @@ void coopCampaignApply(const u8 *raw, s32 from)
     sInheritPending = 1;
     coopCampaignInherit();
 }
+
+void coopResultsApply(const u8 *raw, s32 from)
+{
+    (void) raw;
+    (void) from;
+}
