@@ -14,11 +14,18 @@
  *  - Join snapshot: when a player's Bond first shows up in the mission (and
  *    after a host migration, for everyone), the host sends every record,
  *    COOPREPL_SNAP_PER_TICK packets a tick. Those apply at once.
- *  - Periodic resync: the rest of the time the host walks the list a packet
- *    at a time (COOPREPL_CYCLE_TICKS apart). A difference has to still be
- *    there COOPREPL_PERSIST_TICKS after it was first seen before it is
- *    corrected, so an event in flight or a door closing on its own timer a
- *    moment later on one side is not fought.
+ *  - Desync checksum (periodic resync): the rest of the time the host sends
+ *    each joiner a hash of every block of COOPREPL_PER_PKT records twice a
+ *    second (COOPPKT_REPLSUM), with a hash of the stage flags and alarm and
+ *    one of which chrs exist. A joiner hashes its own blocks the same way; a
+ *    block that still differs after COOPREPL_SUM_MISSES checks in a row (an
+ *    event in flight, a door closing on its own timer a moment later, settle
+ *    before that) is asked for (COOPPKT_REPLREQ) and its records applied as
+ *    they come. A block whose records then show nothing to correct (two
+ *    positions within COOPREPL_POS_EPS) keeps that pair of hashes as agreed
+ *    until either side's changes. Stage flags and chrs are already sent in
+ *    full (WORLD, guard snapshots); their hashes only report a disagreement
+ *    that lasts, which the CI runs fail on.
  *
  * Corrections only move a joiner's world towards the host's and never undo
  * anything: an object the host still has is not brought back here, damage
@@ -55,6 +62,7 @@
 #include "player.h"
 #include "bondinv.h"
 #include "bondview.h"
+#include "chr.h"
 #include "propobj.h"
 #include "coop.h"
 #include "coop_net.h"
@@ -69,8 +77,10 @@ extern StandTile *stanFindTileBelowPos(coord3d *pos, u8 *rooms, f32 *yRtn);
 #define COOPREPL_MAX            1024    /* setup objects tracked per stage (Dam has ~300) */
 #define COOPREPL_PER_PKT        16
 #define COOPREPL_SNAP_PER_TICK  2
-#define COOPREPL_CYCLE_TICKS    6       /* 10 packets a second while nothing is pending */
-#define COOPREPL_PERSIST_TICKS  90
+#define COOPREPL_BLOCKS         (COOPREPL_MAX / COOPREPL_PER_PKT)
+#define COOPREPL_SUM_TICKS      30      /* a checksum to each joiner twice a second */
+#define COOPREPL_SUM_MISSES     3       /* checks in a row a block differs before it is asked for */
+#define COOPREPL_STUCK_SUMS     20      /* a difference still there after this many (10 s) is reported */
 #define COOPREPL_POS_EPS        24.0f   /* units: closer than this counts as the same spot */
 
 /* CoopReplRec.bits */
@@ -105,11 +115,37 @@ typedef struct
     u16 type;       /* COOPPKT_REPL */
     s32 stage;
     u16 total;      /* records in the stage */
-    u8 snap;        /* part of a join snapshot: apply now */
+    u8 snap;        /* REPLSNAP_* */
     u8 count;
     u32 snapid;     /* which snapshot (a joiner may get a second one) */
     CoopReplRec rec[COOPREPL_PER_PKT];
 } CoopReplPkt;
+
+enum { REPLSNAP_NONE, REPLSNAP_JOIN, REPLSNAP_ASKED };
+
+/* host -> joiner: what its world looks like, in hashes */
+typedef struct
+{
+    u32 magic;
+    u16 version;
+    u16 type;       /* COOPPKT_REPLSUM */
+    s32 stage;
+    u16 total;
+    u16 nblocks;
+    u32 world;      /* stage flags and alarm */
+    u32 chrs;       /* the set of chrnums */
+    u32 hash[COOPREPL_BLOCKS];
+} CoopReplSumPkt;
+
+/* joiner -> host: send me these blocks */
+typedef struct
+{
+    u32 magic;
+    u16 version;
+    u16 type;       /* COOPPKT_REPLREQ */
+    s32 stage;
+    u32 want[COOPREPL_BLOCKS / 32];
+} CoopReplReqPkt;
 
 /* engine-owned bits that differ between worlds and must not be copied */
 #define COOPREPL_FLAGMASK (~(u32) (PROPFLAG_INMOTION | PROPFLAG_00000100))
@@ -125,14 +161,21 @@ static struct
     s32 seen;       /* their Bond is in this mission */
     s32 snapAt;     /* next record of the snapshot being sent, -1 none */
     u32 snapid;
-    s32 cursor;     /* the periodic walk */
+    u32 want[COOPREPL_BLOCKS / 32];     /* blocks they asked for */
+    s32 wantAt;     /* where the sending of those is */
 } sOut[COOP_MAX_PLAYERS];
 static u32 sSnapSerial;
 static u32 sTick;
 
 /* joiner */
-static u32 sFirstMiss[COOPREPL_MAX];    /* sTick a difference was first seen, 0 none */
 static u8 sSnapGot[COOPREPL_MAX];
+static u8 sMiss[COOPREPL_BLOCKS];       /* checks in a row this block has differed */
+static u32 sHostSum[COOPREPL_BLOCKS];   /* the host's hash in the last checksum */
+static u32 sAgreedHost[COOPREPL_BLOCKS], sAgreedOurs[COOPREPL_BLOCKS];  /* a difference that needs nothing */
+static u8 sAgreed[COOPREPL_BLOCKS];
+static s32 sWorldMiss, sChrMiss;
+static s32 sDesyncs;            /* blocks found different and corrected this mission */
+static s32 sStuck;              /* differences that lasted COOPREPL_STUCK_SUMS checks */
 static u32 sSnapId;
 static s32 sSnapLeft = -1;      /* records of the snapshot not in yet; 0 done; -1 none yet */
 static s32 sFixes;
@@ -266,6 +309,88 @@ static void coopReplCapture(s32 i, CoopReplRec *r)
     }
 }
 
+/* ---- hashes ------------------------------------------------------------------ */
+
+static u32 coopReplFnv(u32 h, u32 v)
+{
+    s32 k;
+
+    for (k = 0; k < 4; k++)
+    {
+        h ^= (v >> (k * 8)) & 0xFF;
+        h *= 16777619u;
+    }
+    return h;
+}
+
+/* a record as far as a correction cares: what coopReplDiff compares */
+static u32 coopReplHashRec(u32 h, const CoopReplRec *r)
+{
+    u32 bits = r->bits & (RB_PRESENT | RB_HELD | RB_DOORDEAD | RB_LOOSE);
+
+    if ((r->bits & RB_DOORSTILL) && (r->bits & RB_DOOROPEN))
+    {
+        bits |= RB_DOOROPEN;
+    }
+    h = coopReplFnv(h, r->type | (bits << 8) | ((u32) r->destroyed << 16));
+    h = coopReplFnv(h, r->flags);
+    h = coopReplFnv(h, r->flags2);
+    h = coopReplFnv(h, r->keyflags);
+    if (r->bits & RB_LOOSE)
+    {   /* to a grid: positions this close count as the same (and a block that
+         * only differs by rounding is agreed once looked at) */
+        h = coopReplFnv(h, (u32) (s32) (r->pos[0] / COOPREPL_POS_EPS));
+        h = coopReplFnv(h, (u32) (s32) (r->pos[1] / COOPREPL_POS_EPS));
+        h = coopReplFnv(h, (u32) (s32) (r->pos[2] / COOPREPL_POS_EPS));
+    }
+    return h;
+}
+
+static s32 coopReplBlocks(void)
+{
+    return (sNum + COOPREPL_PER_PKT - 1) / COOPREPL_PER_PKT;
+}
+
+static u32 coopReplBlockHash(s32 b)
+{
+    u32 h = 2166136261u;
+    s32 i;
+
+    for (i = b * COOPREPL_PER_PKT; i < sNum && i < (b + 1) * COOPREPL_PER_PKT; i++)
+    {
+        CoopReplRec r;
+
+        coopReplCapture(i, &r);
+        h = coopReplHashRec(h, &r);
+    }
+    return h;
+}
+
+static u32 coopReplWorldHash(void)
+{
+    return coopReplFnv(coopReplFnv(2166136261u, (u32) objectiveregisters1), alarmIsActive() ? 1 : 0);
+}
+
+/* which chrs exist (order free: each one adds its own hash); partners' puppets left out */
+static u32 coopReplChrHash(void)
+{
+    u32 sum = 0;
+    s32 i;
+
+    for (i = 0; i < g_NumChrSlots; i++)
+    {
+        ChrRecord *chr = &g_ChrSlots[i];
+
+        if (chr->model == NULL || chr->prop == NULL
+            || (chr->chrnum >= COOP_PUPPET_CHRNUM && chr->chrnum < COOP_PUPPET_CHRNUM + COOP_MAX_PLAYERS))
+        {
+            continue;
+        }
+        sum += coopReplFnv(2166136261u, (u32) chr->chrnum);
+    }
+    return sum;
+}
+
 /* ---- host ------------------------------------------------------------------ */
 
 void coopReplSendSnapshot(s32 player)
@@ -298,6 +423,25 @@ static void coopReplSend(s32 player, s32 from, s32 snap, u32 snapid)
     coopExtSendPacket(&p, (s32) ((u8 *) &p.rec[k] - (u8 *) &p), player);
 }
 
+static void coopReplSendSum(s32 player)
+{
+    CoopReplSumPkt p;
+    s32 b, n = coopReplBlocks();
+
+    memset(&p, 0, sizeof(p));
+    p.type = COOPPKT_REPLSUM;
+    p.stage = bossGetStageNum();
+    p.total = (u16) sNum;
+    p.nblocks = (u16) n;
+    p.world = coopReplWorldHash();
+    p.chrs = coopReplChrHash();
+    for (b = 0; b < n; b++)
+    {
+        p.hash[b] = coopReplBlockHash(b);
+    }
+    coopExtSendPacket(&p, (s32) ((u8 *) &p.hash[n] - (u8 *) &p), player);
+}
+
 static void coopReplHostTick(void)
 {
     s32 p;
@@ -314,13 +458,14 @@ static void coopReplHostTick(void)
         if (!sOut[p].seen)
         {   /* they just arrived: everything the world went through without them */
             sOut[p].seen = 1;
+            memset(sOut[p].want, 0, sizeof(sOut[p].want));
             coopReplSendSnapshot(p);
         }
         if (sOut[p].snapAt >= 0)
         {
             for (n = 0; n < COOPREPL_SNAP_PER_TICK && sOut[p].snapAt < sNum; n++)
             {
-                coopReplSend(p, sOut[p].snapAt, 1, sOut[p].snapid);
+                coopReplSend(p, sOut[p].snapAt, REPLSNAP_JOIN, sOut[p].snapid);
                 sOut[p].snapAt += COOPREPL_PER_PKT;
             }
             if (sOut[p].snapAt >= sNum)
@@ -329,18 +474,26 @@ static void coopReplHostTick(void)
             }
             continue;
         }
-        if ((sTick % COOPREPL_CYCLE_TICKS) == (u32) p % COOPREPL_CYCLE_TICKS)
-        {
-            if (sOut[p].cursor >= sNum)
+        for (n = 0; n < COOPREPL_SNAP_PER_TICK && sOut[p].wantAt < COOPREPL_BLOCKS; sOut[p].wantAt++)
+        {   /* the blocks they asked for */
+            s32 b = sOut[p].wantAt;
+
+            if (sOut[p].want[b / 32] & (1u << (b % 32)))
             {
-                sOut[p].cursor = 0;
+                sOut[p].want[b / 32] &= ~(1u << (b % 32));
+                if (b * COOPREPL_PER_PKT < sNum)
+                {
+                    coopReplSend(p, b * COOPREPL_PER_PKT, REPLSNAP_ASKED, 0);
+                }
+                n++;
             }
-            coopReplSend(p, sOut[p].cursor, 0, 0);
-            sOut[p].cursor += COOPREPL_PER_PKT;
+        }
+        if ((sTick % COOPREPL_SUM_TICKS) == (u32) p * 7)
+        {
+            coopReplSendSum(p);
         }
     }
 }
-
 /* the host changed hands: the new host's world is the truth now, so everyone gets it */
 void coopReplMigrated(void)
 {
@@ -350,9 +503,10 @@ void coopReplMigrated(void)
     {
         sOut[p].seen = 0;
         sOut[p].snapAt = -1;
-        sOut[p].cursor = 0;
+        sOut[p].wantAt = COOPREPL_BLOCKS;
     }
-    memset(sFirstMiss, 0, sizeof(sFirstMiss));
+    memset(sMiss, 0, sizeof(sMiss));
+    memset(sAgreed, 0, sizeof(sAgreed));
 }
 
 /* ---- joiner ---------------------------------------------------------------- */
@@ -486,7 +640,7 @@ static void coopReplFix(s32 i, const CoopReplRec *host, s32 fix)
     }
 }
 
-static void coopReplApply(const CoopReplRec *host, s32 snap)
+static s32 coopReplApply(const CoopReplRec *host)
 {
     CoopReplRec ours;
     s32 i = host->idx;
@@ -494,51 +648,44 @@ static void coopReplApply(const CoopReplRec *host, s32 snap)
 
     if (i >= sNum || coopReplObj(i)->type != host->type)
     {
-        return;
+        return 0;
     }
     coopReplCapture(i, &ours);
     fix = coopReplDiff(host, &ours);
-    if (fix == 0)
+    if (fix != 0)
     {
-        sFirstMiss[i] = 0;
-        return;
+        coopReplFix(i, host, fix);
     }
-    if (!snap)
-    {   /* it has to last: an event may be on its way, or a door closing a moment later here */
-        if (sFirstMiss[i] == 0)
-        {
-            sFirstMiss[i] = sTick;
-            return;
-        }
-        if (sTick - sFirstMiss[i] < COOPREPL_PERSIST_TICKS)
-        {
-            return;
-        }
+    return fix != 0;
+}
+static s32 coopReplHostPkt(const void *buf, s32 len, s32 from, s32 hdr, s32 stage)
+{
+    if (from != 0 || coopNetIsHost() || len < hdr || !coopReplHostHere() || stage != bossGetStageNum())
+    {
+        return 0;
     }
-    sFirstMiss[i] = 0;
-    coopReplFix(i, host, fix);
+    coopReplList();
+    return 1;
 }
 
-void coopReplPacket(const void *buf, s32 len, s32 from)
+static void coopReplRecvRecords(const CoopReplPkt *p, s32 len)
 {
-    const CoopReplPkt *p = (const CoopReplPkt *) buf;
     s32 hdr = (s32) ((const u8 *) &p->rec[0] - (const u8 *) p);
-    s32 k;
+    s32 k, fixed = 0;
 
-    if (from != 0 || coopNetIsHost() || len < hdr || p->count > COOPREPL_PER_PKT
-        || len < hdr + p->count * (s32) sizeof(CoopReplRec) || !coopReplHostHere())
+    if (p->count > COOPREPL_PER_PKT || len < hdr + p->count * (s32) sizeof(CoopReplRec))
     {
         return;
     }
-    if (p->stage != bossGetStageNum() || coopReplList() != p->total)
+    if (p->total != sNum)
     {
-        if (p->stage == bossGetStageNum() && (sTick % 300) == 0)
+        if ((sTick % 300) == 0)
         {
             portConLogf("ge: coop: repl: host has %d setup objects, we have %d: not applied\n", p->total, sNum);
         }
         return;
     }
-    if (p->snap && p->snapid != sSnapId)
+    if (p->snap == REPLSNAP_JOIN && p->snapid != sSnapId)
     {
         sSnapId = p->snapid;
         sSnapLeft = sNum;
@@ -549,8 +696,8 @@ void coopReplPacket(const void *buf, s32 len, s32 from)
     {
         s32 i = p->rec[k].idx;
 
-        coopReplApply(&p->rec[k], p->snap);
-        if (p->snap && p->snapid == sSnapId && i < sNum && !sSnapGot[i])
+        fixed += coopReplApply(&p->rec[k]);
+        if (p->snap == REPLSNAP_JOIN && p->snapid == sSnapId && i < sNum && !sSnapGot[i])
         {
             sSnapGot[i] = 1;
             if (--sSnapLeft == 0)
@@ -559,11 +706,143 @@ void coopReplPacket(const void *buf, s32 len, s32 from)
             }
         }
     }
+    if (p->snap == REPLSNAP_ASKED && p->count > 0)
+    {
+        s32 b = p->rec[0].idx / COOPREPL_PER_PKT;
+        u32 ours = coopReplBlockHash(b);
+
+        sMiss[b] = 0;
+        if (fixed > 0)
+        {
+            sDesyncs++;
+            portConLogf("ge: coop: repl: desync in block %d: %d objects corrected\n", b, fixed);
+        }
+        if (ours != sHostSum[b])
+        {   /* nothing (more) to correct, the hashes just round differently: agreed until one changes */
+            sAgreed[b] = 1;
+            sAgreedHost[b] = sHostSum[b];
+            sAgreedOurs[b] = ours;
+        }
+    }
+}
+
+static void coopReplRecvSum(const CoopReplSumPkt *p, s32 len)
+{
+    s32 hdr = (s32) ((const u8 *) &p->hash[0] - (const u8 *) p);
+    CoopReplReqPkt req;
+    s32 b, ask = 0, differ = 0;
+
+    if (p->nblocks > COOPREPL_BLOCKS || len < hdr + p->nblocks * 4 || p->total != sNum || p->nblocks != coopReplBlocks()
+        || sSnapLeft != 0)
+    {
+        return;     /* another setup, or the join snapshot is still coming */
+    }
+    memset(&req, 0, sizeof(req));
+    req.type = COOPPKT_REPLREQ;
+    req.stage = p->stage;
+    for (b = 0; b < p->nblocks; b++)
+    {
+        u32 ours = coopReplBlockHash(b);
+
+        sHostSum[b] = p->hash[b];
+        if (ours == p->hash[b] || (sAgreed[b] && sAgreedHost[b] == p->hash[b] && sAgreedOurs[b] == ours))
+        {
+            sMiss[b] = 0;
+            continue;
+        }
+        sAgreed[b] = 0;
+        differ++;
+        if (sMiss[b] < 255)
+        {
+            sMiss[b]++;
+        }
+        if (sMiss[b] >= COOPREPL_SUM_MISSES && ((sMiss[b] - COOPREPL_SUM_MISSES) % 4) == 0)
+        {   /* ask, and again every 4 checks while it lasts */
+            req.want[b / 32] |= 1u << (b % 32);
+            ask++;
+        }
+        if (sMiss[b] == COOPREPL_STUCK_SUMS)
+        {
+            sStuck++;
+            portConLogf("ge: coop: repl: unresolved desync in block %d (objects %d..%d)\n", b, b * COOPREPL_PER_PKT,
+                        b * COOPREPL_PER_PKT + COOPREPL_PER_PKT - 1);
+        }
+    }
+    if (ask > 0)
+    {
+        coopExtSendPacket(&req, sizeof(req), 0);
+    }
+    /* the rest is sent whole elsewhere: only a lasting difference is news */
+    sWorldMiss = (p->world != coopReplWorldHash()) ? sWorldMiss + 1 : 0;
+    sChrMiss = (p->chrs != coopReplChrHash()) ? sChrMiss + 1 : 0;
+    if (sWorldMiss == COOPREPL_STUCK_SUMS)
+    {
+        sStuck++;
+        portConLogf("ge: coop: repl: unresolved desync: stage flags %08x here\n", (u32) objectiveregisters1);
+    }
+    if (sChrMiss == COOPREPL_STUCK_SUMS)
+    {
+        sStuck++;
+        portConLogf("ge: coop: repl: unresolved desync: the chrs here are not the host's\n");
+    }
+}
+
+static void coopReplRecvReq(const CoopReplReqPkt *p, s32 len, s32 from)
+{
+    s32 k;
+
+    if (!coopNetIsHost() || len < (s32) sizeof(*p) || from <= 0 || from >= COOP_MAX_PLAYERS || p->stage != bossGetStageNum())
+    {
+        return;
+    }
+    for (k = 0; k < COOPREPL_BLOCKS / 32; k++)
+    {
+        sOut[from].want[k] |= p->want[k];
+    }
+    sOut[from].wantAt = 0;
+}
+
+void coopReplPacket(const void *buf, s32 len, s32 from)
+{
+    const u16 *h = (const u16 *) buf;
+
+    if (len < 12)
+    {
+        return;
+    }
+    switch (h[3])
+    {
+        case COOPPKT_REPL:
+            if (coopReplHostPkt(buf, len, from, 20, ((const CoopReplPkt *) buf)->stage))
+            {
+                coopReplRecvRecords((const CoopReplPkt *) buf, len);
+            }
+            break;
+        case COOPPKT_REPLSUM:
+            if (coopReplHostPkt(buf, len, from, 24, ((const CoopReplSumPkt *) buf)->stage))
+            {
+                coopReplRecvSum((const CoopReplSumPkt *) buf, len);
+            }
+            break;
+        case COOPPKT_REPLREQ:
+            coopReplRecvReq((const CoopReplReqPkt *) buf, len, from);
+            break;
+    }
 }
 
 s32 coopReplSnapshotDone(void)
 {
     return sSnapLeft == 0;
+}
+
+s32 coopReplDesyncs(void)
+{
+    return sDesyncs;
+}
+
+s32 coopReplUnresolved(void)
+{
+    return sStuck;
 }
 
 /* ---- harness ---------------------------------------------------------------- */
@@ -689,9 +968,12 @@ void coopReplStageStart(void)
     {
         sOut[p].seen = 0;
         sOut[p].snapAt = -1;
-        sOut[p].cursor = 0;
+        sOut[p].wantAt = COOPREPL_BLOCKS;
     }
-    memset(sFirstMiss, 0, sizeof(sFirstMiss));
+    memset(sMiss, 0, sizeof(sMiss));
+    memset(sAgreed, 0, sizeof(sAgreed));
+    sWorldMiss = sChrMiss = 0;
+    sDesyncs = sStuck = 0;
     sSnapLeft = -1;
     sSnapId = 0;
 }

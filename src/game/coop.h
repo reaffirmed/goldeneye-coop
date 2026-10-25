@@ -463,13 +463,17 @@ void coopObjApply(s32 kind, const u8 *raw, s32 from);
 
 
 /* netcode (coop_repl.c and the netcode thread's later files): COOPPKT 20..23, COOPEV 48..55 */
-#define COOPPKT_REPL 20
+#define COOPPKT_REPL 20     /* records */
+#define COOPPKT_REPLSUM 21  /* the desync checksum */
+#define COOPPKT_REPLREQ 22  /* send me these blocks */
 void coopReplStageStart(void);
 void coopReplTick(u32 missionticks);
 void coopReplPacket(const void *buf, s32 len, s32 from);
 void coopReplSendSnapshot(s32 player);  /* host: every setup object's state to that player, over the next ticks */
 s32  coopReplSnapshotDone(void);        /* joiner: this mission's join snapshot is in and applied */
 void coopReplMigrated(void);            /* we became the host or follow a new one: snapshot to everyone again */
+s32  coopReplDesyncs(void);             /* joiner: blocks found different and corrected this mission */
+s32  coopReplUnresolved(void);          /* joiner: differences that outlasted 10 s of corrections */
 /* coop.c's side of it */
 s32  coopReplPlayerHere(s32 p);         /* host: player p's Bond is in this mission */
 s32  coopReplHostHere(void);            /* joiner: we and the host are in this mission */

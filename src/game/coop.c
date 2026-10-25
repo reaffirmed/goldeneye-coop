@@ -880,7 +880,7 @@ static void coopPollNet(void)
         {
             coopExtPacket(buf, n, coopPlayerOfChan(c));
         }
-        if (p->type == COOPPKT_REPL)
+        if (p->type >= COOPPKT_REPL && p->type <= COOPPKT_REPLREQ)
         {
             coopReplPacket(buf, n, coopPlayerOfChan(c));
         }

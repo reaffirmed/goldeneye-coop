@@ -717,3 +717,26 @@ satellite-console work and the Runway plane did nothing on the host.
   repl-after-*, host left, joiner right); a joiner arriving after them gets
   them from the join snapshot ("join snapshot applied, 241 objects, 4
   corrected"); 3 players through the lobby, both joiners corrected.
+
+## Netcode 2: desync checksum with automatic correction (2026-10-25)
+
+- Replaces the periodic walk of netcode 1. Twice a second the host sends each
+  joiner COOPPKT_REPLSUM (21): an FNV-1a hash per block of 16 object records
+  (what coopReplDiff compares; positions on a 24-unit grid), a hash of the
+  stage flags and alarm, and an order-free hash of which chrnums exist
+  (puppets left out). About 90 bytes for Dam, instead of ~12 KB/s.
+- The joiner hashes its own blocks. A block that differs in 3 checks in a
+  row (1 s; events in flight and doors' own timers settle before that) goes
+  in a COOPPKT_REPLREQ (22) bitmask, asked again every 4 checks while it
+  lasts. The host sends those blocks' records (REPLSNAP_ASKED), which apply
+  at once. If they show nothing to correct (rounding at the grid's edges),
+  that pair of hashes is agreed until either side's changes.
+- Stage flags, alarm and chrs are already sent whole (WORLD, guard
+  snapshots); their hashes only report a difference that lasts 10 s. So does
+  a block still different after 20 checks: "repl: unresolved desync ...",
+  counted by coopReplUnresolved(), which the CI runs fail on.
+  coopReplDesyncs() counts the corrected ones.
+- Verified with GE_COOP_TESTREPL=22 on Dam: "desync in block 4: 2 objects
+  corrected", block 13 (the door lock) 1, then block 4 again for the debris
+  that settled after the destroy; nothing asked after that, no unresolved.
+
