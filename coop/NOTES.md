@@ -1258,3 +1258,7 @@ on the paper) and scroll as before.
 - Prediction matched handles_shot_actors better: hits on the gun or a hat do
   no damage (the moon hat counts as the head), and a punch never predicts a
   death. Helmet hits used to predict deaths the host never applied.
+- Drops lie where the host's do: once the host's copy of a guard's drop has
+  landed and stayed still for 30 ticks, COOPEV_DROPREST (21) sends its place
+  and orientation (a quaternion in s16s); the joiners' copies stop and are put
+  exactly there (coop_items.c coopItemsRestTick / coopItemsApplyRest).

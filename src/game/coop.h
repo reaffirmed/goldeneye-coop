@@ -444,7 +444,7 @@ void coopVsStartMatch(s32 stage);          /* front.c: this PC's half of the mat
 enum
 {
     COOPEV_CHAT = 20,       /* a part of a chat line (coop_chat.c) */
-    /* 21 spare */
+    COOPEV_DROPREST = 21,   /* host -> all: where a guard's drop came to rest (coop_items.c) */
     COOPEV_OBJDONE = 22,    /* host -> all: objective done, and who gets the credit */
     COOPEV_TEAMTIME = 23,   /* host -> all: the team's time for the mission just won */
     COOPEV_CAMPAIGN = 24,   /* host -> joiner: a line of the host's campaign record */

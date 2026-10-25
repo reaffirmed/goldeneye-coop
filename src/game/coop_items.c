@@ -57,6 +57,7 @@ extern void propobjSetDropped(PropRecord *prop, DROPTYPE droptype);
 extern s32 objDrop(PropRecord *prop);
 extern void gunInitProjectileObject(ObjectRecord *obj, coord3d *pos, StandTile *stan, Mtxf *matrix, coord3d *velocity, Mtxf *arg5, PropRecord *owner);
 extern StandTile *stanFindTileBelowPos(coord3d *pos, u8 *rooms, f32 *yRtn);
+extern void setupUpdateObjectRoomPosition(ObjectRecord *obj);
 extern void matrix_4x4_set_identity(Mtxf *mtx);
 
 enum { COOPITEM_THROWN = 1, COOPITEM_DROP = 2 };
@@ -99,6 +100,14 @@ typedef struct
     f32 pos[3];         /* where it was, for a guard we do not have */
 } CoopDropMsg;          /* COOPEV_DROP */
 
+typedef struct
+{
+    u16 id;
+    s16 rot[4];         /* the orientation as a quaternion, x 32767 */
+    u16 pad;
+    f32 pos[3];
+} CoopDropRestMsg;      /* COOPEV_DROPREST: the host's copy came to rest here (28 bytes) */
+
 #define COOP_ITEMS_MAX 64
 
 typedef struct
@@ -107,6 +116,9 @@ typedef struct
     u8 used;
     u8 kind;            /* COOPITEM_* */
     u8 gone;            /* a partner's copy went off: ours is going off with it */
+    u8 rested;          /* host, a guard's drop: where it came to rest has been sent */
+    u8 still;           /* host: ticks it has not moved */
+    f32 last[3];        /* host: where it was last tick */
     s32 item;
     ObjectRecord *obj;
 } CoopItem;
@@ -205,6 +217,8 @@ static void coopItemAdd(u16 id, s32 kind, ObjectRecord *obj)
     }
     sItems[free].used = 1;
     sItems[free].gone = 0;
+    sItems[free].rested = 0;
+    sItems[free].still = 0;
     sItems[free].id = id;
     sItems[free].kind = (u8) kind;
     sItems[free].item = ((WeaponObjRecord *) obj)->weaponnum;
@@ -587,6 +601,184 @@ static void coopItemsApplyGone(const CoopGoneMsg *g, s32 from)
     portConLogf("ge: coop: player %d picked up item %04x: removed here\n", from + 1, g->id);
 }
 
+/* ---- where a guard's drop came to rest -------------------------------------------
+ * Each game lets its copy of a dropped gun tumble on its own, from its own copy
+ * of the guard, so the copies came to rest apart. Once the host's has landed
+ * (no longer airborne), its place and orientation go to everyone, and theirs
+ * is put there exactly. */
+
+static s32 coopItemsAirborne(ObjectRecord *obj)
+{
+    return (obj->runtime_bitflags & RUNTIMEBITFLAG_HASPROJECTILE) && obj->projectile != NULL
+        && (obj->projectile->flags & PROJECTILEFLAG_AIRBORNE);
+}
+
+/* the rotation part of obj->mtx (scaled by the model) to a unit quaternion */
+static void coopItemsMtxToQuat(Mtxf *mtx, f32 scale, f32 q[4])
+{
+    f32 m[3][3];
+    f32 t, n;
+    s32 a, b;
+
+    for (a = 0; a < 3; a++)
+    {
+        for (b = 0; b < 3; b++)
+        {
+            m[a][b] = mtx->m[a][b] / scale;
+        }
+    }
+    t = m[0][0] + m[1][1] + m[2][2];
+    if (t > 0.0f)
+    {
+        f32 r = sqrtf(t + 1.0f) * 2.0f;
+        q[3] = 0.25f * r;
+        q[0] = (m[1][2] - m[2][1]) / r;
+        q[1] = (m[2][0] - m[0][2]) / r;
+        q[2] = (m[0][1] - m[1][0]) / r;
+    }
+    else if (m[0][0] > m[1][1] && m[0][0] > m[2][2])
+    {
+        f32 r = sqrtf(1.0f + m[0][0] - m[1][1] - m[2][2]) * 2.0f;
+        q[3] = (m[1][2] - m[2][1]) / r;
+        q[0] = 0.25f * r;
+        q[1] = (m[1][0] + m[0][1]) / r;
+        q[2] = (m[2][0] + m[0][2]) / r;
+    }
+    else if (m[1][1] > m[2][2])
+    {
+        f32 r = sqrtf(1.0f + m[1][1] - m[0][0] - m[2][2]) * 2.0f;
+        q[3] = (m[2][0] - m[0][2]) / r;
+        q[0] = (m[1][0] + m[0][1]) / r;
+        q[1] = 0.25f * r;
+        q[2] = (m[2][1] + m[1][2]) / r;
+    }
+    else
+    {
+        f32 r = sqrtf(1.0f + m[2][2] - m[0][0] - m[1][1]) * 2.0f;
+        q[3] = (m[0][1] - m[1][0]) / r;
+        q[0] = (m[2][0] + m[0][2]) / r;
+        q[1] = (m[2][1] + m[1][2]) / r;
+        q[2] = 0.25f * r;
+    }
+    n = sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+    for (a = 0; a < 4; a++)
+    {
+        q[a] = (n > 0.0f) ? q[a] / n : (a == 3);
+    }
+}
+
+static void coopItemsQuatToMtx(const f32 q[4], f32 scale, Mtxf *mtx)
+{
+    f32 x = q[0], y = q[1], z = q[2], w = q[3];
+
+    mtx->m[0][0] = (1.0f - 2.0f * (y * y + z * z)) * scale;
+    mtx->m[0][1] = (2.0f * (x * y + z * w)) * scale;
+    mtx->m[0][2] = (2.0f * (x * z - y * w)) * scale;
+    mtx->m[1][0] = (2.0f * (x * y - z * w)) * scale;
+    mtx->m[1][1] = (1.0f - 2.0f * (x * x + z * z)) * scale;
+    mtx->m[1][2] = (2.0f * (y * z + x * w)) * scale;
+    mtx->m[2][0] = (2.0f * (x * z + y * w)) * scale;
+    mtx->m[2][1] = (2.0f * (y * z - x * w)) * scale;
+    mtx->m[2][2] = (1.0f - 2.0f * (x * x + y * y)) * scale;
+}
+
+static f32 coopItemsMtxScale(Mtxf *mtx)
+{
+    f32 s = sqrtf(mtx->m[0][0] * mtx->m[0][0] + mtx->m[0][1] * mtx->m[0][1] + mtx->m[0][2] * mtx->m[0][2]);
+
+    return (s > 0.0001f) ? s : 1.0f;
+}
+
+/* host, each tick: send the resting place of each guard's drop once it has landed */
+static void coopItemsRestTick(void)
+{
+    s32 i, k;
+
+    if (!coopItemsOn() || !coopExtIsHost() || !coopInMissionNow())
+    {
+        return;
+    }
+    for (i = 0; i < COOP_ITEMS_MAX; i++)
+    {
+        CoopItem *it = &sItems[i];
+        ObjectRecord *obj = it->obj;
+        CoopDropRestMsg r;
+        f32 q[4];
+
+        if (!it->used || it->rested || it->kind != COOPITEM_DROP || !coopItemLive(it) || obj->prop->parent != NULL
+            || coopItemsAirborne(obj))
+        {
+            continue;
+        }
+        if (it->last[0] != obj->prop->pos.f[0] || it->last[1] != obj->prop->pos.f[1] || it->last[2] != obj->prop->pos.f[2])
+        {   /* still settling */
+            it->last[0] = obj->prop->pos.f[0];
+            it->last[1] = obj->prop->pos.f[1];
+            it->last[2] = obj->prop->pos.f[2];
+            it->still = 0;
+            continue;
+        }
+        if (++it->still < 30)
+        {
+            continue;
+        }
+        it->rested = 1;
+        memset(&r, 0, sizeof(r));
+        r.id = it->id;
+        coopItemsMtxToQuat(&obj->mtx, coopItemsMtxScale(&obj->mtx), q);
+        for (k = 0; k < 4; k++)
+        {
+            r.rot[k] = (s16) (q[k] * 32767.0f);
+        }
+        r.pos[0] = obj->prop->pos.f[0];
+        r.pos[1] = obj->prop->pos.f[1];
+        r.pos[2] = obj->prop->pos.f[2];
+        coopExtSend(COOPEV_DROPREST, 0xFF, &r, sizeof(r));
+        portConLogf("ge: coop: drop %04x came to rest at %.0f %.0f %.0f\n", r.id, r.pos[0], r.pos[1], r.pos[2]);
+    }
+}
+
+static void coopItemsApplyRest(const CoopDropRestMsg *r)
+{
+    CoopItem *it = coopItemById(r->id);
+    ObjectRecord *obj;
+    PropRecord *prop;
+    coord3d pos;
+    StandTile *stan;
+    f32 q[4];
+    s32 k;
+
+    if (it == NULL || !coopItemLive(it) || (prop = it->obj->prop)->parent != NULL)
+    {
+        return;     /* picked up, or gone */
+    }
+    obj = it->obj;
+    pos.f[0] = r->pos[0];
+    pos.f[1] = r->pos[1] + 30.0f;   /* the floor under it, from a little above */
+    pos.f[2] = r->pos[2];
+    stan = stanFindTileBelowPos(&pos, NULL, NULL);
+    if (stan == NULL)
+    {
+        return;
+    }
+    for (k = 0; k < 4; k++)
+    {
+        q[k] = (f32) r->rot[k] / 32767.0f;
+    }
+    if (obj->runtime_bitflags & RUNTIMEBITFLAG_HASPROJECTILE)
+    {
+        obj->projectile->flags &= ~PROJECTILEFLAG_AIRBORNE;     /* ours stops where theirs did */
+        obj->projectile->speed.f[0] = obj->projectile->speed.f[1] = obj->projectile->speed.f[2] = 0.0f;
+    }
+    coopItemsQuatToMtx(q, coopItemsMtxScale(&obj->mtx), &obj->mtx);
+    pos.f[1] = r->pos[1];
+    prop->pos = pos;
+    prop->stan = stan;
+    obj->runtime_pos = pos;
+    setupUpdateObjectRoomPosition(obj);
+    portConLogf("ge: coop: drop %04x put where the host's came to rest\n", r->id);
+}
+
 /* ---- events --------------------------------------------------------------- */
 
 void coopItemsApply(s32 kind, const u8 *raw, s32 from)
@@ -620,6 +812,17 @@ void coopItemsApply(s32 kind, const u8 *raw, s32 from)
             coopItemsApplyGone(&g, from);
             break;
         }
+        case COOPEV_DROPREST:
+        {
+            CoopDropRestMsg r;
+
+            memcpy(&r, raw, sizeof(r));
+            if (coopInMissionNow())
+            {
+                coopItemsApplyRest(&r);
+            }
+            break;
+        }
         case COOPEV_DROP:
         {
             CoopDropMsg m;
@@ -643,6 +846,7 @@ static f32 sTestAimYaw, sTestAimPitch, sTestAimBase = -1.0f;
 
 void coopItemsTick(s32 missionticks)
 {
+    coopItemsRestTick();
     if (sTestAimAt == -2)
     {
         const char *e = getenv("GE_COOP_TESTAIM");
