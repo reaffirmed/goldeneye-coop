@@ -28,10 +28,16 @@ Playing
    pick who you play as: the multiplayer cast (Bond in each outfit,
    Natalya, Trevelyan, Xenia, Ourumov, Boris, Valentin, Mishkin, Jaws,
    Mayday, Oddjob, Baron Samedi, the guards, scientists and the rest), or
-   "Mission Bond", Bond in the mission's own outfit. A / fire steps forward,
-   L / R (or left / right on the d-pad) step back and forth. The others see
-   your pick under your name, and you look like it on their screens. Your
-   pick is kept for next time.
+   "Mission Bond", Bond in the mission's own outfit. Selecting the row
+   opens the character select: every character on a film strip along the
+   top, the one you are on large in the middle, turning, with its name and
+   file beside it. Step with the arrow keys, the mouse wheel, a click on the
+   strip, or LB / RB or the d-pad on a pad; Enter / A (or a click
+   on the photo) takes it, Esc / B leaves your pick as it was. On the row
+   itself L / R still step back and forth without opening it. The pick is
+   looks only: everyone plays the same. The others see your pick on your
+   card in the lobby, and you look like it on their screens. Your pick is
+   kept for next time.
 3. Each friend either accepts the Steam invite, or picks the host's name
    (marked "Join") on their own CO-OP screen, then picks "Ready Up".
    Public games are listed under "Public Games" with the host's name and

@@ -60,12 +60,13 @@ static struct GlyphLook glyphLook(s32 action)
         g.ink = 0x202020FF;
         g.round = 0;
         g.text = (action == MENUGLYPH_ACCEPT) ? "ENTER" : (action == MENUGLYPH_BACK) ? "ESC"
-               : (action == MENUGLYPH_CHAT) ? "T" : "CLICK";   /* L and R: a click steps the row */
+               : (action == MENUGLYPH_CHAT) ? "T" : (action == MENUGLYPH_ARROWS) ? "ARROWS"
+               : "CLICK";   /* L and R: a click steps the row */
         return g;
     }
-    if (action == MENUGLYPH_LEFT || action == MENUGLYPH_RIGHT)
+    if (action == MENUGLYPH_LEFT || action == MENUGLYPH_RIGHT || action == MENUGLYPH_ARROWS)
     {
-        const s32 l = (action == MENUGLYPH_LEFT);
+        const s32 l = (action != MENUGLYPH_RIGHT);
 
         g.round = 0;
         g.face = 0x383838FF;
@@ -179,7 +180,7 @@ static Gfx *hintWord(Gfx *gdl, s32 x, s32 y, const char *word)
 /* a hint's L stands with its R on a pad; the keyboard has one click for both */
 static s32 hintPaired(const struct MenuHint *h)
 {
-    return h->action == MENUGLYPH_LEFT && portInputGlyphStyle() != GLYPH_KEYS;
+    return (h->action == MENUGLYPH_LEFT || h->action == MENUGLYPH_ARROWS) && portInputGlyphStyle() != GLYPH_KEYS;
 }
 
 static s32 hintItemW(const struct MenuHint *h)

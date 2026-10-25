@@ -8880,6 +8880,16 @@ static s32 coop_lobby_ticks;
 static s32 coop_lobby_auto;         /* GE_COOP_LOBBY harness: 'h'ost or 'j'oin */
 static u8 coop_lobby_invited[48];
 static s32 coop_lobby_scroll;       /* the first row shown */
+/* the character select over the lobby (coopCharselTick, coopCharselRender) */
+static s32 coop_charsel_open;   /* the select is up (a mode of the lobby) */
+static s32 coop_charsel_pos;    /* the pickers' position on show (coopCharacterPos) */
+static s32 coop_charsel_ticks;
+static f32 coop_charsel_yaw;
+static s32 coop_charsel_hot;    /* under the crosshair: CS_HOT_* or a strip card 0.. */
+static f32 coop_charsel_cursor[2];  /* the crosshair when it opened, for when it closes */
+static void coopCharselOpen(void);
+static void coopCharselTick(void);
+static void coopCharselHarness(void);
 
 /* Steam names can hold anything; the menu font has ASCII */
 static void coopLobbyCopyName(char *out, s32 cap, const char *name)
@@ -9670,7 +9680,7 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
             coopSetSetting(COOPSET_DIFFICULTY, (coopSetting(COOPSET_DIFFICULTY) + 1) % coopDifficultyCount());
             break;
         case CLROW_CHARACTER:
-            coopSetCharacter(coopCharacterStep(coopCharacter(), 1));
+            coopCharselOpen();     /* L / R on the row still step in place */
             break;
         case CLROW_FRIENDLYFIRE:
             coopSetSetting(COOPSET_FRIENDLYFIRE, !coopSetting(COOPSET_FRIENDLYFIRE));
@@ -9783,6 +9793,7 @@ void init_menu1D_cooplobby(void)
     coop_lobby_hot = -1;
     coop_lobby_ticks = 0;
     coop_lobby_scroll = 0;
+    coop_charsel_open = FALSE;     /* a mission that started under the select took us away */
     (void) portMouseWheelSteps();   /* notches banked in play are not for these rows */
     selected_folder_num = (selected_folder_num >= FOLDER1) ? selected_folder_num : FOLDER1;
     if (gamemode == GAMEMODE_MULTI && coopVsPlayers() >= 2)
@@ -10047,7 +10058,7 @@ void interface_menu1D_cooplobby(void)
     viSetFovY(FOV_Y_F);
     viSetAspect(ASPECT_RATIO_SD);
     viSetZRange(100.0f, 10000.0f);
-    viSetUseZBuf(FALSE);
+    viSetUseZBuf(TRUE);     /* the characters are 3D (coopFigureDraw); the folder draws without it */
 
     disable_all_switches(walletinst[0]);
     set_item_visibility_in_objinstance(walletinst[0], SW_TABS, 1);
@@ -10074,6 +10085,13 @@ void interface_menu1D_cooplobby(void)
     if (coopScreenErrorInput())
     {   /* an error panel is up (coop_screens.c): the rows wait until it is dismissed */
         frontUpdateControlStickPosition();
+        return;
+    }
+    coopCharselHarness();
+    if (coop_charsel_open)
+    {   /* the character select has the keys */
+        coop_lobby_hot = -1;
+        coopCharselTick();
         return;
     }
     {   /* the chat key types a line here too (coop_chat.c) */
@@ -10231,6 +10249,21 @@ static Gfx *coopLobbyPortrait(Gfx *DL, s32 cx, s32 cy, s32 hw, s32 hh, s32 chr)
     return DL;
 }
 
+/* a studio photo's backdrop: grey, lighter behind the head, darker at the foot */
+static Gfx *coopLobbyBackdrop(Gfx *DL, s32 x, s32 y, s32 w, s32 h)
+{
+    s32 i;
+
+    for (i = 0; i < 8; i++)
+    {
+        const s32 g = 0x78 - i * 9;
+
+        DL = microcode_constructor_related_to_menus(DL, x, y + h * i / 8, x + w, y + h * (i + 1) / 8,
+                                                    ((u32) g << 24) | ((u32) g << 16) | ((u32) (g + 4) << 8) | 0xFF);
+    }
+    return DL;
+}
+
 /* the small font, in capitals, cut to fit w and centred on cx */
 static Gfx *coopLobbySmallText(Gfx *DL, s32 cx, s32 y, s32 w, const char *in, u32 colour)
 {
@@ -10309,7 +10342,8 @@ static Gfx *coopLobbyPlayerCard(Gfx *DL, s32 x, s32 slot, s32 pick, const char *
         DL = microcode_constructor_related_to_menus(DL, x - 1, y - 1, x + COOP_CARD_W + 1, y + COOP_CARD_H + 1, 0x303030FF);
     }
     DL = coopLobbyPolaroid(DL, x, y, COOP_CARD_W, COOP_CARD_H, (u32) coopLobbyChatColour(slot));
-    DL = coopLobbyPortrait(DL, cx, y + 5 + COOP_PHOTO_HH, COOP_PHOTO_HW, COOP_PHOTO_HH, coopLobbyPhotoChar(pick));
+    DL = coopLobbyBackdrop(DL, cx - COOP_PHOTO_HW, y + 5, 2 * COOP_PHOTO_HW, 2 * COOP_PHOTO_HH);
+    DL = coopFigureDraw(DL, pick, cx - COOP_PHOTO_HW, y + 5, 2 * COOP_PHOTO_HW, 2 * COOP_PHOTO_HH, 0.0f, TRUE);
     DL = microcode_constructor(DL);
     DL = coopLobbySmallText(DL, cx, y + COOP_CARD_H - 0xA, COOP_CARD_W - 1, name, 0x202020FF);
     DL = coopLobbySmallText(DL, cx, y + COOP_CARD_H + 4, COOP_CARD_W + COOP_CARD_GAP, status, statuscol);
@@ -10440,6 +10474,462 @@ static Gfx *coopLobbyStrip(Gfx *DL)
     return microcode_constructor(DL);
 }
 
+/* ---- the character select ------------------------------------------------
+ * "Your Character" opens it over the lobby's paper, a select screen in the
+ * manner of the skating games': a film strip of every character along the
+ * top (the one picked lit, the rest in shadow), the picked one large in a
+ * photo below, turning slowly, with arrows either side, its name on a red
+ * band and its file beside it (who they are, and who in the lobby wears them
+ * already). Left / Right (the arrow keys, the D-pad or stick, L / R, the
+ * wheel) step; a click on the strip picks; Accept takes it, Back leaves it
+ * as it was. The lobby keeps running underneath (this is a mode of
+ * MENU_COOP_LOBBY): the pick goes to the others in HELLO, as the row's did,
+ * and their cards show it. Every character plays the same: the pick is
+ * looks only (coop_look.c), and the file says so. */
+#define CS_STRIP_X0     0x2C    /* the film band */
+#define CS_STRIP_X1     0x17E
+#define CS_STRIP_Y0     0x34
+#define CS_STRIP_Y1     0x6A
+#define CS_CARDS        9       /* odd: the pick in the middle */
+#define CS_CARD_W       0x1F
+#define CS_CARD_H       0x2C
+#define CS_CARD_PITCH   0x23
+#define CS_CARD_Y       (CS_STRIP_Y0 + 5)
+#define CS_CARD_X0      (0xD5 - (CS_CARDS * CS_CARD_PITCH - (CS_CARD_PITCH - CS_CARD_W)) / 2)
+#define CS_PHOTO_X      0x38    /* the big photo: its polaroid */
+#define CS_PHOTO_Y      0x72
+#define CS_PHOTO_W      0x8C
+#define CS_PHOTO_H      0xB4
+#define CS_PHOTO_PAD    5
+#define CS_PHOTO_FOOT   0x12    /* the polaroid's deeper bottom edge */
+#define CS_ARROW_W      9
+#define CS_ARROW_H      18
+#define CS_PANEL_X      0xD8    /* the file, right of the photo */
+#define CS_PANEL_R      0x17C
+#define CS_BAND_H       0x18
+
+enum { CS_HOT_NONE = -1, CS_HOT_PREV = -2, CS_HOT_NEXT = -3, CS_HOT_PHOTO = -4 };
+
+/* who they are, for the file: by mp_chr_setup index (looks only, no game in it) */
+static const char *coopCharselAffiliation(s32 mp)
+{
+    static const char *const side[] = {
+        "MI6", "Severnaya Station", "Janus", "Janus", "Russian Army", "Severnaya Station",
+        "Russian Mafia", "Russian Government", "Zorin Industries", "Drax Industries", "Goldfinger", "Kananga",
+        "Russian Army", "Russian Army", "Research Staff", "Research Staff", "Russian Army", "Janus",
+        "Russian Navy", "Janus", "St. Petersburg", "Civilian", "Civilian", "Civilian", "Civilian",
+        "Russian Army", "Russian Army", "Russian Army", "Russian Army", "Janus", "Janus",
+        "Drax Industries", "Drax Industries",
+    };
+
+    if (mp >= 64 && mp <= 67)
+    {
+        return "MI6";                   /* Bond's other outfits */
+    }
+    if (mp == 68)
+    {
+        return "MI6 (006)";
+    }
+    if (mp == 69)
+    {
+        return "Severnaya Station";
+    }
+    if (mp >= 0 && mp < (s32) (sizeof(side) / sizeof(side[0])))
+    {
+        return side[mp];
+    }
+    return "Multiplayer Cast";          /* the named faces on Bond's suit */
+}
+
+#ifdef GE_VIDEO
+extern s32 portInputArrowStepLR(void);      /* input_pc.c: the arrow keys */
+extern u16 portMouseBindMask(void);         /* video.c: the buttons a mouse press drove */
+#else
+#define portInputArrowStepLR() 0
+#define portMouseBindMask() 0
+#endif
+
+static s32 coopCharselStripCard(s32 i, s32 *x)
+{
+    *x = CS_CARD_X0 + i * CS_CARD_PITCH;
+    return coopCharacterAt(coop_charsel_pos + i - CS_CARDS / 2);
+}
+
+static void coopCharselOpen(void)
+{
+    coop_charsel_open = TRUE;
+    coop_charsel_pos = coopCharacterPos(coopCharacter());
+    coop_charsel_ticks = 0;
+    coop_charsel_yaw = -0.5f;
+    coop_charsel_hot = CS_HOT_NONE;
+    coop_charsel_cursor[0] = cursor_h_pos;
+    coop_charsel_cursor[1] = cursor_v_pos;
+    if (frontCursorSnapAllowed())
+    {   /* on the photo: Accept takes what is shown */
+        cursor_h_pos = (f32) (CS_PHOTO_X + CS_PHOTO_W / 2);
+        cursor_v_pos = (f32) (CS_PHOTO_Y + CS_PHOTO_H / 2);
+    }
+    portConLogf("ge: coop lobby: character select open on %d\n", coopCharacter());
+}
+
+static void coopCharselClose(s32 take)
+{
+    if (take)
+    {
+        const s32 pick = coopCharacterAt(coop_charsel_pos);
+        char name[48];
+
+        coopSetCharacter(pick);
+        coopCharacterName(pick, name, sizeof(name));
+        name[strcspn(name, "\n")] = '\0';
+        portConLogf("ge: coop lobby: character %d picked (%s)\n", pick, name);
+    }
+    else
+    {
+        portConLogf("ge: coop lobby: character select closed, still %d\n", coopCharacter());
+    }
+    coop_charsel_open = FALSE;
+    coop_lobby_ticks = 0;   /* the press that closed it is not for the rows */
+    if (frontCursorSnapAllowed())
+    {   /* back where it was, on the row that opened it */
+        cursor_h_pos = coop_charsel_cursor[0];
+        cursor_v_pos = coop_charsel_cursor[1];
+    }
+}
+
+static void coopCharselStep(s32 dir)
+{
+    if (dir == 0)
+    {
+        return;
+    }
+    coop_charsel_pos = coopCharacterPos(coopCharacterAt(coop_charsel_pos + dir));
+    coop_charsel_yaw = (dir > 0) ? -0.9f : 0.9f;   /* the new one turns in from the side it came */
+    sndPlaySfx(g_musicSfxBufferPtr, OPTION_CLICK2_SFX, 0);
+}
+
+/* the crosshair over the strip, an arrow or the photo */
+static s32 coopCharselHotAt(f32 cx, f32 cy)
+{
+    s32 i, x;
+
+    if (cy >= (f32) CS_CARD_Y && cy < (f32) (CS_CARD_Y + CS_CARD_H))
+    {
+        for (i = 0; i < CS_CARDS; i++)
+        {
+            coopCharselStripCard(i, &x);
+            if (cx >= (f32) x && cx < (f32) (x + CS_CARD_W))
+            {
+                return i;
+            }
+        }
+        if (cx < (f32) CS_CARD_X0 && cx >= (f32) CS_STRIP_X0)
+        {
+            return CS_HOT_PREV;
+        }
+        if (cx >= (f32) (CS_CARD_X0 + CS_CARDS * CS_CARD_PITCH - (CS_CARD_PITCH - CS_CARD_W)) && cx < (f32) CS_STRIP_X1)
+        {
+            return CS_HOT_NEXT;
+        }
+    }
+    if (cy >= (f32) (CS_PHOTO_Y + CS_PHOTO_H / 2 - CS_ARROW_H) && cy < (f32) (CS_PHOTO_Y + CS_PHOTO_H / 2 + CS_ARROW_H))
+    {
+        if (cx >= (f32) (CS_PHOTO_X - CS_ARROW_W - 8) && cx < (f32) CS_PHOTO_X)
+        {
+            return CS_HOT_PREV;
+        }
+        if (cx >= (f32) (CS_PHOTO_X + CS_PHOTO_W) && cx < (f32) (CS_PHOTO_X + CS_PHOTO_W + CS_ARROW_W + 8))
+        {
+            return CS_HOT_NEXT;
+        }
+    }
+    if (cx >= (f32) CS_PHOTO_X && cx < (f32) (CS_PHOTO_X + CS_PHOTO_W) && cy >= (f32) CS_PHOTO_Y && cy < (f32) (CS_PHOTO_Y + CS_PHOTO_H))
+    {
+        return CS_HOT_PHOTO;
+    }
+    return CS_HOT_NONE;
+}
+
+/* GE_COOP_CHARSEL=<tick>:<steps>[:<accept tick>]: the harness opens the
+ * select <tick> lobby ticks in, steps <steps> (negative: left) a step every
+ * 8 ticks, and takes the pick at <accept tick> if given */
+static void coopCharselHarness(void)
+{
+    static s32 open = -1, steps, accept, done;
+    const char *e;
+
+    if (open == -1)
+    {
+        open = -2;
+        if ((e = getenv("GE_COOP_CHARSEL")) != NULL)
+        {
+            accept = 0;
+            sscanf(e, "%d:%d:%d", &open, &steps, &accept);
+        }
+    }
+    if (open < 0 || done)
+    {
+        return;
+    }
+    if (!coop_charsel_open && coop_lobby_ticks == open)
+    {
+        coopCharselOpen();
+    }
+    if (!coop_charsel_open)
+    {
+        return;
+    }
+    if (steps != 0 && coop_charsel_ticks > 0 && (coop_charsel_ticks % 8) == 0)
+    {
+        coopCharselStep((steps > 0) ? 1 : -1);
+        steps += (steps > 0) ? -1 : 1;
+    }
+    if (accept > 0 && coop_charsel_ticks == accept)
+    {
+        done = TRUE;
+        coopCharselClose(TRUE);
+    }
+}
+
+static void coopCharselTick(void)
+{
+    const s32 wheel = portMouseWheelSteps();
+    const s32 keys = portInputArrowStepLR();
+    s32 dpx, dpy, step = 0;
+
+    coop_charsel_ticks++;
+    coop_charsel_yaw += 0.012f * g_GlobalTimerDelta;
+    if (coop_charsel_yaw > M_PI_F)
+    {
+        coop_charsel_yaw -= M_TAU_F;
+    }
+    portSheetDpadStep(&dpx, &dpy);
+    frontUpdateControlStickPosition();
+    coop_charsel_hot = coopCharselHotAt(cursor_h_pos, cursor_v_pos);
+    if (coop_charsel_ticks <= 6)
+    {   /* the press that opened it */
+        return;
+    }
+
+    if (dpx != 0)
+    {
+        step = dpx;
+    }
+    else if (joyGetButtonsPressedThisFrame(PLAYER_1, L_TRIG | L_JPAD))
+    {
+        step = -1;
+    }
+    else if (joyGetButtonsPressedThisFrame(PLAYER_1, R_TRIG | R_JPAD))
+    {
+        step = 1;
+    }
+    else if (keys != 0)
+    {
+        step = keys;
+    }
+    else if (wheel != 0)
+    {
+        step = (wheel > 0) ? -1 : 1;    /* wheel up: back along the strip */
+    }
+    coopCharselStep(step);
+
+    if (joyGetButtonsPressedThisFrame(PLAYER_1, B_BUTTON))
+    {
+        sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, 0);
+        coopCharselClose(FALSE);
+        return;
+    }
+    if (joyGetButtonsPressedThisFrame(PLAYER_1, START_BUTTON | Z_TRIG | A_BUTTON))
+    {
+        if (coop_charsel_hot >= 0 && coop_charsel_hot != CS_CARDS / 2)
+        {   /* a card on the strip: show that one */
+            coopCharselStep(coop_charsel_hot - CS_CARDS / 2);
+        }
+        else if (coop_charsel_hot == CS_HOT_PREV || coop_charsel_hot == CS_HOT_NEXT)
+        {
+            coopCharselStep((coop_charsel_hot == CS_HOT_PREV) ? -1 : 1);
+        }
+        else if (coop_charsel_hot != CS_HOT_NONE
+                 || !(portMouseBindMask() & joyGetButtonsPressedThisFrame(PLAYER_1, START_BUTTON | Z_TRIG | A_BUTTON)))
+        {   /* the photo or the middle card, or a pad's A (or Enter) anywhere: take it */
+            sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE_SFX, 0);
+            coopCharselClose(TRUE);
+        }   /* a click on the bare paper does nothing */
+    }
+}
+
+/* a red ink arrowhead, pointing left (dir -1) or right (+1), in steps */
+static Gfx *coopCharselArrow(Gfx *DL, s32 x, s32 cy, s32 dir, s32 hot)
+{
+    const u32 ink = hot ? 0xC01818FF : COOP_INK_RED;
+    s32 i;
+
+    for (i = 0; i < CS_ARROW_W; i++)
+    {
+        const s32 half = (CS_ARROW_H / 2) * (i + 1) / CS_ARROW_W;
+        const s32 col = (dir < 0) ? x + i : x + CS_ARROW_W - 1 - i;
+
+        DL = microcode_constructor_related_to_menus(DL, col + 1, cy - half + 1, col + 2, cy + half + 1, 0x00000040);
+        DL = microcode_constructor_related_to_menus(DL, col, cy - half, col + 1, cy + half, ink);
+    }
+    return DL;
+}
+
+/* Zurich in a colour of our own, cut to fit w */
+static Gfx *coopCharselText(Gfx *DL, s32 x, s32 y, s32 w, const char *in, u32 colour)
+{
+    s32 cx = x, cy = y;
+
+    return frontPrintText(DL, &cx, &cy, (char *) portSheetFitText(in, w), ptrFontZurichBoldChars, ptrFontZurichBold,
+                          colour, viGetX(), viGetY(), 0, 0);
+}
+
+/* a label in the small font, from x */
+static Gfx *coopCharselLabel(Gfx *DL, s32 x, s32 y, const char *text, u32 colour)
+{
+    s32 th = 0, tw = 0;
+    char t[48];
+
+    snprintf(t, sizeof(t), "%s\n", text);
+    textMeasure(&th, &tw, t, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+    return coopLobbySmallText(DL, x + tw / 2, y, tw + 2, text, colour);
+}
+
+static Gfx *coopCharselRender(Gfx *DL)
+{
+    const s32 pick = coopCharacterAt(coop_charsel_pos);
+    const s32 mp = (pick > 0) ? pick - 1 : 0;
+    const s32 state = coopLobbyState();
+    const s32 inlobby = !(state == COOPLOBBY_IDLE || state == COOPLOBBY_OFF || state == COOPLOBBY_BUSY);   /* as coopLobbyStrip */
+    const s32 self = inlobby ? coopLobbySelfPlayer() : 0;
+    char name[48], line[64], t[16];
+    s32 i, x, y, th, tw, n;
+
+    x = COOP_LOBBY_X;
+    y = PORT_SHEET_TITLE_Y;
+    DL = frontPrintText(DL, &x, &y, "SELECT CHARACTER\n", ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+    snprintf(t, sizeof(t), "%d / %d", coop_charsel_pos + 1, coopCharacterCount());
+    DL = coopLobbySmallText(DL, CS_STRIP_X1 - 0x18, PORT_SHEET_TITLE_Y + 4, 0x40, t, COOP_INK_RED);
+
+    /* the film strip: a dark band, its sprocket holes, and the cards */
+    DL = microcode_constructor_related_to_menus(DL, CS_STRIP_X0 + 2, CS_STRIP_Y0 + 2, CS_STRIP_X1 + 2, CS_STRIP_Y1 + 2, 0x00000040);
+    DL = microcode_constructor_related_to_menus(DL, CS_STRIP_X0, CS_STRIP_Y0, CS_STRIP_X1, CS_STRIP_Y1, 0x1C1C1EFF);
+    for (x = CS_STRIP_X0 + 4; x + 4 < CS_STRIP_X1; x += 9)
+    {
+        DL = microcode_constructor_related_to_menus(DL, x, CS_STRIP_Y0 + 1, x + 4, CS_STRIP_Y0 + 3, 0xD8D0B8FF);
+        DL = microcode_constructor_related_to_menus(DL, x, CS_STRIP_Y1 - 3, x + 4, CS_STRIP_Y1 - 1, 0xD8D0B8FF);
+    }
+    for (i = 0; i < CS_CARDS; i++)
+    {
+        const s32 c = coopCharselStripCard(i, &x);
+        const s32 mid = (i == CS_CARDS / 2);
+
+        if (mid)
+        {   /* the pick: lit, in our colour */
+            DL = microcode_constructor_related_to_menus(DL, x - 2, CS_CARD_Y - 2, x + CS_CARD_W + 2, CS_CARD_Y + CS_CARD_H + 2,
+                                                        (u32) coopLobbyChatColour(self));
+            DL = coopLobbyBackdrop(DL, x, CS_CARD_Y, CS_CARD_W, CS_CARD_H);
+        }
+        else
+        {   /* the rest: a pale screen behind, the figure in shadow on it */
+            DL = microcode_constructor_related_to_menus(DL, x, CS_CARD_Y, x + CS_CARD_W, CS_CARD_H + CS_CARD_Y, 0x8A96A4FF);
+        }
+        DL = coopFigureDraw(DL, c, x, CS_CARD_Y, CS_CARD_W, CS_CARD_H, mid ? coop_charsel_yaw * 0.5f : 0.35f, FALSE);
+        if (!mid)
+        {   /* in shadow, the one under the crosshair less so */
+            DL = microcode_constructor_related_to_menus(DL, x, CS_CARD_Y, x + CS_CARD_W, CS_CARD_Y + CS_CARD_H,
+                                                        (i == coop_charsel_hot) ? 0x10203040 : 0x101C30B0);
+        }
+    }
+    DL = coopCharselArrow(DL, CS_STRIP_X0 + 3, (CS_STRIP_Y0 + CS_STRIP_Y1) / 2, -1, coop_charsel_hot == CS_HOT_PREV);
+    DL = coopCharselArrow(DL, CS_STRIP_X1 - 3 - CS_ARROW_W, (CS_STRIP_Y0 + CS_STRIP_Y1) / 2, 1, coop_charsel_hot == CS_HOT_NEXT);
+
+    /* the big photo, turning */
+    DL = coopLobbyPolaroid(DL, CS_PHOTO_X, CS_PHOTO_Y, CS_PHOTO_W, CS_PHOTO_H, (u32) coopLobbyChatColour(self));
+    DL = coopLobbyBackdrop(DL, CS_PHOTO_X + CS_PHOTO_PAD, CS_PHOTO_Y + CS_PHOTO_PAD + 3,
+                           CS_PHOTO_W - 2 * CS_PHOTO_PAD, CS_PHOTO_H - CS_PHOTO_PAD - 3 - CS_PHOTO_FOOT);
+    DL = coopFigureDraw(DL, pick, CS_PHOTO_X + CS_PHOTO_PAD, CS_PHOTO_Y + CS_PHOTO_PAD + 3,
+                        CS_PHOTO_W - 2 * CS_PHOTO_PAD, CS_PHOTO_H - CS_PHOTO_PAD - 3 - CS_PHOTO_FOOT, coop_charsel_yaw, FALSE);
+    snprintf(t, sizeof(t), "NO. %02d", coop_charsel_pos + 1);
+    DL = coopLobbySmallText(DL, CS_PHOTO_X + CS_PHOTO_W / 2, CS_PHOTO_Y + CS_PHOTO_H - CS_PHOTO_FOOT + 4, CS_PHOTO_W, t, 0x202020FF);
+    DL = coopCharselArrow(DL, CS_PHOTO_X - CS_ARROW_W - 4, CS_PHOTO_Y + CS_PHOTO_H / 2, -1, coop_charsel_hot == CS_HOT_PREV);
+    DL = coopCharselArrow(DL, CS_PHOTO_X + CS_PHOTO_W + 4, CS_PHOTO_Y + CS_PHOTO_H / 2, 1, coop_charsel_hot == CS_HOT_NEXT);
+
+    /* the name on a red band */
+    coopCharacterName(pick, name, sizeof(name));
+    DL = microcode_constructor_related_to_menus(DL, CS_PANEL_X + 2, CS_PHOTO_Y + 2, CS_PANEL_R + 2, CS_PHOTO_Y + CS_BAND_H + 2, 0x00000050);
+    DL = microcode_constructor_related_to_menus(DL, CS_PANEL_X, CS_PHOTO_Y, CS_PANEL_R, CS_PHOTO_Y + CS_BAND_H, COOP_INK_RED);
+    DL = microcode_constructor_related_to_menus(DL, CS_PANEL_X, CS_PHOTO_Y + CS_BAND_H - 2, CS_PANEL_R, CS_PHOTO_Y + CS_BAND_H, 0x5A0C0CFF);
+    DL = microcode_constructor(DL);
+    {
+        const char *fit = portSheetFitText(name, CS_PANEL_R - CS_PANEL_X - 8);
+
+        textMeasure(&th, &tw, (char *) fit, ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+        DL = coopCharselText(DL, (CS_PANEL_X + CS_PANEL_R) / 2 - tw / 2, CS_PHOTO_Y + 4, CS_PANEL_R - CS_PANEL_X - 8, fit, 0xF6F2E6FF);
+    }
+
+    /* the file */
+    y = CS_PHOTO_Y + CS_BAND_H + 8;
+    DL = coopCharselLabel(DL, CS_PANEL_X + 2, y, "AFFILIATION", 0x606060FF);
+    snprintf(line, sizeof(line), "%s\n", coopCharselAffiliation(mp));
+    DL = coopCharselText(DL, CS_PANEL_X + 2, y + 9, CS_PANEL_R - CS_PANEL_X - 4, line, 0xFF);
+    y += 0x20;
+    DL = coopCharselLabel(DL, CS_PANEL_X + 2, y, "GENDER", 0x606060FF);
+    DL = coopCharselText(DL, CS_PANEL_X + 2, y + 9, CS_PANEL_R - CS_PANEL_X - 4,
+                         (mp_chr_setup[mp].gender == FEMALE) ? "Female\n" : "Male\n", 0xFF);
+    y += 0x20;
+    DL = coopCharselLabel(DL, CS_PANEL_X + 2, y, "WORN IN THE LOBBY BY", 0x606060FF);
+    line[0] = '\0';
+    for (i = 0, n = 0; i < COOP_MAX_PLAYERS; i++)
+    {   /* the others wearing it now */
+        if (i == self || !inlobby || !coopLobbyPlayerHere(i) || coopPlayerCharacter(i) != pick)
+        {
+            continue;
+        }
+        coopLobbyCopyName(name, sizeof(name), coopPlayerName(i));
+        name[strcspn(name, "\n")] = '\0';
+        snprintf(line + strlen(line), sizeof(line) - strlen(line), "%s%s", n++ ? ", " : "", name);
+    }
+    if (pick == coopCharacter())
+    {
+        snprintf(line + strlen(line), sizeof(line) - strlen(line), "%sYou", n++ ? ", " : "");
+    }
+    strcat(line, n ? "\n" : "Nobody yet\n");
+    DL = coopCharselText(DL, CS_PANEL_X + 2, y + 9, CS_PANEL_R - CS_PANEL_X - 4, line, n ? COOP_LOBBY_COL_OK : PORT_SHEET_COL_DIM);
+    y += 0x20;
+    DL = microcode_constructor_related_to_menus(DL, CS_PANEL_X, y, CS_PANEL_R, y + 1, PORT_SHEET_COL_RULE);
+    DL = microcode_constructor(DL);
+    DL = coopCharselLabel(DL, CS_PANEL_X + 2, y + 4, "COSMETIC ONLY", 0x707070FF);
+
+    /* the team: each player's pick as it stands */
+    y += 0x12;
+    for (i = 0, x = CS_PANEL_X; i < COOP_MAX_PLAYERS; i++)
+    {
+        const s32 here = inlobby ? coopLobbyPlayerHere(i) : (i == 0);
+        const s32 theirs = (i == self) ? pick : coopPlayerCharacter(i);
+        const s32 w = 0x26, h = 0x2E;
+
+        if (!here)
+        {
+            continue;
+        }
+        DL = coopLobbyPolaroid(DL, x, y, w, h + 8, (u32) coopLobbyChatColour(i));
+        DL = coopLobbyBackdrop(DL, x + 2, y + 4, w - 4, h - 4);
+        DL = coopFigureDraw(DL, theirs, x + 2, y + 4, w - 4, h - 4, 0.0f, TRUE);
+        if (i == self)
+        {
+            strcpy(name, "YOU");
+        }
+        else
+        {
+            coopLobbyCopyName(name, sizeof(name), coopPlayerName(i));
+        }
+        DL = coopLobbySmallText(DL, x + w / 2, y + h + 1, w - 2, name, 0x202020FF);
+        x += w + 4;
+    }
+    return microcode_constructor(DL);
+}
+
 Gfx *constructor_menu1D_cooplobby(Gfx *DL)
 {
     s32 i;
@@ -10448,10 +10938,19 @@ Gfx *constructor_menu1D_cooplobby(Gfx *DL)
     s32 th;
     s32 tw;
 
+    coopFigureBeginFrame();
     DL = viSetFillColor(DL, 0, 0, 0);
     DL = viFillScreen(DL);
     DL = frontSetupMenuBackground(DL);
     DL = microcode_constructor(DL);
+
+    if (coop_charsel_open)
+    {
+        DL = coopCharselRender(DL);
+        DL = frontAddPreviousTabText(DL);
+        DL = coopScreenErrorRender(DL);
+        return frontDrawCursor(DL);
+    }
 
     x = COOP_LOBBY_X;
     y = PORT_SHEET_TITLE_Y;
@@ -21711,6 +22210,13 @@ static Gfx *frontHintBar(Gfx *DL)
             if (coopScreenErrorUp())
             {
                 h[n].action = MENUGLYPH_ACCEPT; h[n++].word = "OK";
+                break;
+            }
+            if (coop_charsel_open)
+            {
+                h[n].action = MENUGLYPH_ARROWS; h[n++].word = "CHANGE";
+                h[n].action = MENUGLYPH_ACCEPT; h[n++].word = "ACCEPT";
+                h[n].action = MENUGLYPH_BACK; h[n++].word = "BACK";
                 break;
             }
             if (coop_lobby_hot >= 0 && portInputGlyphStyle() != 0   /* the keyboard's click is Select, which changes it */

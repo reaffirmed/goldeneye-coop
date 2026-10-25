@@ -124,9 +124,21 @@ void coopSetCharacter(s32 c)
 }
 
 /* the pickers' position of a pick: the mission's Bond first, then the MP order */
-static s32 coopCharacterPos(s32 c)
+s32 coopCharacterPos(s32 c)
 {
     return (c <= 0) ? 0 : portMpCharPos(c - 1) + 1;
+}
+
+/* the pick at a pickers' position, wrapping round */
+s32 coopCharacterAt(s32 pos)
+{
+    pos = ((pos % COOP_CHAR_COUNT) + COOP_CHAR_COUNT) % COOP_CHAR_COUNT;
+    return (pos == 0) ? 0 : portMpCharAt(pos - 1) + 1;
+}
+
+s32 coopCharacterCount(void)
+{
+    return COOP_CHAR_COUNT;
 }
 
 s32 coopCharacterStep(s32 c, s32 dir)

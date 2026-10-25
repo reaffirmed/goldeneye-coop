@@ -7579,6 +7579,40 @@ s32 portInputPadDigMoveP1(s32 *dx, s32 *dy)
     return *dx != 0 || *dy != 0;
 }
 
+/** front.c's co-op character select: the keyboard's Left / Right arrows, -1 /
+ *  +1 on the press and again while held (after a pause, about 8 a second),
+ *  0 otherwise. Read straight from the keyboard: the arrows are not a bind. */
+s32 portInputArrowStepLR(void)
+{
+    static int prev;
+    static unsigned heldAt;
+    const Uint8 *keys = SDL_GetKeyboardState(NULL);
+    const unsigned now = SDL_GetTicks();
+    int dir = 0;
+
+    if (keys != NULL && s_WindowFocused)
+    {
+        dir = keys[SDL_SCANCODE_LEFT] ? -1 : (keys[SDL_SCANCODE_RIGHT] ? 1 : 0);
+    }
+    if (dir == 0)
+    {
+        prev = 0;
+        return 0;
+    }
+    if (dir != prev)
+    {
+        prev = dir;
+        heldAt = now + 400;
+        return dir;
+    }
+    if ((int) (now - heldAt) >= 0)
+    {
+        heldAt = now + 120;
+        return dir;
+    }
+    return 0;
+}
+
 /**
  * Give a player to any raphnet channel that has a pad on it and no slot,
  * catching pads that pass 1b (hotplug/menu assigns only) missed. Runs about

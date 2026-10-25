@@ -389,9 +389,16 @@ void coopAudioStageStart(void);
 s32  coopCharacter(void);
 void coopSetCharacter(s32 c);
 s32  coopCharacterStep(s32 c, s32 dir);     /* the next (dir 1) or previous (-1) in the MP pickers' order */
+s32  coopCharacterPos(s32 c);               /* a pick's place in that order, 0 the mission's Bond */
+s32  coopCharacterAt(s32 pos);              /* the pick at a place in it (wraps) */
+s32  coopCharacterCount(void);
 void coopCharacterName(s32 c, char *out, s32 cap);  /* with "\n" */
 s32  coopCharacterBody(s32 c, s32 *head);   /* the body and head, -1 for the mission's Bond */
 s32  coopPlayerCharacter(s32 p);            /* player p's pick, as the lobby knows it */
+
+/* the picks as 3D figures for the lobby (coop_charsel.c) */
+void coopFigureBeginFrame(void);
+Gfx *coopFigureDraw(Gfx *DL, s32 pick, s32 x, s32 y, s32 w, s32 h, f32 yaw, s32 bust);
 
 /* online versus (coop_versus.c): the multiplayer game, one player per PC.
  * Local player indices (g_playerPointers) differ per game; the wire uses the

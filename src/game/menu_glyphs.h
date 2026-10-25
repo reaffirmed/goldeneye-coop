@@ -9,7 +9,8 @@ enum
     MENUGLYPH_BACK,
     MENUGLYPH_LEFT,     /* L; in a hint, L and R together */
     MENUGLYPH_RIGHT,
-    MENUGLYPH_CHAT
+    MENUGLYPH_CHAT,
+    MENUGLYPH_ARROWS    /* a list stepped both ways: the arrow keys, or L and R on a pad */
 };
 
 struct MenuHint

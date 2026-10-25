@@ -1262,3 +1262,37 @@ on the paper) and scroll as before.
   landed and stayed still for 30 ticks, COOPEV_DROPREST (21) sends its place
   and orientation (a quaternion in s16s); the joiners' copies stop and are put
   exactly there (coop_items.c coopItemsRestTick / coopItemsApplyRest).
+
+## Character select (2026-10-25)
+
+- "Your Character" opens a select screen over the lobby (front.c
+  coopCharsel*, a mode of MENU_COOP_LOBBY so HELLO, the harness and the
+  lobby's own ticking carry on underneath): a film strip of all 71 picks,
+  the picked one large and turning, arrows, the name on a red band, and a
+  file (affiliation, gender, who in the lobby wears it, the team's picks).
+  The pick is only taken on Accept; Back leaves it. Nothing in the protocol
+  changed: the pick still rides HELLO.
+- 3D characters in menus (coop_charsel.c): each pick is loaded once, as the
+  solo Bond's body is (private header copies, own buffer and Model), and kept
+  for good, because the renderer's texture and part caches key on addresses.
+  The port keeps model textures in its own pool, so a figure is the files and
+  the Model only: 41 KB at most over all 71, in a 128 KB buffer each.
+- A figure is drawn into a rectangle by its projection (the rectangle baked
+  into the perspective matrix), not by gSPViewport: the port's viewport path
+  is tuned for whole screens and drew large ones zoomed. Framing comes from
+  the idle pose's lowest and highest joints.
+- The lobby's player cards show each pick as a 3D head-and-shoulders shot
+  instead of the multiplayer photo (most of the roster only had the "?").
+- The title stage asks for 20 KB of dynamic vertices (-mvtx20, doubled on
+  PC). Fifteen characters a frame needs more; dyn.c gives the title stage
+  256 KB.
+- Input: the arrow keys (read raw, input_pc.c portInputArrowStepLR), the
+  wheel, a click on a strip card, L / R, the D-pad (portSheetDpadStep).
+  A click on bare paper does nothing (portMouseBindMask tells a click from a
+  pad's A or Enter, which accept anywhere). The hint bar has a new
+  MENUGLYPH_ARROWS: ARROWS on the keyboard, LB RB / L1 R1 / L R on pads.
+- Harness: GE_COOP_CHARSEL=<tick>:<steps>[:<accept tick>] opens the select
+  at that lobby tick, steps (negative: left) one every 8 ticks, and takes
+  the pick at the accept tick (select ticks). Tested by keyboard and mouse
+  with xdotool and by pad with GE_INPUTPLAY on two copies over the mock Steam.
+
