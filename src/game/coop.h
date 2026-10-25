@@ -218,12 +218,21 @@ s32  coopBrowseLocked(s32 i);
 void coopBrowseJoin(s32 i);
 s32  coopBrowseChecking(void);
 s32  coopBrowseRefused(void);
+const char *coopBrowseRefusedText(void);
 void coopBrowseTypeStart(s32 kind, s32 forgame);
 s32  coopBrowseTyping(void);
 s32  coopBrowseTypingFor(void);
 void coopBrowseTypedMask(char *out, s32 cap);
 s32  coopBrowseHarnessJoin(void);
 s32  coopLobbyOnScreen(void);
+s32  coopEnabled(void);
+
+/* rich presence and outside joins (coop_presence.c; port/src/coop_presence.c
+ * talks to Steam and Discord) */
+void coopPresenceGameTick(s32 instage);     /* menus (front.c menu_init) and stages (coopTick) */
+const char *coopMissionName(s32 stage);     /* coop_stats.c: "Dam", NULL when not a solo mission */
+void coopVsPresenceNames(s32 stage, char *arena, s32 arenacap, char *scenario, s32 scenariocap);  /* front.c */
+s32  coopLobbyDiscordAsks(void);            /* host: Discord Ask to Join requests waiting */
 void coopLobbyJoinLobbyId(unsigned long long lobby);
 s32  coopExtVersion(void);
 
@@ -413,7 +422,8 @@ s32  coopChatTyping(void);
 s32  coopChatEatEscape(void);   /* 1: this Escape was the chat's, not the pause's */
 void coopChatTick(s32 inmission);
 void coopChatApply(const u8 *raw, s32 from);
-void coopFeedToast(const char *text, s32 player);   /* centred, the first line in the player's colour (-1 white); '|' starts a second line */
+void coopFeedToast(const char *text, s32 player);
+void coopFeedClock(void);   /* the feed's clock while co-op is off */   /* centred, the first line in the player's colour (-1 white); '|' starts a second line */
 Gfx *coopFeedRender(Gfx *gdl);                       /* in play (coop_hud.c) */
 s32  coopFeedLines(s32 maxlines, char lines[][80], s32 *players);  /* the newest chat lines as typed, for the lobby */
 void coopChatTypedLine(char *out, s32 cap);         /* the line being typed */

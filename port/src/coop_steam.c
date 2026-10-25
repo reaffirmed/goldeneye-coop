@@ -17,6 +17,11 @@
  *        once that matches (GEPA back), or turns it away (GEPR).
  * Join:  GE_COOP=steam:join:<lobbyid>, "+connect_lobby <id>" from Steam, an
  *        accepted invite, or, with no id, the first friend found hosting.
+ *        Invites and Join Game (callbacks 333 / 337) go to coop_presence.c,
+ *        which the game asks for them from any menu, so they work outside
+ *        the lobby screen and while hosting too.
+ * Rich presence: coopSteamSetPresence (coop_presence.c says what to show).
+ *        Steam is brought up at boot for it (coopSteamPresenceOpen).
  *
  * Up to four players: the host talks to each joiner, a joiner only to the
  * host (the game relays what the joiners need of each other).
@@ -143,6 +148,11 @@ static int sReady;          /* the library is loaded and SteamAPI is up */
 static int sOverlay;        /* host: open Steam's invite overlay with the lobby */
 static int sHostLeft;       /* joiner: the host left the lobby (the game picks a new one) */
 static int sHostTagged;     /* host after a migration: the lobby says who hosts */
+static int sAppId = APPID_SPACEWAR; /* steam_appid.txt's: friends playing it are candidate hosts */
+static unsigned int sJoinHash;  /* a password hash from a Discord join secret */
+static int sJoinHashSet;
+static char sPresence[400];     /* what coopSteamSetPresence last sent */
+static unsigned int sPumped;    /* pump() calls: coopSteamPresenceTick pumps when a session doesn't */
 
 /* the lobby screen's friend list, see coopSteamFriendsRefresh */
 #define MAX_FRIENDS 48
@@ -162,7 +172,8 @@ static char sVersion[8] = "0";
 /* a joiner's password for the lobby it is joining, and how that went */
 static char sJoinPassword[32];
 static int sAdmitWait;      /* in a passworded lobby: not taken as a player yet */
-static int sJoinRefused;    /* the host turned our password down */
+static int sJoinRefused;    /* 1: the host turned our password down; 2: Steam kept us out of the lobby */
+static int sJoinDirect;     /* joining one lobby by its id (not looking for any friend's) */
 
 /* the lobby screen's Public Games, see coopSteamBrowseRefresh */
 #define MAX_PUBLIC 16
@@ -276,6 +287,12 @@ static void writeAppId(void)
 
         if (f != NULL)
         {
+            int id = 0;
+
+            if (i == 0 && fscanf(f, "%d", &id) == 1 && id > 0)
+            {
+                sAppId = id;    /* a game's own AppID, once it has one; Spacewar until then */
+            }
             fclose(f);
             continue;
         }
@@ -483,7 +500,6 @@ static int joinControl(u64s from, const unsigned char *data, int size)
             sJoinWanted = 0;
             sJoinCall = 0;
             sAdmitWait = 0;
-            pClearRichPresence(sFriends);
         }
         return 1;
     }
@@ -564,7 +580,7 @@ static void findHostingFriend(void)
         u64s f = pGetFriendByIndex(sFriends, i, 4);
 
         memset(info, 0, sizeof(info));
-        if (pGetFriendGamePlayed(sFriends, f, info) && (rd64(info) & 0xFFFFFF) == APPID_SPACEWAR && rd64(info + 16) != 0)
+        if (pGetFriendGamePlayed(sFriends, f, info) && (int) (rd64(info) & 0xFFFFFF) == sAppId && rd64(info + 16) != 0)
         {
             portConLogf("ge: steam: %s is hosting\n", pGetFriendPersonaName(sFriends, f));
             joinLobby(rd64(info + 16));
@@ -577,7 +593,6 @@ static void onLobbyCreated(const unsigned char *p)
 {
     int result = (int) rd32(p);
     u64s lobby = rd64(p + 8);
-    char buf[64];
 
     if (result != 1 /* k_EResultOK */ || lobby == 0)
     {
@@ -591,9 +606,6 @@ static void onLobbyCreated(const unsigned char *p)
     sLobby = lobby;
     pSetLobbyData(sMM, lobby, LOBBY_KEY, "1");
     applyLobbyOptions();
-    snprintf(buf, sizeof(buf), "+connect_lobby %llu", lobby);
-    pSetRichPresence(sFriends, "connect", buf);
-    pSetRichPresence(sFriends, "status", "Hosting GoldenEye co-op");
     portConLogf("ge: steam: lobby %llu open\n", lobby);
     if (sOverlay)
     {
@@ -619,6 +631,14 @@ static void onLobbyEnter(const unsigned char *p)
     if (response != 1)
     {
         portConLogf("ge: steam: could not join lobby %llu (response %u)\n", lobby, response);
+        if (sJoinDirect)
+        {   /* that lobby or none (an invite, Join Game, Discord): say so, back to idle.
+             * A friends-only lobby keeps out anyone who isn't the host's
+             * Steam friend, so a Discord friend needs the host's lobby Public. */
+            sJoinRefused = 2;
+            sJoinDirect = 0;
+            return;
+        }
         sJoinWanted = 1;
         return;
     }
@@ -635,7 +655,6 @@ static void onLobbyEnter(const unsigned char *p)
     setPeer(0, lobbyHost(lobby));
     tag = pGetLobbyData(sMM, lobby, LOBBY_KEY_PASSWORD);
     sAdmitWait = (tag != NULL && strcmp(tag, "1") == 0);
-    pSetRichPresence(sFriends, "status", "Playing GoldenEye co-op");
     portConLogf("ge: steam: in lobby %llu, host %s\n", lobby, pGetFriendPersonaName(sFriends, sPeers[0]));
 }
 
@@ -735,17 +754,18 @@ static void handle(int id, const unsigned char *p)
             onLobbyList(p);
             break;
         case CB_GameLobbyJoinRequested:
-            if (!sIsHost)
+            /* an accepted invite, or Join Game on a friend in a lobby: lobby, then the friend */
+            if (rd64(p) != sLobby)
             {
-                joinLobby(rd64(p));
+                coopPresenceQueueJoin(rd64(p), 0, 0, pGetFriendPersonaName(sFriends, rd64(p + 8)));
             }
             break;
         case CB_GameRichPresenceJoinRequested:
-        {
+        {   /* Join Game through our "connect" rich presence: the friend, then the string */
             const char *c = strstr((const char *) p + 8, "+connect_lobby ");
-            if (!sIsHost && c != NULL)
+            if (c != NULL && strtoull(c + 15, NULL, 10) != sLobby)
             {
-                joinLobby(strtoull(c + 15, NULL, 10));
+                coopPresenceQueueJoin(strtoull(c + 15, NULL, 10), 0, 0, pGetFriendPersonaName(sFriends, rd64(p)));
             }
             break;
         }
@@ -767,6 +787,7 @@ static void pump(void)
 {
     unsigned char msg[16];
 
+    sPumped++;
     pMDRunFrame(sPipe);
     while (pMDGetNextCallback(sPipe, msg))
     {
@@ -799,7 +820,7 @@ static void pump(void)
     }
     if (sAdmitWait && sPeers[0] != 0 && (sPolls % 30) == 0)
     {
-        sendControl(sPeers[0], PW_ASK, pwHash(sJoinPassword, sLobby));
+        sendControl(sPeers[0], PW_ASK, sJoinHashSet ? sJoinHash : pwHash(sJoinPassword, sLobby));
     }
     fixOwner();
     sPolls++;
@@ -870,6 +891,7 @@ int coopSteamInit(const char *spec)
     if (strncmp(spec, "steam:join", 10) != 0)
     {
         sJoinPassword[0] = '\0';
+        sJoinHashSet = 0;
     }
     sHostLeft = 0;
     sHostTagged = 1;
@@ -885,7 +907,8 @@ int coopSteamInit(const char *spec)
     {
         sIsHost = 0;
         sJoinRefused = 0;
-        if (spec[10] == ':' && spec[11] != '\0')
+        sJoinDirect = spec[10] == ':' && spec[11] != '\0';
+        if (sJoinDirect)
         {
             joinLobby(strtoull(spec + 11, NULL, 10));
         }
@@ -913,7 +936,6 @@ int coopSteamIsHost(void)
 /* see coopNetMigrate: the lobby stays, the peers change */
 void coopSteamMigrate(int ashost, const unsigned long long *ids, int n)
 {
-    char buf[64];
     int i;
 
     if (!sReady)
@@ -944,9 +966,6 @@ void coopSteamMigrate(int ashost, const unsigned long long *ids, int n)
         {
             pSetLobbyOwner(sMM, sLobby, sSelf);   /* refused unless we own it; the owner passes it on */
         }
-        snprintf(buf, sizeof(buf), "+connect_lobby %llu", sLobby);
-        pSetRichPresence(sFriends, "connect", buf);
-        pSetRichPresence(sFriends, "status", "Hosting GoldenEye co-op");
     }
 }
 
@@ -1070,6 +1089,7 @@ void coopSteamShutdown(void)
         pLeaveLobby(sMM, sLobby);
     }
     pClearRichPresence(sFriends);
+    sPresence[0] = '\0';   /* coop_presence.c sets it again */
     sLobby = 0;
     sJoinCall = 0;
     sIsHost = 0;
@@ -1149,7 +1169,7 @@ int coopSteamFriendsRefresh(void)
         e->id = f;
         e->lobby = 0;
         memset(info, 0, sizeof(info));
-        if (pGetFriendGamePlayed(sFriends, f, info) && (rd64(info) & 0xFFFFFF) == APPID_SPACEWAR)
+        if (pGetFriendGamePlayed(sFriends, f, info) && (int) (rd64(info) & 0xFFFFFF) == sAppId)
         {
             e->lobby = rd64(info + 16);
         }
@@ -1265,6 +1285,113 @@ unsigned long long coopSteamBrowseLobby(int i)
 void coopSteamSetJoinPassword(const char *password)
 {
     snprintf(sJoinPassword, sizeof(sJoinPassword), "%s", password != NULL ? password : "");
+    sJoinHashSet = 0;
+}
+
+/* the next steam:join answers a password check with this hash (it came in a
+ * Discord join secret, from a host that let us in) */
+void coopSteamSetJoinPasswordHash(unsigned int hash)
+{
+    sJoinPassword[0] = '\0';
+    sJoinHash = hash;
+    sJoinHashSet = 1;
+}
+
+/* host: the hash a joiner's game must send for this lobby (1), or 0 with no password */
+int coopSteamPasswordHash(unsigned int *hash)
+{
+    if (!sReady || !sIsHost || sLobby == 0 || sPassword[0] == '\0')
+    {
+        return 0;
+    }
+    *hash = pwHash(sPassword, sLobby);
+    return 1;
+}
+
+/* the lobby we are in asks strangers for a password */
+int coopSteamLobbyHasPassword(void)
+{
+    const char *v;
+
+    if (!sReady || sLobby == 0)
+    {
+        return 0;
+    }
+    v = pGetLobbyData(sMM, sLobby, LOBBY_KEY_PASSWORD);
+    return v != NULL && strcmp(v, "1") == 0;
+}
+
+unsigned long long coopSteamLobbyId(void)
+{
+    return sReady ? (unsigned long long) sLobby : 0;
+}
+
+/* ---- rich presence ------------------------------------------------------------ */
+
+/* Steam up with no lobby, for presence and invites from the first menu.
+ * Tried once: the lobby screen tries again when it opens. */
+int coopSteamPresenceOpen(void)
+{
+    static int tried;
+
+    if (!tried)
+    {
+        tried = 1;
+        steamOpen();
+    }
+    return sReady;
+}
+
+/* callbacks (invites, Join Game) while no Steam session reads the transport */
+void coopSteamPresenceTick(void)
+{
+    static unsigned int seen;
+
+    if (sReady && sPumped == seen)
+    {
+        pump();
+    }
+    seen = sPumped;
+}
+
+/* What friends see. "status" is the line in the friend's game info; Steam's
+ * friends list shows steam_display, a token from the app's rich presence
+ * file: Spacewar's (AppID 480) has only its own lines (main menu, waiting for
+ * a match), a game's own AppID ships coop/steam/rich_presence_english.vdf,
+ * whose #Status shows our status as it is. steam_player_group puts players
+ * of one lobby together in the list; "connect" is the Join Game button. */
+void coopSteamSetPresence(const char *status, int phase, unsigned long long group, int groupsize, int joinable)
+{
+    char now[sizeof(sPresence)], buf[40];
+    const char *display;
+
+    if (!sReady)
+    {
+        return;
+    }
+    if (sAppId != APPID_SPACEWAR)
+    {
+        display = "#Status";
+    }
+    else
+    {
+        display = (phase != COOP_PRESENCE_MISSION) ? "#StatusWithoutScore" : "";   /* "At the main menu", "Waiting for match" */
+    }
+    snprintf(now, sizeof(now), "%s|%d|%llu|%d|%d", status, phase, group, groupsize, joinable);
+    if (strcmp(now, sPresence) == 0)
+    {
+        return;
+    }
+    snprintf(sPresence, sizeof(sPresence), "%s", now);
+    pSetRichPresence(sFriends, "status", status);
+    pSetRichPresence(sFriends, "gamestatus", (phase == COOP_PRESENCE_MENU) ? "AtMainMenu" : (phase == COOP_PRESENCE_LOBBY) ? "WaitingForMatch" : "");
+    pSetRichPresence(sFriends, "steam_display", display);
+    snprintf(buf, sizeof(buf), "%llu", group);
+    pSetRichPresence(sFriends, "steam_player_group", (group != 0 && groupsize > 1) ? buf : "");
+    snprintf(buf, sizeof(buf), "%d", groupsize);
+    pSetRichPresence(sFriends, "steam_player_group_size", (group != 0 && groupsize > 1) ? buf : "");
+    snprintf(buf, sizeof(buf), "+connect_lobby %llu", group);
+    pSetRichPresence(sFriends, "connect", (group != 0 && joinable) ? buf : "");
 }
 
 /* 1: in a passworded lobby, waiting for the host to check ours */
@@ -1273,7 +1400,8 @@ int coopSteamAdmitWaiting(void)
     return sReady && sAdmitWait;
 }
 
-/* 1 once after the host turned our password down */
+/* once after a join failed: 1 the host turned our password down, 2 Steam
+ * kept us out (friends only, full, gone) */
 int coopSteamJoinRefused(void)
 {
     int r = sJoinRefused;

@@ -163,10 +163,47 @@ with the whole screen to themselves.
 - Chat (T) works in versus too. A host leaving in the middle of a versus
   match has not been tested yet.
 
+Steam and Discord status, invites
+---------------------------------
+Your Steam friends see what you are doing, in your profile's game info and
+on hover in the friends list: "In the co-op lobby (2/4)", "Co-op: Dam,
+00 Agent (2/4)", "Versus: Temple (3/4)", "Solo: Dam, Agent" or "In the
+menus". Friends in one lobby are grouped together in the list. (Because the
+game runs as Spacewar, the line under your name in the friends list itself
+only says Spacewar's own "At the main menu" / "Waiting for match".)
+
+Invites and joining work from anywhere in the game, not only the CO-OP
+screen:
+- Accept a Steam invite, or right-click a friend in the lobby and pick
+  "Join Game", while you are in the menus: the game opens the CO-OP screen
+  in their lobby. If you are hosting your own lobby you leave it first.
+- If you are in a mission at the time, a message says you will join when
+  the mission ends (abort it from the watch to go now).
+- Have the game running before you accept: while it runs as Spacewar,
+  Steam would start Spacewar itself, not this game. (Discord does start
+  this game for an accepted join; it learns where the game is the first
+  time the game runs with Discord open.)
+- "Join Game" is offered while the lobby has room, also during co-op
+  missions (you join beside the others), but not during a versus match.
+
+Discord (optional): with Discord open on the same PC, your Discord friends
+see the same status with a timer, the party size, and an "Ask to Join"
+button while there is room. When someone asks, the host's CO-OP screen shows
+"<name> asks to join" with Let In / Turn Down (requests go away after 30 s).
+Once let in, their game joins your lobby by itself. If your lobby has a
+password, a Discord join skips it: you let them in yourself. If they are not
+your Steam friend, set your Lobby to Public first; Steam keeps everyone else
+out of a Friends Only lobby (their screen says "Couldn't join that game.").
+Discord needs this build's Discord application id in discord_appid.txt next
+to ProjectMidas.exe. Without the file, or without Discord running, the game
+plays as before. Steam starts with the game now so the status shows from
+the first menu; put GE_NO_PRESENCE=1 in the environment to turn both off.
+
 If something goes wrong
 -----------------------
 Press ~ (tilde) in game to open the console. The co-op lines start with
-"ge: steam:", "ge: coop:" and "ge: versus:". Send those lines along with what happened.
+"ge: steam:", "ge: coop:", "ge: versus:", "ge: presence:" and "ge: discord:".
+Send those lines along with what happened.
 
 Known gaps in this build
 ------------------------

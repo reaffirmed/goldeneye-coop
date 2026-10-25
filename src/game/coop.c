@@ -1035,6 +1035,7 @@ static void coopTickBody(void);
 
 void coopTick(void)
 {
+    coopPresenceGameTick(1);    /* Steam / Discord status, invites (coop_presence.c) */
     if (coopVersus())
     {   /* in a versus match the multiplayer loop leaves the last player current: we are player 0 */
         const s32 cur = get_cur_playernum();
@@ -4893,6 +4894,12 @@ void coopExtSendPacket(void *pkt, s32 len, s32 to)
             coopNetSendTo(c, pkt, len);
         }
     }
+}
+
+/* co-op is on: a session or Steam's idle lobby screen (coop_presence.c) */
+s32 coopEnabled(void)
+{
+    return sEnabled > 0;
 }
 
 /* the lobby screen is up (coop_browse.c refreshes Public Games only then) */

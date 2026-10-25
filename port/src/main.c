@@ -748,8 +748,10 @@ int main(int argc, char **argv)
     portMigrateIni();
 
     { /* co-op over Steam: "+connect_lobby <id>" is how Steam starts us for an
-       * invite or Join Game; -coophost / -coopjoin are the launcher's switches.
-       * They all become GE_COOP (port/src/coop_net.c). */
+       * invite or Join Game: it waits in coop_presence.c until the menus are
+       * up, then opens the lobby screen in that lobby. -coophost / -coopjoin
+       * are the launcher's switches and become GE_COOP (port/src/coop_net.c). */
+        extern void coopPresenceQueueJoin(unsigned long long lobby, int haspw, unsigned int pwhash, const char *from);
         static char coopspec[96];
         int i;
 
@@ -757,7 +759,7 @@ int main(int argc, char **argv)
         {
             if (strcmp(argv[i], "+connect_lobby") == 0 && i + 1 < argc)
             {
-                snprintf(coopspec, sizeof(coopspec), "GE_COOP=steam:join:%s", argv[++i]);
+                coopPresenceQueueJoin(strtoull(argv[++i], NULL, 10), 0, 0, "Steam");
             }
             else if (strcmp(argv[i], "-coophost") == 0)
             {

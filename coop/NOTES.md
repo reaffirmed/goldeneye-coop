@@ -486,3 +486,67 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscen
   to Kill (one hit kills); Golden Gun (pickup leaves the other world, one
   shot kills); Flag Tag (pickup, drop at the holder's body on death); You
   Only Live Twice (two deaths end it).
+
+## Rich presence, invites from anywhere, Discord (2026-10-25)
+
+- What was there: friends-only lobby, in-lobby friend invites and the Steam
+  invite window, Join on a hosting friend, `+connect_lobby` as GE_COOP, a
+  fixed "Hosting/Playing GoldenEye co-op" status. Invites (333/337) only
+  worked with the lobby screen's Steam up and not while hosting.
+- Steam now comes up at boot (coopSteamPresenceOpen, once; the lobby screen
+  still retries). coopSteamPresenceTick pumps callbacks when no session is
+  reading the transport. GE_NO_PRESENCE turns presence and Discord off.
+- port/src/coop_presence.c: one waiting join (lobby, password hash, who
+  from) fed by 333 / 337, `+connect_lobby` (main.c, no longer GE_COOP) and
+  Discord's ACTIVITY_JOIN. src/game/coop_presence.c takes it from the menus
+  (after 120 ticks, not on MENU_RUN_STAGE): coopLobbyLeave if in a lobby,
+  coopLobbyJoinLobbyId, MENU_COOP_LOBBY. In a stage it waits and toasts
+  once. coopFeedClock runs the feed's clock when co-op is off.
+- Presence text per frame (coopPresenceGameTick from menu_init and coopTick):
+  menus / lobby screen / lobby (co-op or versus, n/4, "Picking a mission"
+  off the screen) / co-op, solo, versus mission. Player count changes count
+  after 2 s (a joiner's count of the others flickers with the host's hellos).
+  Joinable: in a Steam lobby with room, not in a versus match.
+- Steam keys: status (our text), steam_display + gamestatus (480: Spacewar's
+  #StatusWithoutScore with AtMainMenu / WaitingForMatch, nothing in a
+  mission; own AppID: #Status from coop/steam/rich_presence_english.vdf, which
+  is "%status%"), steam_player_group(_size) = lobby id / count, connect =
+  "+connect_lobby <id>" while joinable (every member, not only the host).
+  Values are cached and only changes are sent; coopSteamShutdown clears.
+  The AppID is read back from steam_appid.txt (sAppId) for the hosting-friend
+  check. Under 480 Steam's Join Game on a friend whose game isn't running
+  would start Spacewar, so the README says to start the game first.
+- Discord (port/src/coop_discord.c): the RPC socket directly (named pipe
+  discord-ipc-N / Unix socket under XDG_RUNTIME_DIR, TMPDIR, TMP, /tmp plus
+  the flatpak/snap subfolders), non-blocking, retry every 15 s. App id from
+  GE_DISCORD_APPID or discord_appid.txt; none = off. SET_ACTIVITY at most
+  every 4 s (Discord allows 5 per 20 s), details/state, start timestamp
+  (reset when the first line changes), large_image "logo" (an art asset to
+  upload in the Discord app), party ge-<lobby> n/4, secrets.join
+  "ge1:<lobby>:<hash hex>" where hash is coop_steam.c pwHash(password, lobby)
+  (0 without a password; a joiner in a passworded lobby offers no join).
+  The joiner sends that hash as its GEPW (coopSteamSetJoinPasswordHash).
+  SUBSCRIBE ACTIVITY_JOIN / ACTIVITY_JOIN_REQUEST; requests show in the
+  host's lobby (CLROW_DISCORDYES/NO, up to 2 shown) and answer with
+  SEND_ACTIVITY_JOIN_INVITE / CLOSE_ACTIVITY_REQUEST; dropped after 30 s
+  or declined at once when there is nothing to join. Windows registers the
+  discord-<appid> URL protocol under HKCU so Discord can launch the exe.
+- Friends only: Steam keeps a non-friend out of a friends-only lobby (the
+  mock now does too: owner's friends and invitees only, response 2). A
+  direct join that Steam refuses (sJoinDirect) no longer falls back to
+  looking for any hosting friend: the lobby screen says "Couldn't join that
+  game. It's full, or friends only." (coopSteamJoinRefused 2).
+- Mock Discord: coop/mock/discord_mock.py <dir> (READY, replies, logs every
+  frame to <dir>/discord.log; files "join" and "ask" inject ACTIVITY_JOIN /
+  ACTIVITY_JOIN_REQUEST). Harness: GE_DISCORD_AUTOACCEPT=<s>.
+- Test: coop/docker/presence.sh. Verified with the mock Steam and mock
+  Discord, three copies: p3 (Steam friend) at the menus pulled into the lobby
+  by the host's invite; p2 (not a Steam friend) at the mission select joins
+  through Discord Ask to Join into a public lobby with a password, past it
+  with the hash; all three follow into Dam; statuses on every copy
+  ("In the co-op lobby (3/4)", "Co-op: Dam, Agent (3/4)"), connect cleared
+  in a versus match ("Versus: Temple (2/4)"). FRIENDSONLY=1: p2 kept out
+  with the message. P3ENV=GE_STAGE=dam P1DELAY=25: the invite toast in a
+  solo mission. two_player_lobby.sh invite/wait and versus.sh still pass.
+- Not tested: real Steam's friends list display and real Discord (needs a
+  Discord application id and the two accounts).

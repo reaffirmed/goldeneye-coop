@@ -50,6 +50,7 @@ static char sFilterKey[4][32], sFilterVal[4][64];
 static int sNumFilters;
 static u64 sListed[32];
 static int sNumListed;
+static u64 sInvitedTo;  /* the last lobby we were invited to: friends-only lets us in */
 
 /* callback queue */
 typedef struct { int id; int size; unsigned char param[512]; } Cb;
@@ -206,6 +207,7 @@ static void poll_(void)
 
         if (fscanf(inv, "%llu %llu", &v[0], &v[1]) == 2)
         {
+            sInvitedTo = v[0];
             pushCb(333, v, 16);
             log_("invite received");
         }
@@ -370,14 +372,32 @@ API u64 SteamAPI_ISteamMatchmaking_CreateLobby(void *self, int type, int max)
     return call;
 }
 
+static u64 ownerOf(u64 lobby);
+
 API u64 SteamAPI_ISteamMatchmaking_JoinLobby(void *self, u64 lobby)
 {
     unsigned char r[24];
     unsigned int resp = 1;
-    char p[320];
+    char p[320], v[32];
     FILE *f;
+    int i, friend = 0;
 
     (void) self;
+    /* friends only, as Steam: the owner's friends and invitees get in, others
+     * get k_EChatRoomEnterResponseNotAllowed (2) */
+    for (i = 0; i < sNumFriends; i++)
+    {
+        friend |= sFriend[i] == ownerOf(lobby);
+    }
+    if (atoi(dataGet(lobby, "__type", v, sizeof(v))) == 1 && !friend && sInvitedTo != lobby)
+    {
+        memset(r, 0, sizeof(r));
+        resp = 2;
+        memcpy(r, &lobby, 8);
+        memcpy(r + 16, &resp, 4);
+        log_("kept out of a friends-only lobby");
+        return pushResult(504, r, 24);
+    }
     path(p, sizeof(p), lobby, "members");
     f = fopen(p, "a");
     fprintf(f, "%llu\n", sSelf);

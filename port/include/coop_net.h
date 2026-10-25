@@ -73,4 +73,42 @@ void coopSteamSetJoinPassword(const char *password);
 int  coopSteamAdmitWaiting(void);       /* joiner: the host is checking our password */
 int  coopSteamJoinRefused(void);        /* once, after a wrong password */
 
+void coopSteamSetJoinPasswordHash(unsigned int hash);  /* a Discord join secret carries the hash, not the password */
+int  coopSteamPasswordHash(unsigned int *hash);    /* host: 1 and the lobby's hash when it has a password */
+unsigned long long coopSteamLobbyId(void);
+int  coopSteamLobbyHasPassword(void);  /* the lobby we are in, 0 none */
+int  coopSteamPresenceOpen(void);       /* Steam up for presence and invites, no lobby (once; 1 when up) */
+void coopSteamPresenceTick(void);       /* callbacks, when no session is pumping them */
+void coopSteamSetPresence(const char *status, int phase, unsigned long long group, int groupsize, int joinable);  /* phase: COOP_PRESENCE_* */
+
+/* Rich presence and joins from outside the game (port/src/coop_presence.c):
+ * the game says what it is doing, and takes the joins Steam and Discord hand
+ * it (an accepted invite, Join Game, Ask to Join). */
+enum { COOP_PRESENCE_MENU, COOP_PRESENCE_LOBBY, COOP_PRESENCE_MISSION };
+typedef struct
+{
+    int phase;                  /* COOP_PRESENCE_* */
+    const char *status;         /* one line: Steam's status, "Co-op: Dam, 00 Agent (2/4)" */
+    const char *details;        /* Discord's first line, "Co-op: Dam (00 Agent)" */
+    const char *state;          /* Discord's second, "In a mission" */
+    unsigned long long lobby;   /* the Steam lobby, 0 for none */
+    int players, maxplayers;
+    int joinable;               /* a friend may join now */
+} CoopPresence;
+void coopPresenceTick(const CoopPresence *p);   /* every frame or so; pushes changes */
+void coopPresenceQueueJoin(unsigned long long lobby, int haspw, unsigned int pwhash, const char *from);
+/* 1 once per join waiting: the lobby, the password hash (haspw) and who sent it */
+int  coopPresenceTakeJoin(unsigned long long *lobby, int *haspw, unsigned int *pwhash, char *from, int cap);
+int  coopPresencePeekJoin(char *from, int cap);  /* a join is waiting (it stays) */
+
+/* Discord (port/src/coop_discord.c), used by coop_presence.c and the lobby screen */
+void coopDiscordTick(void);
+int  coopDiscordConnected(void);
+void coopDiscordSetActivity(const char *details, const char *state, long long start,
+                            const char *party, int size, int max, const char *secret);
+const char *coopDiscordTakeJoin(void);  /* a Join clicked in Discord: its secret, once ("" none) */
+int  coopDiscordAskCount(void);         /* host: Ask to Join requests waiting */
+const char *coopDiscordAskName(int i);
+void coopDiscordRespond(int i, int accept);
+
 #endif

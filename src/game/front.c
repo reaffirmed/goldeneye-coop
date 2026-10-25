@@ -41,6 +41,7 @@
 #include "assets/obseg/text/LtitleE.h"
 #include "matrixmath.h"
 #include "coop.h"
+#include "coop_net.h"
 #include "bg.h"
 #include "chrai.h"
 #include "title.h"
@@ -8836,7 +8837,8 @@ extern void portConLogf(const char *fmt, ...);
 enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLROW_CANCEL,
        CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE, CLROW_FRIENDLYFIRE,
        CLROW_CHARACTER, CLROW_CHAT, CLROW_PUBLIC, CLROW_PASSWORD, CLROW_JOINPUBLIC, CLROW_LAYOUT, CLROW_OPTION,
-       CLROW_HOSTLEAVES, CLROW_VSMODE, CLROW_VSARENA, CLROW_VSSCENARIO, CLROW_VSLENGTH, CLROW_VSWEAPONS, CLROW_VSSTART };
+       CLROW_HOSTLEAVES, CLROW_VSMODE, CLROW_VSARENA, CLROW_VSSCENARIO, CLROW_VSLENGTH, CLROW_VSWEAPONS, CLROW_VSSTART,
+       CLROW_DISCORDYES, CLROW_DISCORDNO };
 #define COOP_LOBBY_ROWS     48
 #define COOP_LOBBY_VISIBLE  19  /* rows that fit on the paper; more scroll (coop_lobby_scroll) */
 #define COOP_LOBBY_CHAT_LINES 3
@@ -8992,6 +8994,26 @@ static void coopVsArenaName(s32 arena, char *out, s32 cap)
         return;
     }
     coopVsTrimText(out, cap, langGet(multi_stage_setups[arena].folder_text_preset));
+}
+
+/* rich presence (coop_presence.c): the arena being played and the lobby's
+ * scenario, without the menu font's newline */
+void coopVsPresenceNames(s32 stage, char *arena, s32 arenacap, char *scenario, s32 scenariocap)
+{
+    s32 i;
+
+    snprintf(arena, arenacap, "Versus");
+    for (i = 1; i < coopVsArenaCount(); i++)
+    {
+        if (multi_stage_setups[i].stage_id == stage)
+        {
+            coopVsTrimText(arena, arenacap, langGet(multi_stage_setups[i].folder_text_preset));
+            arena[strcspn(arena, "\n")] = '\0';
+            break;
+        }
+    }
+    snprintf(scenario, scenariocap, "%s", coop_vs_scenario_names[coopVsScenario()]);
+    scenario[strcspn(scenario, "\n")] = '\0';
 }
 
 static void coopVsWeaponsName(s32 sc, s32 w, char *out, s32 cap)
@@ -9233,10 +9255,19 @@ static void coopLobbyBuild(void)
     {
         if (coopBrowseRefused() > 0)
         {
-            r = coopLobbyAdd(CLROW_TEXT, 0, "Wrong password.\n", "");
+            r = coopLobbyAdd(CLROW_TEXT, 0, coopBrowseRefusedText(), "");
             if (r != NULL)
             {
                 r->colour = 0xA00000FF;
+            }
+            if (strncmp(coopBrowseRefusedText(), "Couldn't", 8) == 0)
+            {   /* Steam kept us out: friends only (a Discord join from someone
+                 * who isn't the host's Steam friend), full, or gone */
+                r = coopLobbyAdd(CLROW_TEXT, 0, "It's full, or friends only.\n", "");
+                if (r != NULL)
+                {
+                    r->colour = PORT_SHEET_COL_DIM;
+                }
             }
         }
         coopLobbyAdd(CLROW_HOST, 0, "Host a Game\n", "");
@@ -9346,6 +9377,25 @@ static void coopLobbyBuild(void)
                     r->colour = PORT_SHEET_COL_DIM;
                 }
             }
+        }
+    }
+    for (i = 0; i < coopLobbyDiscordAsks() && i < 2; i++)
+    {   /* Discord's Ask to Join: the host lets them in (port/src/coop_discord.c) */
+        char ask[64];
+
+        coopLobbyCopyName(name, sizeof(name), coopDiscordAskName(i));
+        name[strcspn(name, "\n")] = '\0';
+        snprintf(ask, sizeof(ask), "%s asks to join\n", name);
+        r = coopLobbyAdd(CLROW_DISCORDYES, i, ask, "Let In\n");
+        if (r != NULL)
+        {
+            r->colour = COOP_LOBBY_COL_OK;
+        }
+        r = coopLobbyAdd(CLROW_DISCORDNO, i, "on Discord\n", "Turn Down\n");
+        if (r != NULL)
+        {
+            r->indent = 0xC;
+            r->colour = PORT_SHEET_COL_DIM;
         }
     }
     if (coopLobbyIsHost())
@@ -9674,6 +9724,10 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
         }
         case CLROW_HOSTLEAVES:
             coopSetSetting(COOPSET_HOSTLEAVES, (coopSetting(COOPSET_HOSTLEAVES) + 1) % coopHostLeavesCount());
+            break;
+        case CLROW_DISCORDYES:
+        case CLROW_DISCORDNO:
+            coopDiscordRespond(r->arg, r->kind == CLROW_DISCORDYES);
             break;
         default:
             break;
@@ -20810,7 +20864,9 @@ void menu_init(void)
     }
     {   /* co-op: keep the link alive in the menus and follow the host */
         extern s32 coopFrontTick(void);
+        extern void coopPresenceGameTick(s32 instage);
         coopFrontTick();
+        coopPresenceGameTick(0);   /* Steam / Discord status; a join from either opens the lobby */
     }
     portDirectLaunchTick();
     portDirectLaunchMpTick();

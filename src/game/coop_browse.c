@@ -49,6 +49,7 @@ static s32 sLineLen;
 static u32 sNow;
 static u32 sLastRefresh;
 static s32 sRefused;            /* ticks left on "Wrong password" */
+static s32 sRefusedWhy;         /* coopSteamJoinRefused's answer: 1 password, 2 kept out */
 
 /* ---- the host's options ---------------------------------------------------- */
 
@@ -132,6 +133,12 @@ s32 coopBrowseChecking(void)
 s32 coopBrowseRefused(void)
 {
     return sRefused;
+}
+
+/* what to say while coopBrowseRefused: the password, or a lobby Steam kept us out of */
+const char *coopBrowseRefusedText(void)
+{
+    return (sRefusedWhy == 2) ? "Couldn't join that game.\n" : "Wrong password.\n";
 }
 
 /* ---- typing a password ---------------------------------------------------------- */
@@ -289,9 +296,14 @@ void coopBrowseTick(s32 inmission)
         sDirty = 0;
         coopSteamSetLobbyOptions(sPublic, sPassword, coopExtVersion());
     }
-    if (coopSteamJoinRefused())
     {
-        sRefused = COOPBROWSE_REFUSED;
+        const s32 why = coopSteamJoinRefused();
+
+        if (why)
+        {
+            sRefused = (why == 2) ? 2 * COOPBROWSE_REFUSED : COOPBROWSE_REFUSED;
+            sRefusedWhy = why;
+        }
     }
     if (inmission)
     {

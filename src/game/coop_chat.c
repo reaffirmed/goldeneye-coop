@@ -171,6 +171,13 @@ static void coopChatShow(s32 player, const char *said)
     portConLogf("ge: coop: chat from player %d: %s\n", player + 1, said);
 }
 
+/* the feed's clock while co-op is off (coopChatTick runs only with it on), so
+ * a toast shown then (an invite during a solo mission) still goes away */
+void coopFeedClock(void)
+{
+    sNow++;
+}
+
 void coopFeedToast(const char *text, s32 player)
 {
     if (sToastCount == COOPTOAST_MAX)

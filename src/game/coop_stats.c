@@ -601,6 +601,14 @@ static s32 coopCampaignMissionOf(s32 stage)
     return -1;
 }
 
+/* a solo mission's name ("Dam", "Surface II"), NULL for a stage that isn't one (rich presence) */
+const char *coopMissionName(s32 stage)
+{
+    const s32 m = coopCampaignMissionOf(stage);
+
+    return (m >= 0 && m < COOP_MISSIONS) ? sMissionNames[m] : NULL;
+}
+
 static s32 coopCampaignStageOf(s32 mission)
 {
     s32 i;
