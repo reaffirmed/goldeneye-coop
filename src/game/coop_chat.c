@@ -137,22 +137,10 @@ static u32 coopFeedAlpha(u32 colour, s32 a)
 /* HUD-font copy: capitals, ASCII, one line ending in '\n' */
 static void coopFeedText(char *out, s32 cap, const char *in)
 {
-    s32 n = 0;
+    s32 n;
 
-    for (; in != NULL && *in != '\0' && *in != '\n' && n < cap - 2; in++)
-    {
-        char c = *in;
-
-        if ((u8) c >= 0x80 || (u8) c < 0x20)
-        {
-            c = '?';
-        }
-        else if (c >= 'a' && c <= 'z')
-        {
-            c -= 'a' - 'A';
-        }
-        out[n++] = c;
-    }
+    coopAsciiName(out, cap - 1, in, 1);
+    n = (s32) strlen(out);
     out[n++] = '\n';
     out[n] = '\0';
 }

@@ -50,5 +50,11 @@ void coopExtApply(s32 kind, const u8 *raw, s32 from)
         case COOPEV_CAMPAIGN:
             coopCampaignApply(raw, from);
             break;
+        case COOPEV_THROW:
+        case COOPEV_THROWMORE:
+        case COOPEV_ITEMGONE:
+        case COOPEV_DROP:
+            coopItemsApply(kind, raw, from);
+            break;
     }
 }

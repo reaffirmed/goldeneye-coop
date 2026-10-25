@@ -8862,25 +8862,10 @@ static s32 coop_lobby_scroll;       /* the first row shown */
 /* Steam names can hold anything; the menu font has ASCII */
 static void coopLobbyCopyName(char *out, s32 cap, const char *name)
 {
-    s32 i, n = 0;
+    s32 n;
 
-    for (i = 0; name != NULL && name[i] != '\0' && n < cap - 2; i++)
-    {
-        const u8 ch = (u8) name[i];
-
-        if (ch >= 0x20 && ch < 0x7F)
-        {
-            out[n++] = (char) ch;
-        }
-        else if (ch >= 0xC0 || ch < 0x20)
-        {
-            out[n++] = '?';   /* one per UTF-8 character, not per byte */
-        }
-    }
-    if (n == 0)
-    {
-        out[n++] = '?';
-    }
+    coopAsciiName(out, cap - 1, name, 0);   /* accents to plain letters, emoji left out */
+    n = (s32) strlen(out);
     out[n++] = '\n';
     out[n] = '\0';
 }
@@ -9776,7 +9761,7 @@ void init_menu1D_cooplobby(void)
  * first friend listed), waits for a Ready partner plus GE_COOP_LOBBY_DELAY
  * ticks, then starts the stage (Dam by default; not GE_STAGE, which would
  * launch straight away)
- * on Agent the way Select Mission would; the joiner joins the first friend
+ * on Agent (GE_COOP_LOBBY_DIFF=0..3 for another) the way Select Mission would; the joiner joins the first friend
  * found hosting (wait: waits for an invite) and readies. */
 static void coopLobbyHarness(void)
 {
@@ -9880,7 +9865,7 @@ static void coopLobbyHarness(void)
             return;
         }
         portConLogf("ge: coop lobby: partner ready, starting stage %d (down rule %d)\n", stage, coopDownRule());
-        set_selected_difficulty(DIFFICULTY_AGENT);
+        set_selected_difficulty(getenv("GE_COOP_LOBBY_DIFF") != NULL ? atoi(getenv("GE_COOP_LOBBY_DIFF")) : DIFFICULTY_AGENT);
         set_solo_and_ptr_briefing(stage);
         frontChangeMenu(MENU_RUN_STAGE, TRUE);
     }

@@ -379,7 +379,11 @@ enum
     /* 21 spare */
     COOPEV_OBJDONE = 22,    /* host -> all: objective done, and who gets the credit */
     COOPEV_TEAMTIME = 23,   /* host -> all: the team's time for the mission just won */
-    COOPEV_CAMPAIGN = 24    /* host -> joiner: a line of the host's campaign record */
+    COOPEV_CAMPAIGN = 24,   /* host -> joiner: a line of the host's campaign record */
+    COOPEV_THROW = 25,      /* to all: we threw something (coop_items.c), first half */
+    COOPEV_THROWMORE = 26,  /* its second half */
+    COOPEV_ITEMGONE = 27,   /* to all: a thrown or dropped item went off or was picked up */
+    COOPEV_DROP = 28        /* host -> all: a guard dropped its gun */
 };
 typedef struct
 {
@@ -429,6 +433,25 @@ void coopFeedClock(void);   /* the feed's clock while co-op is off */
 Gfx *coopFeedRender(Gfx *gdl);                       /* in play (coop_hud.c) */
 s32  coopFeedLines(s32 maxlines, char lines[][80], s32 *players);  /* the newest chat lines as typed, for the lobby */
 void coopChatTypedLine(char *out, s32 cap);         /* the line being typed */
+
+/* thrown and dropped items in every world (coop_items.c) */
+void coopItemsStageStart(void);
+void coopItemsTick(s32 missionticks);                  /* harness: GE_COOP_TESTAIM */
+void coopItemsApply(s32 kind, const u8 *raw, s32 from);
+void coopItemsThrown(ObjectRecord *obj, coord3d *pos, Mtxf *rot, coord3d *vel, Mtxf *spin);    /* gun.c */
+s32  coopItemsChrDropping(ChrRecord *chr);              /* chr.c: 1 keeps a joiner's guard from dropping on its own */
+void coopItemsChrDropped(ChrRecord *chr, PropRecord *prop);
+void coopItemsExplodeBegin(PropRecord *prop);           /* propobj.c propExplode */
+void coopItemsExplodeEnd(void);
+s32  coopItemsExploding(void);
+s32  coopItemsExplodingOwner(void);
+s32  coopItemsIsPartners(ObjectRecord *obj);            /* a partner's remote mine: not our detonator's */
+void coopItemsPickedUp(ObjectRecord *obj);
+s32  coopInMissionNow(void);
+void coopObjKnockChildren(s32 haschildren);             /* propobj.c objHit */
+void coopObjKnocked(ObjectRecord *obj, s32 bounce, coord3d *viewdir);
+void coopObjUsed(ObjectRecord *obj);                     /* propobj.c propobjInteract */
+void coopAsciiName(char *out, s32 cap, const char *in, s32 upper);   /* a Steam name for the game's fonts */
 
 /* objective credit (coop_objective.c): the host names who completed each
  * objective and every game shows a toast for a partner's */

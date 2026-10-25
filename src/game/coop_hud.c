@@ -43,7 +43,8 @@
 
 extern Gfx *portHudScaleBegin(Gfx *gdl, f32 x, f32 y);
 extern Gfx *portHudScaleEnd(Gfx *gdl);
-extern s32 portObjectivesHudShown(void);    /* video.c: [display] objectives_hud and its key */
+extern s32 portObjectivesHudShown(void);
+extern s32 portVideoShowFps(void);          /* video.c: [display] show_fps */    /* video.c: [display] objectives_hud and its key */
 
 #define COOP_HUD_COL_TEXT   0xFFFFFFFF
 #define COOP_HUD_COL_DIM    0xB0B0B0C0
@@ -67,23 +68,10 @@ static u32 coopHudPlayerColour(s32 player)
 /* the small font in capitals, ASCII only (a byte >= 0x80 starts a two-byte glyph) */
 static void coopHudText(char *out, s32 cap, const char *in)
 {
-    s32 n = 0;
-    s32 i;
+    s32 n;
 
-    for (i = 0; in != NULL && in[i] != '\0' && in[i] != '\n' && n < cap - 2; i++)
-    {
-        char c = in[i];
-
-        if ((u8) c >= 0x80 || (u8) c < 0x20)
-        {
-            c = '?';
-        }
-        else if (c >= 'a' && c <= 'z')
-        {
-            c -= 'a' - 'A';
-        }
-        out[n++] = c;
-    }
+    coopAsciiName(out, cap - 1, in, 1);
+    n = (s32) strlen(out);
     out[n++] = '\n';
     out[n] = '\0';
 }
@@ -500,6 +488,11 @@ static Gfx *coopHudPartnerStatus(Gfx *gdl, CoopHudPartner *p, s32 row)
     char text[48];
     s32 x = viGetViewLeft() + 0x14;
     s32 y = viGetViewTop() + 0x0E + row * 0x18;   /* a block per partner, down the left */
+
+    if (portVideoShowFps())
+    {
+        y += 0x0A;  /* below the FPS counter (bondview2.c), which sits over the name's first letters */
+    }
 
     if (hudAnchorsToEdges())
     {

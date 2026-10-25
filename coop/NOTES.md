@@ -602,3 +602,74 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscen
   second while facing the partner (mouse_auto_aim=1 in midas.ini for Xvfb
   runs, since the mouse blocks auto-aim by default). Verified on Dam with the
   mock Steam: without the fix "partner 30001" every second, with it "none".
+
+## Shared items, thrown objects, knocks, blasts and Use (2026-10-25, COOP_VERSION 9)
+
+From a real Steam test on Dam, Runway and Surface: the joiner never saw the
+host's covert modem or gun drops, the shot-off padlock stayed on for the
+host, grenade-launcher blasts were invisible to the others, the joiner's
+satellite-console work and the Runway plane did nothing on the host.
+
+- **Thrown and placed items** (src/game/coop_items.c). gunInitProjectileFromPlayer
+  calls coopItemsThrown for grenades, the three mines, the covert modem
+  (ITEM_BUG), the camera, the bomb case, plastique and the GoldenEye key.
+  COOPEV_THROW (25) carries item, start pos and velocity; COOPEV_THROWMORE
+  (26) the rotation, spin and fuse. Every other game spawns its own copy
+  with gunCoopSpawnThrown (gun.c), owned by the thrower's puppet, so it
+  flies, sticks and settles the same way. Ids are (player & 3) << 14 | serial.
+  A copy that goes off (propExplode, wrapped in coopItemsExplodeBegin/End)
+  sends COOPEV_ITEMGONE (27) BOOM and the others set their copy's fuse to 0;
+  picking one up sends ITEMGONE PICKED. A partner's remote mines are not
+  set off by our detonator (chrobjWeaponTick, coopItemsIsPartners).
+- **Guard gun drops**: the host sends COOPEV_DROP (28) when a dying guard's
+  weapon prop is detached (chr.c CHRHIDDEN_DROP_HELD_ITEMS); joiners skip
+  their own drops for mirrored guards and drop the mirrored chr's matching
+  child weapon instead (or spawn one at the given pos). Picked up once, by
+  whoever gets there first (ITEMGONE PICKED, then everyone has it).
+- **Shared pickups**: a setup weapon, ammo, key or mission item one player
+  takes is taken by everyone (COOPEV_PICKUP to all, kept in sTeamPick[96]
+  and retried every 15 ticks while a player is dead or not in the mission;
+  the host resends the list to a late joiner when its puppet spawns).
+  Armour is just removed for the others. Each player gets the item into
+  their own inventory, so the joiner has the modem, the key, etc.
+- **Knocks**: objHit drops what sits on the hit object and bounces it only
+  in the shooter's game. COOPEV_OBJKNOCK (17) sends it in world space
+  (objBounce wants view space; the receiver uses its own view rotation
+  transposed), so a shot-off padlock falls everywhere.
+- **Blasts**: coopExplosionCreated. A joiner's own source-less blast
+  (grenade, mine, rocket, GL round) is sent to the host as before; the host
+  now also sends every source-less blast (its own, the guards', and the
+  relayed ones, minus the originator) to each joiner. A joiner plays it
+  under sApplyingHostBoom: the effect plus damage to its own Bond only
+  (guard and object damage stays the host's). Object explosions keep
+  going through OBJDMG. Blasts hurt every player as in solo, Friendly Fire
+  or not (FF only covers bullets).
+- **Use** (propobjInteract): a joiner's press on a console, switch, alarm
+  or the Runway plane sets RUNTIMEBITFLAG_ACTIVATED only in its own game,
+  and the scripts that wait for it (if_object_was_activated) run on the
+  host. COOPEV_OBJUSE (18) sends it to the host, which marks it activated,
+  runs the door-switch link and flips an alarm switch.
+- **Endings**: the presentation commands the host's script relays to the
+  joiners (coopAiCommand) now include AI_MoveObject and Hide/ShowAllChrs.
+  The Runway ending moves the plane to its take-off pad from a global list
+  that only the host runs; the plane's own list (ai_12) runs everywhere and
+  takes off on stage flag 0x00100000, which the WORLD packet brings. Before,
+  the joiner's camera cut to an empty runway.
+- **Name tags**: coopAsciiName folds UTF-8 to the game font (Latin-1 and
+  Latin Extended-A to the base letter, others dropped, "?" if nothing is
+  left), used by the name tag, the feed and the lobby list. The partner
+  status block moves down a line when the FPS counter is on.
+- Harness: GE_COOP_LOBBY_DIFF=<0..3> sets the lobby harness difficulty;
+  GE_COOP_TESTAIM=<s>:<yaw>:<pitch> turns the view that many seconds in;
+  GE_COOP_TESTOBJ=<model> (2 or more) shoots only that model, at any
+  distance; GE_COOP_TESTUSE=<grabtag>:<usetag>:<s> picks up the object
+  tagged <grabtag> (-1 none) <s> seconds in and presses Use on <usetag> 5 s
+  later.
+- Verified with two copies over the mock: the host's covert modem sticks to
+  the same rock on both screens; Dam on Secret Agent and 00 Agent gives
+  both players the modem; host grenades hurt the joiner and the joiner's
+  timed mine hurts the host (each game's own copy); on Runway the joiner
+  takes the key and boards the plane, the host's script runs the ending
+  and both games finish the mission, with the plane taking off on both
+  screens; on Surface the joiner's Use on the dish console runs the host's
+  script, and the joiner shooting it reaches the host as OBJDMG.

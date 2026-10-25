@@ -64,7 +64,12 @@ waits on the title screen and follows the host into each mission.
 Rules
 -----
 - The host's game runs the guards and the level. Both players see the same
-  guards, doors, alarms, destroyed objects and pickups.
+  guards, doors, alarms, destroyed objects and pickups, the mines, grenades
+  and gadgets anyone throws or plants, the guns guards drop, and every
+  explosion (which hurts whoever is close, as in solo).
+- Pickups are shared: a gun, ammo, key or mission item one player takes,
+  everyone gets, and the same goes for a gun a guard dropped.
+- Either player can use consoles, switches and the Runway plane.
 - Objectives are shared. Whoever completes the mission finishes it for both.
 - G gives the partner you face ammo for the gun in your hand: half your spare
   rounds (at least one magazine's worth), and the gun too if they don't have

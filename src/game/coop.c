@@ -21,6 +21,7 @@
  */
 #include <ultra64.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <bondaicommands.h>
@@ -63,6 +64,9 @@ void alarmDeactivate(void);
 bool alarmIsActive(void);
 s32 objGetDestroyedLevel(ObjectRecord *obj);
 void objApplyDamage(ObjectRecord *obj, f32 damage, coord3d *pos, ITEM_IDS itemnum, s32 playernum);
+void objBounce(ObjectRecord *obj, coord3d *arg1);
+void objDropRecursively(PropRecord *prop);
+void propExecuteTickOperation(PropRecord *prop, TICKOP op);
 void chrSetFiring(ChrRecord *self, s32 hand, s32 firing);
 void sub_GAME_7F02BFE4(ChrRecord *self, s32 arg1, s32 arg2);
 PropRecord *chrSpawnAtCoord(s32 bodynum, s32 headnum, coord3d *pos, StandTile *stan, f32 angle, AIListRecord *ailist, s32 spawnflags);
@@ -73,10 +77,11 @@ void set_missionstate(MISSION_STATE_ID state);
 extern void portConLogf(const char *fmt, ...);
 
 #define COOP_MAGIC   0x50434547u /* "GECP" */
-#define COOP_VERSION 8 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
+#define COOP_VERSION 9 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
                           6: host migration (AI sync, bye, addresses in the roster);
                           7: pings, chat, objective credit, team times, cross-save (COOPEV 16, 20..31, COOPPKT 10);
-                          8: versus (COOPEV 32..36, COOPPKT 16) */
+                          8: versus (COOPEV 32..36, COOPPKT 16);
+                          9: shared pickups, thrown items, drops, knocks, Use, host blasts (COOPEV 17, 18, 25..28) */
 
 enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7, COOPPKT_AISYNC = 8, COOPPKT_BYE = 9 };
 /* 10 and 11 (COOPPKT_EXT_FIRST..LAST in coop.h) are coop_ext.c's features' own packets */
@@ -159,7 +164,7 @@ typedef struct
 enum { COOPEV_HIT = 1, COOPEV_SHOTCHR = 2, COOPEV_DOOR = 3, COOPEV_OBJDMG = 4, COOPEV_PICKUP = 5, COOPEV_MISSIONEND = 6, COOPEV_EXPLODE = 7, COOPEV_AICMD = 8,
        COOPEV_STATS = 9, COOPEV_GIVE = 10, COOPEV_GIVEBACK = 11,
        COOPEV_PLAYERNOTE = 12, COOPEV_ENDALL = 13 /* 14, 15: kept for host migration */,
-       COOPEV_PING = 16 };   /* 32+ versus */
+       COOPEV_PING = 16, COOPEV_OBJKNOCK = 17, COOPEV_OBJUSE = 18 };   /* 32+ versus */
 /* 20..31 (COOPEV_EXT_FIRST..LAST in coop.h) belong to coop_ext.c's features:
  * chat, objective credit, team times, cross-save */
 
@@ -175,7 +180,9 @@ typedef struct
         struct { s16 chrnum; s16 hitpart; s32 weaponid; f32 vector[3]; } shot;  /* client -> host */
         struct { s32 doorofs; s32 state; } door;                                /* both ways */
         struct { s32 objofs; f32 damage; f32 pos[3]; s16 item; s16 player; } obj; /* both ways */
-        struct { s32 objofs; s32 kept; } pick;                                  /* both ways */
+        struct { s32 objofs; u8 bounce; u8 children; u8 pad[2]; f32 dir[3]; s32 stage; } knock;  /* to all */
+        struct { s32 objofs; s32 kept; s32 stage; } pick;                       /* to all */
+        struct { s32 objofs; s32 stage; } use;                                  /* joiner to host */
         struct { s32 stage; u32 stageflags; } end;                              /* both ways */
         struct { f32 pos[3]; s16 type; u8 rooms[8]; } boom;                     /* client -> host */
         struct { s16 chrnum; u8 len; u8 cmd[25]; } ai;                          /* host -> client */
@@ -294,6 +301,15 @@ static s32 sEnabled = -1;
 #define COOP_MAX_PEERHELD 32
 static s32 sPeerHeld[COOP_MAX_PEERHELD];
 static s32 sNumPeerHeld;
+/* this mission's shared pickups (see the pickups section) */
+#define COOP_MAX_TEAMPICKS 96
+static s32 sTeamPick[COOP_MAX_TEAMPICKS];       /* setup offsets */
+static u8 sTeamPickDone[COOP_MAX_TEAMPICKS];    /* we have it, or it is gone here */
+static u8 sTeamPickFrom[COOP_MAX_TEAMPICKS];
+static s32 sNumTeamPicks;
+static s32 sApplyingRemotePick;
+static void coopTeamPicksTick(void);
+static void coopResyncPicks(s32 player);
 static CoopHelloPkt sHostHello;  /* joiner: the host's last hello */
 static u32 sMissionSerial;      /* host: missions started */
 static u32 sFollowedMission;    /* joiner: last host mission we launched into */
@@ -393,6 +409,8 @@ static void coopQueueEvent(CoopEvent *ev);
 static void coopFlushEvents(void);
 static void coopApplyDoor(s32 doorofs, s32 state);
 static void coopApplyObjDamage(CoopEvent *ev);
+static void coopApplyObjKnock(CoopEvent *ev);
+static void coopApplyObjUse(CoopEvent *ev);
 static void coopSendWorld(void);
 static void coopApplyPickup(CoopEvent *ev);
 static void coopApplyMissionEnd(CoopEvent *ev);
@@ -1023,6 +1041,7 @@ void coopStageStart(void)
     sMissionTicks = 0;
     sNumPeerHeld = 0;
     memset(sScriptPass, 0, sizeof(sScriptPass));    /* a new mission's scripts */
+    sNumTeamPicks = 0;
     sLastHurtTick = sLastFightTick = sDeadSince = 0;
     sLastHealth = 1.0f;
     sLastWeapon = ITEM_UNARMED;
@@ -1039,6 +1058,7 @@ void coopStageStart(void)
     coopDifficultyStageStart();
     coopVersusStageStart();
     coopPingStageStart();
+    coopItemsStageStart();
 }
 
 static void coopTickBody(void);
@@ -1101,6 +1121,11 @@ static void coopTickBody(void)
     coopSendState();
     coopTrackCombat();
     coopPingTick();
+    if ((sTick % 15) == 0)
+    {
+        coopTeamPicksTick();    /* shared pickups that had to wait */
+    }
+    coopItemsTick((s32) sMissionTicks);   /* harness: GE_COOP_TESTAIM (coop_items.c) */
     if ((sTick % 30) == 0 && coopPartnerHere())
     {
         coopSendWorld();
@@ -1169,6 +1194,10 @@ static void coopRemotesTick(void)
         if (r->puppet == NULL)
         {
             coopPuppetSpawn(r);
+            if (r->puppet != NULL)
+            {
+                coopResyncPicks(p);     /* what the team has picked up so far */
+            }
         }
         else if (r->puppet->chr == NULL)
         {
@@ -1458,11 +1487,12 @@ static void coopHarnessTick(void)
         }
     }
     if (coopPartnerHere())
-    {   /* GE_COOP_TESTOBJ=1: every 5 s, a heavy "shot" on the nearest breakable setup object (harness only) */
+    {   /* GE_COOP_TESTOBJ=1: every 5 s, a heavy "shot" on the nearest breakable setup object;
+         * GE_COOP_TESTOBJ=<model> (2 or more) only on objects of that model, at any distance (harness only) */
         static s32 testobj = -1;
         if (testobj == -1)
         {
-            testobj = getenv("GE_COOP_TESTOBJ") != NULL;
+            testobj = getenv("GE_COOP_TESTOBJ") != NULL ? atoi(getenv("GE_COOP_TESTOBJ")) : 0;
         }
         if (testobj && (sTick % 300) == 150 && coopInMission())
         {
@@ -1473,7 +1503,8 @@ static void coopHarnessTick(void)
             for (it = g_ActivePropsHead; it != NULL; it = it->next)
             {
                 if (it->type == PROP_TYPE_OBJ && it->obj != NULL && coopSetupOfs(it->obj) >= 0
-                    && objIsMortal(it->obj) && !objGetDestroyedLevel(it->obj))
+                    && objIsMortal(it->obj) && !objGetDestroyedLevel(it->obj)
+                    && (testobj < 2 || it->obj->obj == testobj))
                 {
                     f32 dx = it->pos.f[0] - bond->pos.f[0];
                     f32 dz = it->pos.f[2] - bond->pos.f[2];
@@ -1526,6 +1557,40 @@ static void coopHarnessTick(void)
                 portConLogf("ge: coop: testpick %d type %d (dist %.0f)\n", coopSetupOfs(best->obj), best->obj->type, sqrtf(bestd));
                 op = propPickupByPlayer(best, TRUE);
                 propExecuteTickOperation(best, op);
+            }
+        }
+    }
+
+    if (coopPartnerHere())
+    {   /* GE_COOP_TESTUSE=<grabtag>:<usetag>:<s>: <s> seconds into the mission pick up the
+         * object tagged <grabtag> (-1 none), 5 s later press Use on <usetag> (harness only) */
+        static s32 testuse = -1, grabtag, usetag;
+        if (testuse == -1)
+        {
+            const char *e = getenv("GE_COOP_TESTUSE");
+            testuse = 0;
+            if (e != NULL && sscanf(e, "%d:%d:%d", &grabtag, &usetag, &testuse) != 3)
+            {
+                testuse = 0;
+            }
+        }
+        if (testuse > 0 && coopInMission() && (sMissionTicks == (u32) testuse * 60 || sMissionTicks == (u32) testuse * 60 + 300))
+        {
+            ObjectRecord *obj = objFindByTagId(sMissionTicks == (u32) testuse * 60 ? grabtag : usetag);
+            if (obj != NULL && obj->prop != NULL)
+            {
+                TICKOP op;
+                portConLogf("ge: coop: testuse %s obj %d type %d\n", sMissionTicks == (u32) testuse * 60 ? "grab" : "use",
+                    coopSetupOfs(obj), obj->type);
+                if (sMissionTicks == (u32) testuse * 60)
+                {
+                    op = propPickupByPlayer(obj->prop, TRUE);
+                }
+                else
+                {
+                    op = propobjInteract(obj->prop);
+                }
+                propExecuteTickOperation(obj->prop, op);
             }
         }
     }
@@ -2365,6 +2430,12 @@ static void coopApplyEvent(CoopEvent *ev)
         case COOPEV_PICKUP:
             coopApplyPickup(ev);
             break;
+        case COOPEV_OBJKNOCK:
+            coopApplyObjKnock(ev);
+            break;
+        case COOPEV_OBJUSE:
+            coopApplyObjUse(ev);
+            break;
         case COOPEV_MISSIONEND:
             coopApplyMissionEnd(ev);
             break;
@@ -2641,6 +2712,143 @@ static void coopApplyObjDamage(CoopEvent *ev)
     portConLogf("ge: coop: peer obj %d damage %.2f (item %d)\n", ev->u.obj.objofs, ev->u.obj.damage, ev->u.obj.item);
 }
 
+/* A shot knocks things loose (a padlock off a gate, what sat on a crate)
+ * only in the shooter's game; the knock is sent so it happens everywhere.
+ * The direction travels in world space: objBounce wants it in the view's. */
+
+static s32 sKnockChildren;
+static s32 sApplyingKnock;
+
+void coopObjKnockChildren(s32 haschildren)
+{
+    sKnockChildren = haschildren;
+}
+
+void coopObjKnocked(ObjectRecord *obj, s32 bounce, coord3d *viewdir)
+{
+    CoopEvent ev;
+    coord3d dir;
+    s32 ofs;
+
+    if (sEnabled <= 0 || sApplyingKnock || coopVersus() || !coopNetHasPeer() || !coopPartnerHere() || (!bounce && !sKnockChildren))
+    {
+        return;
+    }
+    ofs = coopSetupOfs(obj);
+    if (ofs < 0)
+    {
+        return;
+    }
+    dir = *viewdir;
+    mtx4RotateVecInPlace(currentPlayerGetViewToWorldMtxf(), (f32 *) &dir);
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = COOPEV_OBJKNOCK;
+    ev.u.knock.objofs = ofs;
+    ev.u.knock.bounce = (u8) (bounce != 0);
+    ev.u.knock.children = (u8) (sKnockChildren != 0);
+    ev.u.knock.dir[0] = dir.f[0];
+    ev.u.knock.dir[1] = dir.f[1];
+    ev.u.knock.dir[2] = dir.f[2];
+    ev.u.knock.stage = bossGetStageNum();
+    coopQueueEvent(&ev);
+}
+
+static void coopApplyObjKnock(CoopEvent *ev)
+{
+    ObjectRecord *obj;
+    Mtxf *v2w;
+    coord3d dir;
+    s32 i;
+
+    if (ev->u.knock.stage != bossGetStageNum() || !coopInMission() || g_CurrentSetup.propDefs == NULL
+        || coopSetupOfs((u8 *) g_CurrentSetup.propDefs + ev->u.knock.objofs) < 0)
+    {
+        return;
+    }
+    obj = (ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + ev->u.knock.objofs);
+    if (obj->prop == NULL)
+    {
+        return;
+    }
+    /* world to view: the view's rotation transposed */
+    v2w = currentPlayerGetViewToWorldMtxf();
+    for (i = 0; i < 3; i++)
+    {
+        dir.f[i] = v2w->m[i][0] * ev->u.knock.dir[0] + v2w->m[i][1] * ev->u.knock.dir[1] + v2w->m[i][2] * ev->u.knock.dir[2];
+    }
+    sApplyingKnock = 1;
+    if (ev->u.knock.children)
+    {
+        objDropRecursively(obj->prop);
+    }
+    if (ev->u.knock.bounce)
+    {
+        objBounce(obj, &dir);
+    }
+    sApplyingKnock = 0;
+    portConLogf("ge: coop: player %d knocked obj %d loose\n", ev->from + 1, ev->u.knock.objofs);
+}
+
+/* A joiner pressing Use on a console, switch or the Runway plane marks it
+ * activated only in its own game, and the level scripts that wait for that
+ * run on the host: the press is sent there. */
+
+static s32 sApplyingUse;
+
+void coopObjUsed(ObjectRecord *obj)
+{
+    CoopEvent ev;
+    s32 ofs;
+
+    if (sEnabled <= 0 || sApplyingUse || coopVersus() || coopNetIsHost() || !coopNetHasPeer() || !coopPartnerHere())
+    {
+        return;
+    }
+    ofs = coopSetupOfs(obj);
+    if (ofs < 0)
+    {
+        return;
+    }
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = COOPEV_OBJUSE;
+    ev.u.use.objofs = ofs;
+    ev.u.use.stage = bossGetStageNum();
+    coopQueueEvent(&ev);
+}
+
+static void coopApplyObjUse(CoopEvent *ev)
+{
+    ObjectRecord *obj;
+
+    if (!coopNetIsHost() || ev->u.use.stage != bossGetStageNum() || !coopInMission() || g_CurrentSetup.propDefs == NULL
+        || coopSetupOfs((u8 *) g_CurrentSetup.propDefs + ev->u.use.objofs) < 0)
+    {
+        return;
+    }
+    obj = (ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + ev->u.use.objofs);
+    if (obj->prop == NULL)
+    {
+        return;
+    }
+    sApplyingUse = 1;
+    if (obj->type == PROPDEF_ALARM)
+    {   /* the joiner's switch flipped its own alarm; the host's state is the one the joiners follow */
+        if (alarmIsActive())
+        {
+            alarmDeactivate();
+        }
+        else
+        {
+            alarmActivate();
+        }
+    }
+    obj->runtime_bitflags |= RUNTIMEBITFLAG_ACTIVATED;
+    sub_GAME_7F03E6A0(obj->prop);
+    coopObjNoteActor(ev->from, 0);  /* an objective the press completes is theirs (coop_objective.c) */
+    sApplyingUse = 0;
+    portConLogf("ge: coop: player %d used obj %d (type %d)\n", ev->from + 1, ev->u.use.objofs, obj->type);
+}
+
 /* Explosions hurt chrs on the host only; the joiner's copies of the host's
  * explosions would count twice, and neither side's blast may hurt the
  * puppet (each player's own game hurts its own Bond). */
@@ -2762,14 +2970,64 @@ static void coopApplyWorld(CoopWorldPkt *p)
 
 
 /* ---- pickups ---------------------------------------------------------------
- * Whoever picks a setup item up first has it; it leaves the other world. Kept
- * items (keys, mission items) are only taken out of play there, so objective
- * checks can still find the record and count it as the team's. */
+ * What one player picks up, everyone gets: a gun with its ammo, ammo, keys
+ * and mission items (the covert modem a level script hands the host at the
+ * start included). Each game plays the pickup on its own copy of the setup
+ * item, so the item really is in everyone's inventory and objective checks
+ * find it there. Body armour is the exception: whoever takes it has it, and
+ * it leaves the other worlds.
+ *
+ * Every game keeps the list of this mission's shared pickups. A pickup that
+ * cannot happen yet here (dead, in a cutscene, or before the mission began)
+ * waits on the list and is tried again; the host sends the whole list to a
+ * player that arrives, so a late joiner gets what the team has. */
 
+
+static s32 coopTeamPickFind(s32 ofs)
+{
+    s32 i;
+
+    for (i = 0; i < sNumTeamPicks; i++)
+    {
+        if (sTeamPick[i] == ofs)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static s32 coopTeamPickAdd(s32 ofs, s32 from, s32 done)
+{
+    s32 i = coopTeamPickFind(ofs);
+
+    if (i < 0 && sNumTeamPicks < COOP_MAX_TEAMPICKS)
+    {
+        i = sNumTeamPicks++;
+        sTeamPick[i] = ofs;
+        sTeamPickDone[i] = 0;
+        sTeamPickFrom[i] = (u8) from;
+    }
+    if (i >= 0 && done)
+    {
+        sTeamPickDone[i] = 1;
+    }
+    return i;
+}
+
+static void coopSendPickup(s32 ofs, s32 to)
+{
+    CoopEvent ev;
+
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = COOPEV_PICKUP;
+    ev.u.pick.objofs = ofs;
+    ev.u.pick.stage = bossGetStageNum();
+    coopQueueEventTo(&ev, to);
+}
 
 void coopPickedUp(ObjectRecord *obj, s32 kept)
 {
-    CoopEvent ev;
     s32 ofs;
 
     if (coopVersus())
@@ -2780,7 +3038,7 @@ void coopPickedUp(ObjectRecord *obj, s32 kept)
         }
         return;
     }
-    if (sEnabled <= 0 || !coopNetHasPeer() || !coopPartnerHere())
+    if (sEnabled <= 0 || sApplyingRemotePick)
     {
         return;
     }
@@ -2788,46 +3046,108 @@ void coopPickedUp(ObjectRecord *obj, s32 kept)
     ofs = coopSetupOfs(obj);
     if (ofs < 0)
     {
+        coopItemsPickedUp(obj);     /* a dropped gun or a thrown item (coop_items.c) */
         return;
     }
-    memset(&ev, 0, sizeof(ev));
-    ev.kind = COOPEV_PICKUP;
-    ev.u.pick.objofs = ofs;
-    ev.u.pick.kept = kept;
-    coopQueueEvent(&ev);
+    coopTeamPickAdd(ofs, coopSelf(), 1);
+    portConLogf("ge: coop: we picked up obj %d (type %d)%s\n", ofs, obj->type, coopPartnerHere() ? "" : ", no partner here yet");
+    if (coopNetHasPeer() && coopPartnerHere())
+    {
+        coopSendPickup(ofs, COOP_ALL);
+    }
+}
+
+/* one shared pickup, here: 1 when it is settled (taken, or not ours to take) */
+static s32 coopTeamPickTry(s32 i)
+{
+    ObjectRecord *obj;
+    PropRecord *prop;
+    TICKOP op;
+
+    if (coopSetupOfs((u8 *) g_CurrentSetup.propDefs + sTeamPick[i]) < 0)
+    {
+        return 1;
+    }
+    obj = (ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + sTeamPick[i]);
+    prop = obj->prop;
+    if (prop == NULL || bondinvHasPropInInv(prop))
+    {
+        return 1; /* gone already, or we have it */
+    }
+    if (obj->type == PROPDEF_ARMOUR)
+    {   /* not shared: it leaves this world */
+        objFreePermanently(obj, TRUE);
+        portConLogf("ge: coop: player %d took body armour %d: removed here\n", sTeamPickFrom[i] + 1, sTeamPick[i]);
+        return 1;
+    }
+    if (!coopInMission() || g_CurrentPlayer->bonddead || g_ClockTimer <= 0)
+    {
+        return 0; /* later */
+    }
+    sApplyingRemotePick = 1;
+    op = propPickupByPlayer(prop, TRUE);
+    if (op != TICKOP_NONE)
+    {
+        propExecuteTickOperation(prop, op);
+    }
+    sApplyingRemotePick = 0;
+    if (op == TICKOP_NONE)
+    {
+        return 0;
+    }
+    portConLogf("ge: coop: player %d picked up obj %d: ours too\n", sTeamPickFrom[i] + 1, sTeamPick[i]);
+    return 1;
+}
+
+static void coopTeamPicksTick(void)
+{
+    s32 i;
+
+    for (i = 0; i < sNumTeamPicks; i++)
+    {
+        if (!sTeamPickDone[i] && coopTeamPickTry(i))
+        {
+            sTeamPickDone[i] = 1;
+        }
+    }
+}
+
+/* host: a player arrived in the mission; everything the team has picked up so far */
+static void coopResyncPicks(s32 player)
+{
+    s32 i;
+
+    if (!coopNetIsHost() || sNumTeamPicks == 0)
+    {
+        return;
+    }
+    for (i = 0; i < sNumTeamPicks; i++)
+    {
+        coopSendPickup(sTeamPick[i], player);
+    }
+    portConLogf("ge: coop: resent %d pickups to player %d\n", sNumTeamPicks, player + 1);
 }
 
 static void coopApplyPickup(CoopEvent *ev)
 {
-    ObjectRecord *obj;
-    PropRecord *prop;
+    s32 i;
 
-    if (coopSetupOfs((u8 *) g_CurrentSetup.propDefs + ev->u.pick.objofs) < 0)
+    if (ev->u.pick.stage != bossGetStageNum() || g_CurrentSetup.propDefs == NULL
+        || coopSetupOfs((u8 *) g_CurrentSetup.propDefs + ev->u.pick.objofs) < 0)
     {
         return;
     }
-    obj = (ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + ev->u.pick.objofs);
-    prop = obj->prop;
-    if (prop == NULL || bondinvHasPropInInv(prop))
+    i = coopTeamPickFind(ev->u.pick.objofs);
+    if (i >= 0 && sTeamPickDone[i])
     {
-        return; /* gone already, or we grabbed it in the same instant */
+        return;
     }
-    if (ev->u.pick.kept)
-    {
-        chrpropDeregisterRooms(prop);
-        chrpropDelist(prop);
-        chrpropDisable(prop);
-        if (sNumPeerHeld < COOP_MAX_PEERHELD)
-        {
-            sPeerHeld[sNumPeerHeld++] = ev->u.pick.objofs;
-        }
-    }
-    else
-    {
-        objFreePermanently(obj, TRUE);
-    }
+    i = coopTeamPickAdd(ev->u.pick.objofs, ev->from, 0);
     coopObjNoteActor(ev->from, 0);
-    portConLogf("ge: coop: peer picked up obj %d (%s)\n", ev->u.pick.objofs, ev->u.pick.kept ? "kept" : "used");
+    if (i >= 0 && coopTeamPickTry(i))
+    {
+        sTeamPickDone[i] = 1;
+    }
 }
 
 s32 coopPeerHolds(ObjectRecord *obj)
@@ -4683,12 +5003,16 @@ void coopScriptSetsFlags(void *script)
 }
 
 
-/* ---- the joiner's explosives ------------------------------------------------
- * A grenade, mine or rocket the joiner fires exists only in its own game. Its
+/* ---- explosives -------------------------------------------------------------
+ * A grenade, mine or rocket a joiner fires exists only in its own game. Its
  * blast there shows the effect and hurts the joiner; the same blast is set
- * off in the host's game, which owns the damage to guards and objects. */
+ * off in the host's game, which owns the damage to guards and objects. The
+ * host in turn sends every such blast (its own, the guards', and the ones
+ * relayed from a joiner) to the other joiners, whose copy shows the effect
+ * and hurts their own Bond. Object explosions are replayed through OBJDMG. */
 
 static s32 sApplyingRemoteBoom;
+static s32 sApplyingHostBoom;    /* joiner: playing the host's explosion */
 
 void coopExplosionCreated(PropRecord *source, coord3d *pos, s32 type, u8 *rooms)
 {
@@ -4700,9 +5024,13 @@ void coopExplosionCreated(PropRecord *source, coord3d *pos, s32 type, u8 *rooms)
         coopVersusExplosion(source, pos, type, rooms);
         return;
     }
-    if (source != NULL || type == EXPLOSION_DEF_PLAYER || sApplyingRemoteBoom || !coopIsMirroringClient())
+    if (source != NULL || type == EXPLOSION_DEF_PLAYER || sApplyingHostBoom)
     {
         return; /* destroyed objects replay from the host's damage events */
+    }
+    if (coopItemsExploding())
+    {
+        return; /* a thrown item: every world sets off its own copy (coop_items.c) */
     }
     memset(&ev, 0, sizeof(ev));
     ev.kind = COOPEV_EXPLODE;
@@ -4715,14 +5043,43 @@ void coopExplosionCreated(PropRecord *source, coord3d *pos, s32 type, u8 *rooms)
     {
         ev.u.boom.rooms[i] = rooms[i];
     }
-    coopQueueEventTo(&ev, 0);
-    portConLogf("ge: coop: our explosion (type %d), sent to host\n", type);
+    if (coopIsMirroringClient())
+    {
+        if (!sApplyingRemoteBoom)
+        {
+            coopQueueEventTo(&ev, 0);
+            portConLogf("ge: coop: our explosion (type %d), sent to host\n", type);
+        }
+        return;
+    }
+    if (sEnabled > 0 && coopNetIsHost() && coopNetHasPeer() && coopInMission())
+    {   /* the host's (its guards' grenades, a launcher round, a joiner's passed on): seen and felt everywhere */
+        s32 p;
+
+        for (p = 1; p < COOP_MAX_PLAYERS; p++)
+        {
+            if (p != sApplyingRemoteBoom && coopRemoteHere(p))
+            {
+                coopQueueEventTo(&ev, p);
+            }
+        }
+    }
 }
 
 /* coop_stats.c: the explosion being made is the partner's */
 s32 coopApplyingPartnerExplosion(void)
 {
+    if (sApplyingRemoteBoom == 0 && coopNetIsHost() && coopItemsExplodingOwner() > 1)
+    {
+        return coopItemsExplodingOwner() - 1;   /* the host's copy of a joiner's mine or grenade */
+    }
     return sApplyingRemoteBoom;
+}
+
+/* coop_items.c */
+s32 coopInMissionNow(void)
+{
+    return sEnabled > 0 && coopInMission();
 }
 
 static void coopApplyExplosion(CoopEvent *ev)
@@ -4730,7 +5087,7 @@ static void coopApplyExplosion(CoopEvent *ev)
     coord3d pos;
     StandTile *stan;
 
-    if (!coopNetIsHost() || !coopInMission())
+    if (!coopInMission())
     {
         return;
     }
@@ -4738,8 +5095,24 @@ static void coopApplyExplosion(CoopEvent *ev)
     pos.f[1] = ev->u.boom.pos[1];
     pos.f[2] = ev->u.boom.pos[2];
     stan = stanFindTileBelowPos(&pos, NULL, NULL);
+    if (stan == NULL)
+    {   /* on a ceiling or a wall's top: look from a little higher */
+        coord3d up = pos;
+
+        up.f[1] += 150.0f;
+        stan = stanFindTileBelowPos(&up, NULL, NULL);
+    }
     if (stan == NULL || ev->u.boom.rooms[0] == 0xFF)
     {
+        portConLogf("ge: coop: player %d's explosion at %.0f %.0f %.0f has no floor here, dropped\n", ev->from + 1, pos.f[0], pos.f[1], pos.f[2]);
+        return;
+    }
+    if (!coopNetIsHost())
+    {   /* the host's: our copy shows it and hurts our Bond; guards and objects are the host's business */
+        sApplyingHostBoom = 1;
+        explosionCreate(NULL, &pos, stan, ev->u.boom.type, 0, 0, ev->u.boom.rooms, 0);
+        sApplyingHostBoom = 0;
+        portConLogf("ge: coop: host explosion (type %d) at %.0f %.0f %.0f\n", ev->u.boom.type, pos.f[0], pos.f[1], pos.f[2]);
         return;
     }
     sApplyingRemoteBoom = ev->from;   /* whose (coop_stats.c) */
@@ -4753,8 +5126,10 @@ static void coopApplyExplosion(CoopEvent *ev)
 /* ---- cutscenes and script presentation --------------------------------------
  * Level scripts run only on the host, but some of their commands are about
  * what the player sees: cutscene cameras, fades, locking the controls, on-
- * screen text, music. The host sends each of those commands' bytes and the
- * joiner runs that one command through its own interpreter. */
+ * screen text, music, and the props an ending moves into its shot (the
+ * Runway plane, whose own script then takes off on the synced stage flag).
+ * The host sends each of those commands' bytes and the joiner runs that one
+ * command through its own interpreter. */
 
 static s32 coopIsPresentationCmd(u8 cmd)
 {
@@ -4775,6 +5150,9 @@ static s32 coopIsPresentationCmd(u8 cmd)
         case AI_TextPrintTop:
         case AI_MusicPlaySlot:
         case AI_MusicStopSlot:
+        case AI_HideAllChrs:
+        case AI_ShowAllChrs:
+        case AI_MoveObject:     /* the Runway plane to its take-off pad */
             return 1;
         default:
             return 0;
@@ -4958,4 +5336,106 @@ void coopLobbyJoinLobbyId(unsigned long long lobby)
 s32 coopExtVersion(void)
 {
     return COOP_VERSION;
+}
+
+/* ---- names ------------------------------------------------------------------
+ * Steam names are UTF-8; the game's fonts have ASCII. Accented Latin letters
+ * keep their base letter (Camilo, Jose, Muller), anything else (emoji,
+ * symbols, other scripts) is left out rather than shown as '?'. */
+
+static const char sLatin1[] =       /* U+00C0..U+00FF */
+    "AAAAAAACEEEEIIII" "DNOOOOOxOUUUUYTs" "aaaaaaaceeeeiiii" "dnooooo/ouuuuyty";
+static const char sLatinA[] =       /* U+0100..U+017F */
+    "AaAaAaCcCcCcCcDd" "DdEeEeEeEeEeGgGg" "GgGgHhHhIiIiIiIi" "IiJjJjKkkLlLlLlL"
+    "lLlNnNnNnnNnOoOo" "OoOoRrRrRrSsSsSs" "SsTtTtTtUuUuUuUu" "UuUuWwYyYZzZzZzs";
+
+void coopAsciiName(char *out, s32 cap, const char *in, s32 upper)
+{
+    const u8 *p = (const u8 *) in;
+    s32 n = 0;
+
+    while (p != NULL && *p != '\0' && *p != '\n' && n < cap - 1)
+    {
+        u32 cp;
+        s32 len;
+        char c = 0;
+        s32 k;
+
+        if (*p < 0x80)
+        {
+            cp = *p;
+            len = 1;
+        }
+        else if ((*p & 0xE0) == 0xC0)
+        {
+            cp = *p & 0x1F;
+            len = 2;
+        }
+        else if ((*p & 0xF0) == 0xE0)
+        {
+            cp = *p & 0x0F;
+            len = 3;
+        }
+        else if ((*p & 0xF8) == 0xF0)
+        {
+            cp = *p & 0x07;
+            len = 4;
+        }
+        else
+        {
+            p++;    /* a stray continuation byte */
+            continue;
+        }
+        for (k = 1; k < len; k++)
+        {
+            if ((p[k] & 0xC0) != 0x80)
+            {
+                break;  /* cut short (a name clipped to its buffer) */
+            }
+            cp = (cp << 6) | (p[k] & 0x3F);
+        }
+        p += k;
+        if (k < len)
+        {
+            continue;
+        }
+        if (cp >= 0x20 && cp < 0x7F)
+        {
+            c = (char) cp;
+        }
+        else if (cp >= 0xC0 && cp <= 0xFF)
+        {
+            c = sLatin1[cp - 0xC0];
+        }
+        else if (cp >= 0x100 && cp <= 0x17F)
+        {
+            c = sLatinA[cp - 0x100];
+        }
+        else if (cp == 0xA0 || cp == 0x3000)
+        {
+            c = ' ';
+        }
+        if (c == 0)
+        {
+            continue;
+        }
+        if (upper && c >= 'a' && c <= 'z')
+        {
+            c -= 'a' - 'A';
+        }
+        if (c == ' ' && (n == 0 || out[n - 1] == ' '))
+        {
+            continue;   /* a dropped symbol leaves no double space */
+        }
+        out[n++] = c;
+    }
+    while (n > 0 && out[n - 1] == ' ')
+    {
+        n--;
+    }
+    if (n == 0 && cap > 1)
+    {
+        out[n++] = '?';
+    }
+    out[n] = '\0';
 }

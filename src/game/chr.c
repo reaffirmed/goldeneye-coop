@@ -2873,11 +2873,20 @@ after_position_update:
             PropRecord *dropprop = prop->child;
             PropRecord *unusedprop;
 
+#ifndef TARGET_N64
+            if (coopItemsChrDropping(chr))
+            {
+                dropprop = NULL;    /* co-op joiner: the host's guard drops, and says so (coop_items.c) */
+            }
+#endif
             while (dropprop != NULL)
             {
                 PropRecord *nextprop = dropprop->prev;
 
                 objDrop(dropprop);
+#ifndef TARGET_N64
+                coopItemsChrDropped(chr, dropprop);
+#endif
 
                 dropprop = nextprop;
             }
