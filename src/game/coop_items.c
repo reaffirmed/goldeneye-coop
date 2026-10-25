@@ -350,29 +350,29 @@ s32 coopItemsChrDropping(ChrRecord *chr)
 /* chr.c: the host's guard dropped prop */
 void coopItemsChrDropped(ChrRecord *chr, PropRecord *prop)
 {
-    WeaponObjRecord *w;
+    ObjectRecord *obj;
     CoopDropMsg m;
 
-    if (!coopItemsOn() || !coopExtIsHost() || chr == NULL || prop == NULL || prop->type != PROP_TYPE_WEAPON
+    if (!coopItemsOn() || !coopExtIsHost() || chr == NULL || prop == NULL || (prop->type != PROP_TYPE_WEAPON && prop->type != PROP_TYPE_OBJ)
         || prop->parent != NULL || chr->prop == NULL || coopPropIsPartner(chr->prop))
     {
         return;
     }
-    w = prop->weapon;
-    if (w == NULL || w->weaponnum <= ITEM_UNARMED)
+    obj = prop->obj;
+    if (obj == NULL || (prop->type == PROP_TYPE_WEAPON && ((WeaponObjRecord *) obj)->weaponnum <= ITEM_UNARMED))
     {
         return;
     }
     memset(&m, 0, sizeof(m));
     m.id = coopItemNewId();
     m.chrnum = (s16) chr->chrnum;
-    m.item = w->weaponnum;
-    m.model = (s16) w->obj;
+    m.item = (prop->type == PROP_TYPE_WEAPON) ? ((WeaponObjRecord *) obj)->weaponnum : -1;  /* -1: a key or other object it held */
+    m.model = (s16) obj->obj;
     m.stage = bossGetStageNum();
     m.pos[0] = chr->prop->pos.f[0];
     m.pos[1] = chr->prop->pos.f[1];
     m.pos[2] = chr->prop->pos.f[2];
-    coopItemAdd(m.id, COOPITEM_DROP, (ObjectRecord *) w);
+    coopItemAdd(m.id, COOPITEM_DROP, obj);
     coopExtSend(COOPEV_DROP, 0xFF, &m, sizeof(m));
     portConLogf("ge: coop: guard %d dropped item %d (id %04x)\n", m.chrnum, m.item, m.id);
 }
@@ -393,12 +393,17 @@ static void coopItemsApplyDrop(const CoopDropMsg *m)
     {
         for (child = chr->prop->child; child != NULL; child = child->prev)
         {
-            if (child->type == PROP_TYPE_WEAPON && child->weapon != NULL && child->weapon->weaponnum == m->item)
+            if (m->item > 0 ? (child->type == PROP_TYPE_WEAPON && child->weapon != NULL && child->weapon->weaponnum == m->item)
+                            : (child->type == PROP_TYPE_OBJ && child->obj != NULL && child->obj->obj == m->model))
             {
                 found = child;
                 break;
             }
         }
+    }
+    if (found == NULL && m->item <= 0)
+    {
+        return;     /* a key or object our stand-in does not have: nothing to make it from */
     }
     sApplying = 1;
     if (found == NULL)
@@ -440,6 +445,9 @@ static void coopItemsApplyDrop(const CoopDropMsg *m)
         }
     }
     propobjSetDropped(found, DROPTYPE_DEFAULT);
+    /* drop it at the guard's feet, not its hand: our stand-in's hand is where our copy of the
+     * model was last drawn, and a gun dropped from there could miss the floor and fall for ever */
+    found->flags &= ~PROPFLAG_ONSCREEN;
     objDrop(found);
     coopItemAdd(m->id, COOPITEM_DROP, found->obj);
     sApplying = 0;
