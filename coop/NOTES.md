@@ -768,3 +768,33 @@ satellite-console work and the Runway plane did nothing on the host.
   is Xvfb's uneven frame time). Guard 6 traced on both: the joiner's follows
   the host's path about 120 ms behind.
 
+## Netcode 4: prediction of our own shots on guards (2026-10-25)
+
+- Our own movement was always local (each game runs its own Bond and sends
+  STATE), so prediction here is about the one thing that waited for the
+  host: a joiner's shot on a guard reacted a round trip plus the drawing
+  delay later (and played no yelp at all on the shooter's game).
+- coopClientForwardShot now calls coopPredictShot: the host's damage
+  arithmetic (destruction amount x g_AiHealthModifier, head x4, chest x2,
+  general halves) against the guard's health from the last AI sync less what
+  we have hit it for since (before any sync: our copy's setup health x the
+  lobby difficulty's multiplier, coopDifficultyGuardHealthMul). Lethal: a
+  death animation from g_HitReactionTable for that part; otherwise a flinch
+  animation (with the same left/right hand swap as the host). Both play at
+  once with the yelp. Not for fists, gun or hat hits, or a guard the host
+  already shows dying (GSF_DYING, new in the snapshot flags).
+- The shot event carries predicted (COOPPRED_*) and predidx. On the host,
+  triggered_on_shot_hit's two rolls go through coopReactionPick, so when its
+  own outcome is the same kind it plays the same animation, and the rare
+  variants (stagger against a wall, the butt-hit flinch) are skipped for such
+  shots (coopReactionForced).
+- While a prediction holds (round trip + drawing delay + 200 ms, 300..1200,
+  doubled for deaths), snapshots leave that guard's animation alone. A death
+  the host confirms keeps ours to the end if the host's is the same; if the
+  host rolled another, it is shown. A death not confirmed in time is dropped
+  ("predict: guard N survived"). GE_COOP_NOPREDICT=1 turns it off.
+- Verified with GE_COOP_TESTSHOT=6 on the joiner, NETSIM 60:40:2: Normal,
+  one PPK chest shot, "dies ... setup health", "death confirmed (same
+  animation)"; Brutal (health x2), a flinch, then "dies ... after the AI
+  sync", confirmed, same animation.
+

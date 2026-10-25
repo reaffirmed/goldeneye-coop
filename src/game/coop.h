@@ -468,6 +468,11 @@ void coopObjApply(s32 kind, const u8 *raw, s32 from);
 #define COOPPKT_REPLREQ 22  /* send me these blocks */
 #define COOPPKT_TIME 23     /* round trip pings */
 s32  coopNetRttMs(s32 player);          /* round trip to that player in ms, 0 when not known yet */
+/* prediction of our own shots' reactions (coop.c): the host's side, from chraction.c */
+s32  coopReactionPick(ChrRecord *self, s32 death, s32 rolled, s32 count);
+s32  coopReactionForced(ChrRecord *self);
+s32  coopPredictStats(s32 *confirmed, s32 *wrong);  /* joiner: deaths predicted, confirmed, not */
+f32  coopDifficultyGuardHealthMul(void);    /* the lobby difficulty's guard health, on any game */
 
 /* smooth movement (coop_interp.c): timed samples drawn a moment behind */
 #define COOPINTERP_SAMPLES 8

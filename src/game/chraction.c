@@ -2104,7 +2104,11 @@ void triggered_on_shot_hit(ChrRecord *self, coord3d *arg1, f32 arg2, s32 req_ani
 
         if (self->damage >= self->maxdamage)
         {
-            if (((arg2 < 1.5707964f) || (arg2 > 4.712389f)) && ((randomGetNext() % (u32)0x14) == 0))
+            if (((arg2 < 1.5707964f) || (arg2 > 4.712389f)) && ((randomGetNext() % (u32)0x14) == 0)
+#ifndef TARGET_N64
+                && !coopReactionForced(self) /* co-op: the shooter's game already played a death from the table */
+#endif
+                )
             {
                 ft = getsubroty(model) + M_PI_F;
 
@@ -2169,6 +2173,9 @@ void triggered_on_shot_hit(ChrRecord *self, coord3d *arg1, f32 arg2, s32 req_ani
                     another_flag = 1;
 
                     tr = (randomGetNext() % (u32)g_HitReactionTable[animation_something_index].deathAnimCount);
+#ifndef TARGET_N64
+                    tr = coopReactionPick(self, 1, tr, g_HitReactionTable[animation_something_index].deathAnimCount);
+#endif
                     struck_anib = &g_HitReactionTable[animation_something_index].deathAnims[tr];
                     chrStopFiring(self);
 
@@ -2218,7 +2225,11 @@ void triggered_on_shot_hit(ChrRecord *self, coord3d *arg1, f32 arg2, s32 req_ani
         }
         else
         {
-            if ((req_animation_id == 7) && (arg2 > 2.3561945f) && (arg2 < 3.926991f) && ((u32) (randomGetNext() % (u32)5) < 2U))
+            if ((req_animation_id == 7) && (arg2 > 2.3561945f) && (arg2 < 3.926991f) && ((u32) (randomGetNext() % (u32)5) < 2U)
+#ifndef TARGET_N64
+                && !coopReactionForced(self) /* co-op: the shooter's game already played a flinch from the table */
+#endif
+                )
             {
                 u32 sp54 = randomGetNext() % (u32)5;
                 chrStopFiring(self);
@@ -2291,6 +2302,9 @@ void triggered_on_shot_hit(ChrRecord *self, coord3d *arg1, f32 arg2, s32 req_ani
 
                     something_ani = &g_HitReactionTable[animation_something_index];
                     tr = (randomGetNext() % (u32) something_ani->flinchAnimCount);
+#ifndef TARGET_N64
+                    tr = coopReactionPick(self, 0, tr, something_ani->flinchAnimCount);
+#endif
                     struck_ani = &something_ani->flinchAnims[tr];
 
                     chrStopFiring(self);

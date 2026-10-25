@@ -74,6 +74,8 @@ s32 chraiGetAIListID(AIRecord *AIList, bool *isGlobalAIList);
 void chrStopFiring(ChrRecord *self);
 void set_missionstate(MISSION_STATE_ID state);
 
+void play_sound_for_shot_actor(ChrRecord *self);
+u32 randomGetNext(void);
 extern void portConLogf(const char *fmt, ...);
 
 #define COOP_MAGIC   0x50434547u /* "GECP" */
@@ -179,7 +181,7 @@ typedef struct
     union
     {
         struct { f32 damage; f32 angle; } hit;                                  /* host -> client */
-        struct { s16 chrnum; s16 hitpart; s32 weaponid; f32 vector[3]; } shot;  /* client -> host */
+        struct { s16 chrnum; s16 hitpart; s32 weaponid; f32 vector[3]; u8 predicted; u8 predidx; u8 pad[2]; } shot;  /* client -> host; predicted: COOPPRED_* the shooter's game played, predidx which one */
         struct { s32 doorofs; s32 state; } door;                                /* both ways */
         struct { s32 objofs; f32 damage; f32 pos[3]; s16 item; s16 player; } obj; /* both ways */
         struct { s32 objofs; u8 bounce; u8 children; u8 pad[2]; f32 dir[3]; s32 stage; } knock;  /* to all */
@@ -213,7 +215,7 @@ typedef struct
 } CoopEventsPkt;
 
 /* host -> client guard snapshot, one entry per chr */
-enum { GSF_HIDDEN = 1, GSF_FLIP = 2, GSF_LOOP = 4, GSF_FIRE_R = 8, GSF_FIRE_L = 16 };
+enum { GSF_HIDDEN = 1, GSF_FLIP = 2, GSF_LOOP = 4, GSF_FIRE_R = 8, GSF_FIRE_L = 16, GSF_DYING = 32 };
 
 typedef struct
 {
@@ -406,6 +408,7 @@ static u32 sChrLastSync[COOP_MAX_CHRS]; /* sTick of the last snapshot entry */
 static CoopTrack sGuardTrack[COOP_MAX_CHRS];   /* joiner: each mirrored chr's recent positions, by the host's clock */
 static s16 sGuardTrackNum[COOP_MAX_CHRS];      /* the chrnum its track is of */
 static u32 sGuardPktMs;                         /* the guard packet being applied: its clock */
+static u8 sChrHostDying[COOP_MAX_CHRS];         /* the host's says this chr is dying or dead */
 static u8 sChrFireSeen[COOP_MAX_CHRS][2]; /* host: firecount at the last snapshot */
 static u8 sChrFiring[COOP_MAX_CHRS];      /* client: GSF_FIRE_* from the last snapshot */
 static u32 sLastSnapTick;
@@ -435,6 +438,9 @@ static s32 coopIsMirroringClient(void);
 static void coopSendGuards(void);
 static void coopReapGuards(void);
 static void coopGuardsInterpTick(void);
+static s32 coopPredictHolds(s32 slot, ChrRecord *chr, ModelAnimation *hostanim, s32 hostdying);
+static void coopPredictShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, u8 *kind, u8 *idx);
+static void coopPredictReset(void);
 static void coopClientGunfire(void);
 static void coopHarnessTick(void);
 static void coopPuppetRemove(CoopRemote *r);
@@ -1199,6 +1205,8 @@ void coopStageStart(void)
     }
     sLastSnapTick = 0;
     memset(sAiSyncHave, 0, sizeof(sAiSyncHave));
+    memset(sChrHostDying, 0, sizeof(sChrHostDying));
+    coopPredictReset();
     sMissionTicks = 0;
     sNumPeerHeld = 0;
     memset(sScriptPass, 0, sizeof(sScriptPass));    /* a new mission's scripts */
@@ -2231,6 +2239,10 @@ static void coopSendGuards(void)
         {
             e->flags |= GSF_LOOP;
         }
+        if (chr->actiontype == ACT_DIE || chr->actiontype == ACT_DEAD)
+        {
+            e->flags |= GSF_DYING;
+        }
         e->pos[0] = chr->prop->pos.f[0];
         e->pos[1] = chr->prop->pos.f[1];
         e->pos[2] = chr->prop->pos.f[2];
@@ -2333,6 +2345,7 @@ static void coopApplyGuard(CoopGuardEnt *e)
     slot = chr - g_ChrSlots;
     if (slot >= 0 && slot < COOP_MAX_CHRS)
     {
+        sChrHostDying[slot] = (e->flags & GSF_DYING) != 0;
         sChrLastSync[slot] = sTick;
         sChrFiring[slot] = e->flags & (GSF_FIRE_R | GSF_FIRE_L);
     }
@@ -2382,6 +2395,11 @@ static void coopApplyGuard(CoopGuardEnt *e)
 placed:
     chr->chrflags |= CHRFLAG_INIT;
 
+    if (e->animoff >= 0 && slot >= 0 && slot < COOP_MAX_CHRS
+        && coopPredictHolds(slot, chr, (ModelAnimation *) ((u8 *) ptr_animation_table + e->animoff), (e->flags & GSF_DYING) != 0))
+    {
+        return;     /* our own shot's reaction is playing; the host's catches up (prediction section) */
+    }
     if (e->animoff >= 0)
     {
         ModelAnimation *anim = (ModelAnimation *) ((u8 *) ptr_animation_table + e->animoff);
@@ -2514,6 +2532,229 @@ static void coopReapGuards(void)
     }
 }
 
+/* ---- prediction: our own shots on the host's guards ---------------------------
+ * A joiner's shot on a guard is the host's to apply, so the guard used to
+ * react a round trip (and the drawing delay) later. Now the shooter's game
+ * plays the reaction at once: the yelp, a flinch animation, or, when the hit
+ * is lethal by the guard's health in the last AI sync less what we have taken
+ * since, a death animation. The shot tells the host which animation we chose
+ * (CoopEvent shot.predicted / predidx), and the host's triggered_on_shot_hit
+ * uses the same one when its own roll lands on the same kind of reaction
+ * (coopReactionPick), so the snapshots that follow show the same animation.
+ * While a prediction holds, snapshots don't change that guard's animation;
+ * a death the host confirms (GSF_DYING) keeps ours to the end. One the host
+ * did not confirm in time (the guard had more health than we knew, another
+ * player's shot, a deferred reaction) is dropped and the host's animation
+ * comes back: "predict: guard N survived". */
+
+enum { COOPPRED_NONE, COOPPRED_FLINCH, COOPPRED_DEATH };
+
+static struct
+{
+    s16 chrnum;
+    u8 kind;        /* COOPPRED_* */
+    u8 confirmed;
+    u32 untilMs;
+    ModelAnimation *anim;
+    f32 damage;     /* what we took off since the last AI sync */
+    u32 syncSeen;   /* sAiSyncGot when damage was last reset */
+} sPred[COOP_MAX_CHRS];
+static u32 sAiSyncGot[COOP_MAX_CHRS];  /* AI syncs received per slot */
+static s32 sPredDeaths, sPredConfirmed, sPredWrong;
+static ChrRecord *sForceChr;    /* host: applying a shot whose shooter predicted ... */
+static u8 sForceKind, sForceIdx;
+
+static void coopPredictReset(void)
+{
+    memset(sPred, 0, sizeof(sPred));
+    memset(sAiSyncGot, 0, sizeof(sAiSyncGot));
+}
+
+static s32 coopPredictWindowMs(void)
+{
+    s32 w = coopNetRttMs(0) + coopClockDelay(&sClock[0]) + 200;
+
+    return w < 300 ? 300 : (w > 1200 ? 1200 : w);
+}
+
+/* host's triggered_on_shot_hit (chraction.c): its roll for a death or flinch
+ * animation, or the one the shooter's game already played */
+s32 coopReactionPick(ChrRecord *self, s32 death, s32 rolled, s32 count)
+{
+    if (self == sForceChr && sForceKind == (death ? COOPPRED_DEATH : COOPPRED_FLINCH) && sForceIdx < count)
+    {
+        return sForceIdx;
+    }
+    return rolled;
+}
+
+/* host: the shooter predicted a reaction for this chr: skip the rare variants it can't have known */
+s32 coopReactionForced(ChrRecord *self)
+{
+    return self == sForceChr && sForceKind != COOPPRED_NONE;
+}
+
+static struct ChrHitReaction *coopHitReaction(s32 hitpart)
+{
+    s32 i;
+
+    for (i = 0; g_HitReactionTable[i].hitpart != -1; i++)
+    {
+        if (g_HitReactionTable[i].hitpart == hitpart)
+        {
+            return &g_HitReactionTable[i];
+        }
+    }
+    return &g_HitReactionTable[0];
+}
+
+static void coopPredictShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, u8 *kind, u8 *idx)
+{
+    s32 slot = chr - g_ChrSlots;
+    struct ChrHitReaction *hr;
+    struct StruckAnim *sa;
+    f32 dmg;
+    s32 lethal = 0, n;
+    static s32 off = -1;
+
+    *kind = COOPPRED_NONE;
+    *idx = 0;
+    if (off < 0)
+    {
+        const char *e = getenv("GE_COOP_NOPREDICT");
+
+        off = (e != NULL && atoi(e) != 0);
+    }
+    if (off || slot < 0 || slot >= COOP_MAX_CHRS || hitpart == HIT_GUN || hitpart == HIT_HAT || weaponid == ITEM_FIST
+        || chr->model == NULL || sChrHostDying[slot] || (sPred[slot].chrnum == chr->chrnum && sPred[slot].kind == COOPPRED_DEATH))
+    {
+        return;
+    }
+    if (sPred[slot].chrnum != chr->chrnum || sPred[slot].syncSeen != sAiSyncGot[slot])
+    {   /* a fresh AI sync has what the host applied so far */
+        sPred[slot].chrnum = chr->chrnum;
+        sPred[slot].damage = 0.0f;
+        sPred[slot].syncSeen = sAiSyncGot[slot];
+        sPred[slot].kind = COOPPRED_NONE;
+        sPred[slot].confirmed = 0;
+    }
+    /* the host's arithmetic (handles_shot_actors) */
+    dmg = gunItemGetDestructionAmount(weaponid) * g_AiHealthModifier;
+    if (hitpart == HIT_GENERAL || hitpart == HIT_GENERALHALF)
+    {
+        dmg *= (hitpart == HIT_GENERAL) ? 0.5f : 0.25f;
+        hitpart = HIT_CHEST;
+    }
+    if (hitpart == HIT_HEAD)
+    {
+        dmg *= 4.0f;
+    }
+    else if (hitpart == HIT_CHEST)
+    {
+        dmg *= 2.0f;
+    }
+    sPred[slot].damage += dmg;
+    if (sAiSyncHave[slot] && sAiSync[slot].chrnum == chr->chrnum)
+    {   /* the host's numbers, a second old at most, and ours since */
+        lethal = !(sAiSync[slot].chrflags & CHRFLAG_INVINCIBLE) && sAiSync[slot].damage + sPred[slot].damage >= sAiSync[slot].maxdamage;
+    }
+    else
+    {   /* no AI sync yet: our copy's setup health, as the host's difficulty scales it */
+        lethal = !(chr->chrflags & CHRFLAG_INVINCIBLE) && sPred[slot].damage >= chr->maxdamage * coopDifficultyGuardHealthMul();
+    }
+    play_sound_for_shot_actor(chr);
+    hr = coopHitReaction(hitpart);
+    if (lethal && hr->deathAnims != NULL && hr->deathAnimCount > 0)
+    {
+        *kind = COOPPRED_DEATH;
+        n = hr->deathAnimCount;
+        *idx = (u8) (randomGetNext() % (u32) n);
+        sa = &hr->deathAnims[*idx];
+        sPredDeaths++;
+    }
+    else if (!lethal && hr->flinchAnims != NULL && hr->flinchAnimCount > 0)
+    {
+        if (hr == &g_HitReactionTable[9] && chrGetEquippedWeaponProp(chr, GUNLEFT) != NULL)
+        {
+            hr = &g_HitReactionTable[10];
+        }
+        else if (hr == &g_HitReactionTable[12] && chrGetEquippedWeaponProp(chr, GUNRIGHT) != NULL)
+        {
+            hr = &g_HitReactionTable[13];
+        }
+        *kind = COOPPRED_FLINCH;
+        n = hr->flinchAnimCount;
+        *idx = (u8) (randomGetNext() % (u32) n);
+        sa = &hr->flinchAnims[*idx];
+    }
+    else
+    {
+        return;
+    }
+    modelSetAnimationWithMerge(chr->model, sa->struck_anim, sa->flip, 0.0f, sa->speed, 16.0f, TRUE);
+    if (sa->endframe >= 0.0f)
+    {
+        modelSetAnimEndFrame(chr->model, sa->endframe);
+    }
+    sPred[slot].kind = *kind;
+    sPred[slot].confirmed = 0;
+    sPred[slot].anim = sa->struck_anim;
+    sPred[slot].untilMs = coopNowMs() + (u32) coopPredictWindowMs() * (*kind == COOPPRED_DEATH ? 2 : 1);
+    portConLogf("ge: coop: predict: guard %d %s (anim %d, damage %.2f, %s)\n", chr->chrnum, *kind == COOPPRED_DEATH ? "dies" : "flinches",
+                *idx, sPred[slot].damage, sAiSyncHave[slot] ? "after the AI sync" : "setup health");
+    (void) vector;
+}
+
+/* a snapshot for a guard we predicted for: 1 to leave its animation alone */
+static s32 coopPredictHolds(s32 slot, ChrRecord *chr, ModelAnimation *hostanim, s32 hostdying)
+{
+    if (sPred[slot].chrnum != chr->chrnum || sPred[slot].kind == COOPPRED_NONE)
+    {
+        return 0;
+    }
+    if (sPred[slot].kind == COOPPRED_DEATH)
+    {
+        if (hostdying)
+        {
+            if (!sPred[slot].confirmed)
+            {
+                sPred[slot].confirmed = 1;
+                sPredConfirmed++;
+                portConLogf("ge: coop: predict: guard %d death confirmed (%s animation)\n", chr->chrnum,
+                            hostanim == sPred[slot].anim ? "same" : "other");
+            }
+            if (hostanim == sPred[slot].anim)
+            {
+                return 1;   /* ours plays to the end */
+            }
+            sPred[slot].kind = COOPPRED_NONE;   /* the host rolled another: show its */
+            return 0;
+        }
+        if ((s32) (coopNowMs() - sPred[slot].untilMs) < 0)
+        {
+            return 1;
+        }
+        sPredWrong++;
+        portConLogf("ge: coop: predict: guard %d survived, back to the host's animation\n", chr->chrnum);
+        sPred[slot].kind = COOPPRED_NONE;
+        return 0;
+    }
+    /* a flinch: until the host's reaction has had time to come, or it shows the same one */
+    if (hostanim == sPred[slot].anim || hostdying || (s32) (coopNowMs() - sPred[slot].untilMs) >= 0)
+    {
+        sPred[slot].kind = COOPPRED_NONE;
+        return hostanim == sPred[slot].anim;
+    }
+    return 1;
+}
+
+s32 coopPredictStats(s32 *confirmed, s32 *wrong)
+{
+    *confirmed = sPredConfirmed;
+    *wrong = sPredWrong;
+    return sPredDeaths;
+}
+
 s32 coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid)
 {
     CoopEvent ev;
@@ -2530,6 +2771,7 @@ s32 coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weap
     ev.u.shot.vector[0] = vector->f[0];
     ev.u.shot.vector[1] = vector->f[1];
     ev.u.shot.vector[2] = vector->f[2];
+    coopPredictShot(chr, hitpart, vector, weaponid, &ev.u.shot.predicted, &ev.u.shot.predidx);
     coopQueueEventTo(&ev, 0);
     portConLogf("ge: coop: shot guard %d (part %d, weapon %d), sent to host\n", chr->chrnum, hitpart, weaponid);
     return 1;
@@ -2592,7 +2834,11 @@ static void coopHostApplyShot(CoopEvent *ev)
     g_CoopPropOverride = sR[ev->from].puppet; /* the stimulus belongs to that player */
     coopStatsBlameBegin(ev->from);            /* and so do the hit and the kill */
     coopObjNoteActor(ev->from, 1);
+    sForceChr = chr;                          /* the reaction their game already played, if it can be the same */
+    sForceKind = ev->u.shot.predicted;
+    sForceIdx = ev->u.shot.predidx;
     handles_shot_actors(chr, ev->u.shot.hitpart, &vec, ev->u.shot.weaponid, TRUE);
+    sForceChr = NULL;
     coopStatsBlameEnd();
     g_CoopPropOverride = NULL;
     portConLogf("ge: coop: player %d shot guard %d (part %d)\n", ev->from + 1, ev->u.shot.chrnum, ev->u.shot.hitpart);
@@ -4665,6 +4911,7 @@ static void coopRecvAiSync(CoopAiPkt *p)
         {
             sAiSync[slot] = p->ent[k];
             sAiSyncHave[slot] = 1;
+            sAiSyncGot[slot]++;
         }
     }
 }

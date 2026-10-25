@@ -108,6 +108,12 @@ f32 coopDifficultyHealthMul(void)
     return coopNetIsHost() ? sModes[coopDifficultyMode()].health : 1.0f;
 }
 
+/* the host's guard health multiplier, on any game (a joiner predicting its shots, coop.c) */
+f32 coopDifficultyGuardHealthMul(void)
+{
+    return sModes[coopDifficultyMode()].health;
+}
+
 /* alloc_init_GUARDdata_entries: room for the extra guards, on both games */
 s32 coopDifficultyExtraSlots(void)
 {
