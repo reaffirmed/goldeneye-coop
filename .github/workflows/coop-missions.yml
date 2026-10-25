@@ -1,0 +1,139 @@
+name: Co-op mission runs
+
+# Two copies of the Linux build over the mock Steam (coop/mock) play every
+# story mission together: the host goes straight in, the joiner follows it
+# over a lossy link, and the run fails if the joiner can't follow, never gets
+# the join snapshot, doesn't complete the mission with the host, or the desync
+# checksum finds a difference it can't correct (coop/ci/mission_runs.sh).
+#
+# The cart image is never in the repository. It comes from the "ci-rom"
+# release as baserom.u.z64.gpg, encrypted with the CI_ROM_KEY secret:
+#   gpg --symmetric --cipher-algo AES256 -o baserom.u.z64.gpg baserom.u.z64
+#   gh release create ci-rom baserom.u.z64.gpg --prerelease
+#   gh secret set CI_ROM_KEY
+# Without the secret (forks, or before it is set up) the job only says so.
+on:
+  push:
+    paths-ignore:
+    - '*.md'
+    - 'docs/**'
+  workflow_dispatch:
+    inputs:
+      stages:
+        description: 'Stages to run (space separated; empty for every mission)'
+        required: false
+        default: ''
+
+env:
+  SDL2_VERSION: 2.30.11
+  SDL2_SRC_SHA1: f3cdd91df44653518d4f3db5fdc775170016aa85
+  BASEROM_US_SHA1: abe01e4aeb033b6c0836819f549c791b26cfde83
+  CI_ROM_KEY: ${{ secrets.CI_ROM_KEY }}
+
+concurrency:
+  group: coop-missions-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  missions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check for the cart image key
+        id: key
+        run: |
+          if [ -z "$CI_ROM_KEY" ]; then
+            echo "::notice::No CI_ROM_KEY secret: the co-op mission runs need the encrypted cart image (see the top of coop-missions.yml) and were skipped"
+            echo "have=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "have=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout repository
+        if: steps.key.outputs.have == '1'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Install Linux (i686) build and run dependencies
+        if: steps.key.outputs.have == '1'
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y cmake gcc-multilib g++-multilib \
+            libx11-dev:i386 libxext-dev:i386 libxrandr-dev:i386 libxcursor-dev:i386 \
+            libxfixes-dev:i386 libxi-dev:i386 libxss-dev:i386 libasound2-dev:i386 \
+            libudev-dev:i386 libgl-dev:i386 \
+            xvfb xauth libgl1:i386 libgl1-mesa-dri:i386 libglx-mesa0:i386
+
+      - name: Cache SDL2 (i686) build
+        if: steps.key.outputs.have == '1'
+        id: cache-sdl2-linux
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/sdl2-linux-i686
+          key: sdl2-linux-i686-${{ env.SDL2_VERSION }}-v2
+
+      - name: Build SDL2 from source (i686)
+        if: steps.key.outputs.have == '1' && steps.cache-sdl2-linux.outputs.cache-hit != 'true'
+        run: |
+          wget -O sdl2-src.tar.gz "https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-${SDL2_VERSION}.tar.gz"
+          echo "${SDL2_SRC_SHA1}  sdl2-src.tar.gz" | sha1sum -c -
+          mkdir -p sdl2-src
+          tar -xzf sdl2-src.tar.gz --strip-components=1 -C sdl2-src
+          cmake -S sdl2-src -B sdl2-build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_FLAGS=-m32 -DCMAKE_CXX_FLAGS=-m32 \
+            -DCMAKE_SHARED_LINKER_FLAGS=-m32 -DCMAKE_EXE_LINKER_FLAGS=-m32 \
+            -DCMAKE_INSTALL_PREFIX="$HOME/sdl2-linux-i686" -DCMAKE_INSTALL_LIBDIR=lib/i386-linux-gnu \
+            -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TESTS=OFF \
+            -DSDL_WAYLAND=OFF -DSDL_IBUS=OFF -DSDL_FCITX=OFF -DSDL_DBUS=OFF \
+            -DSDL_PULSEAUDIO=OFF -DSDL_JACK=OFF -DSDL_SNDIO=OFF -DSDL_LIBSAMPLERATE=OFF \
+            -DSDL_X11=ON -DSDL_OPENGL=ON -DSDL_ALSA=ON
+          cmake --build sdl2-build -j$(nproc)
+          cmake --install sdl2-build
+
+      - name: Build the game and the mock Steam
+        if: steps.key.outputs.have == '1'
+        run: |
+          cmake -B build_pc -DCMAKE_BUILD_TYPE=Release -DGE_VIDEO=ON -DSDL2_LINUX_ROOT="$HOME/sdl2-linux-i686"
+          cmake --build build_pc -j$(nproc)
+          mkdir -p build_pc/mock
+          gcc -m32 -shared -fPIC -O1 -o build_pc/mock/libsteam_api.so coop/mock/steam_mock.c
+
+      - name: Get and decrypt the cart image
+        if: steps.key.outputs.have == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download ci-rom --repo "$GITHUB_REPOSITORY" --pattern baserom.u.z64.gpg --dir "$RUNNER_TEMP"
+          mkdir -p build_pc/Data
+          gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 0 --decrypt \
+            -o build_pc/Data/baserom.u.z64 "$RUNNER_TEMP/baserom.u.z64.gpg" <<< "$CI_ROM_KEY"
+          echo "${BASEROM_US_SHA1}  build_pc/Data/baserom.u.z64" | sha1sum -c -
+
+      - name: Run every mission with two players
+        if: steps.key.outputs.have == '1'
+        env:
+          STAGES: ${{ github.event.inputs.stages }}
+        run: PAR=$(nproc) coop/ci/mission_runs.sh build_pc mission-runs
+
+      - name: Summary
+        if: always() && steps.key.outputs.have == '1'
+        run: |
+          [ -f mission-runs/summary.txt ] || exit 0
+          { echo '### Co-op mission runs'; echo; echo '```'; cat mission-runs/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the logs
+        if: always() && steps.key.outputs.have == '1'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coop-mission-runs
+          path: mission-runs
+          retention-days: 7
+
+      - name: Remove the cart image
+        if: always()
+        run: rm -f build_pc/Data/baserom.u.z64 "$RUNNER_TEMP/baserom.u.z64.gpg"

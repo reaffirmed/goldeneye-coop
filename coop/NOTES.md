@@ -823,3 +823,26 @@ satellite-console work and the Runway plane did nothing on the host.
   guard hits during a walk at NETSIM 150:50 all counted (in sight). The host
   logs the aim lead every 5 s ("guards aim at player 2 250 ms ahead ...").
 
+
+## Netcode 6: two-player runs of every mission in CI (2026-10-25)
+
+- coop/ci/mission_runs.sh <build> <out> [stages]: for each of the 20 story
+  missions, a host (GE_STAGE, GE_COOP_TESTEND=900, GE_COOP_TESTWIN=1) and a
+  joiner (-coopjoin, GE_COOP_NETSIM=60:20:2) over the mock Steam, PAR pairs
+  at once on their own displays, mock folders and ids. A stage fails if the
+  joiner never follows the host in, never applies the join snapshot, doesn't
+  complete the mission with the host, either copy logs an unresolved desync
+  or dies, or it takes over LIMIT (240) s. out/summary.txt has one line per
+  stage. TESTEND ends the mission on the host; the objectives are not
+  played, so this checks the joiner can join, stay in agreement and finish
+  with the host, not each mission's level scripts.
+- .github/workflows/coop-missions.yml runs it on every push. The cart image
+  comes from the "ci-rom" release as baserom.u.z64.gpg (gpg symmetric,
+  passphrase in the CI_ROM_KEY secret), checked against the US sha1 and
+  deleted at the end; without the secret the job only leaves a notice.
+- First run caught a bug: with 2% loss a lost join snapshot datagram left the
+  joiner waiting for it for good, and the checksum (which waits for the
+  snapshot) never ran. Now the first checksum a second after the last
+  snapshot packet asks for the blocks still missing ("N records of the join
+  snapshot lost, asking for M blocks again") and the asked-for records count
+  towards the snapshot. All 20 pass locally, PAR=3, in about 6 minutes.
