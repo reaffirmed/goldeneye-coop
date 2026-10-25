@@ -137,6 +137,10 @@ void coopObjStatusChanged(s32 index, s32 letter, s32 status)
     d.player = (u8) credit;
     coopExtSend(COOPEV_OBJDONE, 0xFF /* COOP_ALL */, &d, sizeof(d));
     coopObjToast(index, letter, credit);
+    if (credit == coopLobbySelfPlayer())
+    {
+        coopStatsNote(COOPSTAT_OBJECTIVES);  /* the results screen's Objectives row */
+    }
 }
 
 void coopObjApply(s32 kind, const u8 *raw, s32 from)
@@ -150,6 +154,10 @@ void coopObjApply(s32 kind, const u8 *raw, s32 from)
     }
     portConLogf("ge: coop: host says objective %d (%c) was player %d's\n", d.index, 'A' + d.letter, d.player + 1);
     coopObjToast(d.index, d.letter, d.player);
+    if (d.player == coopLobbySelfPlayer())
+    {
+        coopStatsNote(COOPSTAT_OBJECTIVES);
+    }
 }
 
 /* GE_COOP_TESTOBJDONE=<s>: <s> seconds into the mission, this game counts

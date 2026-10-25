@@ -68,14 +68,12 @@ s32  coopHudBleedOut(void);     /* revive only: ticks left before we bleed out, 
 #define COOPEV_DESIGN_LAST  63
 enum
 {
-    COOPEV_CINEMA = 56,     /* host -> all: CoopCinemaMsg, the host's intro is over */
-    COOPEV_RESULTS = 57     /* to all: a player's extra results (coop_stats.c) */
+    COOPEV_CINEMA = 56      /* host -> all: CoopCinemaMsg, the host's intro is over */
 };
 #define COOP_ALL_PLAYERS 0xFF   /* coopDesignSend's `to`: everyone */
 void coopDesignSend(s32 kind, s32 to, const void *payload, s32 len);
 void coopRunHostScript(u8 *list);   /* host: run script commands as the level would (relayed) */
 void coopCutsceneStandUp(coord3d *pos, StandTile *stan, f32 yaw);
-void coopResultsApply(const u8 *raw, s32 from);
 void coopDesignApply(s32 kind, const u8 *raw, s32 from);
 s32  coopDesignSelf(void);
 s32  coopDesignIsHost(void);
@@ -223,7 +221,7 @@ s32  coopHostLeavesCount(void);         /* COOPSET_HOSTLEAVES's rules */
 const char *coopHostLeavesName(s32 rule);
 
 /* end-of-mission stats and the campaign record (coop_stats.c) */
-enum { COOPSTAT_KILLS, COOPSTAT_SHOTS, COOPSTAT_HITS, COOPSTAT_HEAD, COOPSTAT_DEATHS, COOPSTAT_REVIVED, COOPSTAT_RESPAWNS, COOPSTAT_REVIVES, COOPSTAT_COUNT };
+enum { COOPSTAT_KILLS, COOPSTAT_SHOTS, COOPSTAT_HITS, COOPSTAT_HEAD, COOPSTAT_DEATHS, COOPSTAT_REVIVED, COOPSTAT_RESPAWNS, COOPSTAT_REVIVES, COOPSTAT_OBJECTIVES, COOPSTAT_DAMAGE, COOPSTAT_COUNT };
 void coopStatsMissionStart(void);
 void coopStatsMissionTick(s32 partnerhere);
 void coopStatsFrontTick(void);
@@ -239,6 +237,7 @@ s32  coopStatsShown(void);              /* 1: the debrief shows the co-op column
 s32  coopStatsColumns(void);            /* the debrief's columns (players), up to COOP_MAX_PLAYERS */
 s32  coopStatsGet(s32 col, s32 stat);    /* -1 not in yet */
 const char *coopStatsName(s32 col);
+s32  coopStatsSelf(s32 stat);            /* our own column's number, -1 not in yet */
 void coopCampaignMissionEnd(void);
 s32  coopCampaignNext(s32 *stage, s32 *difficulty, char *label, s32 labelcap);  /* the host's campaign (cross-save) */
 void coopCampaignTick(void);

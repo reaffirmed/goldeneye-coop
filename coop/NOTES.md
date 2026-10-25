@@ -710,3 +710,15 @@ satellite-console work and the Runway plane did nothing on the host.
   partner), GE_COOP_CINEMASHOT=<ticks> (cine_p<player>_<n>.bmp).
 - Event ids: this feature set owns COOPEV 56..63 (COOPEV_DESIGN_FIRST/LAST)
   and COOPPKT 24..25.
+
+## Results screen (2026-10-25)
+
+- The co-op debrief (menu0D) has two pages. Page 1 "TEAM": one column per
+  player with Kills, Accuracy (percent of shots), Head hits, Objectives (the
+  ones credited to them, coop_objective.c), Revives (partners they got up),
+  Damage (taken, in health bars: health plus armour lost), Downed (times down,
+  and how many a partner revived). Page 2 "YOURS": the game's own solo table,
+  with a joiner's kill total taken from the host's count.
+- Next turns to page 2 before leaving; Previous or B turns back; L/R flip.
+- Two new columns in COOPEV_STATS (COOPSTAT_OBJECTIVES, COOPSTAT_DAMAGE): ten
+  u16s, 24 bytes of the 28 (checked at compile time). Same COOP_VERSION 10.

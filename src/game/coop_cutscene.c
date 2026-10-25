@@ -437,8 +437,5 @@ void coopDesignApply(s32 kind, const u8 *raw, s32 from)
         case COOPEV_CINEMA:
             coopCutsceneApply(raw, from);
             break;
-        case COOPEV_RESULTS:
-            coopResultsApply(raw, from);
-            break;
     }
 }
