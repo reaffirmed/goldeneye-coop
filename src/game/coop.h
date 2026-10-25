@@ -26,7 +26,8 @@ void coopMissionComplete(void);
 s32  coopFrontTick(void);
 s32  coopAltBondBegin(s32 k); /* 1: "Bond" is now the k-th living partner (from 0), call coopAltBondEnd */
 void coopAltBondEnd(void);
-void coopAltBondCredit(s32 k); /* the check passed for that partner */
+void coopAltBondCredit(void *script, s32 k);   /* a script's "either player" check passed: k 0 for our Bond, else partner k-1 */
+void coopScriptSetsFlags(void *script);        /* that script sets stage flags: it was whoever passed its last check */
 void coopAiCommand(u8 *list, s32 offset, ChrRecord *self);
 s32  coopDeadTick(void); /* 1: co-op owns this death (waiting or respawned) */
 void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon);
@@ -432,6 +433,7 @@ void coopChatTypedLine(char *out, s32 cap);         /* the line being typed */
 /* objective credit (coop_objective.c): the host names who completed each
  * objective and every game shows a toast for a partner's */
 void coopObjNoteActor(s32 player, s32 damage);  /* host: something player did just changed the world */
+void coopObjNoteSelf(void);     /* this game's own Bond did it: a photo, a room, a pickup, ... */
 void coopObjStatusChanged(s32 index, s32 letter, s32 status);  /* objective_status.c */
 void coopObjTick(s32 inmission);
 void coopObjApply(s32 kind, const u8 *raw, s32 from);

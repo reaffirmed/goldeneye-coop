@@ -5006,6 +5006,12 @@ void analyzeGEKey(void)
     {
    	    HUDMESSAGEBOTTOM(langGet(getStringID(LGUN, GUN_STR_D8_ANALYZINGTHEGOLDENEYEKEY_LF))); //Analyzing the GoldenEye key...
     	g_CurrentPlayer->copiedgoldeneye = TRUE;
+#ifndef TARGET_N64
+    	{
+    	    extern void coopObjNoteSelf(void);
+    	    coopObjNoteSelf();  /* co-op: we copied it (coop_objective.c) */
+    	}
+#endif
     	sndPlaySfx(g_musicSfxBufferPtr, KEY_ANALYSER_SFX, 0x0);
     	currentPlayerEquipWeaponWrapper(GUNRIGHT, ITEM_GOLDENEYEKEY);
     	currentPlayerEquipWeaponWrapper(GUNLEFT, ITEM_UNARMED);

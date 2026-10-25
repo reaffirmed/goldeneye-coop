@@ -6,8 +6,11 @@
  * so the moment one completes says nothing about who did it. The host
  * decides: coop.c notes the player behind every remote change it applies
  * (coopObjNoteActor: their WORLD bits, pickups, shots on guards and objects,
- * explosions), and our own shots are noted as ours. When an objective turns
- * complete on the host, the credit goes to
+ * explosions), and our own Bond notes itself (coopObjNoteSelf: shots, the
+ * camera, rooms, thrown items, pickups, the key copy). A level script that
+ * sets stage flags notes whoever passed its last "either player" check
+ * (coop.c coopScriptSetsFlags: the elevator, a room). When an objective
+ * turns complete on the host, the credit goes to
  *   - whoever changed the world in the last COOPOBJ_NOW ticks (a room, a
  *     pickup, a photo: the objective turns in the same tick), else
  *   - whoever last did damage in the last COOPOBJ_DAMAGE ticks (a guard's
@@ -66,6 +69,14 @@ void coopObjNoteActor(s32 player, s32 damage)
     {
         sActor = player;
         sActorTick = sNow;
+    }
+}
+
+void coopObjNoteSelf(void)
+{
+    if (coopExtIsHost())
+    {   /* a joiner's own changes reach the host in its WORLD and PICKUP packets */
+        coopObjNoteActor(coopExtSelf(), 0);
     }
 }
 
@@ -173,6 +184,7 @@ static void coopObjTestTick(s32 inmission)
         {
             g_CurrentPlayer->copiedgoldeneye = 1;   /* Bunker 1's key copy */
         }
+        coopObjNoteSelf();   /* as objectivestatusCheckRoomEntered and analyzeGEKey do */
         at = -1;
     }
 }

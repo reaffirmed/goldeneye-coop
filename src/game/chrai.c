@@ -2120,9 +2120,9 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                         near = value > chrGetDistanceFromBondToPad(ChrEntityp, pad);
                         coopAltBondEnd();
                     }
-                    if (near && coopk > 0)
+                    if (near)
                     {
-                        coopAltBondCredit(coopk - 1);   /* the partner did it (coop_objective.c) */
+                        coopAltBondCredit(Entityp, coopk);  /* whose check it was (coop.c, objective credit) */
                     }
 #endif
                     if (near)
@@ -2183,9 +2183,9 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                         inroom = check_if_actor_is_at_preset(ChrEntityp, pad_id);
                         coopAltBondEnd();
                     }
-                    if (inroom && coopk > 0)
+                    if (inroom)
                     {
-                        coopAltBondCredit(coopk - 1);   /* the partner did it (coop_objective.c) */
+                        coopAltBondCredit(Entityp, coopk);  /* whose check it was (coop.c, objective credit) */
                     }
 #endif
                     if (inroom)
@@ -3175,7 +3175,16 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 {
                     AiSetObjectiveBitfieldRecord *ai    = AiListp + Offset;
                     s32                           flags = ntohl(ai->BITFIELD);
+#ifndef TARGET_N64
+                    s32 coopflags = objectiveregisters1;
+#endif
                     chrSetStageFlags(ChrEntityp, flags);
+#ifndef TARGET_N64
+                    if (objectiveregisters1 != coopflags)
+                    {   /* co-op: a new flag is whoever passed this script's last check */
+                        coopScriptSetsFlags(Entityp);
+                    }
+#endif
                     Offset += sizeof(AiSetObjectiveBitfieldRecord);
                     break;
                 }
@@ -4134,9 +4143,9 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                         below = getCurrentPlayerProp()->pos.y < bondpos;
                         coopAltBondEnd();
                     }
-                    if (below && coopk > 0)
+                    if (below)
                     {
-                        coopAltBondCredit(coopk - 1);   /* the partner did it (coop_objective.c) */
+                        coopAltBondCredit(Entityp, coopk);  /* whose check it was (coop.c, objective credit) */
                     }
 #endif
                     if (below)

@@ -332,6 +332,15 @@ typedef struct
     u32 lostMs;         /* when */
     u32 seenMs;         /* the newest STATE, wall clock */
 } CoopRemote;
+/* each level script's last "either player" check passer (coopAltBondCredit) */
+#define COOP_SCRIPTPASS 32
+static struct
+{
+    void *script;
+    s8 player;
+} sScriptPass[COOP_SCRIPTPASS];
+static s32 sScriptPassNext;
+
 static CoopRemote sR[COOP_MAX_PLAYERS];
 
 /* a reliable event channel per transport peer (host: a joiner each; joiner: the host) */
@@ -1013,6 +1022,7 @@ void coopStageStart(void)
     memset(sAiSyncHave, 0, sizeof(sAiSyncHave));
     sMissionTicks = 0;
     sNumPeerHeld = 0;
+    memset(sScriptPass, 0, sizeof(sScriptPass));    /* a new mission's scripts */
     sLastHurtTick = sLastFightTick = sDeadSince = 0;
     sLastHealth = 1.0f;
     sLastWeapon = ITEM_UNARMED;
@@ -2774,6 +2784,7 @@ void coopPickedUp(ObjectRecord *obj, s32 kept)
     {
         return;
     }
+    coopObjNoteSelf();   /* a collect objective that turns now is ours (coop_objective.c) */
     ofs = coopSetupOfs(obj);
     if (ofs < 0)
     {
@@ -4620,17 +4631,52 @@ void coopAltBondEnd(void)
     g_CoopPropOverride = NULL;
 }
 
-/* a level script's check passed for the k-th living partner: whatever the
- * script does next is theirs (coop_objective.c) */
-void coopAltBondCredit(s32 k)
-{
-    s32 p;
+/* A level script's "either player" check (chrai.c) passed: k 0 for our own
+ * Bond, else the (k-1)-th living partner. The script's last passer is kept, so
+ * when it then sets stage flags (an objective's trigger: the elevator, a
+ * room) the credit goes to the player its check was about, not to whoever a
+ * different script's check (run every tick) last saw. */
 
-    for (p = 1; p < COOP_MAX_PLAYERS; p++)
+void coopAltBondCredit(void *script, s32 k)
+{
+    s32 who = coopSelf();
+    s32 p, i;
+
+    if (k > 0)
     {
-        if (coopRemoteAliveHere(p) && k-- == 0)
+        for (p = 1, k--, who = -1; p < COOP_MAX_PLAYERS && who < 0; p++)
         {
-            coopObjNoteActor(p, 0);
+            if (coopRemoteAliveHere(p) && k-- == 0)
+            {
+                who = p;
+            }
+        }
+    }
+    if (who < 0)
+    {
+        return;
+    }
+    for (i = 0; i < COOP_SCRIPTPASS && sScriptPass[i].script != script; i++)
+    {
+    }
+    if (i == COOP_SCRIPTPASS)
+    {
+        i = sScriptPassNext;
+        sScriptPassNext = (sScriptPassNext + 1) % COOP_SCRIPTPASS;
+    }
+    sScriptPass[i].script = script;
+    sScriptPass[i].player = (s8) who;
+}
+
+void coopScriptSetsFlags(void *script)
+{
+    s32 i;
+
+    for (i = 0; i < COOP_SCRIPTPASS; i++)
+    {
+        if (sScriptPass[i].script == script)
+        {
+            coopObjNoteActor(sScriptPass[i].player, 0);
             return;
         }
     }

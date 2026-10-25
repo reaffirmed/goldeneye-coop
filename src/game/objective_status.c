@@ -449,6 +449,7 @@ void objectivestatusCheckRoomEntered(s32 roomid)
             if ((stan != NULL) && (roomid == stan->room))
             {
                 var_v0->status = 1;
+                coopObjNoteSelf();  /* co-op: we walked in (coop_objective.c) */
             }
         }
 
@@ -487,6 +488,7 @@ void objectivestatusCheckDeposit(s32 weaponnum, s32 roomid)
             if (pad->stan != NULL && roomid == pad->stan->room)
             {
                 dep->flag = 1;
+                coopObjNoteSelf();  /* co-op: we threw it there */
             }
         }
     }
@@ -538,6 +540,7 @@ void objectiveTakePictureHandler(void)
                                     if (sp64.up < (getPlayer_c_screentop() + getPlayer_c_screenheight()))
                                     {
                                         criteria->flag = 1;
+                                        coopObjNoteSelf();  /* co-op: our camera took it */
                                     }
                                 }
                             }

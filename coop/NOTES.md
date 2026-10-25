@@ -382,7 +382,12 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscen
   own shots in coop_look.c; chrai.c's "either player" checks through
   coopAltBondCredit). When an objective turns complete on the host the credit
   is whoever acted in the last 3 ticks, else the last damage in 5 s, else the
-  host; COOPEV_OBJDONE to all, toast unless it is ours. Harness:
+  host. Our own Bond notes itself (coopObjNoteSelf: camera photo, room
+  entered, thrown item deposited, pickup, key copy). A level script's
+  "either player" check no longer credits on its own (those run every tick
+  while a partner stands in a room, which credited the friend for the host's
+  photo and elevator): it records who passed it per script, and only when
+  that script then sets a new stage flag does that player get noted; COOPEV_OBJDONE to all, toast unless it is ours. Harness:
   GE_COOP_TESTOBJDONE=<s> (Bunker has room criteria; Dam has none).
 - Team time (coop_teamtime.c): the host sends its mission timer each second
   (COOPPKT_TEAMTIME) and the exact time before MISSIONEND (COOPEV_TEAMTIME);
