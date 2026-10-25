@@ -206,9 +206,19 @@ the first menu; put GE_NO_PRESENCE=1 in the environment to turn both off.
 
 If something goes wrong
 -----------------------
-Press ~ (tilde) in game to open the console. The co-op lines start with
-"ge: steam:", "ge: coop:", "ge: versus:", "ge: presence:" and "ge: discord:".
-Send those lines along with what happened.
+- Something looks wrong: press F8 (anywhere, in a mission or the menus). The
+  game saves a bug report zip on your Desktop with its log, the co-op state,
+  your settings and a screenshot, and copies it, so Ctrl+V in Discord
+  attaches it. Send it with a line on what happened. (Typing "bugreport" in
+  the ~ console does the same.)
+- The game crashes: it saves a crash report (log, co-op state, settings and
+  a memory dump) in Data\Crashes and asks whether to put it on your Desktop
+  as a zip. Say yes and paste it into Discord: it is on the clipboard too.
+  If you say no, or the game froze instead, it asks again the next time you
+  start it.
+- Press ~ (tilde) in game to open the console. The co-op lines start with
+  "ge: steam:", "ge: coop:", "ge: versus:", "ge: presence:" and
+  "ge: discord:".
 
 Known gaps in this build
 ------------------------

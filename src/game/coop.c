@@ -5439,3 +5439,64 @@ void coopAsciiName(char *out, s32 cap, const char *in, s32 upper)
     }
     out[n] = '\0';
 }
+
+/* ---- crash and bug reports ---------------------------------------------- */
+
+/* The co-op state for a crash or bug report (port/src/port_report.c): who we
+ * are, the session, each partner and each channel. It only reads this file's
+ * own copies (no props), so it is safe to call from the crash handler. */
+s32 coopDebugDump(char *buf, s32 cap)
+{
+    u32 now = coopNowMs();
+    s32 n = 0;
+    s32 i;
+
+#define DUMP(...) do { if (n < cap) { n += snprintf(buf + n, cap - n, __VA_ARGS__); } } while (0)
+    DUMP("co-op protocol %d, %s\n", COOP_VERSION, sEnabled > 0 ? "on" : "off");
+    if (sEnabled > 0)
+    {
+        DUMP("transport: %s, %s, %s\n", coopNetIsSteam() ? "steam" : "udp",
+             coopNetIsOpen() ? "open" : "closed", coopNetIsHost() ? "host" : "joiner");
+        DUMP("self: player %d (%s), session %08x\n", (int) coopSelf(), coopLobbySelfName(), (unsigned) sSelfSession);
+        DUMP("stage %d, tick %u, mission ticks %u, late join %d, lobby screen %d\n",
+             (int) bossGetStageNum(), (unsigned) sTick, (unsigned) sMissionTicks, (int) sLateJoin, (int) sOnLobbyScreen);
+        DUMP("host hello: stage %d, difficulty %d, mission %u; our serial %u, followed %u\n",
+             (int) sHostHello.stage, (int) sHostHello.difficulty, (unsigned) sHostHello.mission,
+             (unsigned) sMissionSerial, (unsigned) sFollowedMission);
+        DUMP("host waiting %d, migrated %d, pending end %d, down rule %d, settings",
+             (int) sHostWaiting, (int) sMigrated, (int) sPendingEnd, (int) sDownRule);
+        for (i = 0; i < COOPSET_MAX; i++)
+        {
+            DUMP(" %d", (int) sSettings[i]);
+        }
+        DUMP("\n");
+        for (i = 0; i < COOP_MAX_PLAYERS; i++)
+        {
+            CoopRemote *r = &sR[i];
+
+            if (i == coopSelf() || !r->valid)
+            {
+                continue;
+            }
+            DUMP("player %d %s: stage %d, pos %.0f %.0f %.0f, health %.2f, dead %d, lost %d, last heard %u ms ago, puppet %s\n",
+                 i, coopPlayerName(i), (int) r->st.stage, r->st.pos[0], r->st.pos[1], r->st.pos[2],
+                 r->st.health, (int) r->st.dead, (int) r->lost, (unsigned) (now - r->seenMs),
+                 r->puppet != NULL ? "yes" : "no");
+        }
+        for (i = 0; i < COOP_NET_MAX_PEERS; i++)
+        {
+            CoopChan *c = &sChan[i];
+
+            if (!coopNetPeerConnected(i) && c->session == 0)
+            {
+                continue;
+            }
+            DUMP("channel %d (%s): connected %d, session %08x, out %u acked %u, in %u, heard %u ms ago\n",
+                 i, coopNetPeerName(i), coopNetPeerConnected(i), (unsigned) c->session,
+                 (unsigned) c->outNext, (unsigned) c->outAcked, (unsigned) c->inDone,
+                 (unsigned) (now - c->heardMs));
+        }
+    }
+#undef DUMP
+    return n < cap ? n : cap - 1;
+}

@@ -673,3 +673,40 @@ satellite-console work and the Runway plane did nothing on the host.
   and both games finish the mission, with the plane taking off on both
   screens; on Surface the joiner's Use on the dish console runs the host's
   script, and the joiner shooting it reaches the host as OBJDMG.
+
+## Crash and bug reports (2026-10-25)
+
+- port/src/port_report.c. A crash (SEH filter on Windows, the signal handler
+  on Linux) or the stall watchdog's exit writes Data/Crashes/crash-<date>-<time>/:
+  info.txt (build string, commit, branch, OS, menu, stage), log.txt (the last
+  64 KB of portConLogf lines: port_console.c taps every line into
+  portReportTap, since the console ring is only 128 rows), coop.txt
+  (coopDebugDump in coop.c: role, player, stage, ticks, host hello, migration
+  state, settings, each partner's last STATE, each channel's seq/ack and
+  silence), crash.log, midas.ini, and on Windows minidump.dmp
+  (MiniDumpWithIndirectlyReferencedMemory | ScanMemory, about 40 KB; .bss is
+  23 MB so no data segments) and the last 512 KB of ge_direct.log. Linux adds
+  backtrace.txt. The newest 10 folders are kept.
+- Windows asks at once (MessageBox, game window minimised first): Yes zips
+  the folder to the Desktop (SHGetFolderPath CSIDL_DESKTOPDIRECTORY, so
+  OneDrive desktops work), puts the zip on the clipboard as CF_HDROP (Ctrl+V
+  in Discord or Explorer attaches the file) and opens Explorer on it.
+  Anything unanswered (No, Linux, a stall, GE_NOMSGBOX) leaves
+  Data/Crashes/pending.txt, and the next start asks before the window opens
+  (Save to Desktop / Don't send / Ask me later).
+- The zip is stored, not deflated: the writer allocates nothing and uses
+  fixed buffers, since it runs in a dying process.
+- F8 (a fixed key in input_pc.c, like ~; also `bugreport` in the console):
+  the same files minus the dump, plus screenshot.bmp (gfx_sdl2.cpp's forced
+  shot, halved until 1280 wide or less, about 2.7 MB), under
+  Data/Reports/bug-<date>-<time>/, zipped to the Desktop and copied
+  (Linux: the path as text). The console's flash rows say where.
+  portReportTick runs once a frame beside portConRender (boss.c).
+- Harness: GE_BUGTEST=<frame>, GE_CRASHTEST=<frame> (writes to address 16),
+  GE_REPORT_AUTOSAVE=1 (answer Save without a box), GE_REPORT_DESKTOP=<dir>
+  (Linux: where the Desktop is). Verified: F8 in a two-copy Dam run on the
+  mock Steam (zip opens, five files, coop.txt lists the host's channel);
+  a crash on the host mid-mission (coop.txt has the partner's position and
+  channel); the next start's box (screens/reports/crash-next-start.png) and
+  its autosave; the Windows build under Wine: the stall path wrote the
+  minidump and put the zip on the Wine Desktop.

@@ -461,4 +461,7 @@ void coopObjStatusChanged(s32 index, s32 letter, s32 status);  /* objective_stat
 void coopObjTick(s32 inmission);
 void coopObjApply(s32 kind, const u8 *raw, s32 from);
 
+/* crash and bug reports (port/src/port_report.c): the co-op state as text */
+s32  coopDebugDump(char *buf, s32 cap);
+
 #endif
