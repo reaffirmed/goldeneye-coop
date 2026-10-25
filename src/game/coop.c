@@ -2663,6 +2663,17 @@ static ChrRecord *coopMirrorSpawn(CoopGuardEnt *e)
     return chr;
 }
 
+/* Client: a mirrored guard the host says is dying (or our shot's predicted death).
+ * Its actions never tick here, so only the actiontype changes: chrUpdateCollisionBounds
+ * lets Bond walk over a dying or dead chr, and auto-aim skips it. */
+static void coopMirrorDying(ChrRecord *chr)
+{
+    chr->actiontype = ACT_DIE;
+    chr->act_die.timeextra = 0.0f;
+    chr->act_die.elapseextra = 0.0f;
+    portConLogf("ge: coop: guard %d is dying here: its body no longer blocks\n", chr->chrnum);
+}
+
 static void coopApplyGuard(CoopGuardEnt *e)
 {
     ChrRecord *chr = chrFindByLiteralId(e->chrnum);
@@ -2681,6 +2692,10 @@ static void coopApplyGuard(CoopGuardEnt *e)
     }
     prop = chr->prop;
     slot = chr - g_ChrSlots;
+    if ((e->flags & GSF_DYING) && chr->actiontype != ACT_DIE && chr->actiontype != ACT_DEAD)
+    {
+        coopMirrorDying(chr);   /* the body stops blocking, as the host's does */
+    }
     if (slot >= 0 && slot < COOP_MAX_CHRS)
     {
         sChrHostDying[slot] = (e->flags & GSF_DYING) != 0;
@@ -2896,6 +2911,7 @@ static struct
     ModelAnimation *anim;
     f32 damage;     /* what we took off since the last AI sync */
     u32 syncSeen;   /* sAiSyncGot when damage was last reset */
+    s32 prevact;    /* a predicted death: the actiontype before it (ACT_DIE drops the body's collision), -1 none */
 } sPred[COOP_MAX_CHRS];
 static u32 sAiSyncGot[COOP_MAX_CHRS];  /* AI syncs received per slot */
 static s32 sPredDeaths, sPredConfirmed, sPredWrong;
@@ -2983,6 +2999,10 @@ static void coopPredictShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 we
         dmg *= (hitpart == HIT_GENERAL) ? 0.5f : 0.25f;
         hitpart = HIT_CHEST;
     }
+    if (hitpart == HIT_HAT && chr->handle_positiondata_hat != NULL && get_hat_model(chr->handle_positiondata_hat) == HATTYPE_MOON)
+    {
+        hitpart = HIT_HEAD;     /* as handles_shot_actors: the moon hat counts as the head */
+    }
     if (hitpart == HIT_HEAD)
     {
         dmg *= 4.0f;
@@ -2990,6 +3010,14 @@ static void coopPredictShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 we
     else if (hitpart == HIT_CHEST)
     {
         dmg *= 2.0f;
+    }
+    else if (hitpart == HIT_GUN || hitpart == HIT_HAT)
+    {
+        dmg = 0.0f;             /* the host's does no damage for these: predicting a death there was wrong */
+    }
+    if (weaponid == ITEM_FIST)
+    {
+        dmg = 0.0f;             /* the host scales a punch by the angle and the guard's action: never predict a death from one */
     }
     sPred[slot].damage += dmg;
     if (sAiSyncHave[slot] && sAiSync[slot].chrnum == chr->chrnum)
@@ -3037,6 +3065,12 @@ static void coopPredictShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 we
     sPred[slot].kind = *kind;
     sPred[slot].confirmed = 0;
     sPred[slot].anim = sa->struck_anim;
+    sPred[slot].prevact = -1;
+    if (*kind == COOPPRED_DEATH && chr->actiontype != ACT_DIE && chr->actiontype != ACT_DEAD)
+    {   /* a joiner never ticks the host's guards' actions: the body would block us until it fades */
+        sPred[slot].prevact = chr->actiontype;
+        coopMirrorDying(chr);
+    }
     sPred[slot].untilMs = coopNowMs() + (u32) coopPredictWindowMs() * (*kind == COOPPRED_DEATH ? 2 : 1);
     portConLogf("ge: coop: predict: guard %d %s (anim %d, damage %.2f, %s)\n", chr->chrnum, *kind == COOPPRED_DEATH ? "dies" : "flinches",
                 *idx, sPred[slot].damage, sAiSyncHave[slot] ? "after the AI sync" : "setup health");
@@ -3075,6 +3109,11 @@ static s32 coopPredictHolds(s32 slot, ChrRecord *chr, ModelAnimation *hostanim, 
         sPredWrong++;
         portConLogf("ge: coop: predict: guard %d survived, back to the host's animation\n", chr->chrnum);
         sPred[slot].kind = COOPPRED_NONE;
+        if (sPred[slot].prevact >= 0 && chr->actiontype == ACT_DIE)
+        {
+            chr->actiontype = sPred[slot].prevact;
+        }
+        sPred[slot].prevact = -1;
         return 0;
     }
     /* a flinch: until the host's reaction has had time to come, or it shows the same one */

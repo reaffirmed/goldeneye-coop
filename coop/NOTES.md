@@ -1241,3 +1241,20 @@ on the paper) and scroll as before.
   "dropped in beside player 1 after 2.6 s". JOINAFTER=<s> in
   mission_runs.sh starts the joiner that late; CI runs Dam, Facility and
   Frigate that way too.
+
+## Play-test fixes on the combined build (2026-10-25, evening)
+
+- Joiner door switches: the host no longer runs the door-switch link again on
+  COOPEV_OBJUSE (it toggled the Dam tunnel gates shut on the joiner).
+- Guard drops on the joiner: dropped at the stand-in guard's feet
+  (PROPFLAG_ONSCREEN cleared before objDrop), not from its last drawn hand
+  matrix, which put guns off the floor (they fell for ever) or near the camera
+  with a broken rotation. COOPEV_DROP also carries keys and other held objects
+  (item -1, matched by model among the stand-in's children).
+- Bodies: a mirrored guard the host says is dying (GSF_DYING), or one our shot
+  predicts dead, gets actiontype ACT_DIE on the joiner (coopMirrorDying), so
+  chrUpdateCollisionBounds stops blocking Bond; a death that doesn't hold puts
+  the old actiontype back.
+- Prediction matched handles_shot_actors better: hits on the gun or a hat do
+  no damage (the moon hat counts as the head), and a punch never predicts a
+  death. Helmet hits used to predict deaths the host never applied.
