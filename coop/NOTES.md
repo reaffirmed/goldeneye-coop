@@ -1056,3 +1056,188 @@ on the paper) and scroll as before.
   when we stand at the end, a partner stands, or a partner's game ended the
   mission. A wipe still fails. Objectives, difficulty and the team's time
   decide the cheats as in solo.
+
+## Netcode 1: every setup object replicated from the host (2026-10-25)
+
+- Why: the events (doors, OBJDMG, pickups, knocks, Use) only carry the
+  changes someone hooked, and only to players already in the mission. Level
+  scripts change objects in ways no event covers (locks, flags, AI_DestroyObject,
+  AI_MoveObject), and a late joiner never heard what happened before it came.
+- src/game/coop_repl.c. Each setup object (the prop def types
+  cleanup_objects.c frees; Dam has 241) is a record: present, in the
+  sender's inventory, destroyed level, flags and flags2 (minus
+  PROPFLAG_INMOTION and PROPFLAG_00000100, which each world keeps itself),
+  door lock / open / still / destroyed, and position plus the 3x3 of obj->mtx
+  for loose objects at rest (no parent, not moving, not a vehicle or door).
+  COOPPKT_REPL (20), 16 records a packet, unreliable.
+- Host: when a player's puppet first appears in the mission (and after a
+  migration, coopReplMigrated from coopMigrate) the whole list goes to them,
+  2 packets a tick, and applies at once (coopReplSnapshotDone() on the joiner
+  once it is all in). Otherwise it walks the list a packet every 6 ticks per
+  player (about 12 KB/s for Dam; the checksum work replaces most of this).
+- Joiner: compares each record with its own capture. Outside a snapshot a
+  difference must last 90 ticks before it is corrected (events in flight,
+  doors on their own auto-close timers). Corrections only move toward the
+  host and never undo: gone there and not in our hands: objFreePermanently;
+  in the host's inventory: the shared pickup (coopReplTeamPick); destroyed
+  further: AI_DestroyObject's damage until the level matches; flags, lock,
+  door open/shut once both doors are still; moved: the host's position and
+  rotation (as objDetach places an object). Doors and damage go through
+  coopReplDoorSet / coopReplDestroy so they send no events back.
+- Found on the way: Dam's first gate keeps PROPFLAG_DOOR_KEEPOPEN on a joiner
+  that arrives after the host opened it (doorStartOpen clears it), so its
+  door auto-closed differently; the join snapshot now corrects both.
+- Not covered here: runtime objects (thrown items, dropped guns:
+  coop_items.c's ids), chrs (guard snapshots), stage flags, alarm and
+  criteria (the WORLD packet).
+- COOP_VERSION stays 9: older builds ignore type 20. Ids for the netcode
+  work: COOPPKT 20..23, COOPEV 48..55.
+- Harness: GE_COOP_TESTREPL=<s> on the host: <s> seconds in, the nearest
+  loose object is moved 5 m ahead on the left and destroyed, the next moved
+  ahead on the right, the next one's flags2 changed, the nearest door's
+  lock flipped, all without events. Verified with the mock: a joiner already
+  in gets all four within a cycle (screens/netcode/repl-before-* and
+  repl-after-*, host left, joiner right); a joiner arriving after them gets
+  them from the join snapshot ("join snapshot applied, 241 objects, 4
+  corrected"); 3 players through the lobby, both joiners corrected.
+
+## Netcode 2: desync checksum with automatic correction (2026-10-25)
+
+- Replaces the periodic walk of netcode 1. Twice a second the host sends each
+  joiner COOPPKT_REPLSUM (21): an FNV-1a hash per block of 16 object records
+  (what coopReplDiff compares; positions on a 24-unit grid), a hash of the
+  stage flags and alarm, and an order-free hash of which chrnums exist
+  (puppets left out). About 90 bytes for Dam, instead of ~12 KB/s.
+- The joiner hashes its own blocks. A block that differs in 3 checks in a
+  row (1 s; events in flight and doors' own timers settle before that) goes
+  in a COOPPKT_REPLREQ (22) bitmask, asked again every 4 checks while it
+  lasts. The host sends those blocks' records (REPLSNAP_ASKED), which apply
+  at once. If they show nothing to correct (rounding at the grid's edges),
+  that pair of hashes is agreed until either side's changes.
+- Stage flags, alarm and chrs are already sent whole (WORLD, guard
+  snapshots); their hashes only report a difference that lasts 10 s. So does
+  a block still different after 20 checks: "repl: unresolved desync ...",
+  counted by coopReplUnresolved(), which the CI runs fail on.
+  coopReplDesyncs() counts the corrected ones.
+- Verified with GE_COOP_TESTREPL=22 on Dam: "desync in block 4: 2 objects
+  corrected", block 13 (the door lock) 1, then block 4 again for the debris
+  that settled after the destroy; nothing asked after that, no unresolved.
+
+## Netcode 3: smooth partners and guards, round trip, network simulator (2026-10-25, COOP_VERSION 10)
+
+- STATE and GUARDS carry the sender's clock (ms, coopNowMs), so COOP_VERSION
+  is 10. src/game/coop_interp.c: CoopClock maps a sender's clock onto ours
+  (offset from the quickest packet, creeping up slowly if the route gets
+  longer; send interval and jitter smoothed); CoopTrack keeps the last 8
+  timed samples (late ones go in their place).
+- Partners' puppets and a joiner's mirrored guards are drawn at
+  now - offset - delay, between the two samples around that moment, delay =
+  1.5 send intervals + 2 x jitter, 30..200 ms. Past the newest sample a
+  track runs on at its speed for 100 ms, then holds; a step over 3 m (a
+  respawn) is not drawn as a slide. Guard snapshots place a guard directly
+  only the first time; animation is untouched (it already runs locally and
+  resyncs past 6 frames). GE_COOP_NOINTERP=1 draws each packet as it lands.
+- Round trip: COOPPKT_TIME (23) pings each transport peer every 500 ms, wall
+  clock; coopNetRttMs(player) (a joiner's partner: twice the host's).
+  "net: player N round trip .. drawn .. behind .." in the log every 10 s.
+- port/src/coop_net.c GE_COOP_NETSIM=<ms>:<jitter>[:<loss %>]: every packet
+  arriving is held that long (plus up to the jitter, so out of order too) and
+  some dropped. Works on UDP and the Steam mock.
+- GE_COOP_MOTIONLOG=1: per puppet, every 2 s of movement, the mean step per
+  tick, its coefficient of variation, ticks it froze and ticks it jumped.
+- Measured on Dam, host walking (GE_AUTOSTICK), both copies at
+  NETSIM=60:40:2: without interpolation cv 0.81..0.87, 25..31 frozen ticks
+  and 17..20 jumps per 120; with it cv 0.35, none frozen, 3 jumps (the rest
+  is Xvfb's uneven frame time). Guard 6 traced on both: the joiner's follows
+  the host's path about 120 ms behind.
+
+## Netcode 4: prediction of our own shots on guards (2026-10-25)
+
+- Our own movement was always local (each game runs its own Bond and sends
+  STATE), so prediction here is about the one thing that waited for the
+  host: a joiner's shot on a guard reacted a round trip plus the drawing
+  delay later (and played no yelp at all on the shooter's game).
+- coopClientForwardShot now calls coopPredictShot: the host's damage
+  arithmetic (destruction amount x g_AiHealthModifier, head x4, chest x2,
+  general halves) against the guard's health from the last AI sync less what
+  we have hit it for since (before any sync: our copy's setup health x the
+  lobby difficulty's multiplier, coopDifficultyGuardHealthMul). Lethal: a
+  death animation from g_HitReactionTable for that part; otherwise a flinch
+  animation (with the same left/right hand swap as the host). Both play at
+  once with the yelp. Not for fists, gun or hat hits, or a guard the host
+  already shows dying (GSF_DYING, new in the snapshot flags).
+- The shot event carries predicted (COOPPRED_*) and predidx. On the host,
+  triggered_on_shot_hit's two rolls go through coopReactionPick, so when its
+  own outcome is the same kind it plays the same animation, and the rare
+  variants (stagger against a wall, the butt-hit flinch) are skipped for such
+  shots (coopReactionForced).
+- While a prediction holds (round trip + drawing delay + 200 ms, 300..1200,
+  doubled for deaths), snapshots leave that guard's animation alone. A death
+  the host confirms keeps ours to the end if the host's is the same; if the
+  host rolled another, it is shown. A death not confirmed in time is dropped
+  ("predict: guard N survived"). GE_COOP_NOPREDICT=1 turns it off.
+- Verified with GE_COOP_TESTSHOT=6 on the joiner, NETSIM 60:40:2: Normal,
+  one PPK chest shot, "dies ... setup health", "death confirmed (same
+  animation)"; Brutal (health x2), a flinch, then "dies ... after the AI
+  sync", confirmed, same animation.
+
+## Netcode 5: lag compensation for hits (2026-10-25)
+
+- Our shots on guards already favour the shooter: a joiner hits what its own
+  screen shows and the host applies the hit to that chrnum wherever the guard
+  has got to. Nothing to add there.
+- Guards against joiners were the unfair side: the host's guards see and
+  shoot at the joiner's puppet, which (with netcode 3) is drawn a trip plus
+  the drawing delay in the past.
+  - Aim (host): coopRemoteAim keeps, per joiner, where they are about now:
+    the newest sample run on at its speed for its age plus half the round
+    trip, at most 250 ms, on the floor (coopFindStan). coopChrTickBegin moves
+    the puppet there for each guard tick aimed at that joiner (sight, aim,
+    hit chance) and coopChrTickEnd puts it back where it is drawn.
+  - Cover (joiner): COOPEV_HIT now carries the guard's chrnum. A hit from a
+    guard whose line to our Bond, from its newest snapshot position, fails
+    chrCanSeeBond's own floor test right now is dropped: we got behind cover
+    before it landed ("lagcomp: guard N's hit (...) dropped"). Friendly fire
+    and blasts are not guard hits and always count.
+- GE_COOP_NOLAGCOMP=1 turns both off. Harness GE_COOP_TESTHIT=<s> (host):
+  <s> seconds in, a 0.01 hit on player 2 from the nearest guard that can see
+  their puppet and one from the farthest guard. Verified on Dam at NETSIM
+  60:20: the farthest (guard 43, 330 m off through the rock) dropped; real
+  guard hits during a walk at NETSIM 150:50 all counted (in sight). The host
+  logs the aim lead every 5 s ("guards aim at player 2 250 ms ahead ...").
+
+
+## Netcode 6: two-player runs of every mission in CI (2026-10-25)
+
+- coop/ci/mission_runs.sh <build> <out> [stages]: for each of the 20 story
+  missions, a host (GE_STAGE, GE_COOP_TESTEND=900, GE_COOP_TESTWIN=1) and a
+  joiner (-coopjoin, GE_COOP_NETSIM=60:20:2) over the mock Steam, PAR pairs
+  at once on their own displays, mock folders and ids. A stage fails if the
+  joiner never follows the host in, never applies the join snapshot, doesn't
+  complete the mission with the host, either copy logs an unresolved desync
+  or dies, or it takes over LIMIT (240) s. out/summary.txt has one line per
+  stage. TESTEND ends the mission on the host; the objectives are not
+  played, so this checks the joiner can join, stay in agreement and finish
+  with the host, not each mission's level scripts.
+- .github/workflows/coop-missions.yml runs it on every push. The cart image
+  comes from the "ci-rom" release as baserom.u.z64.gpg (gpg symmetric,
+  passphrase in the CI_ROM_KEY secret), checked against the US sha1 and
+  deleted at the end; without the secret the job only leaves a notice.
+- First run caught a bug: with 2% loss a lost join snapshot datagram left the
+  joiner waiting for it for good, and the checksum (which waits for the
+  snapshot) never ran. Now the first checksum a second after the last
+  snapshot packet asks for the blocks still missing ("N records of the join
+  snapshot lost, asking for M blocks again") and the asked-for records count
+  towards the snapshot. All 20 pass locally, PAR=3, in about 6 minutes.
+- Drop-in (the live-plumbing thread's #15) holds a joiner arriving in a
+  mission under way, sending no STATE, until coopReplSnapshotDone(). The
+  host only started the snapshot on the joiner's puppet, which needs STATE,
+  so the two waited on each other until drop-in's 20 s cap. Now a joiner in
+  the stage with no snapshot sends COOPPKT_REPLREQ with join set every
+  second; the host sends the snapshot (and re-asked blocks) to it before its
+  Bond appears, holding the checksum until it does. The lost-records re-ask
+  moved to the joiner's own tick for the same reason. Tested merged with
+  #15: Dam, joiner 30 s late, snapshot in, one lost block re-asked,
+  "dropped in beside player 1 after 2.6 s". JOINAFTER=<s> in
+  mission_runs.sh starts the joiner that late; CI runs Dam, Facility and
+  Frigate that way too.

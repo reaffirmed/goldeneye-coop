@@ -561,4 +561,61 @@ void coopCaptionChrGunfire(ChrRecord *chr);     /* chraction.c: a chr's gun went
 Gfx *coopCaptionsRender(Gfx *gdl);
 void coopCaptionHarness(void);
 
+
+/* netcode (coop_repl.c and the netcode thread's later files): COOPPKT 20..23, COOPEV 48..55 */
+#define COOPPKT_REPL 20     /* records */
+#define COOPPKT_REPLSUM 21  /* the desync checksum */
+#define COOPPKT_REPLREQ 22  /* send me these blocks */
+#define COOPPKT_TIME 23     /* round trip pings */
+s32  coopNetRttMs(s32 player);          /* round trip to that player in ms, 0 when not known yet */
+/* prediction of our own shots' reactions (coop.c): the host's side, from chraction.c */
+s32  coopReactionPick(ChrRecord *self, s32 death, s32 rolled, s32 count);
+s32  coopReactionForced(ChrRecord *self);
+s32  coopPredictStats(s32 *confirmed, s32 *wrong);  /* joiner: deaths predicted, confirmed, not */
+f32  coopDifficultyGuardHealthMul(void);    /* the lobby difficulty's guard health, on any game */
+
+/* smooth movement (coop_interp.c): timed samples drawn a moment behind */
+#define COOPINTERP_SAMPLES 8
+typedef struct
+{
+    u32 ms;         /* the sender's clock */
+    f32 pos[3];
+    f32 yaw;
+} CoopSample;
+typedef struct
+{
+    CoopSample s[COOPINTERP_SAMPLES];   /* oldest first */
+    s32 n;
+} CoopTrack;
+typedef struct
+{
+    s32 valid;
+    s32 off;        /* our clock minus the sender's, for its quickest packet */
+    f32 creep;
+    u32 lastSend;
+    f32 interval;   /* ms between its samples, smoothed */
+    f32 jitter;     /* ms its packets come later than the quickest, smoothed */
+} CoopClock;
+void coopClockReset(CoopClock *c);
+void coopClockSample(CoopClock *c, u32 sendms, u32 arrivems);
+s32  coopClockDelay(const CoopClock *c);
+u32  coopClockRenderMs(const CoopClock *c, u32 nowms);
+void coopTrackReset(CoopTrack *t);
+void coopTrackPush(CoopTrack *t, const CoopSample *s);
+s32  coopTrackAt(const CoopTrack *t, u32 rt, CoopSample *out);
+void coopReplStageStart(void);
+void coopReplTick(u32 missionticks);
+void coopReplPacket(const void *buf, s32 len, s32 from);
+void coopReplSendSnapshot(s32 player);  /* host: every setup object's state to that player, over the next ticks */
+s32  coopReplSnapshotDone(void);        /* joiner: this mission's join snapshot is in and applied */
+void coopReplMigrated(void);            /* we became the host or follow a new one: snapshot to everyone again */
+s32  coopReplDesyncs(void);             /* joiner: blocks found different and corrected this mission */
+s32  coopReplUnresolved(void);          /* joiner: differences that outlasted 10 s of corrections */
+/* coop.c's side of it */
+s32  coopReplPlayerHere(s32 p);         /* host: player p's Bond is in this mission */
+s32  coopReplHostHere(void);            /* joiner: we and the host are in this mission */
+void coopReplDoorSet(DoorRecord *door, s32 state);  /* doorSetOpenState, sent to no one */
+void coopReplDestroy(ObjectRecord *obj);            /* AI_DestroyObject's damage, sent to no one */
+void coopReplTeamPick(ObjectRecord *obj);           /* a shared pickup we missed: take it */
+
 #endif

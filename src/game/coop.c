@@ -74,16 +74,19 @@ s32 chraiGetAIListID(AIRecord *AIList, bool *isGlobalAIList);
 void chrStopFiring(ChrRecord *self);
 void set_missionstate(MISSION_STATE_ID state);
 
+void play_sound_for_shot_actor(ChrRecord *self);
+u32 randomGetNext(void);
 extern void portConLogf(const char *fmt, ...);
 
 #define COOP_MAGIC   0x50434547u /* "GECP" */
-#define COOP_VERSION 10 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
+#define COOP_VERSION 11 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
                           6: host migration (AI sync, bye, addresses in the roster);
                           7: pings, chat, objective credit, team times, cross-save (COOPEV 16, 20..31, COOPPKT 10);
                           8: versus (COOPEV 32..36, COOPPKT 16);
                           9: shared pickups, thrown items, drops, knocks, Use, host blasts (COOPEV 17, 18, 25..28);
                           10: hold Use to revive (STATE revive), more stats (COOPEV 56..63, COOPPKT 24..25 kept for
-                              revive, cutscenes and the results) */
+                              revive, cutscenes and the results);
+                          11: sender clocks in STATE and GUARDS (smooth movement), round trip (COOPPKT_TIME) */
 
 enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7, COOPPKT_AISYNC = 8, COOPPKT_BYE = 9 };
 /* 10 and 11 (COOPPKT_EXT_FIRST..LAST in coop.h) are coop_ext.c's features' own packets;
@@ -110,6 +113,7 @@ typedef struct
                        COOP_REVIVE_HOLD the reviver has held (coop_revive.c) */
     u16 calm;       /* ticks since the sender was last in a fight (capped) */
     CoopLook look;  /* guns, movement, shots and character (coop_look.c) */
+    u32 ms;         /* the sender's clock (coopNowMs) as it sent this: the puppet is drawn by it (coop_interp.c) */
 } CoopStatePkt;
 
 #define COOP_ALL 0xFF   /* CoopEvent.to: everyone */
@@ -181,8 +185,8 @@ typedef struct
     u8 pad;
     union
     {
-        struct { f32 damage; f32 angle; } hit;                                  /* host -> client */
-        struct { s16 chrnum; s16 hitpart; s32 weaponid; f32 vector[3]; } shot;  /* client -> host */
+        struct { f32 damage; f32 angle; s16 chrnum; u8 pad[2]; } hit;           /* host -> client; chrnum: the guard that fired, -1 not a guard */
+        struct { s16 chrnum; s16 hitpart; s32 weaponid; f32 vector[3]; u8 predicted; u8 predidx; u8 pad[2]; } shot;  /* client -> host; predicted: COOPPRED_* the shooter's game played, predidx which one */
         struct { s32 doorofs; s32 state; } door;                                /* both ways */
         struct { s32 objofs; f32 damage; f32 pos[3]; s16 item; s16 player; } obj; /* both ways */
         struct { s32 objofs; u8 bounce; u8 children; u8 pad[2]; f32 dir[3]; s32 stage; } knock;  /* to all */
@@ -216,7 +220,7 @@ typedef struct
 } CoopEventsPkt;
 
 /* host -> client guard snapshot, one entry per chr */
-enum { GSF_HIDDEN = 1, GSF_FLIP = 2, GSF_LOOP = 4, GSF_FIRE_R = 8, GSF_FIRE_L = 16 };
+enum { GSF_HIDDEN = 1, GSF_FLIP = 2, GSF_LOOP = 4, GSF_FIRE_R = 8, GSF_FIRE_L = 16, GSF_DYING = 32 };
 
 typedef struct
 {
@@ -241,6 +245,7 @@ typedef struct
     u16 version;
     u16 type;
     u32 snap;       /* snapshot id; one snapshot spans several packets */
+    u32 ms;         /* the host's clock as it took the snapshot */
     u16 first;      /* index of the first entry in the snapshot */
     u16 count;
     CoopGuardEnt ent[COOP_GUARDS_PER_PKT];
@@ -303,6 +308,9 @@ enum { COOPNOTE_LOST = 1, COOPNOTE_BACK, COOPNOTE_GONE, COOPNOTE_LEFT, COOPNOTE_
 
 
 static s32 sEnabled = -1;
+static s32 sNoInterp;   /* GE_COOP_NOINTERP=1: draw each packet as it lands (to compare) */
+static s32 sNoLagComp;  /* GE_COOP_NOLAGCOMP=1: guards aim at the drawn puppet, every hit counts */
+static s32 sCoverSaves; /* joiner: guards' hits dropped behind cover, this run */
 #define COOP_MAX_PEERHELD 32
 static s32 sPeerHeld[COOP_MAX_PEERHELD];
 static s32 sNumPeerHeld;
@@ -356,6 +364,9 @@ typedef struct
     s32 lost;           /* its connection dropped: the Bond stands idle, guards and scripts leave it be */
     u32 lostMs;         /* when */
     u32 seenMs;         /* the newest STATE, wall clock */
+    CoopTrack track;    /* its recent positions, by its clock: the puppet is drawn between them */
+    coord3d aimPos;     /* host: where this player is about now, for the guards (lag compensation) */
+    StandTile *aimStan; /* NULL: use the drawn spot */
 } CoopRemote;
 /* each level script's last "either player" check passer (coopAltBondCredit) */
 #define COOP_SCRIPTPASS 32
@@ -367,6 +378,7 @@ static struct
 static s32 sScriptPassNext;
 
 static CoopRemote sR[COOP_MAX_PLAYERS];
+static CoopClock sClock[COOP_MAX_PLAYERS];  /* each player's clock against ours (coop_interp.c) */
 
 /* a reliable event channel per transport peer (host: a joiner each; joiner: the host) */
 typedef struct
@@ -399,6 +411,9 @@ typedef struct
 #define COOP_MAX_CHRS 256
 static CoopChrTarget sChrTarget[COOP_MAX_CHRS];
 static ChrRecord *sTickChr;         /* guard whose tick has the puppet as Bond */
+static PropRecord *sAimSwapped;     /* the puppet moved to its aim position for that tick */
+static coord3d sAimSavedPos;
+static StandTile *sAimSavedStan;
 PropRecord *g_CoopPropOverride;     /* read by getCurrentPlayerProp() */
 
 static s32 sEvForwarding;   /* host: passing a joiner's event on, keep its sender */
@@ -406,6 +421,10 @@ static s32 sEvForwarding;   /* host: passing a joiner's event on, keep its sende
 /* client guard mirroring */
 static u32 sGuardSnap;
 static u32 sChrLastSync[COOP_MAX_CHRS]; /* sTick of the last snapshot entry */
+static CoopTrack sGuardTrack[COOP_MAX_CHRS];   /* joiner: each mirrored chr's recent positions, by the host's clock */
+static s16 sGuardTrackNum[COOP_MAX_CHRS];      /* the chrnum its track is of */
+static u32 sGuardPktMs;                         /* the guard packet being applied: its clock */
+static u8 sChrHostDying[COOP_MAX_CHRS];         /* the host's says this chr is dying or dead */
 static u8 sChrFireSeen[COOP_MAX_CHRS][2]; /* host: firecount at the last snapshot */
 static u8 sChrFiring[COOP_MAX_CHRS];      /* client: GSF_FIRE_* from the last snapshot */
 static u32 sLastSnapTick;
@@ -434,6 +453,10 @@ static StandTile *coopFindStan(coord3d *pos, StandTile *from, coord3d *frompos);
 static s32 coopIsMirroringClient(void);
 static void coopSendGuards(void);
 static void coopReapGuards(void);
+static void coopGuardsInterpTick(void);
+static s32 coopPredictHolds(s32 slot, ChrRecord *chr, ModelAnimation *hostanim, s32 hostdying);
+static void coopPredictShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, u8 *kind, u8 *idx);
+static void coopPredictReset(void);
 static void coopClientGunfire(void);
 static void coopHarnessTick(void);
 static void coopPuppetRemove(CoopRemote *r);
@@ -620,6 +643,7 @@ static void coopSendState(void)
     p.player = (u8) coopSelf();
     p.revive = (u8) (p.dead ? ((sDeadSince != 0 && sReviveHold < 255) ? sReviveHold : 0) : coopReviveTarget());
     p.calm = (u16) coopLocalCalm();
+    p.ms = coopNowMs();
     coopNetSend(&p, sizeof(p));
 
     if ((sTick % 300) == 1)
@@ -770,6 +794,18 @@ static void coopRecvState(s32 c, CoopStatePkt *p)
         return;
     }
     r = &sR[p->player];
+    if (p->stage == bossGetStageNum())
+    {   /* every sample counts for the drawing, a late one too (coop_interp.c) */
+        CoopSample smp;
+
+        coopClockSample(&sClock[p->player], p->ms, coopNowMs());
+        smp.ms = p->ms;
+        smp.pos[0] = p->pos[0];
+        smp.pos[1] = p->pos[1];
+        smp.pos[2] = p->pos[2];
+        smp.yaw = p->yaw;
+        coopTrackPush(&r->track, &smp);
+    }
     /* datagrams can arrive out of order; keep the newest */
     if (r->valid && (s32) (p->tick - r->st.tick) <= 0 && r->st.stage == p->stage)
     {
@@ -858,6 +894,124 @@ static void coopRecvVoice(s32 c, u8 *buf, s32 n)
     coopVoiceReceive(buf, n);
 }
 
+/* ---- round trip ------------------------------------------------------------
+ * Every half second, each game pings each transport peer with its clock; the
+ * answer echoes it, and the difference is a round trip. Wall clock, so a
+ * paused game still answers (coopKeepAlive). */
+
+typedef struct
+{
+    u32 magic;
+    u16 version;
+    u16 type;       /* COOPPKT_TIME */
+    u32 ms;         /* the sender's clock */
+    u32 echo;       /* an answer: the ping's ms */
+    u8 answer;
+    u8 pad[3];
+} CoopTimePkt;
+
+static u32 sTimeSent[COOP_NET_MAX_PEERS];
+static f32 sRtt[COOP_NET_MAX_PEERS];     /* smoothed, ms; 0 not measured yet */
+
+static void coopSendTime(s32 c, s32 answer, u32 echo)
+{
+    CoopTimePkt t;
+
+    memset(&t, 0, sizeof(t));
+    t.magic = COOP_MAGIC;
+    t.version = COOP_VERSION;
+    t.type = COOPPKT_TIME;
+    t.ms = coopNowMs();
+    t.echo = echo;
+    t.answer = (u8) answer;
+    coopNetSendTo(c, &t, sizeof(t));
+}
+
+static void coopRecvTime(s32 c, CoopTimePkt *t)
+{
+    if (!t->answer)
+    {
+        coopSendTime(c, 1, t->ms);
+        return;
+    }
+    {
+        f32 rtt = (f32) (s32) (coopNowMs() - t->echo);
+
+        if (rtt < 0.0f || rtt > 10000.0f)
+        {
+            return;
+        }
+        sRtt[c] = (sRtt[c] == 0.0f) ? rtt : sRtt[c] + (rtt - sRtt[c]) * 0.2f;
+        if (sRtt[c] < 1.0f)
+        {
+            sRtt[c] = 1.0f;     /* measured: under a millisecond on one machine */
+        }
+    }
+}
+
+static void coopTimeTick(void)
+{
+    u32 now = coopNowMs();
+    s32 c;
+    static s32 envread;
+    static u32 lastLog;
+
+    if (!envread)
+    {
+        const char *e = getenv("GE_COOP_NOINTERP");
+
+        envread = 1;
+        sNoInterp = (e != NULL && atoi(e) != 0);
+        e = getenv("GE_COOP_NOLAGCOMP");
+        sNoLagComp = (e != NULL && atoi(e) != 0);
+    }
+    for (c = 0; c < COOP_NET_MAX_PEERS; c++)
+    {
+        if (!coopNetPeerConnected(c))
+        {
+            sRtt[c] = 0.0f;
+            continue;
+        }
+        if (now - sTimeSent[c] >= 500)
+        {
+            sTimeSent[c] = now;
+            coopSendTime(c, 0, 0);
+        }
+    }
+    if (now - lastLog >= 10000 && coopInMission())
+    {
+        s32 p;
+
+        lastLog = now;
+        for (p = 0; p < COOP_MAX_PLAYERS; p++)
+        {
+            if (p != coopSelf() && sR[p].valid && sClock[p].valid)
+            {
+                portConLogf("ge: coop: net: player %d round trip %d ms, drawn %d ms behind (send every %.0f ms, jitter %.1f)\n", p + 1,
+                            coopNetRttMs(p), coopClockDelay(&sClock[p]), sClock[p].interval, sClock[p].jitter);
+            }
+        }
+    }
+}
+
+/* the round trip to player p in ms, 0 when not known; a joiner's partner is reached through the host */
+s32 coopNetRttMs(s32 p)
+{
+    s32 c;
+
+    if (sEnabled <= 0 || p < 0 || p >= COOP_MAX_PLAYERS || p == coopSelf())
+    {
+        return 0;
+    }
+    if (coopNetIsHost())
+    {
+        c = coopChanOfPlayer(p);
+        return (c >= 0 && c < COOP_NET_MAX_PEERS) ? (s32) (sRtt[c] + 0.5f) : 0;
+    }
+    /* a joiner only talks to the host: another joiner is two of those away (about) */
+    return (s32) (sRtt[0] * (p == 0 ? 1.0f : 2.0f) + 0.5f);
+}
+
 static void coopPollNet(void)
 {
     u8 buf[1500];
@@ -919,6 +1073,8 @@ static void coopPollNet(void)
             }
             if (coopInStage() && coopRemoteHere(0))
             {
+                coopClockSample(&sClock[0], g->ms, coopNowMs());
+                sGuardPktMs = g->ms;
                 for (k = 0; k < g->count; k++)
                 {
                     coopApplyGuard(&g->ent[k]);
@@ -975,6 +1131,15 @@ static void coopPollNet(void)
         {
             coopExtPacket(buf, n, coopPlayerOfChan(c));
         }
+        if (p->type == COOPPKT_TIME && n >= (s32) sizeof(CoopTimePkt))
+        {
+            coopRecvTime(c, (CoopTimePkt *) buf);
+            continue;
+        }
+        if (p->type >= COOPPKT_REPL && p->type <= COOPPKT_REPLREQ)
+        {
+            coopReplPacket(buf, n, coopPlayerOfChan(c));
+        }
     }
 }
 
@@ -1025,6 +1190,7 @@ static void coopPuppetSpawn(CoopRemote *r)
     prop->chr->sleep = 0;
 
     r->puppet = prop;
+    r->aimStan = NULL;
     r->puppetPrev = pos;
     r->puppetAnim = -1;
     r->puppetGhost = 1;
@@ -1039,12 +1205,19 @@ static void coopPuppetUpdate(CoopRemote *r)
     ChrRecord *chr = r->puppet->chr;
     coord3d pos;
     StandTile *stan;
-
+    CoopSample at;
     f32 yaw = r->st.yaw;
 
     pos.f[0] = r->st.pos[0];
     pos.f[1] = r->st.pos[1];
     pos.f[2] = r->st.pos[2];
+    if (!sNoInterp && coopTrackAt(&r->track, coopClockRenderMs(&sClock[r->st.player], coopNowMs()), &at) >= 0)
+    {   /* a moment behind, between two of their samples: smooth however the packets came */
+        pos.f[0] = at.pos[0];
+        pos.f[1] = at.pos[1];
+        pos.f[2] = at.pos[2];
+        yaw = at.yaw;
+    }
     coopCutscenePuppetPos(r->st.player, &pos, &yaw);   /* the intro's line beside our Bond */
 
     stan = coopFindStan(&pos, r->puppet->stan, &r->puppet->pos);
@@ -1140,12 +1313,16 @@ void coopStageStart(void)
     }
     for (i = 0; i < COOP_MAX_CHRS; i++)
     {
+        coopTrackReset(&sGuardTrack[i]);
+        sGuardTrackNum[i] = -1;
         sChrLastSync[i] = 0;
         sChrFireSeen[i][0] = sChrFireSeen[i][1] = 0;
         sChrFiring[i] = 0;
     }
     sLastSnapTick = 0;
     memset(sAiSyncHave, 0, sizeof(sAiSyncHave));
+    memset(sChrHostDying, 0, sizeof(sChrHostDying));
+    coopPredictReset();
     sMissionTicks = 0;
     sNumPeerHeld = 0;
     memset(sScriptPass, 0, sizeof(sScriptPass));    /* a new mission's scripts */
@@ -1162,6 +1339,8 @@ void coopStageStart(void)
         sR[i].puppetAnim = -1;
         sR[i].valid = 0;
         sR[i].lost = 0;
+        coopTrackReset(&sR[i].track);
+        sR[i].aimStan = NULL;
     }
     coopDifficultyStageStart();
     coopVersusStageStart();
@@ -1169,6 +1348,7 @@ void coopStageStart(void)
     coopPingStageStart();
     coopAudioStageStart();
     coopItemsStageStart();
+    coopReplStageStart();
 }
 
 static void coopTickBody(void);
@@ -1212,6 +1392,7 @@ static void coopTickBody(void)
     sTick++;
     sInCinema = coopCutsceneTick();     /* before the packets: they ask coopInStage */
     coopPollNet();
+    coopTimeTick();
     coopSessionTick();
     if (bossGetStageNum() != LEVELID_TITLE)
     {
@@ -1255,6 +1436,7 @@ static void coopTickBody(void)
     {
         coopSendWorld();
     }
+    coopReplTick(sMissionTicks);    /* every setup object's state, from the host (coop_repl.c) */
 
     {   /* GE_COOP_TRACE=<chrnum>: log one chr on both sides to compare */
         static s32 trace = -2;
@@ -1287,6 +1469,10 @@ static void coopTickBody(void)
     {
         coopReapGuards();
         coopClientGunfire();
+        if (!sNoInterp)
+        {
+            coopGuardsInterpTick();
+        }
     }
 
     coopHarnessTick();
@@ -1321,6 +1507,173 @@ static void coopCinemaTick(void)
         coopClientGunfire();
     }
     coopRemotesTick();
+}
+
+/* ---- lag compensation -------------------------------------------------------
+ * Guards against joiners: the host's guards see and shoot at a joiner's
+ * puppet, which is drawn a moment in the past (the trip here and the drawing
+ * delay). For each guard tick aimed at a joiner, the puppet stands where the
+ * joiner is about now instead: their newest sample run on at its speed by its
+ * age plus half the round trip, at most COOP_AIM_LEAD_MS, along the floor
+ * (coopRemoteAim; swapped in coopChrTickBegin and back in coopChrTickEnd).
+ * And on the joiner, a guard's hit that comes in after we got behind cover
+ * is dropped: the line from the guard (its newest snapshot) to our Bond, the
+ * same floor test chrCanSeeBond uses, is blocked now (coopHitBehindCover).
+ * Our own shots need nothing: a joiner already hits what it sees, and the
+ * host applies the hit to that guard wherever it has got to. */
+
+#define COOP_AIM_LEAD_MS 250
+
+static void coopRemoteAim(CoopRemote *r, s32 p)
+{
+    const CoopTrack *t = &r->track;
+    const CoopSample *a, *b;
+    s32 lead, span, k;
+    coord3d pos;
+
+    r->aimStan = NULL;
+    if (!coopNetIsHost() || r->puppet == NULL || t->n < 2 || !sClock[p].valid || sNoLagComp)
+    {
+        return;
+    }
+    a = &t->s[t->n - 2];
+    b = &t->s[t->n - 1];
+    span = (s32) (b->ms - a->ms);
+    /* the sender's clock now, about: ours less the offset, plus the half trip the offset took off */
+    lead = (s32) (coopNowMs() - (u32) sClock[p].off - b->ms) + coopNetRttMs(p) / 2;
+    if (lead < 0)
+    {
+        lead = 0;
+    }
+    if (lead > COOP_AIM_LEAD_MS)
+    {
+        lead = COOP_AIM_LEAD_MS;
+    }
+    for (k = 0; k < 3; k++)
+    {
+        pos.f[k] = b->pos[k];
+        if (span > 0 && span < 250)
+        {
+            pos.f[k] += (b->pos[k] - a->pos[k]) * (f32) lead / (f32) span;
+        }
+    }
+    r->aimStan = coopFindStan(&pos, r->puppet->stan, &r->puppet->pos);
+    r->aimPos = pos;
+    if ((sTick % 300) == 0 && r->aimStan != NULL)
+    {
+        f32 dx = pos.f[0] - r->puppet->pos.f[0], dz = pos.f[2] - r->puppet->pos.f[2];
+
+        portConLogf("ge: coop: lagcomp: guards aim at player %d %d ms ahead, %.0f units from the drawn puppet\n", p + 1, lead, sqrtf(dx * dx + dz * dz));
+    }
+}
+
+/* joiner: a guard's hit that the host decided before we reached cover */
+static s32 coopHitBehindCover(CoopEvent *ev)
+{
+    ChrRecord *chr;
+    PropRecord *bond = getCurrentPlayerProp();
+    StandTile *stan;
+    coord3d from;
+    s32 slot, clear;
+    f32 height;
+
+    if (coopNetIsHost() || sNoLagComp || ev->u.hit.chrnum < 0 || (chr = chrFindByLiteralId(ev->u.hit.chrnum)) == NULL
+        || chr->prop == NULL || chr->prop->stan == NULL || bond == NULL || bond->stan == NULL)
+    {
+        return 0;
+    }
+    from = chr->prop->pos;
+    slot = chr - g_ChrSlots;
+    if (slot >= 0 && slot < COOP_MAX_CHRS && sGuardTrack[slot].n > 0 && sGuardTrackNum[slot] == chr->chrnum)
+    {   /* where it fired from: its newest snapshot, not where it is drawn */
+        const CoopSample *nw = &sGuardTrack[slot].s[sGuardTrack[slot].n - 1];
+
+        from.f[0] = nw->pos[0];
+        from.f[1] = nw->pos[1];
+        from.f[2] = nw->pos[2];
+    }
+    stan = coopFindStan(&from, chr->prop->stan, &chr->prop->pos);
+    if (stan == NULL)
+    {
+        return 0;
+    }
+    height = chr->chrheight - 20.0f;
+    clear = stanTestLineUnobstructed(&stan, from.f[0], from.f[2], bond->pos.f[0], bond->pos.f[2],
+                                     CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_PATHBLOCKER | CDTYPE_AIOPAQUE, height, height, 0.0f, 1.0f)
+            && stan == bond->stan;
+    if (clear)
+    {
+        return 0;
+    }
+    sCoverSaves++;
+    portConLogf("ge: coop: lagcomp: guard %d's hit (%.3f) dropped: we are behind cover now\n", ev->u.hit.chrnum, ev->u.hit.damage);
+    return 1;
+}
+
+/* GE_COOP_MOTIONLOG=1 (tests): how evenly each puppet moves on screen. Every
+ * 2 s of movement: the mean step per tick, its coefficient of variation, and
+ * the ticks it stood still or jumped (over twice the mean) while moving */
+static void coopMotionLog(s32 p, coord3d *pos)
+{
+    static s32 on = -1;
+    static coord3d prev[COOP_MAX_PLAYERS];
+    static f32 sum[COOP_MAX_PLAYERS], sum2[COOP_MAX_PLAYERS];
+    static s32 n[COOP_MAX_PLAYERS], still[COOP_MAX_PLAYERS], jump[COOP_MAX_PLAYERS];
+    static f32 last[COOP_MAX_PLAYERS];
+    f32 dx, dz, d;
+
+    if (on < 0)
+    {
+        const char *e = getenv("GE_COOP_MOTIONLOG");
+
+        on = (e != NULL && atoi(e) != 0);
+    }
+    if (!on)
+    {
+        return;
+    }
+    dx = pos->f[0] - prev[p].f[0];
+    dz = pos->f[2] - prev[p].f[2];
+    prev[p] = *pos;
+    d = sqrtf(dx * dx + dz * dz);
+    if (d > 200.0f)
+    {
+        return;     /* spawned or respawned */
+    }
+    if (d < 0.01f && last[p] < 0.01f)
+    {
+        if (n[p] >= 120)
+        {
+            goto report;
+        }
+        return;     /* standing */
+    }
+    last[p] = d;
+    n[p]++;
+    sum[p] += d;
+    sum2[p] += d * d;
+    if (d < 0.01f)
+    {
+        still[p]++;
+    }
+    if (n[p] > 10 && d > 2.0f * sum[p] / (f32) n[p])
+    {
+        jump[p]++;
+    }
+    if (n[p] < 120)
+    {
+        return;
+    }
+report:
+    {
+        f32 mean = sum[p] / (f32) n[p];
+        f32 var = sum2[p] / (f32) n[p] - mean * mean;
+
+        portConLogf("ge: coop: motion: player %d step %.2f cv %.2f still %d jumps %d of %d ticks\n", p + 1, mean,
+                    mean > 0.0f ? sqrtf(var > 0.0f ? var : 0.0f) / mean : 0.0f, still[p], jump[p], n[p]);
+    }
+    n[p] = still[p] = jump[p] = 0;
+    sum[p] = sum2[p] = 0.0f;
 }
 
 /* the puppets: one per other player in this mission */
@@ -1365,6 +1718,8 @@ static void coopRemotesTick(void)
         {
             coopPuppetUpdate(r);
             coopPuppetUpdateGhost(r);
+            coopRemoteAim(r, p);
+            coopMotionLog(p, &r->puppet->pos);
             if ((sTick % 60) == 0)
             {
                 ChrRecord *c = r->puppet->chr;
@@ -1478,6 +1833,68 @@ static void coopHarnessTick(void)
             portConLogf("ge: coop: testworld: alarm + flag 0x40000000\n");
         }
     }
+    if (coopNetIsHost() && coopInMission() && coopRemoteHere(1) && sR[1].puppet != NULL)
+    {   /* GE_COOP_TESTHIT=<s>: <s> seconds in, a small hit on player 2 from the nearest guard that
+         * can see their puppet and one from the farthest guard (harness only: lag compensation) */
+        static s32 testhit = -2;
+        if (testhit == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTHIT");
+            testhit = (e != NULL) ? atoi(e) * 60 : -1;
+        }
+        if (testhit >= 0 && sMissionTicks == (u32) testhit)
+        {
+            ChrRecord *nearc = NULL, *farc = NULL;
+            f32 nd = 0.0f, fd = 0.0f;
+            s32 i, k;
+
+            for (i = 0; i < g_NumChrSlots; i++)
+            {
+                ChrRecord *c = &g_ChrSlots[i];
+                StandTile *st;
+                f32 dx, dz, d;
+
+                if (c->model == NULL || c->prop == NULL || c->prop->stan == NULL || coopIsPuppet(c->prop) || c->actiontype == ACT_DEAD || c->actiontype == ACT_DIE)
+                {
+                    continue;
+                }
+                dx = c->prop->pos.f[0] - sR[1].puppet->pos.f[0];
+                dz = c->prop->pos.f[2] - sR[1].puppet->pos.f[2];
+                d = dx * dx + dz * dz;
+                st = c->prop->stan;
+                if (stanTestLineUnobstructed(&st, c->prop->pos.f[0], c->prop->pos.f[2], sR[1].puppet->pos.f[0], sR[1].puppet->pos.f[2],
+                                             CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_PATHBLOCKER | CDTYPE_AIOPAQUE, c->chrheight - 20.0f, c->chrheight - 20.0f, 0.0f, 1.0f)
+                    && st == sR[1].puppet->stan && (nearc == NULL || d < nd))
+                {
+                    nearc = c;
+                    nd = d;
+                }
+                if (farc == NULL || d > fd)
+                {
+                    farc = c;
+                    fd = d;
+                }
+            }
+            for (k = 0; k < 2; k++)
+            {
+                ChrRecord *c = k == 0 ? nearc : farc;
+                CoopEvent ev;
+
+                if (c == NULL)
+                {
+                    portConLogf("ge: coop: testhit: no %s guard\n", k == 0 ? "seeing" : "far");
+                    continue;
+                }
+                memset(&ev, 0, sizeof(ev));
+                ev.kind = COOPEV_HIT;
+                ev.u.hit.damage = 0.01f;
+                ev.u.hit.chrnum = (s16) c->chrnum;
+                coopQueueEventTo(&ev, 1);
+                portConLogf("ge: coop: testhit: guard %d (%s, %.0f away) hits player 2\n", c->chrnum, k == 0 ? "sees them" : "farthest", sqrtf(k == 0 ? nd : fd));
+            }
+        }
+    }
+
     if (coopIsMirroringClient())
     {   /* GE_COOP_TESTSHOT=<chrnum>: a chest shot every 2 s (harness only) */
         static s32 testchr = -2;
@@ -1970,12 +2387,26 @@ s32 coopChrTickBegin(ChrRecord *chr)
         }
         sTickChr = chr;
         g_CoopPropOverride = sR[t].puppet;
+        if (sR[t].aimStan != NULL && sR[t].puppet != NULL)
+        {   /* the guard sees and shoots at where they are now, not where they are drawn (lag compensation) */
+            sAimSwapped = sR[t].puppet;
+            sAimSavedPos = sAimSwapped->pos;
+            sAimSavedStan = sAimSwapped->stan;
+            sAimSwapped->pos = sR[t].aimPos;
+            sAimSwapped->stan = sR[t].aimStan;
+        }
     }
     return 1;
 }
 
 void coopChrTickEnd(void)
 {
+    if (sAimSwapped != NULL)
+    {
+        sAimSwapped->pos = sAimSavedPos;
+        sAimSwapped->stan = sAimSavedStan;
+        sAimSwapped = NULL;
+    }
     sTickChr = NULL;
     g_CoopPropOverride = NULL;
 }
@@ -2066,6 +2497,7 @@ s32 coopTargetRecordDamage(f32 damage, f32 angle)
     ev.kind = COOPEV_HIT;
     ev.u.hit.damage = damage;
     ev.u.hit.angle = angle;
+    ev.u.hit.chrnum = (sTickChr != NULL) ? (s16) sTickChr->chrnum : -1;
     coopQueueEventTo(&ev, coopPlayerOfProp(g_CoopPropOverride));
     portConLogf("ge: coop: guard %d hit player %d: %.3f\n", sTickChr ? sTickChr->chrnum : -1,
                 coopPlayerOfProp(g_CoopPropOverride) + 1, damage);
@@ -2088,6 +2520,7 @@ static void coopSendGuards(void)
     pkt.version = COOP_VERSION;
     pkt.type = COOPPKT_GUARDS;
     pkt.snap = sGuardSnap;
+    pkt.ms = coopNowMs();
 
     for (i = 0; i < g_NumChrSlots; i++)
     {
@@ -2143,6 +2576,10 @@ static void coopSendGuards(void)
         if (chr->model->animlooping)
         {
             e->flags |= GSF_LOOP;
+        }
+        if (chr->actiontype == ACT_DIE || chr->actiontype == ACT_DEAD)
+        {
+            e->flags |= GSF_DYING;
         }
         e->pos[0] = chr->prop->pos.f[0];
         e->pos[1] = chr->prop->pos.f[1];
@@ -2246,6 +2683,7 @@ static void coopApplyGuard(CoopGuardEnt *e)
     slot = chr - g_ChrSlots;
     if (slot >= 0 && slot < COOP_MAX_CHRS)
     {
+        sChrHostDying[slot] = (e->flags & GSF_DYING) != 0;
         sChrLastSync[slot] = sTick;
         sChrFiring[slot] = e->flags & (GSF_FIRE_R | GSF_FIRE_L);
     }
@@ -2262,6 +2700,27 @@ static void coopApplyGuard(CoopGuardEnt *e)
     pos.f[0] = e->pos[0];
     pos.f[1] = e->pos[1];
     pos.f[2] = e->pos[2];
+    if (slot >= 0 && slot < COOP_MAX_CHRS && !sNoInterp)
+    {   /* drawn between samples each tick (coopGuardsInterpTick); placed here only the first time */
+        CoopSample smp;
+        s32 first = sGuardTrackNum[slot] != chr->chrnum || sGuardTrack[slot].n == 0;
+
+        if (sGuardTrackNum[slot] != chr->chrnum)
+        {
+            coopTrackReset(&sGuardTrack[slot]);
+            sGuardTrackNum[slot] = chr->chrnum;
+        }
+        smp.ms = sGuardPktMs;
+        smp.pos[0] = e->pos[0];
+        smp.pos[1] = e->pos[1];
+        smp.pos[2] = e->pos[2];
+        smp.yaw = e->yaw;
+        coopTrackPush(&sGuardTrack[slot], &smp);
+        if (!first)
+        {
+            goto placed;
+        }
+    }
     stan = coopFindStan(&pos, prop->stan, &prop->pos);
     if (stan != NULL)
     {
@@ -2271,8 +2730,14 @@ static void coopApplyGuard(CoopGuardEnt *e)
         chrDetectRooms(chr);
     }
     setsubroty(chr->model, e->yaw);
+placed:
     chr->chrflags |= CHRFLAG_INIT;
 
+    if (e->animoff >= 0 && slot >= 0 && slot < COOP_MAX_CHRS
+        && coopPredictHolds(slot, chr, (ModelAnimation *) ((u8 *) ptr_animation_table + e->animoff), (e->flags & GSF_DYING) != 0))
+    {
+        return;     /* our own shot's reaction is playing; the host's catches up (prediction section) */
+    }
     if (e->animoff >= 0)
     {
         ModelAnimation *anim = (ModelAnimation *) ((u8 *) ptr_animation_table + e->animoff);
@@ -2303,6 +2768,40 @@ static void coopApplyGuard(CoopGuardEnt *e)
                 modelSetAnimSpeed(chr->model, e->speed, 0.0f);
             }
         }
+    }
+}
+
+/* Client: each mirrored chr where the host's was a moment ago, between two
+ * snapshots (coop_interp.c), so guards move smoothly between packets */
+static void coopGuardsInterpTick(void)
+{
+    u32 rt = coopClockRenderMs(&sClock[0], coopNowMs());
+    s32 i;
+
+    for (i = 0; i < g_NumChrSlots && i < COOP_MAX_CHRS; i++)
+    {
+        ChrRecord *chr = &g_ChrSlots[i];
+        CoopSample at;
+        coord3d pos;
+        StandTile *stan;
+
+        if (sGuardTrack[i].n == 0 || chr->model == NULL || chr->prop == NULL || chr->chrnum != sGuardTrackNum[i]
+            || coopIsPuppet(chr->prop) || coopTrackAt(&sGuardTrack[i], rt, &at) < 0)
+        {
+            continue;
+        }
+        pos.f[0] = at.pos[0];
+        pos.f[1] = at.pos[1];
+        pos.f[2] = at.pos[2];
+        stan = coopFindStan(&pos, chr->prop->stan, &chr->prop->pos);
+        if (stan != NULL)
+        {
+            chr->prop->stan = stan;
+            chr->prop->pos = pos;
+            setsuboffset(chr->model, &pos);
+            chrDetectRooms(chr);
+        }
+        setsubroty(chr->model, at.yaw);
     }
 }
 
@@ -2371,6 +2870,229 @@ static void coopReapGuards(void)
     }
 }
 
+/* ---- prediction: our own shots on the host's guards ---------------------------
+ * A joiner's shot on a guard is the host's to apply, so the guard used to
+ * react a round trip (and the drawing delay) later. Now the shooter's game
+ * plays the reaction at once: the yelp, a flinch animation, or, when the hit
+ * is lethal by the guard's health in the last AI sync less what we have taken
+ * since, a death animation. The shot tells the host which animation we chose
+ * (CoopEvent shot.predicted / predidx), and the host's triggered_on_shot_hit
+ * uses the same one when its own roll lands on the same kind of reaction
+ * (coopReactionPick), so the snapshots that follow show the same animation.
+ * While a prediction holds, snapshots don't change that guard's animation;
+ * a death the host confirms (GSF_DYING) keeps ours to the end. One the host
+ * did not confirm in time (the guard had more health than we knew, another
+ * player's shot, a deferred reaction) is dropped and the host's animation
+ * comes back: "predict: guard N survived". */
+
+enum { COOPPRED_NONE, COOPPRED_FLINCH, COOPPRED_DEATH };
+
+static struct
+{
+    s16 chrnum;
+    u8 kind;        /* COOPPRED_* */
+    u8 confirmed;
+    u32 untilMs;
+    ModelAnimation *anim;
+    f32 damage;     /* what we took off since the last AI sync */
+    u32 syncSeen;   /* sAiSyncGot when damage was last reset */
+} sPred[COOP_MAX_CHRS];
+static u32 sAiSyncGot[COOP_MAX_CHRS];  /* AI syncs received per slot */
+static s32 sPredDeaths, sPredConfirmed, sPredWrong;
+static ChrRecord *sForceChr;    /* host: applying a shot whose shooter predicted ... */
+static u8 sForceKind, sForceIdx;
+
+static void coopPredictReset(void)
+{
+    memset(sPred, 0, sizeof(sPred));
+    memset(sAiSyncGot, 0, sizeof(sAiSyncGot));
+}
+
+static s32 coopPredictWindowMs(void)
+{
+    s32 w = coopNetRttMs(0) + coopClockDelay(&sClock[0]) + 200;
+
+    return w < 300 ? 300 : (w > 1200 ? 1200 : w);
+}
+
+/* host's triggered_on_shot_hit (chraction.c): its roll for a death or flinch
+ * animation, or the one the shooter's game already played */
+s32 coopReactionPick(ChrRecord *self, s32 death, s32 rolled, s32 count)
+{
+    if (self == sForceChr && sForceKind == (death ? COOPPRED_DEATH : COOPPRED_FLINCH) && sForceIdx < count)
+    {
+        return sForceIdx;
+    }
+    return rolled;
+}
+
+/* host: the shooter predicted a reaction for this chr: skip the rare variants it can't have known */
+s32 coopReactionForced(ChrRecord *self)
+{
+    return self == sForceChr && sForceKind != COOPPRED_NONE;
+}
+
+static struct ChrHitReaction *coopHitReaction(s32 hitpart)
+{
+    s32 i;
+
+    for (i = 0; g_HitReactionTable[i].hitpart != -1; i++)
+    {
+        if (g_HitReactionTable[i].hitpart == hitpart)
+        {
+            return &g_HitReactionTable[i];
+        }
+    }
+    return &g_HitReactionTable[0];
+}
+
+static void coopPredictShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, u8 *kind, u8 *idx)
+{
+    s32 slot = chr - g_ChrSlots;
+    struct ChrHitReaction *hr;
+    struct StruckAnim *sa;
+    f32 dmg;
+    s32 lethal = 0, n;
+    static s32 off = -1;
+
+    *kind = COOPPRED_NONE;
+    *idx = 0;
+    if (off < 0)
+    {
+        const char *e = getenv("GE_COOP_NOPREDICT");
+
+        off = (e != NULL && atoi(e) != 0);
+    }
+    if (off || slot < 0 || slot >= COOP_MAX_CHRS || hitpart == HIT_GUN || hitpart == HIT_HAT || weaponid == ITEM_FIST
+        || chr->model == NULL || sChrHostDying[slot] || (sPred[slot].chrnum == chr->chrnum && sPred[slot].kind == COOPPRED_DEATH))
+    {
+        return;
+    }
+    if (sPred[slot].chrnum != chr->chrnum || sPred[slot].syncSeen != sAiSyncGot[slot])
+    {   /* a fresh AI sync has what the host applied so far */
+        sPred[slot].chrnum = chr->chrnum;
+        sPred[slot].damage = 0.0f;
+        sPred[slot].syncSeen = sAiSyncGot[slot];
+        sPred[slot].kind = COOPPRED_NONE;
+        sPred[slot].confirmed = 0;
+    }
+    /* the host's arithmetic (handles_shot_actors) */
+    dmg = gunItemGetDestructionAmount(weaponid) * g_AiHealthModifier;
+    if (hitpart == HIT_GENERAL || hitpart == HIT_GENERALHALF)
+    {
+        dmg *= (hitpart == HIT_GENERAL) ? 0.5f : 0.25f;
+        hitpart = HIT_CHEST;
+    }
+    if (hitpart == HIT_HEAD)
+    {
+        dmg *= 4.0f;
+    }
+    else if (hitpart == HIT_CHEST)
+    {
+        dmg *= 2.0f;
+    }
+    sPred[slot].damage += dmg;
+    if (sAiSyncHave[slot] && sAiSync[slot].chrnum == chr->chrnum)
+    {   /* the host's numbers, a second old at most, and ours since */
+        lethal = !(sAiSync[slot].chrflags & CHRFLAG_INVINCIBLE) && sAiSync[slot].damage + sPred[slot].damage >= sAiSync[slot].maxdamage;
+    }
+    else
+    {   /* no AI sync yet: our copy's setup health, as the host's difficulty scales it */
+        lethal = !(chr->chrflags & CHRFLAG_INVINCIBLE) && sPred[slot].damage >= chr->maxdamage * coopDifficultyGuardHealthMul();
+    }
+    play_sound_for_shot_actor(chr);
+    hr = coopHitReaction(hitpart);
+    if (lethal && hr->deathAnims != NULL && hr->deathAnimCount > 0)
+    {
+        *kind = COOPPRED_DEATH;
+        n = hr->deathAnimCount;
+        *idx = (u8) (randomGetNext() % (u32) n);
+        sa = &hr->deathAnims[*idx];
+        sPredDeaths++;
+    }
+    else if (!lethal && hr->flinchAnims != NULL && hr->flinchAnimCount > 0)
+    {
+        if (hr == &g_HitReactionTable[9] && chrGetEquippedWeaponProp(chr, GUNLEFT) != NULL)
+        {
+            hr = &g_HitReactionTable[10];
+        }
+        else if (hr == &g_HitReactionTable[12] && chrGetEquippedWeaponProp(chr, GUNRIGHT) != NULL)
+        {
+            hr = &g_HitReactionTable[13];
+        }
+        *kind = COOPPRED_FLINCH;
+        n = hr->flinchAnimCount;
+        *idx = (u8) (randomGetNext() % (u32) n);
+        sa = &hr->flinchAnims[*idx];
+    }
+    else
+    {
+        return;
+    }
+    modelSetAnimationWithMerge(chr->model, sa->struck_anim, sa->flip, 0.0f, sa->speed, 16.0f, TRUE);
+    if (sa->endframe >= 0.0f)
+    {
+        modelSetAnimEndFrame(chr->model, sa->endframe);
+    }
+    sPred[slot].kind = *kind;
+    sPred[slot].confirmed = 0;
+    sPred[slot].anim = sa->struck_anim;
+    sPred[slot].untilMs = coopNowMs() + (u32) coopPredictWindowMs() * (*kind == COOPPRED_DEATH ? 2 : 1);
+    portConLogf("ge: coop: predict: guard %d %s (anim %d, damage %.2f, %s)\n", chr->chrnum, *kind == COOPPRED_DEATH ? "dies" : "flinches",
+                *idx, sPred[slot].damage, sAiSyncHave[slot] ? "after the AI sync" : "setup health");
+    (void) vector;
+}
+
+/* a snapshot for a guard we predicted for: 1 to leave its animation alone */
+static s32 coopPredictHolds(s32 slot, ChrRecord *chr, ModelAnimation *hostanim, s32 hostdying)
+{
+    if (sPred[slot].chrnum != chr->chrnum || sPred[slot].kind == COOPPRED_NONE)
+    {
+        return 0;
+    }
+    if (sPred[slot].kind == COOPPRED_DEATH)
+    {
+        if (hostdying)
+        {
+            if (!sPred[slot].confirmed)
+            {
+                sPred[slot].confirmed = 1;
+                sPredConfirmed++;
+                portConLogf("ge: coop: predict: guard %d death confirmed (%s animation)\n", chr->chrnum,
+                            hostanim == sPred[slot].anim ? "same" : "other");
+            }
+            if (hostanim == sPred[slot].anim)
+            {
+                return 1;   /* ours plays to the end */
+            }
+            sPred[slot].kind = COOPPRED_NONE;   /* the host rolled another: show its */
+            return 0;
+        }
+        if ((s32) (coopNowMs() - sPred[slot].untilMs) < 0)
+        {
+            return 1;
+        }
+        sPredWrong++;
+        portConLogf("ge: coop: predict: guard %d survived, back to the host's animation\n", chr->chrnum);
+        sPred[slot].kind = COOPPRED_NONE;
+        return 0;
+    }
+    /* a flinch: until the host's reaction has had time to come, or it shows the same one */
+    if (hostanim == sPred[slot].anim || hostdying || (s32) (coopNowMs() - sPred[slot].untilMs) >= 0)
+    {
+        sPred[slot].kind = COOPPRED_NONE;
+        return hostanim == sPred[slot].anim;
+    }
+    return 1;
+}
+
+s32 coopPredictStats(s32 *confirmed, s32 *wrong)
+{
+    *confirmed = sPredConfirmed;
+    *wrong = sPredWrong;
+    return sPredDeaths;
+}
+
 s32 coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid)
 {
     CoopEvent ev;
@@ -2387,6 +3109,7 @@ s32 coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weap
     ev.u.shot.vector[0] = vector->f[0];
     ev.u.shot.vector[1] = vector->f[1];
     ev.u.shot.vector[2] = vector->f[2];
+    coopPredictShot(chr, hitpart, vector, weaponid, &ev.u.shot.predicted, &ev.u.shot.predidx);
     coopQueueEventTo(&ev, 0);
     portConLogf("ge: coop: shot guard %d (part %d, weapon %d), sent to host\n", chr->chrnum, hitpart, weaponid);
     return 1;
@@ -2427,6 +3150,7 @@ s32 coopShotPuppet(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, s
     ev.kind = COOPEV_HIT;
     ev.u.hit.damage = damage;
     ev.u.hit.angle = 0.0f;
+    ev.u.hit.chrnum = -1;   /* a partner's shot: theirs to aim */
     coopQueueEventTo(&ev, p);
     portConLogf("ge: coop: friendly fire on player %d (part %d, weapon %d): %.3f\n", p + 1, hitpart, weaponid, damage);
     (void) vector;
@@ -2449,7 +3173,11 @@ static void coopHostApplyShot(CoopEvent *ev)
     g_CoopPropOverride = sR[ev->from].puppet; /* the stimulus belongs to that player */
     coopStatsBlameBegin(ev->from);            /* and so do the hit and the kill */
     coopObjNoteActor(ev->from, 1);
+    sForceChr = chr;                          /* the reaction their game already played, if it can be the same */
+    sForceKind = ev->u.shot.predicted;
+    sForceIdx = ev->u.shot.predidx;
     handles_shot_actors(chr, ev->u.shot.hitpart, &vec, ev->u.shot.weaponid, TRUE);
+    sForceChr = NULL;
     coopStatsBlameEnd();
     g_CoopPropOverride = NULL;
     portConLogf("ge: coop: player %d shot guard %d (part %d)\n", ev->from + 1, ev->u.shot.chrnum, ev->u.shot.hitpart);
@@ -2559,7 +3287,7 @@ static void coopApplyEvent(CoopEvent *ev)
     switch (ev->kind)
     {
         case COOPEV_HIT:
-            if (coopInMission() && !g_CurrentPlayer->bonddead)
+            if (coopInMission() && !g_CurrentPlayer->bonddead && !coopHitBehindCover(ev))
             {
                 portConLogf("ge: coop: hit from player %d: %.3f\n", ev->from + 1, ev->u.hit.damage);
                 bondviewCallRecordDamageKills(ev->u.hit.damage, ev->u.hit.angle, -1, 1);
@@ -4013,6 +4741,7 @@ s32 coopFrontTick(void)
     }
     sTick++;
     coopPollNet();
+    coopTimeTick();
     coopSessionTick();
     coopExtTick(0);         /* chat, objective credit, ... (coop_ext.c) */
     coopStatsFrontTick();   /* back from a mission: send our stats column */
@@ -4948,6 +5677,7 @@ static void coopRecvAiSync(CoopAiPkt *p)
         {
             sAiSync[slot] = p->ent[k];
             sAiSyncHave[slot] = 1;
+            sAiSyncGot[slot]++;
         }
     }
 }
@@ -5132,6 +5862,7 @@ static void coopMigrate(void)
         sMigNewHost = list[0];
     }
     sMigrated = 1;
+    coopReplMigrated();     /* the new host's world is the one everyone follows now */
     if (coopHostLeavesRule() == 1 && coopInMission())
     {
         sPendingEnd = 1;    /* the lobby's rule: back to the lobby, with the new host */
@@ -6084,4 +6815,49 @@ s32 coopDebugDump(char *buf, s32 cap)
     }
 #undef DUMP
     return n < cap ? n : cap - 1;
+}
+
+
+/* ---- object replication (coop_repl.c) ------------------------------------- */
+
+s32 coopReplPlayerHere(s32 p)
+{
+    return p >= 0 && p < COOP_MAX_PLAYERS && p != coopSelf() && coopRemoteHere(p) && sR[p].puppet != NULL;
+}
+
+s32 coopReplHostHere(void)
+{
+    return sEnabled > 0 && !coopNetIsHost() && coopInMission() && coopRemoteHere(0);
+}
+
+void coopReplDoorSet(DoorRecord *door, s32 state)
+{
+    sApplyingRemoteDoor = 1;
+    doorSetOpenState(door, state);
+    sApplyingRemoteDoor = 0;
+}
+
+void coopReplDestroy(ObjectRecord *obj)
+{
+    f32 damage = ((obj->damage - obj->maxdamage) + 1) / 250.0f;   /* as AI_DestroyObject */
+
+    sApplyingRemoteObj = 1;
+    objApplyDamage(obj, damage, &obj->runtime_pos, 0x1D, -1);
+    sApplyingRemoteObj = 0;
+}
+
+void coopReplTeamPick(ObjectRecord *obj)
+{
+    s32 ofs = coopSetupOfs(obj);
+    s32 i;
+
+    if (ofs < 0)
+    {
+        return;
+    }
+    i = coopTeamPickAdd(ofs, 0, 0);
+    if (i >= 0 && coopTeamPickTry(i))
+    {
+        sTeamPickDone[i] = 1;
+    }
 }

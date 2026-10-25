@@ -12,6 +12,11 @@
  *
  * Non-blocking, up to three peers (see coop_net.h). Packets are
  * game-defined (see src/game/coop.c).
+ *
+ * GE_COOP_NETSIM=<ms>:<jitter ms>[:<loss %>] (tests): every packet that
+ * arrives is held <ms> plus up to <jitter> more before the game sees it, so
+ * they also come out of order, and <loss> percent are dropped. Both
+ * directions when every copy sets it, as the scripts do.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -250,7 +255,7 @@ int coopNetRecv(void *buf, int cap)
     return coopNetRecvFrom(buf, cap, NULL);
 }
 
-int coopNetRecvFrom(void *buf, int cap, int *peer)
+static int coopNetRecvRaw(void *buf, int cap, int *peer)
 {
     struct sockaddr_in from;
     socklen_t fromlen;
@@ -304,6 +309,93 @@ int coopNetRecvFrom(void *buf, int cap, int *peer)
         }
         return n;
     }
+}
+
+/* ---- GE_COOP_NETSIM: a slow, jittery, lossy line for tests ---------------- */
+
+extern unsigned long long portProfNow(void);
+
+#define NETSIM_SLOTS 512
+typedef struct
+{
+    unsigned long long due;     /* us */
+    int peer;
+    int len;
+    unsigned char data[1400];
+} NetSimPkt;
+static NetSimPkt *sSim;
+static int sSimOn = -1, sSimLat, sSimJit, sSimLoss;
+static unsigned int sSimRand = 12345;
+
+static unsigned int netsimRand(void)
+{
+    sSimRand = sSimRand * 1103515245u + 12345u;
+    return (sSimRand >> 8) & 0xFFFFFF;
+}
+
+int coopNetRecvFrom(void *buf, int cap, int *peer)
+{
+    unsigned char tmp[1500];
+    unsigned long long now;
+    int n, from = -1, i, best;
+
+    if (sSimOn < 0)
+    {
+        const char *e = getenv("GE_COOP_NETSIM");
+
+        sSimOn = 0;
+        if (e != NULL && sscanf(e, "%d:%d:%d", &sSimLat, &sSimJit, &sSimLoss) >= 2)
+        {
+            sSim = (NetSimPkt *) calloc(NETSIM_SLOTS, sizeof(NetSimPkt));
+            sSimOn = sSim != NULL;
+            sSimRand ^= (unsigned int) portProfNow();
+            portConLogf("ge: coop: netsim: %d ms + up to %d ms jitter, %d%% loss\n", sSimLat, sSimJit, sSimLoss);
+        }
+    }
+    if (!sSimOn)
+    {
+        return coopNetRecvRaw(buf, cap, peer);
+    }
+    now = portProfNow();
+    while ((n = coopNetRecvRaw(tmp, sizeof(tmp), &from)) > 0)
+    {   /* hold everything that came */
+        if (n > (int) sizeof(sSim[0].data) || (int) (netsimRand() % 100) < sSimLoss)
+        {
+            continue;
+        }
+        for (i = 0; i < NETSIM_SLOTS && sSim[i].len != 0; i++)
+        {
+        }
+        if (i == NETSIM_SLOTS)
+        {
+            continue;   /* full: as good as lost */
+        }
+        sSim[i].due = now + (unsigned long long) sSimLat * 1000ull
+                    + (sSimJit > 0 ? (unsigned long long) (netsimRand() % (unsigned int) (sSimJit * 1000)) : 0ull);
+        sSim[i].peer = from;
+        sSim[i].len = n;
+        memcpy(sSim[i].data, tmp, (size_t) n);
+    }
+    best = -1;
+    for (i = 0; i < NETSIM_SLOTS; i++)
+    {   /* the one due first, if it is due */
+        if (sSim[i].len != 0 && sSim[i].due <= now && (best < 0 || sSim[i].due < sSim[best].due))
+        {
+            best = i;
+        }
+    }
+    if (best < 0)
+    {
+        return 0;
+    }
+    n = sSim[best].len < cap ? sSim[best].len : cap;
+    memcpy(buf, sSim[best].data, (size_t) n);
+    if (peer != NULL)
+    {
+        *peer = sSim[best].peer;
+    }
+    sSim[best].len = 0;
+    return n;
 }
 
 void coopNetShutdown(void)
