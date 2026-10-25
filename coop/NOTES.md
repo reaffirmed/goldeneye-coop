@@ -710,3 +710,31 @@ satellite-console work and the Runway plane did nothing on the host.
   channel); the next start's box (screens/reports/crash-next-start.png) and
   its autosave; the Windows build under Wine: the stall path wrote the
   minidump and put the zip on the Wine Desktop.
+
+## Versioned saves (2026-10-25)
+
+- port/include/port_save.h, port/src/port_save.c. A text save in Data/Saves
+  starts `#ge-save <kind> <version> <commit>`; portSaveOpenRead returns the
+  file past that line with the version (1 for no header: written before
+  versioning), so the owner reads old layouts and its next write is current.
+  portSaveOpenWrite / portSaveCommit write <name>.tmp and swap it in
+  (rename; MoveFileEx REPLACE_EXISTING | WRITE_THROUGH on Windows), so a
+  crash mid-write keeps the last good save.
+- A legacy path given to portSaveOpenRead is the file's older place: found
+  only there, it is moved into Data/Saves (rename; if that fails it is read
+  in place and the next write lands in Data/Saves).
+- coop_campaign.txt (coop_stats.c) and coop_character.txt (coop_look.c) are
+  version 2: same lines as before, now in Data/Saves with the header. v1 was
+  beside the exe.
+- Backups: Data/Saves/build.txt holds the commit that last ran. A different
+  one (or none, with saves present) copies every plain file in Data/Saves plus
+  the two legacy co-op files to Data/Saves/Backups/<old commit or
+  "older">-<date>-<time>/ before anything reads them (main.c, before the
+  crash-report check). Newest 5 kept. eeprom.bin keeps the retail format
+  (no header); the backups cover it.
+- New save kinds (other threads): pick a name, start at version 1, read with
+  portSaveOpenRead, write with portSaveOpenWrite + portSaveCommit.
+- Verified: legacy coop_campaign.txt and coop_character.txt beside the
+  exe were backed up (3 files with eeprom.bin) and moved in on first read;
+  a co-op win on the mock Steam wrote the campaign with the v2 header and
+  Continue read it back ("Continue: Facility (Agent)").

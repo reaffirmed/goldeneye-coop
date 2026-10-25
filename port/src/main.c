@@ -910,6 +910,10 @@ int main(int argc, char **argv)
         portAnimDataInit();
     }
 
+    {   /* a new build backs the saves up before it touches them (port_save.c) */
+        extern void portSaveBootCheck(void);
+        portSaveBootCheck();
+    }
     {   /* a crash report from last time nobody answered for (port_report.c) */
         extern void portReportBootCheck(void);
         portReportBootCheck();

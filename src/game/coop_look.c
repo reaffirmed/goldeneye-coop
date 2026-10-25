@@ -48,7 +48,7 @@
 #include "coop.h"
 
 extern void portConLogf(const char *fmt, ...);
-extern const char *portRootPath(const char *name);
+#include "port_save.h"
 extern s32 playerGetCrouchPos(s32 playernum);
 extern PROP getPropForHeldItem(ITEM_IDS item);
 extern void sub_GAME_7F02BFE4(ChrRecord *self, s32 hand, s32 play);
@@ -64,6 +64,7 @@ extern s32 portMpCharPos(s32 c);
 #define coopFinite(x) ((x) == (x) && ((x) - (x)) == 0.0f)
 
 #define COOP_CHAR_FILE  "coop_character.txt"
+#define COOP_CHAR_VERSION 2   /* 1: beside the game, no header (port_save.h) */
 #define COOP_CHAR_COUNT (PORT_MP_CHAR_COUNT + 1)    /* the mission's Bond, then the roster */
 #define COOP_MISS_RANGE 3000.0f                     /* a shot that hit nothing: the tracer's length */
 
@@ -77,14 +78,15 @@ s32 coopCharacter(void)
     {
         const char *e = getenv("GE_COOP_CHAR");     /* harness: an mp_chr_setup index, -1 the mission's Bond */
         FILE *f;
+        int version;
 
         sCharacter = 0;
         if (e != NULL)
         {
             sCharacter = atoi(e) + 1;
         }
-        else if ((f = fopen(portRootPath(COOP_CHAR_FILE), "r")) != NULL)
-        {
+        else if ((f = portSaveOpenRead(COOP_CHAR_FILE, COOP_CHAR_FILE, &version)) != NULL)
+        {   /* v1 beside the game, v2 in Data/Saves: one number either way */
             int v = 0;
 
             if (fscanf(f, "%d", &v) == 1)
@@ -114,10 +116,10 @@ void coopSetCharacter(s32 c)
     {
         return; /* the harness's pick is not saved */
     }
-    if ((f = fopen(portRootPath(COOP_CHAR_FILE), "w")) != NULL)
+    if ((f = portSaveOpenWrite(COOP_CHAR_FILE, "coop-character", COOP_CHAR_VERSION)) != NULL)
     {
         fprintf(f, "%d\n", (int) c);
-        fclose(f);
+        portSaveCommit(f);
     }
 }
 
