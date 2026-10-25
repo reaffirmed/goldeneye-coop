@@ -466,6 +466,7 @@ void coopObjApply(s32 kind, const u8 *raw, s32 from);
 
 /* crash and bug reports (port/src/port_report.c): the co-op state as text */
 s32  coopDebugDump(char *buf, s32 cap);
+void coopCrashBye(void);   /* port_report.c: the game crashed, tell the partners */
 
 /* accessibility (coop_access.c) */
 enum { COOPCAP_GUNFIRE, COOPCAP_EXPLOSION, COOPCAP_DOOR, COOPCAP_ALARM, COOPCAP_COUNT };

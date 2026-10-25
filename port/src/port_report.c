@@ -45,6 +45,7 @@ extern const char *portLogPath(const char *name);
 extern void portConPrintf(int showmsg, const char *fmt, ...);
 extern void portConLogf(const char *fmt, ...);
 extern int coopDebugDump(char *buf, int cap);   /* src/game/coop.c */
+extern void coopCrashBye(void);                 /* src/game/coop.c */
 extern int ge_shot_force;                       /* gfx_sdl2.cpp */
 extern char ge_shot_path[512];
 
@@ -666,6 +667,10 @@ void portReportCrash(void *ctx, const char *what)
 
     reportWriteInfo(sCrashDir, what);
     reportWriteCommon(sCrashDir);
+    /* the partners hear now, not after the silence: a crashed host's
+     * partners pick a new one at once (after coop.txt, which is the state
+     * before it) */
+    coopCrashBye();
     reportPath(path, sizeof(path), sCrashDir, "crash.log");
     reportCopy(portLogPath("crash.log"), path, 0);
 #ifdef _WIN32

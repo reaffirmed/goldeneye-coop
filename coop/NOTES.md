@@ -807,3 +807,20 @@ satellite-console work and the Runway plane did nothing on the host.
   GE_COOP_TESTDROPIN=<s> holds the watch at least <s> s for screenshots.
   Verified: rejoiner and a fresh third player both dropped in mid-mission
   on the mock Steam.
+
+## Faster host migration (2026-10-25)
+
+- A crashed or stalled host says goodbye from its crash report
+  (port_report.c portReportCrash calls coopCrashBye after the text files,
+  before the minidump and the question): BYE HANDOFF to the next player, so
+  the partners migrate at once. Verified with GE_CRASHTEST on the host in
+  host_drop.sh (KILLAT=none): "the host handed over", the new host took
+  over 36 chrs.
+- A host that just goes silent (killed, cable pulled): COOP_SILENT_MS 3 s ->
+  2 s, then COOP_HOST_WAIT_MS 12 s -> 3.5 s once we have played the same
+  mission together for 10 s (coopHostWaitMs); early in a mission or in the
+  menus the old 12 s stays (COOP_HOST_WAIT_LOAD_MS) so a slower PC's load is
+  not taken for a crash. About 5.5 s instead of 15 s (host_drop.sh KILL=1).
+- The world the new host takes over is unchanged here (AI sync each second,
+  mirrored doors and objects); the netcode thread's coop_repl.c adds its
+  snapshot through coopReplMigrated.

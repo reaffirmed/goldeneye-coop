@@ -4162,7 +4162,9 @@ s32 coopSessionActive(void)
  * The host runs the world (guards, scripts, doors, objects), so losing it is
  * the hard case. A joiner that hears nothing from the host for
  * COOP_SILENT_MS shows a banner and waits COOP_HOST_WAIT_MS for it to come
- * back (a hitch, a slow load). After that, or at once when the host says
+ * back (a hitch), COOP_HOST_WAIT_LOAD_MS early in a mission or in the menus
+ * (a slow load). A host that crashes says goodbye from its crash report
+ * (coopCrashBye), so its partners do not wait at all. After that, or at once when the host says
  * goodbye (COOPPKT_BYE) or leaves the Steam lobby, the players still here
  * pick a new host: the lowest player number left in the host's last roster.
  * Everyone renumbers in that order (the new host 0, the rest 1..), the new
@@ -4181,8 +4183,9 @@ s32 coopSessionActive(void)
  * (the watch's Abort) is asked whether to hand the mission over or end it
  * for everyone. */
 
-#define COOP_SILENT_MS        3000    /* nothing from the host this long: say so */
-#define COOP_HOST_WAIT_MS     12000   /* and wait this much longer for it to come back */
+#define COOP_SILENT_MS        2000    /* nothing from the host this long: say so */
+#define COOP_HOST_WAIT_MS     3500    /* and, mid-mission, wait this much longer for it to come back */
+#define COOP_HOST_WAIT_LOAD_MS 12000  /* or this long while it may still be loading (a slower PC) */
 #define COOP_NEWHOST_WAIT_MS  8000    /* the player picked to host must answer within this */
 #define COOP_LOST_MS          3000    /* host: a joiner quiet this long has lost its connection */
 #define COOP_DROP_MS          30000   /* and is gone after this long lost */
@@ -4190,6 +4193,17 @@ s32 coopSessionActive(void)
 #define COOP_HOSTTITLE_MS     2000    /* joiner: the host back in the menus this long, mid-mission */
 
 enum { HOSTW_NONE, HOSTW_SILENT, HOSTW_NEWHOST };
+
+/* how long a silent host gets: short once we both play the same mission
+ * (it was there a moment ago: a crash or a lost connection, not a load) */
+static u32 coopHostWaitMs(void)
+{
+    if (coopInMission() && sMissionTicks > 600 && sHostHello.stage == bossGetStageNum())
+    {
+        return COOP_HOST_WAIT_MS;
+    }
+    return COOP_HOST_WAIT_LOAD_MS;
+}
 
 static u32 sHostWaitMs;         /* when the current wait began */
 static s32 sHostLeftHow;        /* 0 went quiet, else COOPBYE_* (a lobby leave counts as COOPBYE_LEAVE) */
@@ -4288,6 +4302,20 @@ static void coopAtExit(void)
         }
         coopSendBye(coopNetIsHost() ? COOPBYE_HANDOFF : COOPBYE_LEAVE, coopNetIsHost() ? coopNextHost() : 0);
     }
+}
+
+/* port_report.c, the game crashed or stalled (its report's text is written):
+ * the same goodbye, without the AI sync, which may be what broke. Once. */
+void coopCrashBye(void)
+{
+    static s32 done;
+
+    if (done || sEnabled <= 0 || !coopNetIsOpen() || !coopNetHasPeer())
+    {
+        return;
+    }
+    done = 1;
+    coopSendBye(coopNetIsHost() ? COOPBYE_HANDOFF : COOPBYE_LEAVE, coopNetIsHost() ? coopNextHost() : 0);
 }
 
 /* the lobby's Leave (a host hands the lobby to the next player) */
@@ -4931,7 +4959,7 @@ static void coopSessionTick(void)
             {
                 coopHostGone(COOPBYE_LEAVE);
             }
-            else if (now - sHostWaitMs > COOP_HOST_WAIT_MS)
+            else if (now - sHostWaitMs > coopHostWaitMs())
             {
                 coopHostGone(0);
             }
@@ -4975,7 +5003,7 @@ s32 coopHudSessionBanner(char *line1, char *line2, s32 cap)
     }
     if (sHostWaiting == HOSTW_SILENT)
     {
-        s32 left = (s32) (COOP_HOST_WAIT_MS - (now - sHostWaitMs) + 999) / 1000;
+        s32 left = (s32) (coopHostWaitMs() - (now - sHostWaitMs) + 999) / 1000;
 
         snprintf(line1, cap, "HOST NOT RESPONDING: %s", coopPlayerName(0));
         snprintf(line2, cap, coopHostLeavesRule() == 1 ? "BACK TO THE LOBBY IN %d" : "WAITING FOR THE HOST %d",
