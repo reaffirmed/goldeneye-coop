@@ -673,3 +673,47 @@ satellite-console work and the Runway plane did nothing on the host.
   and both games finish the mission, with the plane taking off on both
   screens; on Surface the joiner's Use on the dish console runs the host's
   script, and the joiner shooting it reaches the host as OBJDMG.
+
+## Netcode 1: every setup object replicated from the host (2026-10-25)
+
+- Why: the events (doors, OBJDMG, pickups, knocks, Use) only carry the
+  changes someone hooked, and only to players already in the mission. Level
+  scripts change objects in ways no event covers (locks, flags, AI_DestroyObject,
+  AI_MoveObject), and a late joiner never heard what happened before it came.
+- src/game/coop_repl.c. Each setup object (the prop def types
+  cleanup_objects.c frees; Dam has 241) is a record: present, in the
+  sender's inventory, destroyed level, flags and flags2 (minus
+  PROPFLAG_INMOTION and PROPFLAG_00000100, which each world keeps itself),
+  door lock / open / still / destroyed, and position plus the 3x3 of obj->mtx
+  for loose objects at rest (no parent, not moving, not a vehicle or door).
+  COOPPKT_REPL (20), 16 records a packet, unreliable.
+- Host: when a player's puppet first appears in the mission (and after a
+  migration, coopReplMigrated from coopMigrate) the whole list goes to them,
+  2 packets a tick, and applies at once (coopReplSnapshotDone() on the joiner
+  once it is all in). Otherwise it walks the list a packet every 6 ticks per
+  player (about 12 KB/s for Dam; the checksum work replaces most of this).
+- Joiner: compares each record with its own capture. Outside a snapshot a
+  difference must last 90 ticks before it is corrected (events in flight,
+  doors on their own auto-close timers). Corrections only move toward the
+  host and never undo: gone there and not in our hands: objFreePermanently;
+  in the host's inventory: the shared pickup (coopReplTeamPick); destroyed
+  further: AI_DestroyObject's damage until the level matches; flags, lock,
+  door open/shut once both doors are still; moved: the host's position and
+  rotation (as objDetach places an object). Doors and damage go through
+  coopReplDoorSet / coopReplDestroy so they send no events back.
+- Found on the way: Dam's first gate keeps PROPFLAG_DOOR_KEEPOPEN on a joiner
+  that arrives after the host opened it (doorStartOpen clears it), so its
+  door auto-closed differently; the join snapshot now corrects both.
+- Not covered here: runtime objects (thrown items, dropped guns:
+  coop_items.c's ids), chrs (guard snapshots), stage flags, alarm and
+  criteria (the WORLD packet).
+- COOP_VERSION stays 9: older builds ignore type 20. Ids for the netcode
+  work: COOPPKT 20..23, COOPEV 48..55.
+- Harness: GE_COOP_TESTREPL=<s> on the host: <s> seconds in, the nearest
+  loose object is moved 5 m ahead on the left and destroyed, the next moved
+  ahead on the right, the next one's flags2 changed, the nearest door's
+  lock flipped, all without events. Verified with the mock: a joiner already
+  in gets all four within a cycle (screens/netcode/repl-before-* and
+  repl-after-*, host left, joiner right); a joiner arriving after them gets
+  them from the join snapshot ("join snapshot applied, 241 objects, 4
+  corrected"); 3 players through the lobby, both joiners corrected.

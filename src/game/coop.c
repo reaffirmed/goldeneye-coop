@@ -880,6 +880,10 @@ static void coopPollNet(void)
         {
             coopExtPacket(buf, n, coopPlayerOfChan(c));
         }
+        if (p->type == COOPPKT_REPL)
+        {
+            coopReplPacket(buf, n, coopPlayerOfChan(c));
+        }
     }
 }
 
@@ -1059,6 +1063,7 @@ void coopStageStart(void)
     coopVersusStageStart();
     coopPingStageStart();
     coopItemsStageStart();
+    coopReplStageStart();
 }
 
 static void coopTickBody(void);
@@ -1130,6 +1135,7 @@ static void coopTickBody(void)
     {
         coopSendWorld();
     }
+    coopReplTick(sMissionTicks);    /* every setup object's state, from the host (coop_repl.c) */
 
     {   /* GE_COOP_TRACE=<chrnum>: log one chr on both sides to compare */
         static s32 trace = -2;
@@ -4554,6 +4560,7 @@ static void coopMigrate(void)
         sMigNewHost = list[0];
     }
     sMigrated = 1;
+    coopReplMigrated();     /* the new host's world is the one everyone follows now */
     if (coopHostLeavesRule() == 1 && coopInMission())
     {
         sPendingEnd = 1;    /* the lobby's rule: back to the lobby, with the new host */
@@ -5438,4 +5445,49 @@ void coopAsciiName(char *out, s32 cap, const char *in, s32 upper)
         out[n++] = '?';
     }
     out[n] = '\0';
+}
+
+
+/* ---- object replication (coop_repl.c) ------------------------------------- */
+
+s32 coopReplPlayerHere(s32 p)
+{
+    return p >= 0 && p < COOP_MAX_PLAYERS && p != coopSelf() && coopRemoteHere(p) && sR[p].puppet != NULL;
+}
+
+s32 coopReplHostHere(void)
+{
+    return sEnabled > 0 && !coopNetIsHost() && coopInMission() && coopRemoteHere(0);
+}
+
+void coopReplDoorSet(DoorRecord *door, s32 state)
+{
+    sApplyingRemoteDoor = 1;
+    doorSetOpenState(door, state);
+    sApplyingRemoteDoor = 0;
+}
+
+void coopReplDestroy(ObjectRecord *obj)
+{
+    f32 damage = ((obj->damage - obj->maxdamage) + 1) / 250.0f;   /* as AI_DestroyObject */
+
+    sApplyingRemoteObj = 1;
+    objApplyDamage(obj, damage, &obj->runtime_pos, 0x1D, -1);
+    sApplyingRemoteObj = 0;
+}
+
+void coopReplTeamPick(ObjectRecord *obj)
+{
+    s32 ofs = coopSetupOfs(obj);
+    s32 i;
+
+    if (ofs < 0)
+    {
+        return;
+    }
+    i = coopTeamPickAdd(ofs, 0, 0);
+    if (i >= 0 && coopTeamPickTry(i))
+    {
+        sTeamPickDone[i] = 1;
+    }
 }
