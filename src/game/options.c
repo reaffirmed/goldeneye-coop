@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include "coop.h"
 static s32 sPortCoopAbortAsk;   /* co-op host: Abort confirmed once, now hand over or end for everyone */
+static s32 sPortCoopAbortAte;   /* that first confirm press: draw_watch_current_page must not toggle focus off with it */
 #endif
 /* Defined further down, next to the vanilla page drawer they replace; the
  * watch MOUSE layer needs them a few thousand lines earlier. */
@@ -2552,6 +2553,7 @@ void watch_screen0_navigation(void)
         {   /* a co-op host is asked first: hand the mission over, or end it
              * for everyone (draw_abort_cancel_confirm shows the choice) */
             sPortCoopAbortAsk = 1;
+            sPortCoopAbortAte = 1;
             return;
         }
         if (sPortCoopAbortAsk)
@@ -8426,6 +8428,10 @@ const char D_80058454[] = " \n\n";
  */
 Gfx *draw_watch_current_page(Gfx *gdl, Mtx *arg1, s32 watch_transitioning)
 {
+#ifndef TARGET_N64
+    s32 coopabortate;
+#endif
+
     set_page_rectangle_colors(watch_screen_index, (struct WatchVertex *)g_CurrentPlayer->buffer_for_watch_greenbackdrop_vertices);
 
     if (watch_transitioning == TRUE)
@@ -8439,6 +8445,8 @@ Gfx *draw_watch_current_page(Gfx *gdl, Mtx *arg1, s32 watch_transitioning)
          * swallow left armed would eat A on the other four). NOT the tick
          * itself: that would run the listener twice a frame. */
         portWatchAssignSwallowPoll();
+        coopabortate = sPortCoopAbortAte;   /* only ever this frame's press */
+        sPortCoopAbortAte = 0;
 #endif
         // Handle A or Z button click when in any page but inventory page
         if ((watch_screen_index != WATCH_INDEX_INVENTORY) && (joyGetButtonsPressedThisFrame(PLAYER_1, Z_TRIG|A_BUTTON))
@@ -8447,6 +8455,14 @@ Gfx *draw_watch_current_page(Gfx *gdl, Mtx *arg1, s32 watch_transitioning)
 #endif
             )
         {
+#ifndef TARGET_N64
+            if (coopabortate)
+            {   /* the press that opened the co-op host's choice: the toggle
+                 * would unfocus the row and draw_abort_cancel_confirm would
+                 * then drop the choice, so Abort did nothing */
+            }
+            else
+#endif
 #ifndef TARGET_N64
             if (portInputAssignActive() || portWatchAssignSwallowing())
             {
