@@ -783,3 +783,27 @@ satellite-console work and the Runway plane did nothing on the host.
   Steam) reuses one buffer.
 - Harness: GE_COOP_FAKEVER=<n> makes this copy claim co-op version <n>
   (two_player_lobby.sh with JOINENV="GE_COOP_FAKEVER=8").
+
+## Drop-in (2026-10-25)
+
+- A joiner that follows the host into a mission over 10 s old (sLateJoin,
+  as before) no longer jumps straight onto the host. coopDropInTick (coop.c)
+  watches a partner through coop_spectate.c (coopSpectateDropIn: alive, no
+  red wash) and comes in by the respawn rules: beside the calmest partner
+  once they have been out of a fight for 4 s, at most 20 s, never before 2 s
+  of watching, and after coopReplSnapshotDone() (a weak default returns 1;
+  the netcode thread's coop_repl.c overrides it with the join snapshot).
+  Nobody standing for 60 s: it plays from the level's start.
+- Until it arrives it sends no STATE, so the host has no puppet of it at the
+  level's start for guards to shoot. The HUD banner says "DROPPING IN BESIDE
+  <name>" with a countdown; the feed says "Dropped in beside <name>".
+- Public Games: the host sets lobby data gemission=1 while in a mission
+  (coopSteamSetInMission from coopBrowseTick) and the row's action reads
+  "Drop In" instead of "Join". Invites and Join a Friend's Game drop in the
+  same way.
+- Harness: coop/docker/drop_in.sh (the joiner is killed at KILLAT and comes
+  back), coop/docker/public_drop_in.sh (a third copy, nobody's friend, finds
+  the game under Public Games at LATE s; THIRD=browse joins it).
+  GE_COOP_TESTDROPIN=<s> holds the watch at least <s> s for screenshots.
+  Verified: rejoiner and a fresh third player both dropped in mid-mission
+  on the mock Steam.

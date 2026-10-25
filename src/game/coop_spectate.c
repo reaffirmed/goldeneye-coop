@@ -9,6 +9,9 @@
  * When we are back (or the mission ends) the view is ours again; the respawn
  * fades in from black as before.
  *
+ * A drop-in (coop.c coopDropInTick: joined a mission under way) watches the
+ * same way while it waits for a quiet moment, alive and without the wash.
+ *
  * bondview2.c asks here before it uses our camera or our room:
  *   - bondviewRenderDebugBondView: coopSpectateCamera
  *   - bondviewGetCurrentPlayersRoom / Position / Position3: coopSpectateRoom,
@@ -36,6 +39,7 @@ extern f32 bondviewYPositionRelated(StandTile *stan, f32 x, f32 z);
 
 static s32 sTarget = -1;        /* the partner we watch, -1: none */
 static s32 sLive;              /* we came back in on a partner */
+static s32 sDropIn;            /* watching while we drop in, not dead */
 static coord3d sPos;            /* their eyes */
 static coord3d sPos3;           /* their feet, for the portal walk */
 static f32 sYaw, sPitch;
@@ -92,7 +96,10 @@ void coopSpectateTick(void)
             return;
         }
         sLive = 1;
-        currentPlayerAdjustFade(COOPSPEC_FADE, 150, 0, 0, 0.18f);   /* a red wash: we are watching */
+        if (!sDropIn)
+        {
+            currentPlayerAdjustFade(COOPSPEC_FADE, 150, 0, 0, 0.18f);   /* a red wash: we are watching */
+        }
         portConLogf("ge: coop: spectating player %d\n", sTarget + 1);
     }
     if (joyGetButtonsPressedThisFrame(0, Z_TRIG))
@@ -122,10 +129,17 @@ void coopSpectateStop(void)
     sTarget = -1;
 }
 
+/* coopDropInTick: start (1) or end (0) watching while we drop in */
+void coopSpectateDropIn(s32 on)
+{
+    sDropIn = on;
+    coopSpectateStop();
+}
+
 /* the partner we watch, -1 when the view is our own */
 s32 coopSpectateTarget(void)
 {
-    if (!sLive || sTarget < 0 || g_CurrentPlayer == NULL || !g_CurrentPlayer->bonddead)
+    if (!sLive || sTarget < 0 || g_CurrentPlayer == NULL || (!g_CurrentPlayer->bonddead && !sDropIn))
     {
         sLive = 0;
         sTarget = -1;

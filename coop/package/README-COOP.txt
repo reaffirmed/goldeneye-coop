@@ -204,6 +204,13 @@ to ProjectMidas.exe. Without the file, or without Discord running, the game
 plays as before. Steam starts with the game now so the status shows from
 the first menu; put GE_NO_PRESENCE=1 in the environment to turn both off.
 
+Dropping in
+-----------
+You can join a game that is already in a mission: from an invite, Join a
+Friend's Game, or Public Games (the row says "Drop In"). You watch a
+partner for a moment and come in beside them once things are quiet (at
+most 20 seconds).
+
 Accessibility
 -------------
 Options > Gameplay > Accessibility:

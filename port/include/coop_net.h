@@ -73,6 +73,8 @@ void coopSteamSetJoinPassword(const char *password);
 int  coopSteamAdmitWaiting(void);       /* joiner: the host is checking our password */
 const char *coopSteamRefusedBuild(void); /* after refusal 3: the host's build */
 const char *coopSteamOwnBuild(void);
+int  coopSteamBrowseInMission(int i);   /* the public game is in a mission: Drop In */
+void coopSteamSetInMission(int on);     /* host: in a mission or not */
 int  coopSteamJoinRefused(void);        /* once, after a wrong password */
 
 void coopSteamSetJoinPasswordHash(unsigned int hash);  /* a Discord join secret carries the hash, not the password */

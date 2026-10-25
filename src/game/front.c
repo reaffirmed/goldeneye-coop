@@ -9287,7 +9287,8 @@ static void coopLobbyBuild(void)
             coopLobbyCopyName(name, sizeof(name), coopBrowseName(i));
             name[strlen(name) - 1] = '\0';
             snprintf(label, sizeof(label), "%.30s  %d/%d\n", name, (int) coopBrowseMembers(i), COOP_MAX_PLAYERS);
-            r = coopLobbyAdd(CLROW_JOINPUBLIC, i, label, coopBrowseLocked(i) ? "Password\n" : "Join\n");
+            r = coopLobbyAdd(CLROW_JOINPUBLIC, i, label,
+                             coopBrowseLocked(i) ? "Password\n" : coopBrowseInMission(i) ? "Drop In\n" : "Join\n");
             if (r != NULL && coopBrowseMembers(i) >= COOP_MAX_PLAYERS)
             {
                 r->dim = TRUE;

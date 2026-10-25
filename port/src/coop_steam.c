@@ -60,6 +60,7 @@ typedef unsigned char sbool; /* C++ bool in the DLL: only the low byte is set */
 #define LOBBY_KEY_VERSION "gever"   /* the game's co-op protocol: the list shows only ours */
 #define LOBBY_KEY_BUILD "gebuild" /* the host's build (commit), for the "update needed" line */
 #define LOBBY_KEY_NAME "host"
+#define LOBBY_KEY_MISSION "gemission"   /* "1" while the host is in a mission: Public Games says Drop In */
 #define LOBBY_KEY_PASSWORD "pw"
 
 /* the password handshake: transport-level messages, never handed to the game */
@@ -187,6 +188,7 @@ typedef struct
     char name[32];
     int members;
     int locked;
+    int inmission;
 } SteamPublic;
 static SteamPublic sPublicList[MAX_PUBLIC];
 static int sNumPublic;
@@ -537,6 +539,8 @@ static void onLobbyList(const unsigned char *p)
         e->locked = (v != NULL && strcmp(v, "1") == 0);
         v = pGetLobbyData(sMM, lobby, LOBBY_KEY_NAME);
         snprintf(e->name, sizeof(e->name), "%s", (v != NULL && v[0] != '\0') ? v : "?");
+        v = pGetLobbyData(sMM, lobby, LOBBY_KEY_MISSION);
+        e->inmission = (v != NULL && strcmp(v, "1") == 0);
         e->members = pGetNumLobbyMembers(sMM, lobby);
         sNumPublic++;
     }
@@ -1299,6 +1303,29 @@ int coopSteamBrowseMembers(int i)
 int coopSteamBrowseLocked(int i)
 {
     return i >= 0 && i < sNumPublic && sPublicList[i].locked;
+}
+
+int coopSteamBrowseInMission(int i)
+{
+    return i >= 0 && i < sNumPublic && sPublicList[i].inmission;
+}
+
+/* host: in a mission (1) or in the menus (0), for Public Games */
+void coopSteamSetInMission(int on)
+{
+    static int last = -1;
+
+    on = on != 0;
+    if (!sReady || !sIsHost || sLobby == 0)
+    {
+        last = -1;
+        return;
+    }
+    if (on != last)
+    {
+        last = on;
+        pSetLobbyData(sMM, sLobby, LOBBY_KEY_MISSION, on ? "1" : "0");
+    }
 }
 
 unsigned long long coopSteamBrowseLobby(int i)

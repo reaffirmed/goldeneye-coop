@@ -99,6 +99,12 @@ s32 coopBrowseLocked(s32 i)
     return coopSteamBrowseLocked(i);
 }
 
+/* the public game is in a mission: joining drops in (coop.c coopDropInTick) */
+s32 coopBrowseInMission(s32 i)
+{
+    return coopSteamBrowseInMission(i);
+}
+
 static void coopBrowseJoinWith(s32 i, const char *pw)
 {
     unsigned long long lobby = coopSteamBrowseLobby(i);
@@ -322,6 +328,7 @@ void coopBrowseTick(s32 inmission)
         coopBrowseTypeStop();
         return;
     }
+    coopSteamSetInMission(inmission);   /* host: Public Games shows Drop In while we play */
     if (sDirty)
     {
         sDirty = 0;

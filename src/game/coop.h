@@ -216,6 +216,7 @@ s32  coopBrowseCount(void);             /* -1 still looking */
 const char *coopBrowseName(s32 i);
 s32  coopBrowseMembers(s32 i);
 s32  coopBrowseLocked(s32 i);
+s32  coopBrowseInMission(s32 i);
 void coopBrowseJoin(s32 i);
 s32  coopBrowseChecking(void);
 s32  coopBrowseRefused(void);
@@ -251,6 +252,7 @@ Gfx *coopPhotoRender(Gfx *gdl);
 /* watching a partner while we are down (coop_spectate.c) */
 void coopSpectateTick(void);
 void coopSpectateStop(void);
+void coopSpectateDropIn(s32 on);
 s32  coopSpectateTarget(void);
 s32  coopSpectateCamera(struct coord3d *pos, struct coord3d *look, struct coord3d *up);
 s32  coopSpectateRoom(u8 *room);
