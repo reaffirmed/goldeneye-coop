@@ -77,11 +77,13 @@ void set_missionstate(MISSION_STATE_ID state);
 extern void portConLogf(const char *fmt, ...);
 
 #define COOP_MAGIC   0x50434547u /* "GECP" */
-#define COOP_VERSION 9 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
+#define COOP_VERSION 10 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
                           6: host migration (AI sync, bye, addresses in the roster);
                           7: pings, chat, objective credit, team times, cross-save (COOPEV 16, 20..31, COOPPKT 10);
                           8: versus (COOPEV 32..36, COOPPKT 16);
-                          9: shared pickups, thrown items, drops, knocks, Use, host blasts (COOPEV 17, 18, 25..28) */
+                          9: shared pickups, thrown items, drops, knocks, Use, host blasts (COOPEV 17, 18, 25..28);
+                          10: hold Use to revive (STATE revive), more stats (COOPEV 56..63, COOPPKT 24..25 kept for
+                              revive, cutscenes and the results) */
 
 enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7, COOPPKT_AISYNC = 8, COOPPKT_BYE = 9 };
 /* 10 and 11 (COOPPKT_EXT_FIRST..LAST in coop.h) are coop_ext.c's features' own packets */
@@ -103,7 +105,8 @@ typedef struct
     s32 respawn;    /* dead and waiting: ticks to the respawn (bleed-out under revive only), else -1 */
     s32 downrule;   /* the rule the sender plays by */
     u8 player;      /* whose Bond (the host stamps a joiner's before relaying it) */
-    u8 pad;
+    u8 revive;      /* standing: the player we hold Use over to revive, + 1 (0 none); down: ticks of
+                       COOP_REVIVE_HOLD the reviver has held (coop_revive.c) */
     u16 calm;       /* ticks since the sender was last in a fight (capped) */
     CoopLook look;  /* guns, movement, shots and character (coop_look.c) */
 } CoopStatePkt;
@@ -326,6 +329,7 @@ static u32 sLastFightTick;  /* host: a guard was attacking someone */
 static f32 sLastHealth;
 static s32 sLastWeapon = ITEM_UNARMED;
 static u32 sDeadSince;      /* sTick our Bond's death fade finished, 0 alive */
+static s32 sReviveHold;     /* while down: ticks a partner has held Use over us */
 static s32 sDefsBytes;  /* size of the stage's setup prop defs */
 static void *sDefsBase;
 static u32 sTick;
@@ -582,6 +586,7 @@ static void coopSendState(void)
     p.respawn = coopRespawnEta();
     p.downrule = sDownRule;
     p.player = (u8) coopSelf();
+    p.revive = (u8) (p.dead ? ((sDeadSince != 0 && sReviveHold < 255) ? sReviveHold : 0) : coopReviveTarget());
     p.calm = (u16) coopLocalCalm();
     coopNetSend(&p, sizeof(p));
 
@@ -1118,6 +1123,7 @@ static void coopTickBody(void)
         return;
     }
     coopStatsMissionTick(coopPartnerHere());
+    coopReviveTick((s32) sMissionTicks);   /* hold Use over a downed partner (coop_revive.c) */
     coopSendState();
     coopTrackCombat();
     coopPingTick();
@@ -3273,11 +3279,8 @@ static s32 coopLocalCalm(void)
 static coord3d sDeathPos;
 static StandTile *sDeathStan;
 static f32 sDeathYaw;
-static s32 sReviveHold;     /* ticks the partner has stood over us */
 static s32 sBledOut;
 
-#define COOP_REVIVE_DIST   140.0f  /* the partner within this of where we fell (xz) */
-#define COOP_BLEED_OUT     3600    /* revive only: 60 s down and you are out of this mission */
 
 /* A lobby setting (COOPSET_*): the host sets them on the lobby screen, the
  * joiner's game takes the host's from each hello. 0 is every setting's default. */
@@ -3370,12 +3373,12 @@ s32 coopDeadTick(void)
         }
         sDeathYaw = 6.2831855f - bondviewGetPlayerYawRadians();
         hudmsgBottomShow(sDownRule == COOPDOWN_TIMER ? "Waiting for your partners to get clear...\n"
-                                                     : "Down! A partner can revive you.\n");
+                                                     : "Down! A partner can hold Use by you to revive you.\n");
         portConLogf("ge: coop: dead, rule %d\n", sDownRule);
     }
     dead = sTick - sDeadSince;
 
-    /* revive: a partner stands where we fell */
+    /* revive: a partner holds Use beside where we fell (their STATE names us, coop_revive.c) */
     if (sDownRule != COOPDOWN_TIMER && !sBledOut && sDeathStan != NULL)
     {
         s32 over = -1;
@@ -3386,7 +3389,8 @@ s32 coopDeadTick(void)
             f32 dz = sR[p].st.pos[2] - sDeathPos.f[2];
             f32 dy = sR[p].st.pos[1] - sDeathPos.f[1];
 
-            if (coopRemoteAliveHere(p) && dx * dx + dz * dz < COOP_REVIVE_DIST * COOP_REVIVE_DIST && dy < 250.0f && dy > -250.0f)
+            if (coopRemoteAliveHere(p) && sR[p].st.revive == coopSelf() + 1
+                && dx * dx + dz * dz < COOP_REVIVE_DIST * COOP_REVIVE_DIST && dy < 250.0f && dy > -250.0f)
             {
                 over = p;
             }
@@ -3398,6 +3402,7 @@ s32 coopDeadTick(void)
                 portConLogf("ge: coop: revived by player %d after %.1f s\n", over + 1, dead / 60.0f);
                 sR[over].puppetGhost = 1;
                 coopRespawnPlayerAt(&sDeathPos, sDeathStan, sDeathYaw, sLastWeapon);
+                g_CurrentPlayer->bondhealth = 0.5f;     /* back on your feet, not fresh */
                 hudmsgBottomShow("Revived!\n");
                 coopStatsNote(COOPSTAT_REVIVED);
                 sLastHealth = g_CurrentPlayer->bondhealth;
@@ -3518,6 +3523,7 @@ s32 coopHudPartnerAt(s32 i, CoopHudPartner *out)
     out->armour = st->armour;
     out->respawn = st->respawn;
     out->revivable = st->dead && st->downrule != COOPDOWN_TIMER && (st->downrule != COOPDOWN_REVIVE || st->respawn > 0);
+    out->revivehold = st->dead ? st->revive : 0;
     out->name = coopPlayerName(p);
     out->player = p;
     return 1;
@@ -3537,6 +3543,18 @@ s32 coopHudDownRule(void)
 s32 coopHudReviveHold(void)
 {
     return (sDeadSince != 0) ? sReviveHold : 0;
+}
+
+s32 coopHudBleedOut(void)
+{
+    u32 dead;
+
+    if (sEnabled <= 0 || sDownRule != COOPDOWN_REVIVE || sBledOut || !g_CurrentPlayer->bonddead)
+    {
+        return -1;
+    }
+    dead = (sDeadSince != 0) ? sTick - sDeadSince : 0;
+    return (dead < COOP_BLEED_OUT) ? (s32) (COOP_BLEED_OUT - dead) : 0;
 }
 
 s32 coopHudBledOut(void)

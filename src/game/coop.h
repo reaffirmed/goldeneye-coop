@@ -44,7 +44,8 @@ typedef struct
     f32 health;
     f32 armour;
     s32 respawn;        /* ticks, -1 = not waiting */
-    s32 revivable;      /* down, and walking over them brings them back */
+    s32 revivable;      /* down, and holding Use beside them brings them back */
+    s32 revivehold;     /* down: ticks of COOP_REVIVE_HOLD someone has held Use over them */
     const char *name;
     s32 player;         /* their player number, 0 the host */
 } CoopHudPartner;
@@ -53,8 +54,16 @@ s32  coopHudPartnerAt(s32 i, CoopHudPartner *out);  /* the i-th, from 0 */
 s32  coopHudRespawnEta(void);
 s32  coopHudDownRule(void);
 s32  coopHudReviveHold(void);   /* ticks of COOP_REVIVE_HOLD */
-#define COOP_REVIVE_HOLD 45        /* the partner stands where we fell for 3/4 s */
+#define COOP_REVIVE_HOLD 150       /* a partner holds Use beside where we fell for 2.5 s */
+#define COOP_REVIVE_DIST 160.0f    /* ... within this of us (xz), and 250 up or down */
+#define COOP_BLEED_OUT   3600      /* revive only: 60 s down and you are out of this mission */
 s32  coopHudBledOut(void);
+s32  coopHudBleedOut(void);     /* revive only: ticks left before we bleed out, -1 none */
+
+/* reviving a downed partner (coop_revive.c) */
+void coopReviveTick(s32 missionticks);
+s32  coopReviveTarget(void);    /* STATE: the player we hold Use over, + 1; 0 none */
+s32  coopReviveHud(CoopHudPartner *out, s32 *hold);
 
 /* Lobby settings the host picks and the joiner's game copies (coopSetting).
  * Append only: 0 must stay each one's default. */
@@ -185,7 +194,7 @@ s32  coopHostLeavesCount(void);         /* COOPSET_HOSTLEAVES's rules */
 const char *coopHostLeavesName(s32 rule);
 
 /* end-of-mission stats and the campaign record (coop_stats.c) */
-enum { COOPSTAT_KILLS, COOPSTAT_SHOTS, COOPSTAT_HITS, COOPSTAT_HEAD, COOPSTAT_DEATHS, COOPSTAT_REVIVED, COOPSTAT_RESPAWNS, COOPSTAT_COUNT };
+enum { COOPSTAT_KILLS, COOPSTAT_SHOTS, COOPSTAT_HITS, COOPSTAT_HEAD, COOPSTAT_DEATHS, COOPSTAT_REVIVED, COOPSTAT_RESPAWNS, COOPSTAT_REVIVES, COOPSTAT_COUNT };
 void coopStatsMissionStart(void);
 void coopStatsMissionTick(s32 partnerhere);
 void coopStatsFrontTick(void);
