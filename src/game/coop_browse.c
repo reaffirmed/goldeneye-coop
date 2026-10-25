@@ -49,7 +49,7 @@ static s32 sLineLen;
 static u32 sNow;
 static u32 sLastRefresh;
 static s32 sRefused;            /* ticks left on "Wrong password" */
-static s32 sRefusedWhy;         /* coopSteamJoinRefused's answer: 1 password, 2 kept out */
+static s32 sRefusedWhy;         /* coopSteamJoinRefused's answer: 1 password, 2 kept out, 3 another version */
 
 /* ---- the host's options ---------------------------------------------------- */
 
@@ -138,7 +138,38 @@ s32 coopBrowseRefused(void)
 /* what to say while coopBrowseRefused: the password, or a lobby Steam kept us out of */
 const char *coopBrowseRefusedText(void)
 {
+    if (sRefusedWhy == 3)
+    {
+        return "Update needed to join.\n";
+    }
     return (sRefusedWhy == 2) ? "Couldn't join that game.\n" : "Wrong password.\n";
+}
+
+/* the dim line under it, "" for none */
+const char *coopBrowseRefusedHint(void)
+{
+    static char text[64];
+
+    if (sRefusedWhy == 2)
+    {   /* Steam kept us out: friends only (a Discord join from someone who
+         * isn't the host's Steam friend), full, or gone */
+        return "It's full, or friends only.\n";
+    }
+    if (sRefusedWhy == 3)
+    {   /* builds are commits: 7 characters is enough to tell them apart */
+        const char *theirs = coopSteamRefusedBuild();
+
+        if (theirs[0] != '\0')
+        {
+            snprintf(text, sizeof(text), "Host %.7s, you %.7s\n", theirs, coopSteamOwnBuild());
+        }
+        else
+        {
+            snprintf(text, sizeof(text), "Host is on another build.\n");
+        }
+        return text;
+    }
+    return "";
 }
 
 /* ---- typing a password ---------------------------------------------------------- */
@@ -294,14 +325,17 @@ void coopBrowseTick(s32 inmission)
     if (sDirty)
     {
         sDirty = 0;
-        coopSteamSetLobbyOptions(sPublic, sPassword, coopExtVersion());
+        /* GE_COOP_FAKEVER=<n> (harness): claim another co-op version, to
+         * see the "update needed" line */
+        coopSteamSetLobbyOptions(sPublic, sPassword,
+                                 getenv("GE_COOP_FAKEVER") != NULL ? atoi(getenv("GE_COOP_FAKEVER")) : coopExtVersion());
     }
     {
         const s32 why = coopSteamJoinRefused();
 
         if (why)
         {
-            sRefused = (why == 2) ? 2 * COOPBROWSE_REFUSED : COOPBROWSE_REFUSED;
+            sRefused = (why >= 2) ? 2 * COOPBROWSE_REFUSED : COOPBROWSE_REFUSED;
             sRefusedWhy = why;
         }
     }

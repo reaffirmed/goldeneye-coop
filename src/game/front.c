@@ -9258,10 +9258,9 @@ static void coopLobbyBuild(void)
             {
                 r->colour = 0xA00000FF;
             }
-            if (strncmp(coopBrowseRefusedText(), "Couldn't", 8) == 0)
-            {   /* Steam kept us out: friends only (a Discord join from someone
-                 * who isn't the host's Steam friend), full, or gone */
-                r = coopLobbyAdd(CLROW_TEXT, 0, "It's full, or friends only.\n", "");
+            if (coopBrowseRefusedHint()[0] != '\0')
+            {   /* why: friends only or full, or which build the host has */
+                r = coopLobbyAdd(CLROW_TEXT, 0, coopBrowseRefusedHint(), "");
                 if (r != NULL)
                 {
                     r->colour = PORT_SHEET_COL_DIM;

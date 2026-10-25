@@ -220,6 +220,7 @@ void coopBrowseJoin(s32 i);
 s32  coopBrowseChecking(void);
 s32  coopBrowseRefused(void);
 const char *coopBrowseRefusedText(void);
+const char *coopBrowseRefusedHint(void);
 void coopBrowseTypeStart(s32 kind, s32 forgame);
 s32  coopBrowseTyping(void);
 s32  coopBrowseTypingFor(void);

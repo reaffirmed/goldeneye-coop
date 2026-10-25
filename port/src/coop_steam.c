@@ -47,6 +47,7 @@
 #endif
 
 #include "coop_net.h"
+#include "port_buildinfo.h"
 
 extern void portConLogf(const char *fmt, ...);
 extern const char *portRootPath(const char *name);
@@ -57,6 +58,7 @@ typedef unsigned char sbool; /* C++ bool in the DLL: only the low byte is set */
 #define APPID_SPACEWAR 480
 #define LOBBY_KEY "gecoop"
 #define LOBBY_KEY_VERSION "gever"   /* the game's co-op protocol: the list shows only ours */
+#define LOBBY_KEY_BUILD "gebuild" /* the host's build (commit), for the "update needed" line */
 #define LOBBY_KEY_NAME "host"
 #define LOBBY_KEY_PASSWORD "pw"
 
@@ -172,7 +174,9 @@ static char sVersion[8] = "0";
 /* a joiner's password for the lobby it is joining, and how that went */
 static char sJoinPassword[32];
 static int sAdmitWait;      /* in a passworded lobby: not taken as a player yet */
-static int sJoinRefused;    /* 1: the host turned our password down; 2: Steam kept us out of the lobby */
+static int sJoinRefused;    /* 1: the host turned our password down; 2: Steam kept us out of the lobby;
+                             * 3: the host's game is another co-op version */
+static char sRefusedBuild[16]; /* 3: the host's build, "" if it did not say */
 static int sJoinDirect;     /* joining one lobby by its id (not looking for any friend's) */
 
 /* the lobby screen's Public Games, see coopSteamBrowseRefresh */
@@ -430,6 +434,7 @@ static void applyLobbyOptions(void)
     }
     pSetLobbyType(sMM, sLobby, sPublic ? 2 /* public */ : 1 /* friends only */);
     pSetLobbyData(sMM, sLobby, LOBBY_KEY_VERSION, sVersion);
+    pSetLobbyData(sMM, sLobby, LOBBY_KEY_BUILD, PORT_BUILD_COMMIT);
     snprintf(buf, sizeof(buf), "%s", pGetFriendPersonaName(sFriends, sSelf));
     pSetLobbyData(sMM, sLobby, LOBBY_KEY_NAME, buf);
     pSetLobbyData(sMM, sLobby, LOBBY_KEY_PASSWORD, sPassword[0] != '\0' ? "1" : "0");
@@ -648,6 +653,26 @@ static void onLobbyEnter(const unsigned char *p)
         portConLogf("ge: steam: lobby %llu is not a GoldenEye co-op game\n", lobby);
         pLeaveLobby(sMM, lobby);
         sJoinWanted = 1;
+        return;
+    }
+    tag = pGetLobbyData(sMM, lobby, LOBBY_KEY_VERSION);
+    if (strcmp(sVersion, "0") != 0 && tag != NULL && strcmp(tag, sVersion) != 0)
+    {   /* its packets would never reach us (coop.c drops another version's):
+         * say "update needed" instead of waiting on a game that can't start */
+        char theirs[8];
+        const char *b;
+
+        snprintf(theirs, sizeof(theirs), "%s", tag);   /* the next GetLobbyData can reuse its buffer */
+        b = pGetLobbyData(sMM, lobby, LOBBY_KEY_BUILD);
+        snprintf(sRefusedBuild, sizeof(sRefusedBuild), "%s", b != NULL ? b : "");
+        portConLogf("ge: steam: lobby %llu is co-op version %s (build %s), ours is %s (build %s): update needed\n",
+                lobby, theirs[0] != '\0' ? theirs : "?", sRefusedBuild[0] != '\0' ? sRefusedBuild : "?", sVersion,
+                PORT_BUILD_COMMIT);
+        pLeaveLobby(sMM, lobby);
+        sJoinRefused = 3;
+        sJoinDirect = 0;
+        sJoinWanted = 0;
+        sJoinCall = 0;
         return;
     }
     sLobby = lobby;
@@ -1401,11 +1426,23 @@ int coopSteamAdmitWaiting(void)
 }
 
 /* once after a join failed: 1 the host turned our password down, 2 Steam
- * kept us out (friends only, full, gone) */
+ * kept us out (friends only, full, gone), 3 the host's game is another
+ * co-op version (coopSteamRefusedBuild says which build) */
 int coopSteamJoinRefused(void)
 {
     int r = sJoinRefused;
 
     sJoinRefused = 0;
     return r;
+}
+
+/* after a refusal 3: the host's build ("" if it did not say), and ours */
+const char *coopSteamRefusedBuild(void)
+{
+    return sRefusedBuild;
+}
+
+const char *coopSteamOwnBuild(void)
+{
+    return PORT_BUILD_COMMIT;
 }

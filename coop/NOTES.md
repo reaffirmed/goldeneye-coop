@@ -769,3 +769,17 @@ satellite-console work and the Runway plane did nothing on the host.
 - Harness: GE_CAPTEST=<s> adds one of each caption <s> s after the first
   mission HUD frame and refreshes them for 10 s (logs "ge: captions: test
   caption").
+
+## "Update needed" on a version mismatch (2026-10-25)
+
+- The host's lobby carries gever (COOP_VERSION, already used to filter
+  Public Games) and now gebuild (PORT_BUILD_COMMIT). A joiner arriving by
+  invite, friend list or Discord compares gever in onLobbyEntered
+  (coop_steam.c): another version leaves the lobby at once (coop.c would drop
+  every packet of it anyway) and the lobby screen shows "Update needed to
+  join." with "Host <build>, you <build>" under it (coopSteamJoinRefused 3,
+  coopBrowseRefusedHint).
+- Copy a GetLobbyData answer before the next call: the mock (and possibly
+  Steam) reuses one buffer.
+- Harness: GE_COOP_FAKEVER=<n> makes this copy claim co-op version <n>
+  (two_player_lobby.sh with JOINENV="GE_COOP_FAKEVER=8").
