@@ -2428,6 +2428,42 @@ ObjectRecord *gunCoopSpawnThrown(s32 item, coord3d *pos, Mtxf *rot, coord3d *vel
 
     return (ObjectRecord *) wor;
 }
+
+/* co-op (coop_items.c): a gun a host guard dropped, falling from pos in a joiner's game */
+ObjectRecord *gunCoopSpawnDropped(s32 model, s32 item, coord3d *pos)
+{
+    ObjectRecord *obj;
+    StandTile *tile;
+    Mtxf rot, spin;
+    coord3d velocity = { 0.0f, 0.0f, 0.0f };
+    u8 rooms[8];
+    s32 roomnums[0x14];
+    s32 nrooms;
+
+    tile = stanFindTileBelowPos(pos, NULL, NULL);
+    if (tile == NULL)
+    {
+        return NULL;
+    }
+    obj = create_new_item_instance_of_model(model, item);
+    if (obj == NULL || obj->prop == NULL)
+    {
+        return NULL;
+    }
+    matrix_4x4_set_identity(&rot);
+    matrix_4x4_set_identity(&spin);
+    gunInitProjectileObject(obj, pos, tile, &rot, &velocity, &spin, NULL);
+    if ((obj->runtime_bitflags & RUNTIMEBITFLAG_HASPROJECTILE) != 0)
+    {
+        obj->projectile->flags = (s32) (obj->projectile->flags | 2);
+        obj->projectile->unk8C = 0.1f;
+        obj->projectile->refreshrate = THROWN_ITEM_REFRESH_RATE;
+        rooms[0] = tile->room;
+        rooms[1] = 0xff;
+        bgFindRoomsAlongSegment(pos, pos, rooms, obj->projectile->unkCC, roomnums, &nrooms, 0x14);
+    }
+    return obj;
+}
 #endif
 
 

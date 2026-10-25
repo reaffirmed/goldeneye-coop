@@ -411,6 +411,9 @@ static void coopApplyDoor(s32 doorofs, s32 state);
 static void coopApplyObjDamage(CoopEvent *ev);
 static void coopApplyObjKnock(CoopEvent *ev);
 static void coopApplyObjUse(CoopEvent *ev);
+static s32 sPendingCinemaList;
+static s32 sHostEndingHere;    /* joiner: we play the host's ending; its exit is the host's to send */
+static void coopPendingCinemaTick(void);
 static void coopSendWorld(void);
 static void coopApplyPickup(CoopEvent *ev);
 static void coopApplyMissionEnd(CoopEvent *ev);
@@ -1042,6 +1045,8 @@ void coopStageStart(void)
     sNumPeerHeld = 0;
     memset(sScriptPass, 0, sizeof(sScriptPass));    /* a new mission's scripts */
     sNumTeamPicks = 0;
+    sPendingCinemaList = -1;
+    sHostEndingHere = 0;
     sLastHurtTick = sLastFightTick = sDeadSince = 0;
     sLastHealth = 1.0f;
     sLastWeapon = ITEM_UNARMED;
@@ -1096,6 +1101,7 @@ static void coopTickBody(void)
 
     sTick++;
     coopPollNet();
+    coopPendingCinemaTick();
     coopSessionTick();
     if (bossGetStageNum() != LEVELID_TITLE)
     {
@@ -1389,6 +1395,27 @@ static void coopHarnessTick(void)
                 portConLogf("ge: coop: testgoto -> chr %d at %.0f %.0f %.0f\n", testgoto,
                             c->prop->pos.f[0], c->prop->pos.f[1], c->prop->pos.f[2]);
             }
+        }
+    }
+    if (coopPartnerHere() && coopInMission())
+    {   /* GE_COOP_TESTPAD=<pad>:<s>: <s> seconds into the mission, stand on that (unbound) pad (harness only) */
+        static s32 testpad = -2, padat;
+        if (testpad == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTPAD");
+            testpad = -1;
+            if (e == NULL || sscanf(e, "%d:%d", &testpad, &padat) != 2)
+            {
+                testpad = -1;
+            }
+        }
+        if (testpad >= 0 && sMissionTicks == (u32) padat * 60 && g_CurrentSetup.pads != NULL)
+        {
+            PadRecord *pad = &g_CurrentSetup.pads[testpad];
+            coord3d pos = pad->pos;
+
+            coopRespawnPlayerAt(&pos, pad->stan, 0.0f, sLastWeapon);
+            portConLogf("ge: coop: testpad -> pad %d at %.0f %.0f %.0f\n", testpad, pos.f[0], pos.f[1], pos.f[2]);
         }
     }
     if (coopPartnerHere() && coopInMission())
@@ -1797,8 +1824,8 @@ s32 coopChrTickBegin(ChrRecord *chr)
         return 1;
     }
     if (!coopNetIsHost())
-    {
-        return !coopIsMirroringClient();
+    {   /* our own third-person body in an intro or ending runs its list here */
+        return !coopIsMirroringClient() || (g_CurrentPlayer->prop != NULL && g_CurrentPlayer->prop->chr == chr);
     }
     if (!coopPartnerHere())
     {
@@ -2586,6 +2613,7 @@ void coopDoorStateChanged(DoorRecord *door, s32 state)
     }
     ev.u.door.state = state;
     coopQueueEvent(&ev);
+    portConLogf("ge: coop: our door %d -> state %d, sent\n", ev.u.door.doorofs, state);
 }
 
 static void coopApplyDoor(s32 doorofs, s32 state)
@@ -2814,6 +2842,7 @@ void coopObjUsed(ObjectRecord *obj)
     ev.u.use.objofs = ofs;
     ev.u.use.stage = bossGetStageNum();
     coopQueueEvent(&ev);
+    portConLogf("ge: coop: we used obj %d (type %d), sent to the host\n", ofs, obj->type);
 }
 
 static void coopApplyObjUse(CoopEvent *ev)
@@ -2843,7 +2872,9 @@ static void coopApplyObjUse(CoopEvent *ev)
         }
     }
     obj->runtime_bitflags |= RUNTIMEBITFLAG_ACTIVATED;
-    sub_GAME_7F03E6A0(obj->prop);
+    /* not sub_GAME_7F03E6A0: a door the switch works already moved in the
+     * joiner's game and reached us as a DOOR event; toggling it again here
+     * shut it (the Dam truck gate) */
     coopObjNoteActor(ev->from, 0);  /* an objective the press completes is theirs (coop_objective.c) */
     sApplyingUse = 0;
     portConLogf("ge: coop: player %d used obj %d (type %d)\n", ev->from + 1, ev->u.use.objofs, obj->type);
@@ -3182,6 +3213,11 @@ void coopMissionComplete(void)
     coopCampaignMissionEnd(); /* a win together goes in coop_campaign.txt */
     if (sEnabled <= 0 || sApplyingRemoteEnd || !coopNetHasPeer() || !coopPartnerHere())
     {
+        return;
+    }
+    if (sHostEndingHere && !coopNetIsHost())
+    {   /* our copy of the host's ending ran out first: the host's own ends it for everyone */
+        portConLogf("ge: coop: our copy of the ending finished; the host's ends the mission\n");
         return;
     }
     coopTeamTimeSend();     /* host: the team's time first, so it is in before the debrief (coop_teamtime.c) */
@@ -5167,7 +5203,16 @@ void coopAiCommand(u8 *list, s32 offset, ChrRecord *self)
     s32 len;
     u8 cmd = list[offset];
 
-    if (!coopIsPresentationCmd(cmd) || sApplyingRemoteAi || sEnabled <= 0 || !coopNetIsHost()
+    if (cmd == AI_SetChrAiList && list[offset + 1] == (u8) CHR_BOND_CINEMA)
+    {
+        /* an ending puts the player's own third-person body through a list
+         * (the Dam bungee jump, Runway): each game runs it for its own Bond */
+    }
+    else if (!coopIsPresentationCmd(cmd))
+    {
+        return;
+    }
+    if (sApplyingRemoteAi || sEnabled <= 0 || !coopNetIsHost()
         || !coopNetHasPeer() || !coopPartnerHere())
     {
         return;
@@ -5184,6 +5229,36 @@ void coopAiCommand(u8 *list, s32 offset, ChrRecord *self)
     ev.u.ai.len = (u8) len;
     memcpy(ev.u.ai.cmd, list + offset, len);
     coopQueueEvent(&ev);
+}
+
+/* joiner: an ending's list for our own third-person body, waiting for the
+ * camera switch to make that body (it can lag the command by a few ticks) */
+static s32 sPendingCinemaList = -1;
+static s32 sPendingCinemaWait;
+
+static void coopPendingCinemaTick(void)
+{
+    ChrRecord *bc;
+
+    if (sPendingCinemaList < 0)
+    {
+        return;
+    }
+    bc = (g_CurrentPlayer->prop != NULL) ? g_CurrentPlayer->prop->chr : NULL;
+    if (bc != NULL)
+    {
+        bc->ailist = ailistFindById(sPendingCinemaList);
+        bc->aioffset = 0;
+        bc->sleep = 0;
+        portConLogf("ge: coop: our Bond runs the ending's list %04x\n", sPendingCinemaList);
+        sPendingCinemaList = -1;
+        sHostEndingHere = 1;
+    }
+    else if (--sPendingCinemaWait <= 0)
+    {
+        portConLogf("ge: coop: no third-person Bond for the ending's list %04x\n", sPendingCinemaList);
+        sPendingCinemaList = -1;
+    }
 }
 
 static void coopApplyAiCommand(CoopEvent *ev)
@@ -5214,6 +5289,16 @@ static void coopApplyAiCommand(CoopEvent *ev)
     }
     memcpy(list, ev->u.ai.cmd, ev->u.ai.len);
     list[ev->u.ai.len] = AI_EndList;
+    if (list[0] == AI_SetChrAiList && list[1] == (u8) CHR_BOND_CINEMA)
+    {
+        u16 raw;
+
+        memcpy(&raw, &list[2], sizeof(raw));
+        sPendingCinemaList = ntohs(raw);   /* as the interpreter reads it */
+        sPendingCinemaWait = 300;
+        coopPendingCinemaTick();
+        return;
+    }
     savedlist = chr->ailist;
     savedofs = chr->aioffset;
     chr->ailist = (AIRecord *) list;

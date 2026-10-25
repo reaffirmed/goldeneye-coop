@@ -673,3 +673,24 @@ satellite-console work and the Runway plane did nothing on the host.
   and both games finish the mission, with the plane taking off on both
   screens; on Surface the joiner's Use on the dish console runs the host's
   script, and the joiner shooting it reaches the host as OBJDMG.
+
+### Second Steam test fixes (2026-10-25)
+
+- **Door switches** (Dam truck gate, Facility security computer): a joiner's
+  press already works the linked door in its own game, which reaches the
+  host as a DOOR event; coopApplyObjUse also ran the switch link, so the
+  host flipped the door back. It now only marks the object activated.
+- **Gun drops on a joiner**: dropping the mirrored guard's own gun with
+  objDrop read its stale model matrices (NaN position when off screen or
+  dying), so the gun vanished. The joiner frees that gun and spawns a fresh
+  one at the guard's spot (gun.c gunCoopSpawnDropped).
+- **Endings with Bond in them** (Dam bungee jump, Runway): the host's script
+  hands the player's third-person body (CHR_BOND_CINEMA) a list. That
+  SetChrAiList is now relayed; the joiner gives the list to its own body
+  once the camera switch has made it, and lets that body run its AI
+  (coopChrTickBegin). The joiner's copy reaching exit_level first does not
+  end the mission; the host's does.
+- Logs: "our door N -> state S, sent", "we used obj N, sent to the host",
+  "host guard N dropped item I ... at x y z", "our Bond runs the ending's
+  list". Harness: GE_COOP_TESTPAD=<pad>:<s> stands on that pad (330 is the
+  Dam bungee room).

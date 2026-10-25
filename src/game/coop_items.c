@@ -46,6 +46,8 @@
 extern void portConLogf(const char *fmt, ...);
 extern ObjectRecord *gunCoopSpawnThrown(s32 item, coord3d *pos, Mtxf *rot, coord3d *velocity, Mtxf *spin, s32 timer, PropRecord *owner);
 extern void objFreePermanently(ObjectRecord *obj, bool freeprop);
+extern ObjectRecord *gunCoopSpawnDropped(s32 model, s32 item, coord3d *pos);
+extern void objDetach(PropRecord *prop);
 extern void chrpropReparent(PropRecord *newChild, PropRecord *host);
 extern void chrpropDeregisterRooms(PropRecord *prop);
 extern void chrpropDelist(PropRecord *prop);
@@ -381,13 +383,17 @@ static void coopItemsApplyDrop(const CoopDropMsg *m)
 {
     ChrRecord *chr;
     PropRecord *child;
-    PropRecord *found = NULL;
     ObjectRecord *obj;
+    coord3d pos;
 
     if (m->stage != bossGetStageNum() || coopItemById(m->id) != NULL)
     {
         return;
     }
+    sApplying = 1;
+    /* Our stand-in's own gun goes: dropping it with objDrop reads the stand-in's
+     * model matrices, which are stale (NaN) when it is off screen or mid-death,
+     * and the gun vanished. A fresh one falls from where the guard stood. */
     chr = chrFindByLiteralId(m->chrnum);
     if (chr != NULL && chr->prop != NULL)
     {
@@ -395,55 +401,30 @@ static void coopItemsApplyDrop(const CoopDropMsg *m)
         {
             if (child->type == PROP_TYPE_WEAPON && child->weapon != NULL && child->weapon->weaponnum == m->item)
             {
-                found = child;
+                objDetach(child);
+                objFreePermanently(child->obj, TRUE);
                 break;
             }
         }
     }
-    sApplying = 1;
-    if (found == NULL)
-    {   /* our stand-in did not hold that one: make it */
-        obj = create_new_item_instance_of_model(m->model, m->item);
-        if (obj == NULL || obj->prop == NULL)
-        {
-            sApplying = 0;
-            return;
-        }
-        if (chr != NULL && chr->prop != NULL)
-        {
-            chrpropReparent(obj->prop, chr->prop);
-            found = obj->prop;
-        }
-        else
-        {
-            coord3d pos, vel = { 0.0f, 0.0f, 0.0f };
-            Mtxf rot, spin;
-            StandTile *stan;
-
-            pos.f[0] = m->pos[0];
-            pos.f[1] = m->pos[1] + 60.0f;
-            pos.f[2] = m->pos[2];
-            stan = stanFindTileBelowPos(&pos, NULL, NULL);
-            if (stan == NULL)
-            {
-                objFreePermanently(obj, TRUE);
-                sApplying = 0;
-                return;
-            }
-            matrix_4x4_set_identity(&rot);
-            matrix_4x4_set_identity(&spin);
-            gunInitProjectileObject(obj, &pos, stan, &rot, &vel, &spin, NULL);
-            coopItemAdd(m->id, COOPITEM_DROP, obj);
-            sApplying = 0;
-            portConLogf("ge: coop: host guard %d's drop (item %d) made at %.0f %.0f %.0f\n", m->chrnum, m->item, pos.f[0], pos.f[1], pos.f[2]);
-            return;
-        }
+    pos.f[0] = m->pos[0];
+    pos.f[1] = m->pos[1] + 60.0f;
+    pos.f[2] = m->pos[2];
+    obj = gunCoopSpawnDropped(m->model, m->item, &pos);
+    if (obj == NULL)
+    {
+        pos.f[1] += 150.0f;
+        obj = gunCoopSpawnDropped(m->model, m->item, &pos);
     }
-    propobjSetDropped(found, DROPTYPE_DEFAULT);
-    objDrop(found);
-    coopItemAdd(m->id, COOPITEM_DROP, found->obj);
+    if (obj == NULL)
+    {
+        sApplying = 0;
+        portConLogf("ge: coop: host guard %d's drop (item %d) could not be made at %.0f %.0f %.0f\n", m->chrnum, m->item, pos.f[0], pos.f[1], pos.f[2]);
+        return;
+    }
+    coopItemAdd(m->id, COOPITEM_DROP, obj);
     sApplying = 0;
-    portConLogf("ge: coop: host guard %d dropped item %d (id %04x)\n", m->chrnum, m->item, m->id);
+    portConLogf("ge: coop: host guard %d dropped item %d (id %04x) at %.0f %.0f %.0f\n", m->chrnum, m->item, m->id, pos.f[0], pos.f[1], pos.f[2]);
 }
 
 /* ---- going off, being picked up ------------------------------------------------ */
