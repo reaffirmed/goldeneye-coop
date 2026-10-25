@@ -422,8 +422,9 @@ s32  coopChatTyping(void);
 s32  coopChatEatEscape(void);   /* 1: this Escape was the chat's, not the pause's */
 void coopChatTick(s32 inmission);
 void coopChatApply(const u8 *raw, s32 from);
-void coopFeedToast(const char *text, s32 player);
-void coopFeedClock(void);   /* the feed's clock while co-op is off */   /* centred, the first line in the player's colour (-1 white); '|' starts a second line */
+#define COOPTOAST_ALERT (-2)    /* a toast's "player" for session news (host left, ...): red */
+void coopFeedToast(const char *text, s32 player);   /* bottom left, the lead in the player's colour (-1 white); '|' starts the rest */
+void coopFeedClock(void);   /* the feed's clock while co-op is off */
 Gfx *coopFeedRender(Gfx *gdl);                       /* in play (coop_hud.c) */
 s32  coopFeedLines(s32 maxlines, char lines[][80], s32 *players);  /* the newest chat lines as typed, for the lobby */
 void coopChatTypedLine(char *out, s32 cap);         /* the line being typed */

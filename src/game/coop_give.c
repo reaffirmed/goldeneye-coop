@@ -252,14 +252,14 @@ void coopGiveReceive(CoopGive *give, s32 from)
         coopGiveRounds(rounds, sizeof(rounds), type, a.amount);
         coopGiveWeaponName(gun, sizeof(gun), give->weapon);
         if (a.gotweapon)
-        {   /* two short lines (the HUD queues them): one long one runs into the ammo counter */
-            snprintf(msg, sizeof(msg), "%s gave you the %s.\n", name, gun);
-            hudmsgBottomShow(msg);
+        {   /* a toast each, bottom left (coop_chat.c) */
+            snprintf(msg, sizeof(msg), "%s gave you the %s", name, gun);
+            coopFeedToast(msg, from);
         }
         if (a.amount > 0)
         {
-            snprintf(msg, sizeof(msg), "%s gave you %s.\n", name, rounds);
-            hudmsgBottomShow(msg);
+            snprintf(msg, sizeof(msg), "%s gave you %s", name, rounds);
+            coopFeedToast(msg, from);
         }
         else if (!a.gotweapon)
         {
@@ -296,18 +296,18 @@ void coopGiveReturned(CoopGive *give, s32 from)
     coopGiveWeaponName(gun, sizeof(gun), give->weapon);
     if (give->gotweapon)
     {
-        snprintf(msg, sizeof(msg), "Gave %s the %s.\n", name, gun);
-        hudmsgBottomShow(msg);
+        snprintf(msg, sizeof(msg), "Gave %s the %s", name, gun);
+        coopFeedToast(msg, from);
     }
     if (give->amount > 0)
     {
-        snprintf(msg, sizeof(msg), "Gave %s to %s.\n", rounds, name);
-        hudmsgBottomShow(msg);
+        snprintf(msg, sizeof(msg), "Gave %s to %s", rounds, name);
+        coopFeedToast(msg, from);
     }
     else if (!give->gotweapon)
     {
-        snprintf(msg, sizeof(msg), "%s is full on that ammo.\n", name);
-        hudmsgBottomShow(msg);
+        snprintf(msg, sizeof(msg), "%s is full on that ammo", name);
+        coopFeedToast(msg, from);
     }
 }
 

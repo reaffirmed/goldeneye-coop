@@ -366,8 +366,15 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscen
   after ping: chat (+32, T), photo_mode (+33, P).
 - Chat (coop_chat.c): the port text input (portTextInputStart); a line of up
   to 63 characters goes as up to 3 events of 24. Feed bottom left, 6 lines,
-  10 s, player colours; toasts (coopFeedToast, '|' splits two lines) centred
-  3/8 down. In the lobby the latest 3 lines and a "Type a Message" row.
+  10 s, player colours; toasts (coopFeedToast) stack above the chat lines,
+  newest lowest, 5 s with a short fade in and out: the lead in the player's
+  colour, '|' then the rest in white on the same line (second line when it
+  would pass half the screen). Partner news (joined, left, lost, gives,
+  objectives) and session news (coopBanner: host left, you are the host;
+  red) are toasts; the host-not-answering countdown sits under them while
+  it lasts. The game's own mission text and our own action feedback ("No
+  spare ammo", "Revived!") stay on the game's message line. Harness:
+  GE_COOP_TESTTOASTS=<s> pushes one of each kind every 1.5 s. In the lobby the latest 3 lines and a "Type a Message" row.
   Escape closes the line without opening the watch (coopChatEatEscape).
   Harness: GE_COOP_TESTCHAT=<s>:<text> (mission), GE_COOP_TESTLOBBYCHAT.
 - Objective credit (coop_objective.c): the host notes who changed the world

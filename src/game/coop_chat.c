@@ -14,7 +14,11 @@
  * The feed keeps the newest COOPFEED_LINES lines with who said them; each
  * fades after COOPFEED_SHOW ticks in play (the lobby shows the newest few
  * whatever their age). Toasts (coopFeedToast: a partner completed an
- * objective, ...) show centred near the top for COOPTOAST_SHOW ticks.
+ * objective, joined or left, gave us ammo; the host left, ...) stack above
+ * the chat lines, newest lowest, for COOPTOAST_SHOW ticks, fading in and
+ * out: the lead in the player's colour and the rest after it in white,
+ * word-wrapped to three fifths of the screen, at most three rows. While the host is not
+ * answering (coop.c coopHudSessionBanner) that notice sits under them.
  *
  * The HUD font has no lowercase, so everything shows in capitals.
  */
@@ -64,8 +68,11 @@ extern s32 portTextInputActive(void);
 #define COOPFEED_SHOW     (60 * 10)     /* a line stays 10 s in play */
 #define COOPFEED_FADE     60
 #define COOPTOAST_SHOW    (60 * 5)
-#define COOPTOAST_FADE    40
-#define COOPTOAST_MAX     3
+#define COOPTOAST_FADEIN  10
+#define COOPTOAST_FADE    30
+#define COOPTOAST_MAX     4
+#define COOPTOAST_ALERTCOL 0xFF6060FF
+#define COOPTOAST_LINE    0x0B  /* a toast line's height */
 
 typedef struct
 {
@@ -104,8 +111,8 @@ static s32 sFeedCount;
 
 static struct
 {
-    char text[80];
-    s32 player;
+    char text[112];
+    s32 player;     /* -1 a note from the game, COOPTOAST_ALERT session news */
     u32 tick;
 } sToast[COOPTOAST_MAX];
 static s32 sToastCount;
@@ -114,6 +121,10 @@ static u32 coopFeedColour(s32 player)
 {
     static const u32 colours[COOP_MAX_PLAYERS] = { 0xFFFF80FF, 0x80E0FFFF, 0xFF90E0FF, 0x90FF90FF };
 
+    if (player == COOPTOAST_ALERT)
+    {
+        return COOPTOAST_ALERTCOL;
+    }
     return (player >= 0 && player < COOP_MAX_PLAYERS) ? colours[player] : 0xFFFFFFFF;
 }
 
@@ -186,6 +197,15 @@ void coopFeedToast(const char *text, s32 player)
         sToastCount--;
     }
     snprintf(sToast[sToastCount].text, sizeof(sToast[0].text), "%s", text);
+    {   /* hudmsg style ("... left the game.\n"): no full stop on a toast */
+        char *t = sToast[sToastCount].text;
+        s32 n = (s32) strlen(t);
+
+        while (n > 0 && (t[n - 1] == '\n' || t[n - 1] == '.'))
+        {
+            t[--n] = '\0';
+        }
+    }
     sToast[sToastCount].player = player;
     sToast[sToastCount].tick = sNow;
     sToastCount++;
@@ -338,10 +358,47 @@ static void coopChatTestOne(CoopChatTest *t, s32 active, u32 now)
     }
 }
 
+/* GE_COOP_TESTTOASTS=<s>: from <s> seconds into the mission, one toast of
+ * each kind every 1.5 s, to see them stack (harness only) */
+static void coopToastTestTick(s32 inmission)
+{
+    static const struct
+    {
+        const char *text;
+        s32 player;
+    } toasts[] = {
+        { "PARTNER 2 COMPLETED A|FIND PLANE IGNITION KEY", 1 },
+        { "PARTNER 2 gave you 30 PP7 rounds", 1 },
+        { "Partner 3 left the mission.\n", 2 },
+        { "PARTNER 4 COMPLETED C|DESTROY ALL ALARMS AND COMMUNICATION EQUIPMENT", 3 },
+        { "YOU ARE THE HOST NOW|PARTNER 1 LEFT", COOPTOAST_ALERT },
+    };
+    static s32 at = -2;
+    s32 t;
+
+    if (at == -2)
+    {
+        const char *e = getenv("GE_COOP_TESTTOASTS");
+
+        at = (e != NULL) ? atoi(e) * 60 : -1;
+    }
+    t = (s32) coopExtMissionTicks() - at;
+    if (at < 0 || !inmission || t < 0 || t % 90 != 0)
+    {
+        return;
+    }
+    if (t / 90 < (s32) (sizeof(toasts) / sizeof(toasts[0])))
+    {
+        coopFeedToast(toasts[t / 90].text, toasts[t / 90].player);
+    }
+}
+
 static void coopChatTestTick(s32 inmission)
 {
     static CoopChatTest mission = { "GE_COOP_TESTCHAT", -2 };
     static CoopChatTest lobby = { "GE_COOP_TESTLOBBYCHAT", -2 };
+
+    coopToastTestTick(inmission);
 
     coopChatTestOne(&mission, inmission && coopLobbyHasPartner(), coopExtMissionTicks());
     coopChatTestOne(&lobby, !inmission && coopLobbyHasPartner() && coopLobbyPartnerOnScreen(), sNow);
@@ -469,15 +526,208 @@ static Gfx *coopFeedPrint(Gfx *gdl, s32 x, s32 y, char *text, u32 colour)
                               coopFeedAlpha(0x000000A0, (s32) (colour & 0xFF)), (s32) viGetX(), viGetY(), 0, 0);
 }
 
-/* the chat lines, bottom left, newest lowest; and the toasts, centred near the top */
+#define COOPTOAST_LINES 3
+
+typedef struct
+{
+    char text[100];     /* HUD text ending in '\n' */
+    s32 x;              /* from the toast's left */
+    s32 w;
+    s32 row;
+    s32 lead;           /* in the player's colour, else white */
+} CoopToastPiece;
+
+static s32 coopFeedWidth(const char *text)
+{
+    s32 th = 0, tw = 0;
+
+    textMeasure(&th, &tw, (char *) text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+    return tw;
+}
+
+/* as many of in's words as fit avail (HUD text in out); returns the rest,
+ * or in itself when not even the first word fits */
+static const char *coopToastWords(const char *in, s32 avail, char *out, s32 cap)
+{
+    s32 cut = 0;
+    s32 n;
+
+    for (n = 0; ; n++)
+    {
+        if (in[n] == ' ' || in[n] == '\0')
+        {
+            char try[112];
+
+            snprintf(try, sizeof(try), "%.*s", (int) n, in);
+            coopFeedText(out, cap, try);
+            if (coopFeedWidth(out) > avail)
+            {
+                break;
+            }
+            cut = n;
+            if (in[n] == '\0')
+            {
+                break;
+            }
+        }
+    }
+    snprintf(out, cap, "%.*s", (int) cut, in);
+    coopFeedText(out, cap, out);
+    in += cut;
+    while (*in == ' ')
+    {
+        in++;
+    }
+    return in;
+}
+
+/* add the words of in at row/x on, wrapping to new rows up to COOPTOAST_LINES;
+ * the last row is cut with "..." */
+static s32 coopToastFlow(CoopToastPiece *pc, s32 n, s32 *row, s32 *x, const char *in, s32 maxw, s32 lead)
+{
+    while (*in != '\0' && n < COOPTOAST_LINES * 2)
+    {
+        CoopToastPiece *p = &pc[n];
+        const char *next = coopToastWords(in, maxw - *x, p->text, sizeof(p->text));
+
+        if (next == in)
+        {   /* not one word fits: a new row, or cut it on the last */
+            if (*x > 0 && *row < COOPTOAST_LINES - 1)
+            {
+                (*row)++;
+                *x = 0;
+                continue;
+            }
+            coopFeedText(p->text, sizeof(p->text), in);
+            coopFeedFit(p->text, maxw - *x);
+            next = "";
+        }
+        else if (*next != '\0' && *row == COOPTOAST_LINES - 1)
+        {   /* more than the last row holds */
+            coopFeedText(p->text, sizeof(p->text), in);
+            coopFeedFit(p->text, maxw - *x);
+            next = "";
+        }
+        p->x = *x;
+        p->w = coopFeedWidth(p->text);
+        p->row = *row;
+        p->lead = lead;
+        n++;
+        in = next;
+        *x += p->w + 4;
+        if (*in != '\0')
+        {
+            (*row)++;
+            *x = 0;
+        }
+    }
+    return n;
+}
+
+/* a toast's pieces: the lead (to '|') then "- " and the rest, word-wrapped
+ * to maxw; returns the pieces, *rows the rows they take */
+static s32 coopToastLayout(const char *toast, s32 maxw, CoopToastPiece *pc, s32 *rows)
+{
+    char lead[112], rest[112];
+    const char *bar = strchr(toast, '|');
+    s32 row = 0, x = 0;
+    s32 n;
+
+    snprintf(lead, sizeof(lead), "%.*s", (int) ((bar != NULL) ? bar - toast : (s32) strlen(toast)), toast);
+    n = coopToastFlow(pc, 0, &row, &x, lead, maxw, 1);
+    if (bar != NULL && bar[1] != '\0' && row < COOPTOAST_LINES)
+    {
+        s32 first = n;
+        s32 row0 = row;
+
+        snprintf(rest, sizeof(rest), "- %s", bar + 1);
+        n = coopToastFlow(pc, n, &row, &x, rest, maxw, 0);
+        if (n > first && strcmp(pc[first].text, "-\n") == 0 && row > row0)
+        {   /* only the dash fit beside the lead: the rest on its own rows, no dash */
+            row = row0 + 1;
+            x = 0;
+            n = coopToastFlow(pc, first, &row, &x, bar + 1, maxw, 0);
+        }
+    }
+    *rows = row + 1;
+    return n;
+}
+
+/* one toast with its top row at y: a dark band, the lead in colour, the rest in white */
+static Gfx *coopToastDraw(Gfx *gdl, s32 x, s32 y, CoopToastPiece *pc, s32 n, s32 rows, u32 colour, s32 a)
+{
+    s32 right = 0;
+    s32 i;
+
+    for (i = 0; i < n; i++)
+    {
+        right = (pc[i].x + pc[i].w > right) ? pc[i].x + pc[i].w : right;
+    }
+    gdl = microcode_constructor_related_to_menus(gdl, x - 3, y - 2, x + right + 3, y + rows * COOPTOAST_LINE - 1,
+                                                 coopFeedAlpha(0x00000080, a));
+    for (i = 0; i < n; i++)
+    {
+        gdl = coopFeedPrint(gdl, x + pc[i].x, y + pc[i].row * COOPTOAST_LINE, pc[i].text,
+                            coopFeedAlpha(pc[i].lead ? colour : 0xFFFFFFFF, a));
+    }
+    return gdl;
+}
+
+/* the toasts stacked up from y (the line above the chat), newest lowest */
+static Gfx *coopToastsRender(Gfx *gdl, s32 left, s32 y)
+{
+    const s32 maxw = viGetViewWidth() * 3 / 5;
+    CoopToastPiece pc[COOPTOAST_LINES * 2];
+    s32 n, rows;
+    s32 i;
+
+    {   /* the host not answering, or a new one being reached: held under the rest */
+        char l1[56], l2[56], both[112];
+
+        if (coopHudSessionBanner(l1, l2, sizeof(l1)))
+        {
+            snprintf(both, sizeof(both), "%s|%s", l1, l2);
+            n = coopToastLayout(both, maxw, pc, &rows);
+            y -= rows * COOPTOAST_LINE + 3;
+            gdl = coopToastDraw(gdl, left, y + 3, pc, n, rows, COOPTOAST_ALERTCOL, 0xFF);
+        }
+    }
+    for (i = sToastCount - 1; i >= 0; i--)
+    {
+        u32 age = sNow - sToast[i].tick;
+        s32 a = 0xFF;
+
+        if (age < COOPTOAST_FADEIN)
+        {
+            a = (s32) ((age + 1) * 0xFF / (COOPTOAST_FADEIN + 1));
+        }
+        else if (age > COOPTOAST_SHOW - COOPTOAST_FADE)
+        {
+            a = (s32) ((COOPTOAST_SHOW - age) * 0xFF / COOPTOAST_FADE);
+        }
+        n = coopToastLayout(sToast[i].text, maxw, pc, &rows);
+        y -= rows * COOPTOAST_LINE + 3;
+        gdl = coopToastDraw(gdl, left, y + 3, pc, n, rows, coopFeedColour(sToast[i].player), a);
+    }
+    return gdl;
+}
+
+/* the chat lines, bottom left, newest lowest, and the toasts stacked above them */
 Gfx *coopFeedRender(Gfx *gdl)
 {
     s32 left = viGetViewLeft() + 0x14;
     s32 bottom = viGetViewTop() + viGetViewHeight() - 0x34;
     s32 y;
     s32 i;
-    s32 any = sTyping || sToastCount > 0;
+    s32 any;
+    char l1[56], l2[56];
 
+    while (sToastCount > 0 && sNow - sToast[0].tick >= COOPTOAST_SHOW)
+    {
+        memmove(&sToast[0], &sToast[1], sizeof(sToast[0]) * (COOPTOAST_MAX - 1));
+        sToastCount--;
+    }
+    any = sTyping || sToastCount > 0 || coopHudSessionBanner(l1, l2, sizeof(l1));
     for (i = 0; i < sFeedCount && !any; i++)
     {
         any = sNow - sFeed[i].tick < COOPFEED_SHOW;
@@ -523,59 +773,12 @@ Gfx *coopFeedRender(Gfx *gdl)
         gdl = coopFeedPrint(gdl, left, y, text, coopFeedAlpha(coopFeedColour(sFeed[i].player), a));
         y -= 0x0B;
     }
+    gdl = coopToastsRender(gdl, left, y + 0x0B - 4);
     gdl = combiner_bayer_lod_perspective(gdl);
     gdl = portHudScaleEnd(gdl);
     if (hudAnchorsToEdges())
     {
         PORT_HUD_ANCHOR_OFF(gdl);
-    }
-
-    /* toasts */
-    while (sToastCount > 0 && sNow - sToast[0].tick >= COOPTOAST_SHOW)
-    {
-        memmove(&sToast[0], &sToast[1], sizeof(sToast[0]) * (COOPTOAST_MAX - 1));
-        sToastCount--;
-    }
-    if (sToastCount > 0)
-    {   /* centred a little under the top; a toast's lines are split at '|' and each cut to fit */
-        const s32 cx = viGetViewLeft() + viGetViewWidth() / 2;
-        const s32 maxw = viGetViewWidth() - 0x20;
-
-        gdl = microcode_constructor(gdl);
-        y = viGetViewTop() + viGetViewHeight() * 3 / 8;
-        for (i = 0; i < sToastCount; i++)
-        {
-            u32 age = sNow - sToast[i].tick;
-            const char *at = sToast[i].text;
-            s32 a = 0xFF;
-            s32 line;
-
-            if (age > COOPTOAST_SHOW - COOPTOAST_FADE)
-            {
-                a = (s32) ((COOPTOAST_SHOW - age) * 0xFF / COOPTOAST_FADE);
-            }
-            for (line = 0; line < 2 && *at != '\0'; line++)
-            {
-                char part[80];
-                char text[100];
-                const char *bar = strchr(at, '|');
-                s32 n = (bar != NULL) ? (s32) (bar - at) : (s32) strlen(at);
-                s32 th = 0, tw = 0;
-
-                snprintf(part, sizeof(part), "%.*s", (int) n, at);
-                at += n + (bar != NULL);
-                coopFeedText(text, sizeof(text), part);
-                coopFeedFit(text, maxw);
-                textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
-                gdl = microcode_constructor_related_to_menus(gdl, cx - tw / 2 - 4, y - 2, cx + tw / 2 + 4, y + th + 1,
-                                                             coopFeedAlpha(0x00000090, a));
-                gdl = coopFeedPrint(gdl, cx - tw / 2, y, text,
-                                    coopFeedAlpha(line == 0 ? coopFeedColour(sToast[i].player) : 0xFFFFFFFF, a));
-                y += th + 3;
-            }
-            y += 6;
-        }
-        gdl = combiner_bayer_lod_perspective(gdl);
     }
     return gdl;
 }

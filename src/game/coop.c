@@ -909,7 +909,7 @@ static void coopPuppetSpawn(CoopRemote *r)
     coopLookReset(&r->look);
     coopLookPuppetTick(&r->look, prop->chr, &r->st.look, r->st.dead, COOP_PUPPET_CHRNUM + coopSelf());
     portConLogf("ge: coop: puppet for player %d spawned at %.0f %.0f %.0f\n", r->st.player + 1, pos.f[0], pos.f[1], pos.f[2]);
-    hudmsgBottomShow("A partner is here.\n");
+    coopFeedToast("A partner is here", r->st.player);
 }
 
 static void coopPuppetUpdate(CoopRemote *r)
@@ -1184,7 +1184,7 @@ static void coopRemotesTick(void)
         {
             r->resync = 0;
             coopResyncDoors(p);
-            hudmsgBottomShow("A partner rejoined.\n");
+            coopFeedToast("A partner rejoined", p);
         }
     }
     if (sLateJoin && coopRemoteAliveHere(0) && sMissionTicks > 30 && !g_CurrentPlayer->bonddead)
@@ -1192,7 +1192,7 @@ static void coopRemotesTick(void)
         sLateJoin = 0;
         sR[0].puppetGhost = 1;
         coopRespawnPlayerAt(&sR[0].puppet->pos, sR[0].puppet->stan, 6.2831855f - sR[0].st.yaw, sLastWeapon);
-        hudmsgBottomShow("Joined your partners.\n");
+        coopFeedToast("Joined your partners", -1);
         portConLogf("ge: coop: late join, moved beside the host\n");
     }
 }
@@ -3745,7 +3745,6 @@ s32 coopSessionActive(void)
 #define COOP_LOST_MS          3000    /* host: a joiner quiet this long has lost its connection */
 #define COOP_DROP_MS          30000   /* and is gone after this long lost */
 #define COOP_REMOTE_GONE_MS   40000   /* joiner: a relayed partner silent this long is gone */
-#define COOP_BANNER_MS        6000
 #define COOP_HOSTTITLE_MS     2000    /* joiner: the host back in the menus this long, mid-mission */
 
 enum { HOSTW_NONE, HOSTW_SILENT, HOSTW_NEWHOST };
@@ -3757,8 +3756,6 @@ static s32 sMigSelf;            /* our player number then */
 static s32 sMigNewHost;         /* HOSTW_NEWHOST: the old player number we wait on */
 static char sGoneHostName[24];
 static u32 sHostTitleMs;        /* joiner: the host's hellos have said "menus" since */
-static char sBanner[2][56];
-static u32 sBannerMs;
 static char sLobbyNotice[56];
 static u32 sLobbyNoticeMs;
 static s32 sAtExitSet;
@@ -3773,15 +3770,15 @@ static s32 coopHostLeavesRule(void)
     return sSettings[COOPSET_HOSTLEAVES];
 }
 
-/* a timed two-line banner on the HUD, and the same news on the lobby screen */
+/* session news: a toast in play (coop_chat.c), and the same news on the lobby screen */
 static void coopBanner(const char *line1, const char *line2)
 {
-    snprintf(sBanner[0], sizeof(sBanner[0]), "%s", line1);
-    snprintf(sBanner[1], sizeof(sBanner[1]), "%s", line2 != NULL ? line2 : "");
-    sBannerMs = coopNowMs();
+    char text[112];
+
+    snprintf(text, sizeof(text), (line2 != NULL && line2[0] != '\0') ? "%s|%s" : "%s", line1, line2);
+    coopFeedToast(text, COOPTOAST_ALERT);
     snprintf(sLobbyNotice, sizeof(sLobbyNotice), "%s", line1);  /* one line fits the lobby row */
-    sLobbyNoticeMs = sBannerMs;
-    portConLogf("ge: coop: banner: %s / %s\n", sBanner[0], sBanner[1]);
+    sLobbyNoticeMs = coopNowMs();
 }
 
 static void coopMigrateReset(void)
@@ -4215,7 +4212,6 @@ static void coopMigrate(void)
         sHostWaiting = HOSTW_NONE;
         snprintf(line, sizeof(line), "%s %s", sGoneHostName, sHostLeftHow == COOPBYE_HANDOFF ? "HANDED OVER" : "LEFT");
         coopBanner("YOU ARE THE HOST NOW", line);
-        hudmsgBottomShow("You are the host now.\n");
     }
     else
     {
@@ -4348,7 +4344,7 @@ static void coopApplyNote(CoopEvent *ev)
     portConLogf("ge: coop: %s", msg);
     if (coopInMission())
     {
-        hudmsgBottomShow(msg);
+        coopFeedToast(msg, p);
     }
     else
     {
@@ -4521,7 +4517,8 @@ static void coopSessionTick(void)
 
 /* ---- for the HUD and the lobby screen ---- */
 
-/* the banner's two lines (capitals), 1 when there is one to show */
+/* the host-wait notice's two lines (capitals), 1 while the host is silent or
+ * a new one is being reached; one-off news goes through coopBanner as a toast */
 s32 coopHudSessionBanner(char *line1, char *line2, s32 cap)
 {
     u32 now = coopNowMs();
@@ -4543,12 +4540,6 @@ s32 coopHudSessionBanner(char *line1, char *line2, s32 cap)
     {
         snprintf(line1, cap, "%s %s", sGoneHostName, sHostLeftHow == COOPBYE_HANDOFF ? "HANDED OVER" : "LEFT");
         snprintf(line2, cap, "CONNECTING TO THE NEW HOST...");
-        return 1;
-    }
-    if (sBannerMs != 0 && now - sBannerMs < COOP_BANNER_MS)
-    {
-        snprintf(line1, cap, "%s", sBanner[0]);
-        snprintf(line2, cap, "%s", sBanner[1]);
         return 1;
     }
     return 0;

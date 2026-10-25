@@ -14,8 +14,8 @@
  *     death or a blast finishes a little after the shot), else
  *   - the host.
  * The host sends COOPEV_OBJDONE with the objective and the player to
- * everyone; each game shows "<NAME> COMPLETED OBJECTIVE A" in that player's
- * colour over the objective's text, unless the credit is its own (the game's own "Objective A:
+ * everyone; each game shows a toast, "<NAME> COMPLETED A" in that player's
+ * colour and the objective's text after it, unless the credit is its own (the game's own "Objective A:
  * Completed" line covers that).
  */
 #include <ultra64.h>
@@ -95,7 +95,7 @@ static void coopObjToast(s32 index, s32 letter, s32 player)
             break;
         }
     }
-    snprintf(text, sizeof(text), "%s COMPLETED OBJECTIVE %c|%s", (name != NULL && name[0] != '\0') ? name : "PARTNER",
+    snprintf(text, sizeof(text), "%s COMPLETED %c|%s", (name != NULL && name[0] != '\0') ? name : "PARTNER",
              'A' + letter, body);
     coopFeedToast(text, player);
 }
