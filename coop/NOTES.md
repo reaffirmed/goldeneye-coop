@@ -722,3 +722,21 @@ satellite-console work and the Runway plane did nothing on the host.
 - Next turns to page 2 before leaving; Previous or B turns back; L/R flip.
 - Two new columns in COOPEV_STATS (COOPSTAT_OBJECTIVES, COOPSTAT_DAMAGE): ten
   u16s, 24 bytes of the 28 (checked at compile time). Same COOP_VERSION 10.
+
+## 3-4 player scaling and team unlock rules (2026-10-25)
+
+- coop_difficulty.c: per player past the second, guard health +25% and aim
+  +10%, in every mode (Normal included, since Normal is tuned for two). Three
+  on Normal: health x1.25, aim x1.1; four on Brutal: health x3, aim x1.56.
+  No extra guards from the player count (only the mode adds guards). The count
+  (coopLobbyPlayerCount) goes by connection, not a fresh HELLO, so a game still
+  loading the stage counts; aim follows it live when a player drops.
+  Verified with the mock: Hard soldier health 6.0 with 2 players, 7.5 with 3;
+  Normal 4 players logs health x1.5, aim x1.2 on all four games.
+- Cheats and unlocks: the time is the team's (coop_teamtime.c, above). New:
+  the game marks Bond KIA at any death and fails the debrief on it, so a
+  player who went down and came back (or was down when a partner finished)
+  got FAILED and no unlocks. coopTeamKiaRule (coopMissionComplete) clears it
+  when we stand at the end, a partner stands, or a partner's game ended the
+  mission. A wipe still fails. Objectives, difficulty and the team's time
+  decide the cheats as in solo.

@@ -3324,11 +3324,38 @@ s32 coopPeerHolds(ObjectRecord *obj)
 
 static s32 sApplyingRemoteEnd;
 
+/* Team rules for the debrief, the unlocks and the cheats: the game marks
+ * Bond killed in action (g_isBondKIA) at any death and fails the mission on
+ * it, but in co-op the mission fails only when everyone is down. So if we
+ * stand at the end, or a partner does, or a partner's game ended it, our
+ * earlier fall is forgiven; objectives and the team's time still decide. */
+static void coopTeamKiaRule(void)
+{
+    CoopHudPartner p;
+    s32 i, standing;
+
+    if (!g_isBondKIA || sEnabled <= 0 || !coopNetHasPeer() || coopVersus())
+    {
+        return;
+    }
+    standing = sApplyingRemoteEnd || !g_CurrentPlayer->bonddead;
+    for (i = 0; !standing && coopHudPartnerAt(i, &p); i++)
+    {
+        standing = !p.dead;
+    }
+    if (standing)
+    {
+        g_isBondKIA = FALSE;
+        portConLogf("ge: coop: the team got through, our fall doesn't fail the mission\n");
+    }
+}
+
 void coopMissionComplete(void)
 {
     CoopEvent ev;
 
     coopTeamTimeFreeze();     /* the team's time as the mission ends (coop_teamtime.c) */
+    coopTeamKiaRule();        /* a fall the team got over doesn't fail it */
     coopCampaignMissionEnd(); /* a win together goes in coop_campaign.txt */
     if (sEnabled <= 0 || sApplyingRemoteEnd || !coopNetHasPeer() || !coopPartnerHere())
     {
@@ -3990,6 +4017,31 @@ s32 coopLobbyHasPartner(void)
         }
     }
     return 0;
+}
+
+/* players in the session, us included (1 alone). By connection, not by a
+ * fresh HELLO: a game loading the stage goes quiet for a few seconds. */
+s32 coopLobbyPlayerCount(void)
+{
+    s32 c, p, n = 1;
+
+    if (sEnabled <= 0 || !coopNetHasPeer())
+    {
+        return 1;
+    }
+    if (coopNetIsHost())
+    {
+        for (c = 0; c < COOP_NET_MAX_PEERS; c++)
+        {
+            n += coopNetPeerConnected(c) && sChan[c].helloSeen;
+        }
+        return n;
+    }
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        n += p != coopSelf() && sHostHello.roster[p].present;
+    }
+    return n;
 }
 
 /* host: every partner is ready */

@@ -110,6 +110,7 @@ s32  coopSetting(s32 which);
 void coopSetSetting(s32 which, s32 value);
 
 /* co-op difficulty (coop_difficulty.c): COOPSET_DIFFICULTY's modes */
+s32  coopLobbyPlayerCount(void);          /* players in the session, us included */
 s32  coopDifficultyCount(void);
 const char *coopDifficultyName(s32 mode);
 f32  coopDifficultyHealthMul(void);
