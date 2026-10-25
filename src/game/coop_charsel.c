@@ -36,6 +36,7 @@
 #include "player.h"
 #include "othermodemicrocode.h"
 #include "coop.h"
+#include "textrelated.h"
 
 extern void portConLogf(const char *fmt, ...);
 extern struct MP_selectable_chars mp_chr_setup[];
@@ -229,8 +230,10 @@ Gfx *coopFigureDraw(Gfx *DL, s32 pick, s32 x, s32 y, s32 w, s32 h, f32 yaw, s32 
     setsuboffset(f->model, &zero);    /* the idle sways in place; never walks off */
     setsubroty(f->model, yaw);
 
-    DL = microcode_constructor(DL);
-    gDPPipeSync(DL++);
+    /* the menus' text state, but with perspective-correct, mipmapped
+     * texturing as the game's models expect: the text's flat sampling
+     * smears a face's texture across the head */
+    DL = combiner_bayer_lod_perspective(microcode_constructor(DL));
     /* the menu's whole-screen viewport stays; the projection itself puts
      * the picture in the rectangle (the port's viewport handling is the
      * folder's and the HUD's, tuned for whole screens) */
