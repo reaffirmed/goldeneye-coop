@@ -8843,12 +8843,16 @@ enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLRO
        CLROW_HOSTLEAVES, CLROW_VSMODE, CLROW_VSARENA, CLROW_VSSCENARIO, CLROW_VSLENGTH, CLROW_VSWEAPONS, CLROW_VSSTART,
        CLROW_DISCORDYES, CLROW_DISCORDNO, CLROW_PROFILE };
 #define COOP_LOBBY_ROWS     48
-#define COOP_LOBBY_VISIBLE  PORT_SHEET_PAGE_ROWS  /* rows down to Rare's last line (293); more scroll (coop_lobby_scroll) */
+/* the crew strip (coopLobbyStrip): a photo card per player, and the next
+ * mission's or the arena's photo, between the title and the rows */
+#define COOP_STRIP_Y        0x30
+#define COOP_STRIP_H        0x56
+#define COOP_LOBBY_VISIBLE  9       /* rows down to Rare's last line (293); more scroll (coop_lobby_scroll) */
 #define COOP_LOBBY_CHAT_LINES 3
 #define COOP_LOBBY_X        PORT_SHEET_LABEL_X
 #define COOP_LOBBY_VALUE_X  0xFA
-#define COOP_LOBBY_Y0       PORT_SHEET_ROW_Y0
-#define COOP_LOBBY_PITCH    PORT_SHEET_ROW_PITCH
+#define COOP_LOBBY_Y0       (COOP_STRIP_Y + COOP_STRIP_H + 2)
+#define COOP_LOBBY_PITCH    0x12
 #define COOP_LOBBY_LABEL_W  (COOP_LOBBY_VALUE_X - COOP_LOBBY_X - 6)
 #define COOP_LOBBY_COL_OK   0x006000FF  /* Ready: dark green ink */
 struct CoopLobbyRow { s32 kind; s32 arg; s32 dim; s32 colour; s32 indent; s32 wide; char label[80]; char value[24]; };
@@ -9280,12 +9284,7 @@ static void coopLobbyBuild(void)
         coopLobbyAdd(CLROW_JOINANY, 0, "Join a Friend's Game\n", "");
         coopLobbyAddHostOptions();
         coopCharacterName(coopCharacter(), name, sizeof(name));
-        coopLobbyAdd(CLROW_HEAD, 0, "Your Character\n", "");
-        r = coopLobbyAdd(CLROW_CHARACTER, 0, name, "Change\n");
-        if (r != NULL)
-        {
-            r->indent = 0xC;
-        }
+        coopLobbyAdd(CLROW_CHARACTER, 0, "Your Character\n", portSheetFitText(name, PORT_SHEET_RULE_R - COOP_LOBBY_VALUE_X));
         coopLobbyAddControls();
         coopLobbyAdd(CLROW_HEAD, 0, "Public Games\n", "");
         k = coopBrowseCount();
@@ -9356,35 +9355,9 @@ static void coopLobbyBuild(void)
             r->colour = COOP_LOBBY_COL_OK;
         }
     }
-    coopLobbyAdd(CLROW_HEAD, 0, "Players\n", "");
-    if (coopLobbyIsHost() || coopLobbyHasPartner())
-    {
-        for (i = 0; i < COOP_MAX_PLAYERS; i++)
-        {
-            if (!coopLobbyPlayerHere(i))
-            {
-                continue;
-            }
-            coopLobbyCopyName(name, sizeof(name), coopPlayerName(i));
-            r = coopLobbyAdd(CLROW_TEXT, 0, name, (i == 0) ? "Host\n" : coopLobbyPlayerReady(i) ? "Ready\n" : "Not Ready\n");
-            if (r != NULL && i != 0 && coopLobbyPlayerReady(i))
-            {
-                r->colour = COOP_LOBBY_COL_OK;
-            }
-            /* under each name, who they play as; ours is ours to change */
-            coopCharacterName(coopPlayerCharacter(i), name, sizeof(name));
-            r = coopLobbyAdd((i == coopLobbySelfPlayer()) ? CLROW_CHARACTER : CLROW_TEXT, 0, name,
-                             (i == coopLobbySelfPlayer()) ? "Change\n" : "");
-            if (r != NULL)
-            {
-                r->indent = 0xC;
-                if (i != coopLobbySelfPlayer())
-                {
-                    r->colour = PORT_SHEET_COL_DIM;
-                }
-            }
-        }
-    }
+    /* the players are the strip's photo cards (coopLobbyStrip); ours is ours to change */
+    coopCharacterName(coopCharacter(), name, sizeof(name));
+    coopLobbyAdd(CLROW_CHARACTER, 0, "Your Character\n", portSheetFitText(name, PORT_SHEET_RULE_R - COOP_LOBBY_VALUE_X));
     for (i = 0; i < coopLobbyDiscordAsks() && i < 2; i++)
     {   /* Discord's Ask to Join: the host lets them in (port/src/coop_discord.c) */
         char ask[64];
@@ -10148,6 +10121,285 @@ void interface_menu1D_cooplobby(void)
     }
 }
 
+/* ---- the crew strip ------------------------------------------------------
+ * Under the title: a photo card for each player, clipped to the folder like
+ * the dossier's polaroids (their colour along the top, the character's
+ * picture from the multiplayer screen, the name, and HOST / READY / NOT
+ * READY under it), an OPEN card for each seat still free, and on the right
+ * the next mission's photo with its difficulty, or the versus arena's with
+ * its scenario. Missions without a photo of their own show the world map
+ * from the briefing monitors. */
+#define COOP_CARD_W     0x37
+#define COOP_CARD_H     0x48
+#define COOP_CARD_GAP   0x04
+#define COOP_CARD_X0    0x2E
+#define COOP_PHOTO_HW   0x15    /* the portrait's half size: 42 x 52 */
+#define COOP_PHOTO_HH   0x1A
+#define COOP_MISSION_X  0x11A
+#define COOP_MISSION_W  0x5E
+#define COOP_POLAROID   0xF6F2E6FF
+#define COOP_INK_RED    0x8A1414FF
+
+/* frontRenderCharacterPortrait's four-texture photo, at any size */
+static Gfx *coopLobbyPortrait(Gfx *DL, s32 cx, s32 cy, s32 hw, s32 hh, s32 chr)
+{
+    Mtx *proj = dynAllocateMatrix();
+    Mtx *view = dynAllocateMatrix();
+    Vertex *v = dynAllocateVertices(16);
+    struct sImageTableEntry *simage;
+    s32 i, j, n = 0;
+
+    DL = microcode_constructor(DL);
+    guOrtho(proj, 0.0f, 440.0f, 0.0f, 330.0f, 1.0f, 10.0f, 1.0f);
+    guRotate(view, 3.1415927f, 1.0f, 0.0f, 0.0f);
+    for (i = 0; i < 4; i++)
+    {
+        for (j = 0; j < 4; j++)
+        {
+            const s32 col = (j >= 2) ? j - 1 : j;
+            const s32 row = (i >= 2) ? i - 1 : i;
+
+            v[n].coord.AsArray[0] = (col - 1) * hw + cx;
+            v[n].coord.AsArray[1] = (0x14A - cy) + (row - 1) * hh;
+            v[n].coord.AsArray[2] = -5;
+            v[n].index = 0;
+            v[n].s = (j & 1) ? 0x1000 : 0;
+            v[n].t = (i & 1) ? 0x1000 : 0;
+            v[n].r = v[n].g = v[n].b = v[n].a = 0xFF;
+            n++;
+        }
+    }
+    gSPMatrix(DL++, OS_PHYSICAL_TO_K0(proj), G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
+    gSPMatrix(DL++, OS_PHYSICAL_TO_K0(view), G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
+    gSPVertex(DL++, v, 16, 0);
+    simage = &mpcharselimages[mp_chr_setup[chr].select_photo * 4];
+    for (i = 0; i < 4; i++)
+    {   /* as the character screen's init does; the pool keeps what it already holds */
+        if (simage[i].index < (u32) (MAX_TEXTURES - 1))
+        {
+            texLoadFromTextureNum(simage[i].index, 0);
+        }
+    }
+    texSelect(&DL, simage + 2, 2, 0, 2);
+    gSP1Triangle(DL++, 0, 1, 4, 0);
+    gSP1Triangle(DL++, 4, 1, 5, 0);
+    texSelect(&DL, simage + 3, 2, 0, 2);
+    gSP1Triangle(DL++, 2, 3, 6, 0);
+    gSP1Triangle(DL++, 6, 3, 7, 0);
+    texSelect(&DL, simage + 0, 2, 0, 2);
+    gSP1Triangle(DL++, 8, 9, 12, 0);
+    gSP1Triangle(DL++, 12, 9, 13, 0);
+    texSelect(&DL, simage + 1, 2, 0, 2);
+    gSP1Triangle(DL++, 10, 11, 14, 0);
+    gSP1Triangle(DL++, 14, 11, 15, 0);
+    return DL;
+}
+
+/* the small font, in capitals, cut to fit w and centred on cx */
+static Gfx *coopLobbySmallText(Gfx *DL, s32 cx, s32 y, s32 w, const char *in, u32 colour)
+{
+    char t[40];
+    s32 n, th = 0, tw = 0, x;
+
+    for (n = 0; in[n] != '\0' && in[n] != '\n' && n < (s32) sizeof(t) - 2; n++)
+    {
+        t[n] = (in[n] >= 'a' && in[n] <= 'z') ? in[n] - 0x20 : (((u8) in[n] < 0x80) ? in[n] : '?');
+    }
+    t[n] = '\n';
+    t[n + 1] = '\0';
+    for (;;)
+    {
+        textMeasure(&th, &tw, t, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+        if (tw <= w || n <= 1)
+        {
+            break;
+        }
+        t[--n] = '\n';  /* one letter off the end */
+        t[n + 1] = '\0';
+    }
+    x = cx - tw / 2;
+    return textRender(DL, &x, &y, t, ptrFontBankGothicChars, ptrFontBankGothic, colour, viGetX(), viGetY(), 0, 0);
+}
+
+/* a polaroid clipped to the paper: a soft shadow, the white border, a coloured top edge */
+static Gfx *coopLobbyPolaroid(Gfx *DL, s32 x, s32 y, s32 w, s32 h, u32 band)
+{
+    DL = microcode_constructor_related_to_menus(DL, x + 2, y + 2, x + w + 2, y + h + 2, 0x00000040);
+    DL = microcode_constructor_related_to_menus(DL, x, y, x + w, y + h, COOP_POLAROID);
+    DL = microcode_constructor_related_to_menus(DL, x, y, x + w, y + 3, band);
+    return DL;
+}
+
+/* an mp_chr_setup index for a co-op pick: the mission's Bond is Rare's Bond */
+static s32 coopLobbyPhotoChar(s32 pick)
+{
+    return (pick > 0 && pick - 1 < PORT_MP_CHAR_COUNT) ? pick - 1 : 0;
+}
+
+/* a mission's photo (by its stage id): the multiplayer screen's picture of the same place, when there is one */
+static struct sImageTableEntry *coopLobbyMissionPhoto(s32 stageid)
+{
+    static const s8 photo[SP_LEVEL_MAX] = {
+        IMG_MP_DAM, IMG_MP_FACILITY, IMG_MP_RUNWAY, -1, IMG_MP_BUNKER2,
+        -1, IMG_MP_FRIGATE, -1, IMG_MP_BUNKER2, IMG_MP_STATUE,
+        IMG_MP_ARCHIVES, -1, IMG_MP_DEPOT, -1, -1,
+        -1, IMG_MP_CAVERNS, IMG_MP_CRADLE, IMG_MP_AZTEC, IMG_MP_EGYPT,
+    };
+
+    s32 i, sp = -1;
+
+    for (i = 0; mission_folder_setup_entries[i].folder_text_preset != 0; i++)
+    {
+        if (mission_folder_setup_entries[i].stage_id == stageid)
+        {
+            sp = mission_folder_setup_entries[i].mission_num;   /* SP_LEVEL_* order */
+            break;
+        }
+    }
+    if (sp >= 0 && sp < SP_LEVEL_MAX && photo[sp] >= 0)
+    {
+        return &mpstageselimages[photo[sp]];
+    }
+    return &monitorimages[IMGWORLDMAP];
+}
+
+static Gfx *coopLobbyPlayerCard(Gfx *DL, s32 x, s32 slot, s32 pick, const char *name, const char *status, u32 statuscol, s32 self)
+{
+    const s32 y = COOP_STRIP_Y;
+    const s32 cx = x + COOP_CARD_W / 2;
+
+    if (self)
+    {   /* ours: a dark edge round the card */
+        DL = microcode_constructor_related_to_menus(DL, x - 1, y - 1, x + COOP_CARD_W + 1, y + COOP_CARD_H + 1, 0x303030FF);
+    }
+    DL = coopLobbyPolaroid(DL, x, y, COOP_CARD_W, COOP_CARD_H, (u32) coopLobbyChatColour(slot));
+    DL = coopLobbyPortrait(DL, cx, y + 5 + COOP_PHOTO_HH, COOP_PHOTO_HW, COOP_PHOTO_HH, coopLobbyPhotoChar(pick));
+    DL = microcode_constructor(DL);
+    DL = coopLobbySmallText(DL, cx, y + COOP_CARD_H - 0xA, COOP_CARD_W - 1, name, 0x202020FF);
+    DL = coopLobbySmallText(DL, cx, y + COOP_CARD_H + 4, COOP_CARD_W + COOP_CARD_GAP, status, statuscol);
+    return DL;
+}
+
+static Gfx *coopLobbyOpenCard(Gfx *DL, s32 x)
+{
+    const s32 y = COOP_STRIP_Y;
+
+    DL = microcode_constructor_related_to_menus(DL, x, y, x + COOP_CARD_W, y + COOP_CARD_H, 0x00000018);
+    DL = microcode_constructor_related_to_menus(DL, x + 2, y + 2, x + COOP_CARD_W - 2, y + COOP_CARD_H - 2, 0xE8E0C8FF);
+    DL = microcode_constructor(DL);
+    return coopLobbySmallText(DL, x + COOP_CARD_W / 2, y + COOP_CARD_H / 2 - 4, COOP_CARD_W - 4, "OPEN", 0x00000060);
+}
+
+/* the next mission (co-op) or the arena (versus); 0 = nothing to show */
+static s32 coopLobbyMissionInfo(struct sImageTableEntry **img, char *name, s32 namecap, char *sub, s32 subcap)
+{
+    s32 stage, diff;
+    char label[48];
+    char *p;
+
+    if (coopLobbyState() == COOPLOBBY_IDLE || coopLobbyState() == COOPLOBBY_OFF || coopLobbyState() == COOPLOBBY_BUSY)
+    {
+        return 0;
+    }
+    if (COOP_VS_ON())
+    {
+        const s32 a = coopVsArena();
+
+        if (a <= 0 || a >= coopVsArenaCount())
+        {
+            return 0;   /* Random: no one place to show */
+        }
+        *img = &mpstageselimages[multi_stage_setups[a].photo];
+        coopVsArenaName(a, name, namecap);
+        snprintf(sub, subcap, "%s", coop_vs_scenario_names[coopVsScenario()]);
+        return 1;
+    }
+    if (!coopCampaignNext(&stage, &diff, label, sizeof(label)))
+    {
+        return 0;
+    }
+    *img = coopLobbyMissionPhoto(stage);
+    p = strchr(label, ':');     /* "Continue: Runway (Secret Agent)" */
+    snprintf(name, namecap, "%s", (p != NULL) ? p + 1 + (p[1] == ' ') : label);
+    sub[0] = '\0';
+    if ((p = strstr(name, " (")) != NULL)
+    {
+        *p = '\0';
+        snprintf(sub, subcap, "%s", p + 2);
+        sub[strcspn(sub, ")")] = '\0';
+    }
+    (void) diff;
+    return 1;
+}
+
+static Gfx *coopLobbyStrip(Gfx *DL)
+{
+    struct sImageTableEntry *img = NULL;
+    char name[48], sub[32];
+    const s32 state = coopLobbyState();
+    s32 i, x = COOP_CARD_X0;
+
+    if (state == COOPLOBBY_IDLE || state == COOPLOBBY_OFF || state == COOPLOBBY_BUSY)
+    {   /* not in a lobby yet: our own card */
+        const char *prof = portProfileActive(0);
+
+        coopLobbyCopyName(name, sizeof(name), (prof != NULL && prof[0] != '\0') ? prof : coopLobbySelfName());
+        DL = coopLobbyPlayerCard(DL, x, 0, coopCharacter(), name, "YOU", 0x303030FF, TRUE);
+        x += COOP_CARD_W + COOP_CARD_GAP;
+    }
+    else
+    {
+        for (i = 0; i < COOP_MAX_PLAYERS; i++)
+        {
+            if (!coopLobbyPlayerHere(i))
+            {
+                if (coopLobbyIsHost() || coopLobbyHasPartner())
+                {
+                    DL = coopLobbyOpenCard(DL, x);
+                }
+                x += COOP_CARD_W + COOP_CARD_GAP;
+                continue;
+            }
+            coopLobbyCopyName(name, sizeof(name), coopPlayerName(i));
+            if (i == 0)
+            {
+                DL = coopLobbyPlayerCard(DL, x, i, coopPlayerCharacter(i), name, "HOST", 0x7A5A00FF, i == coopLobbySelfPlayer());
+            }
+            else
+            {
+                const s32 ready = coopLobbyPlayerReady(i);
+
+                DL = coopLobbyPlayerCard(DL, x, i, coopPlayerCharacter(i), name, ready ? "READY" : "NOT READY",
+                                         ready ? COOP_LOBBY_COL_OK : 0x707070FF, i == coopLobbySelfPlayer());
+            }
+            x += COOP_CARD_W + COOP_CARD_GAP;
+        }
+    }
+
+    if (coopLobbyMissionInfo(&img, name, sizeof(name), sub, sizeof(sub)) && img != NULL)
+    {   /* the place: its photo, the name under it, and how hard (or which game) */
+        const s32 y = COOP_STRIP_Y;
+        const s32 pw = COOP_MISSION_W - 8;
+        const s32 ph = 0x3A;
+        struct coord2d pos;
+        struct coord2d half;
+
+        DL = coopLobbyPolaroid(DL, COOP_MISSION_X, y, COOP_MISSION_W, COOP_CARD_H, COOP_INK_RED);
+        DL = microcode_constructor(DL);
+        DL = combiner_bayer_lod_perspective(DL);
+        pos.f[0] = (f32) (COOP_MISSION_X + COOP_MISSION_W / 2);
+        pos.f[1] = (f32) (y + 5 + ph / 2);
+        half.f[0] = (f32) pw / 2.0f;
+        half.f[1] = (f32) ph / 2.0f;
+        texSelect(&DL, img, 1, 0, 2);
+        display_image_at_position(&DL, &pos.f[0], &half.f[0], img->width, img->height, 0, 0, 1, 0xFF, 0xFF, 0xFF, 0xFF, img->level > 0, 0);
+        DL = microcode_constructor(DL);
+        DL = coopLobbySmallText(DL, COOP_MISSION_X + COOP_MISSION_W / 2, y + COOP_CARD_H - 0xA, COOP_MISSION_W - 4, name, 0x202020FF);
+        DL = coopLobbySmallText(DL, COOP_MISSION_X + COOP_MISSION_W / 2, y + COOP_CARD_H + 4, COOP_MISSION_W + 8, sub, COOP_INK_RED);
+    }
+    return microcode_constructor(DL);
+}
+
 Gfx *constructor_menu1D_cooplobby(Gfx *DL)
 {
     s32 i;
@@ -10164,6 +10416,7 @@ Gfx *constructor_menu1D_cooplobby(Gfx *DL)
     x = COOP_LOBBY_X;
     y = PORT_SHEET_TITLE_Y;
     DL = frontPrintText(DL, &x, &y, "CO-OP LOBBY\n", ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+    DL = coopLobbyStrip(DL);
 
     for (i = coop_lobby_scroll; i < coop_lobby_nrows && i < coop_lobby_scroll + COOP_LOBBY_VISIBLE; i++)
     {

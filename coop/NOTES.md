@@ -769,3 +769,21 @@ satellite-console work and the Runway plane did nothing on the host.
   N64 mode (`input_pc.c portInputGlyphStyle`). The co-op error panel's OK
   shows the same button. `GE_GLYPHS=0..4` pins a style, `GE_NOHINTS` hides
   the bar (harness).
+
+## Lobby crew strip (2026-10-25)
+
+The co-op lobby opens with a strip under its title (`front.c
+coopLobbyStrip`): a polaroid card per player clipped to the folder, with
+their colour along the top, their character's photo from the multiplayer
+screen (Mission Bond shows Rare's Bond; the generic guards show Rare's own
+question-mark photo), the name, and HOST / READY / NOT READY under it. A free
+seat is an OPEN card; our own card has a dark edge. On the right, the next
+mission's photo with its difficulty (the campaign's Continue / Next), or in
+versus the arena's photo with the scenario. Missions without a multiplayer
+photo (Surface, Silo, Streets, Train, Jungle, Control) show the briefing
+monitors' world map. Before hosting it is just our own card, named after
+player 1's profile when there is one.
+
+The player rows the strip replaces are gone; "Your Character" is one row
+(L / R or A to change it). The rows below are a little tighter (18 apart, 9
+on the paper) and scroll as before.
