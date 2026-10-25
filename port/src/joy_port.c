@@ -1025,6 +1025,20 @@ s32 portJoyPortUseHeld(s32 pad)
 }
 
 /**
+ * USE HELD in play: co-op's hold-to-revive (coop_revive.c) wants the level of
+ * the use bind while Bond's controls are live. Plain level of the last poll;
+ * nothing taken, so a tap still opens doors.
+ */
+s32 portJoyPortUseHeldInPlay(void)
+{
+    s32 pad = joyPortPad();
+    if (pad < 0 || !joyPortPermitted()) {
+        return 0;
+    }
+    return sPrevDown[pad][PORTACT_USE] != 0;
+}
+
+/**
  * INVENTORY = BACK in menus: front.c menu_init takes a fresh prev/next
  * inventory press and injects B for that pad. Both are taken so one press never
  * fires twice; in play portJoyPortPlayerTick takes them first.

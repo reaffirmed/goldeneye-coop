@@ -1407,6 +1407,10 @@ void bondviewFrozenCameraTick(u16 buttons, u16 oldbuttons, struct coord3d *pos, 
                     s_PortIntroSkipMask = buttons & ~oldbuttons & PORT_INTRO_SKIP_BUTTONS;
                     s_PortIntroSkipPort = portskip;
                 }
+                if (coopIntroHostDone())
+                {   /* co-op: the host's intro is over, so is ours (coop_cutscene.c) */
+                    g_CameraAfterCinema = CAMERAMODE_INTRO;
+                }
             }
 #else
             if ((lvlGetControlsLockedFlag() == 0)
@@ -1610,7 +1614,11 @@ void bondviewFrozenCameraTick(u16 buttons, u16 oldbuttons, struct coord3d *pos, 
             s32 portskip = 0;
 #endif
             if ((lvlGetControlsLockedFlag() == 0)
-                && ((buttons & ~oldbuttons & (A_BUTTON | B_BUTTON | Z_TRIG | START_BUTTON | L_TRIG | R_TRIG)) || portskip))
+                && ((buttons & ~oldbuttons & (A_BUTTON | B_BUTTON | Z_TRIG | START_BUTTON | L_TRIG | R_TRIG)) || portskip
+#ifndef TARGET_N64
+                    || coopIntroHostDone()  /* co-op: the host is already playing */
+#endif
+                    ))
             {
                 camera_fade_active = 1;
                 currentPlayerSetFadeColour(0, 0, 0, g_CurrentPlayer->colourscreenfrac);
@@ -12293,9 +12301,6 @@ s32 portMpSpawnWithWeapon(void)
  * keeping inventory and ammo (mission items included). Called by coop.c. */
 void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon)
 {
-    coord3d start_pos;
-    f32 stan_height;
-
     g_CurrentPlayer->bonddead = 0;
     g_CurrentPlayer->deathanimfinished = 0;
     g_CurrentPlayer->redbloodfinished = 0;
@@ -12307,6 +12312,19 @@ void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon)
     g_CurrentPlayer->gunsightmode = 2;
     hudmsgsSetOn(-1);
     bondviewClearUpperTextDisplayFlag(-1);
+    coopTeleportPlayerTo(pos, stan, yaw);
+    currentPlayerEquipWeaponWrapper(GUNRIGHT, weapon);
+    currentPlayerSetFadeFrac(60.0f, 0.0f);
+    currentPlayerStartChrFade(120.0f, 1.0f);
+}
+
+/* Co-op: move the solo player to the given spot (floor under pos, yaw the
+ * view's), as coopRespawnPlayerAt does, and nothing else: a cutscene moves
+ * everyone to its star (coop_cutscene.c). */
+void coopTeleportPlayerTo(coord3d *pos, StandTile *stan, f32 yaw)
+{
+    coord3d start_pos;
+    f32 stan_height;
 
     stan_height = bondviewYPositionRelated(stan, pos->f[0], pos->f[2]);
     start_pos.f[0] = pos->f[0];
@@ -12340,9 +12358,51 @@ void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon)
     g_CurrentPlayer->field_78 = 0.0f;
     g_CurrentPlayer->field_7C = -0.0001f;
     g_CurrentPlayer->field_80 = 0.0f;
-    currentPlayerEquipWeaponWrapper(GUNRIGHT, weapon);
-    currentPlayerSetFadeFrac(60.0f, 0.0f);
-    currentPlayerStartChrFade(120.0f, 1.0f);
+    if (g_CurrentPlayer->prop->chr != NULL && g_CurrentPlayer->prop->chr->model != NULL)
+    {   /* in a cinema Bond is a chr (solo_char_load): move its body too, as AI_TRYTeleportingChrToPad does */
+        ChrRecord *chr = g_CurrentPlayer->prop->chr;
+        coord3d at = *pos;
+
+        sub_GAME_7F03D058(chr->prop, FALSE);
+        if (chrAdjustPosForSpawn(&at, &stan, 6.2831855f - yaw, TRUE))
+        {
+            chr->prop->pos.x = at.x;
+            chr->prop->pos.y = at.y;
+            chr->prop->pos.z = at.z;
+            chr->prop->stan = stan;
+            chr->chrflags |= CHRFLAG_INIT;
+            setsubroty(chr->model, 6.2831855f - yaw);
+            setsuboffset(chr->model, &at);
+            chrDetectRooms(chr);
+            g_CurrentPlayer->field_488.collision_position.x = at.x;
+            g_CurrentPlayer->field_488.collision_position.y = at.y;
+            g_CurrentPlayer->field_488.collision_position.z = at.z;
+            g_CurrentPlayer->field_488.current_tile_ptr = stan;
+        }
+        sub_GAME_7F03D058(chr->prop, TRUE);
+    }
+}
+
+/* Co-op: where a scripted cinema (CAMERAMODE_POSEND) is set: the pad its
+ * camera looks from or orbits. 0 when none is running. */
+s32 coopCinemaFocus(coord3d *out)
+{
+    PadRecord *pad;
+    s32 padnum;
+
+    if (g_CameraMode != CAMERAMODE_POSEND)
+    {
+        return 0;
+    }
+    if (g_CameraLookAtBondPad != NULL)
+    {
+        *out = g_CameraLookAtBondPad->pos;
+        return 1;
+    }
+    padnum = (gBondViewCutscene != NULL) ? gBondViewCutscene->pad : dword_CODE_bss_80079A14;
+    pad = isNotBoundPad(padnum) ? &g_CurrentSetup.pads[padnum] : (PadRecord *) &g_CurrentSetup.boundpads[getBoundPadNum(padnum)];
+    *out = pad->pos;
+    return 1;
 }
 #endif
 

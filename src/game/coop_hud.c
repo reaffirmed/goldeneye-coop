@@ -8,7 +8,10 @@
  *   - our own wait to respawn while we are down, or to be revived (the
  *     lobby's When Down rule), with the revive's progress
  *   - a downed partner who can be revived: red on the radar and a red
- *     REVIVE tag over where they fell
+ *     REVIVE tag over where they fell; beside them, "HOLD USE TO REVIVE"
+ *     and the revive's progress while we hold it (coop_revive.c)
+ *   - under the Revive rule, how long we have before we bleed out, as a
+ *     draining bar
  *   - partners' pings (coop_ping.c): a diamond in the pinger's colour where
  *     they pinged, with their name and the distance, held to the edge of the
  *     screen when it is off it, and a square on the radar
@@ -668,6 +671,42 @@ static Gfx *coopHudRespawn(Gfx *gdl, s32 eta)
         gdl = coopHudBar(gdl, viGetViewLeft() + (viGetViewWidth() - 0x50) / 2, y + th + 3, 0x50,
                          (f32) hold / (f32) COOP_REVIVE_HOLD, COOP_HUD_COL_DONE);
     }
+    else if (coopHudBleedOut() >= 0)
+    {   /* the time left to be revived in, draining */
+        gdl = coopHudBar(gdl, viGetViewLeft() + (viGetViewWidth() - 0x50) / 2, y + th + 3, 0x50,
+                         (f32) coopHudBleedOut() / (f32) COOP_BLEED_OUT, 0xD02020E0);
+    }
+    return combiner_bayer_lod_perspective(gdl);
+}
+
+/* beside a downed partner: how to revive them, and the revive's progress
+ * while we hold Use (coop_revive.c) */
+static Gfx *coopHudReviving(Gfx *gdl)
+{
+    CoopHudPartner p;
+    char name[40];
+    char text[64];
+    s32 th = 0, tw = 0;
+    s32 x, y, hold;
+
+    if (!coopReviveHud(&p, &hold))
+    {
+        return gdl;
+    }
+    coopHudText(name, sizeof(name), p.name);
+    coopHudFit(name, viGetViewWidth() / 2);
+    name[strlen(name) - 1] = '\0';
+    snprintf(text, sizeof(text), (hold >= 0) ? "REVIVING %s\n" : "HOLD USE TO REVIVE %s\n", name);
+    textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+    x = viGetViewLeft() + (viGetViewWidth() - tw) / 2;
+    y = viGetViewTop() + viGetViewHeight() * 2 / 3;
+    gdl = microcode_constructor(gdl);
+    gdl = coopHudPrint(gdl, x, y, text, (hold >= 0) ? COOP_HUD_COL_DONE : COOP_HUD_COL_TEXT);
+    if (hold >= 0)
+    {
+        gdl = coopHudBar(gdl, viGetViewLeft() + (viGetViewWidth() - 0x50) / 2, y + th + 3, 0x50,
+                         (f32) hold / (f32) COOP_REVIVE_HOLD, COOP_HUD_COL_DONE);
+    }
     return combiner_bayer_lod_perspective(gdl);
 }
 
@@ -816,6 +855,10 @@ Gfx *coopHudRender(Gfx *gdl)
     {
         return gdl;   /* solo missions only, and not over the watch */
     }
+    if (coopCutsceneActive())
+    {
+        return gdl;   /* the partners are in the shot, not tagged */
+    }
     memset(&p, 0, sizeof(p));
     partner = coopHudPartner(&p);
     if (partner)
@@ -856,6 +899,10 @@ Gfx *coopHudRender(Gfx *gdl)
     if (eta >= 0 || coopHudBledOut())
     {
         gdl = coopHudRespawn(gdl, eta);
+    }
+    else
+    {
+        gdl = coopHudReviving(gdl);
     }
     if (portObjectivesHudShown() && !g_CurrentPlayer->bonddead && !weapmenuIsOpen())
     {

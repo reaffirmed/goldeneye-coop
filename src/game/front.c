@@ -10524,9 +10524,12 @@ static s32 coopLobbyAfterMission(void)
     return TRUE;
 }
 
-/* The co-op debrief (menu0D after a co-op mission, won or failed): both
- * players side by side in place of the solo hit table. Numbers the partner's
- * game has not sent yet show as "-". */
+/* The co-op debrief (menu0D after a co-op mission, won or failed) has two
+ * pages: the team's results, every player side by side, then our own solo
+ * table as the game always drew it. Next turns the page before it leaves,
+ * Previous (or B) turns it back; L and R flip between them. Numbers a
+ * partner's game has not sent yet show as "-". */
+static s32 coopDebriefPage;
 /* the players' columns: two as wide as before, up to four narrower */
 static s32 coopDebriefPitch(s32 ncols)
 {
@@ -10543,15 +10546,14 @@ static s32 coopDebriefNameW(s32 ncols)
     return coopDebriefPitch(ncols) - 6;
 }
 
-static void coopDebriefValue(char *out, s32 player, s32 row)
+static void coopDebriefValue(char *out, s32 player, s32 row, s32 wide)
 {
     s32 v;
 
     switch (row)
     {
         case 0: v = coopStatsGet(player, COOPSTAT_KILLS); break;
-        case 1: v = coopStatsGet(player, COOPSTAT_SHOTS); break;
-        case 2:
+        case 1:
         {
             const s32 shots = coopStatsGet(player, COOPSTAT_SHOTS);
             const s32 hits = coopStatsGet(player, COOPSTAT_HITS);
@@ -10562,13 +10564,45 @@ static void coopDebriefValue(char *out, s32 player, s32 row)
             }
             else
             {
-                sprintf(out, "%.1f%%\n", (shots > 0) ? (hits * 100.0f) / shots : 0.0f);
+                const s32 pct = (shots > 0) ? (hits * 100 + shots / 2) / shots : 0;
+
+                if (wide)
+                {
+                    sprintf(out, "%d%% of %d\n", pct, shots);
+                }
+                else
+                {
+                    sprintf(out, "%d%%\n", pct);
+                }
             }
             return;
         }
-        case 3: v = coopStatsGet(player, COOPSTAT_HEAD); break;
-        case 4: v = coopStatsGet(player, COOPSTAT_DEATHS); break;
-        default: v = coopStatsGet(player, COOPSTAT_REVIVED); break;   /* times a partner got them back up */
+        case 2: v = coopStatsGet(player, COOPSTAT_HEAD); break;
+        case 3: v = coopStatsGet(player, COOPSTAT_OBJECTIVES); break;
+        case 4: v = coopStatsGet(player, COOPSTAT_REVIVES); break;   /* partners they got back up */
+        case 5:
+        {   /* in health bars, as on the HUD */
+            v = coopStatsGet(player, COOPSTAT_DAMAGE);
+            if (v >= 0)
+            {
+                sprintf(out, wide ? "%d.%d bars\n" : "%d.%d\n", v / 100, (v % 100) / 10);
+                return;
+            }
+            break;
+        }
+        default:
+        {   /* times down, and how many of those a partner revived */
+            const s32 deaths = coopStatsGet(player, COOPSTAT_DEATHS);
+            const s32 revived = coopStatsGet(player, COOPSTAT_REVIVED);
+
+            if (deaths > 0 && revived > 0 && wide)
+            {
+                sprintf(out, "%d (%d up)\n", deaths, revived);
+                return;
+            }
+            v = deaths;
+            break;
+        }
     }
     if (v < 0)
     {
@@ -10582,7 +10616,7 @@ static void coopDebriefValue(char *out, s32 player, s32 row)
 
 static Gfx *coopDebriefStats(Gfx *DL, s32 y0, s32 pitch)
 {
-    static const char *const labels[] = { "Kills:\n", "Shots:\n", "Accuracy:\n", "Head hits:\n", "Deaths:\n", "Revived:\n" };
+    static const char *const labels[] = { "Kills:\n", "Accuracy:\n", "Head hits:\n", "Objectives:\n", "Revives:\n", "Damage:\n", "Downed:\n" };
     char buf[48];
     s32 x, y, i, p;
     const s32 ncols = coopStatsColumns();
@@ -10604,7 +10638,7 @@ static Gfx *coopDebriefStats(Gfx *DL, s32 y0, s32 pitch)
         DL = frontPrintText(DL, &x, &y, (char *) labels[i], ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
         for (p = 0; p < ncols; p++)
         {
-            coopDebriefValue(buf, p, i);
+            coopDebriefValue(buf, p, i, ncols <= 2);
             x = coopDebriefColX(p, ncols);
             y = y0 + (i + 1) * pitch + 2;
             DL = frontPrintText(DL, &x, &y, buf, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
@@ -19024,6 +19058,9 @@ void init_menu0D_missioncomplete(void)
 {
     tab_next_selected = 0;
     tab_prev_selected = 0;
+#ifndef TARGET_N64
+    coopDebriefPage = 0;
+#endif
     load_walletbond();
     load_briefing_text_for_stage();
     if (g_NewCheatUnlocked)
@@ -19105,6 +19142,24 @@ void interface_menu0D_missioncomplete()
         {
             waited = 0;
             tab_next_selected = TRUE;
+        }
+    }
+    if (coopStatsShown())
+    {   /* the team's page, then ours (see coopDebriefStats) */
+        if (joyGetButtonsPressedThisFrame(PLAYER_1, L_TRIG | R_TRIG))
+        {
+            coopDebriefPage ^= 1;
+            sndPlaySfx((struct ALBankAlt_s *)g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+        }
+        if (tab_next_selected && coopDebriefPage == 0)
+        {
+            coopDebriefPage = 1;
+            tab_next_selected = 0;
+        }
+        else if (tab_prev_selected && coopDebriefPage == 1)
+        {
+            coopDebriefPage = 0;
+            tab_prev_selected = 0;
         }
     }
     if ((tab_next_selected || tab_prev_selected) && coopLobbyAfterMission())
@@ -19214,6 +19269,12 @@ Gfx *constructor_menu0D_missioncomplete(Gfx *DL)
     missiontimer = getMissiontimer();
 #endif
     killcount = get_curplay_killcount();
+#ifndef TARGET_N64
+    if (coopStatsShown() && coopStatsSelf(COOPSTAT_KILLS) >= 0)
+    {
+        killcount = coopStatsSelf(COOPSTAT_KILLS);  /* a joiner's kills were the host's to count */
+    }
+#endif
     shotsfired = get_curplayer_shot_register(0);
     headshots = get_curplayer_shot_register(1);
     bodyshots = get_curplayer_shot_register(2);
@@ -19326,7 +19387,13 @@ Gfx *constructor_menu0D_missioncomplete(Gfx *DL)
 
 #ifndef TARGET_N64
     if (coopStatsShown())
-    {   /* co-op: both players' numbers instead of the solo table below */
+    {   /* which page: the team's results, or ours (the solo table below) */
+        x = 0xB4;
+        y = 0x8F;
+        DL = frontPrintText(DL, &x, &y, (coopDebriefPage == 0) ? "TEAM  1/2\n" : "YOURS  2/2\n", ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+    }
+    if (coopStatsShown() && coopDebriefPage == 0)
+    {   /* co-op: every player's numbers instead of the solo table below */
         DL = coopDebriefStats(DL, 0xCC, y2);
         DL = frontAddNextTabText(DL);
         DL = frontAddPreviousTabText(DL);

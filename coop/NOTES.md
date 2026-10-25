@@ -87,7 +87,7 @@ Each item verified with two copies in Dam using the harness switches listed belo
 - Mission end: completing the mission (bossReturnTitleStage) ends it for both (GE_COOP_TESTEND). The peer's Bond is removed when it leaves the stage or goes silent for 5 s.
 - Death (owner's choice): a dead player respawns beside the partner, with full health and the same inventory, once the partner has been out of combat for 4 s (at least 3 s after the death fade, at most 20 s). If both players are dead, the mission fails as usual (GE_COOP_TESTDIE).
 
-Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscenes (intro and exit) only play on the host; guard tracers; vehicles (Runway plane, tank) run on both sides; and only the host can trigger level exits that check "Bond's" position.
+Known gaps: grenades and mines thrown by the joiner don't hurt anything; (cutscenes: see "Synced cutscenes" below); guard tracers; vehicles (Runway plane, tank) run on both sides; and only the host can trigger level exits that check "Bond's" position.
 
 ## Milestone 4, Steam (2026-10-24)
 
@@ -989,3 +989,70 @@ on the paper) and scroll as before.
 - The world the new host takes over is unchanged here (AI sync each second,
   mirrored doors and objects); the netcode thread's coop_repl.c adds its
   snapshot through coopReplMigrated.
+
+## Revive by holding Use, bleed-out (2026-10-25, COOP_VERSION 10)
+
+- Revive is now an action: a living partner holds Use within 1.6 m of where
+  you fell for 2.5 s (COOP_REVIVE_HOLD). Their HUD says "HOLD USE TO REVIVE
+  NAME", then "REVIVING NAME" with a green bar; your downed screen shows a red
+  bar draining over 60 s (COOP_BLEED_OUT) next to "BEING REVIVED". Back with
+  half health. The mission fails only when everyone is down (unchanged).
+- Wire: the STATE spare byte is now `revive`: standing, whom we hold Use over
+  (player + 1); down, our hold count. The downed game decides (coop.c
+  coopDeadTick); the reviver gets COOPSTAT_REVIVES when the partner stands.
+- Harness: GE_COOP_TESTREVIVE=<s> walks to a downed partner and holds Use.
+- Files: coop_revive.c (reviver side), coop_hud.c, joy_port.c
+  portJoyPortUseHeldInPlay.
+
+## Synced cutscenes (2026-10-25)
+
+- Before: coopInMission() needs CAMERAMODE_FP, so the whole session (state,
+  guards, puppets) paused in intros and cinemas; cinema chrs lived on the host.
+- Now (coop_cutscene.c): while a stage intro or scripted cinema (POSEND) runs
+  the session keeps going (coop.c coopInStage / coopCinemaTick), partners'
+  puppets play what our own Bond plays, guns away, and our HUD is off.
+- Intro: everyone's swirl shows every Bond, partners in slots beside ours;
+  the host's intro ending (skip or not) ends everyone's (COOPEV_CINEMA
+  INTRODONE, bondview2.c coopIntroHostDone).
+- Scripted cinemas (endings, Runway/Dam style AI camera scripts): the star is
+  the player nearest the cinema's pad; everyone else stands up (if down) and
+  is moved to a slot beside them, including their cinema body
+  (coopTeleportPlayerTo, as AI_TRYTeleportingChrToPad). The host's AI
+  relay still drives the camera commands on every game.
+- Player chrs (our Bond as a cinema chr, puppets) never go into guard
+  snapshots or AI sync (coopIsPlayerChr); before, the host's cinema Bond was
+  applied to the joiner's own Bond and crashed it.
+- Harness: GE_COOP_TESTCINEMA=<s> (host runs a 5 s orbit cinema around the
+  partner), GE_COOP_CINEMASHOT=<ticks> (cine_p<player>_<n>.bmp).
+- Event ids: this feature set owns COOPEV 56..63 (COOPEV_DESIGN_FIRST/LAST)
+  and COOPPKT 24..25.
+
+## Results screen (2026-10-25)
+
+- The co-op debrief (menu0D) has two pages. Page 1 "TEAM": one column per
+  player with Kills, Accuracy (percent of shots), Head hits, Objectives (the
+  ones credited to them, coop_objective.c), Revives (partners they got up),
+  Damage (taken, in health bars: health plus armour lost), Downed (times down,
+  and how many a partner revived). Page 2 "YOURS": the game's own solo table,
+  with a joiner's kill total taken from the host's count.
+- Next turns to page 2 before leaving; Previous or B turns back; L/R flip.
+- Two new columns in COOPEV_STATS (COOPSTAT_OBJECTIVES, COOPSTAT_DAMAGE): ten
+  u16s, 24 bytes of the 28 (checked at compile time). Same COOP_VERSION 10.
+
+## 3-4 player scaling and team unlock rules (2026-10-25)
+
+- coop_difficulty.c: per player past the second, guard health +25% and aim
+  +10%, in every mode (Normal included, since Normal is tuned for two). Three
+  on Normal: health x1.25, aim x1.1; four on Brutal: health x3, aim x1.56.
+  No extra guards from the player count (only the mode adds guards). The count
+  (coopLobbyPlayerCount) goes by connection, not a fresh HELLO, so a game still
+  loading the stage counts; aim follows it live when a player drops.
+  Verified with the mock: Hard soldier health 6.0 with 2 players, 7.5 with 3;
+  Normal 4 players logs health x1.5, aim x1.2 on all four games.
+- Cheats and unlocks: the time is the team's (coop_teamtime.c, above). New:
+  the game marks Bond KIA at any death and fails the debrief on it, so a
+  player who went down and came back (or was down when a partner finished)
+  got FAILED and no unlocks. coopTeamKiaRule (coopMissionComplete) clears it
+  when we stand at the end, a partner stands, or a partner's game ended the
+  mission. A wipe still fails. Objectives, difficulty and the team's time
+  decide the cheats as in solo.

@@ -2,7 +2,8 @@
  * Co-op mission stats and the co-op campaign record (port only).
  *
  * Stats: both games keep a column per player (kills, shots, hits, head hits,
- * deaths, times revived, respawns). Each game counts its own shots and deaths.
+ * deaths, times revived, respawns, revives given, objectives credited to them,
+ * damage taken in hundredths of a health bar). Each game counts its own shots and deaths.
  * Kills and hits on guards belong to the host, which runs the guards: a shot
  * or blast the joiner sends is applied on the host between coopStatsBlameBegin
  * and coopStatsBlameEnd, which moves what it added to the host's own counters
@@ -43,6 +44,7 @@ typedef struct
     u8 about;       /* _GUARDS: whose */
     u16 v[COOPSTAT_COUNT];
 } CoopStatsMsg;
+typedef char CoopStatsMsgFits[(sizeof(CoopStatsMsg) <= 28) ? 1 : -1];
 
 typedef struct
 {
@@ -53,6 +55,8 @@ static s32 sStage = -1;         /* the mission the table is for */
 static s32 sCoop;               /* a partner was in it with us */
 static s32 sLive;               /* in the mission; the final column is not sent yet */
 static s32 sDown;               /* this death is counted */
+static f32 sLastHp = -1.0f;     /* health + armour last tick, -1 not yet */
+static f32 sDamage;             /* taken so far, in health bars */
 static s32 sWas[COOP_MAX_PLAYERS];          /* by player number: was in the mission */
 static CoopStatsCol sOwn[COOP_MAX_PLAYERS]; /* each player's own column (ours: deaths, revived, respawns while live) */
 static s32 sOwnIn[COOP_MAX_PLAYERS];
@@ -96,6 +100,8 @@ void coopStatsMissionStart(void)
     sCoop = 0;
     sLive = 1;
     sDown = 0;
+    sLastHp = -1.0f;
+    sDamage = 0.0f;
     sBlame = 0;
     memset(sWas, 0, sizeof(sWas));
     memset(sOwn, 0, sizeof(sOwn));
@@ -177,6 +183,18 @@ void coopStatsMissionTick(s32 partnerhere)
     if (!g_CurrentPlayer->bonddead)
     {
         sDown = 0;
+    }
+    {   /* damage taken: every drop in health and armour (a respawn or a pickup only adds) */
+        f32 hp = g_CurrentPlayer->bondhealth;
+
+        hp = ((hp > 0.0f) ? hp : 0.0f) + ((g_CurrentPlayer->bondarmour > 0.0f) ? g_CurrentPlayer->bondarmour : 0.0f);
+
+        if (sLastHp >= 0.0f && hp < sLastHp)
+        {
+            sDamage += sLastHp - hp;
+        }
+        sLastHp = hp;
+        sOwn[coopLobbySelfPlayer()].v[COOPSTAT_DAMAGE] = (s32) (sDamage * 100.0f + 0.5f);
     }
 }
 
@@ -336,9 +354,10 @@ void coopStatsFrontTick(void)
     own->v[COOPSTAT_KILLS] = coopNetIsHost() ? g_playerPerm->kill_count : 0;
     sOwnIn[self] = 1;
     coopStatsSend(COOPSTATMSG_OWN, self, own);
-    portConLogf("ge: coop: stats sent: kills %d shots %d hits %d head %d deaths %d revived %d respawns %d%s\n",
+    portConLogf("ge: coop: stats sent: kills %d shots %d hits %d head %d deaths %d revived %d respawns %d revives %d objectives %d damage %d%s\n",
                 own->v[COOPSTAT_KILLS], own->v[COOPSTAT_SHOTS], own->v[COOPSTAT_HITS], own->v[COOPSTAT_HEAD],
                 own->v[COOPSTAT_DEATHS], own->v[COOPSTAT_REVIVED], own->v[COOPSTAT_RESPAWNS],
+                own->v[COOPSTAT_REVIVES], own->v[COOPSTAT_OBJECTIVES], own->v[COOPSTAT_DAMAGE],
                 coopNetIsHost() ? "" : " (kills from the host)");
     if (coopNetIsHost())
     {
@@ -385,9 +404,10 @@ void coopStatsApply(const void *payload, s32 from)
     }
     sOwnIn[from] = 1;
     sWas[from] = 1;
-    portConLogf("ge: coop: stats from player %d: kills %d shots %d hits %d head %d deaths %d revived %d respawns %d\n",
+    portConLogf("ge: coop: stats from player %d: kills %d shots %d hits %d head %d deaths %d revived %d respawns %d revives %d objectives %d damage %d\n",
                 from + 1, m.v[COOPSTAT_KILLS], m.v[COOPSTAT_SHOTS], m.v[COOPSTAT_HITS], m.v[COOPSTAT_HEAD],
-                m.v[COOPSTAT_DEATHS], m.v[COOPSTAT_REVIVED], m.v[COOPSTAT_RESPAWNS]);
+                m.v[COOPSTAT_DEATHS], m.v[COOPSTAT_REVIVED], m.v[COOPSTAT_RESPAWNS],
+                m.v[COOPSTAT_REVIVES], m.v[COOPSTAT_OBJECTIVES], m.v[COOPSTAT_DAMAGE]);
 }
 
 /* 1: the debrief on screen is for a co-op mission (draw the columns) */
@@ -437,6 +457,21 @@ s32 coopStatsGet(s32 col, s32 stat)
         case COOPSTAT_HEAD:  return sGuardsIn[p] ? sOwn[p].v[stat] + sGuards[p].v[stat] : -1;
         default:             return sOwn[p].v[stat];
     }
+}
+
+s32 coopStatsSelf(s32 stat)
+{
+    const s32 self = coopLobbySelfPlayer();
+    s32 col;
+
+    for (col = 0; col < coopStatsColumns(); col++)
+    {
+        if (sOrder[col] == self)
+        {
+            return coopStatsGet(col, stat);
+        }
+    }
+    return -1;
 }
 
 const char *coopStatsName(s32 col)
@@ -885,3 +920,4 @@ void coopCampaignApply(const u8 *raw, s32 from)
     sInheritPending = 1;
     coopCampaignInherit();
 }
+

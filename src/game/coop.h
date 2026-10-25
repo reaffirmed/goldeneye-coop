@@ -31,6 +31,8 @@ void coopScriptSetsFlags(void *script);        /* that script sets stage flags: 
 void coopAiCommand(u8 *list, s32 offset, ChrRecord *self);
 s32  coopDeadTick(void); /* 1: co-op owns this death (waiting or respawned) */
 void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon);
+void coopTeleportPlayerTo(coord3d *pos, StandTile *stan, f32 yaw);    /* bondview2.c */
+s32  coopCinemaFocus(coord3d *out);                                     /* bondview2.c: a scripted cinema's pad */
 s32  coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid);
 s32  coopShotPuppet(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, s32 isPlayer);
 
@@ -44,7 +46,8 @@ typedef struct
     f32 health;
     f32 armour;
     s32 respawn;        /* ticks, -1 = not waiting */
-    s32 revivable;      /* down, and walking over them brings them back */
+    s32 revivable;      /* down, and holding Use beside them brings them back */
+    s32 revivehold;     /* down: ticks of COOP_REVIVE_HOLD someone has held Use over them */
     const char *name;
     s32 player;         /* their player number, 0 the host */
 } CoopHudPartner;
@@ -53,8 +56,41 @@ s32  coopHudPartnerAt(s32 i, CoopHudPartner *out);  /* the i-th, from 0 */
 s32  coopHudRespawnEta(void);
 s32  coopHudDownRule(void);
 s32  coopHudReviveHold(void);   /* ticks of COOP_REVIVE_HOLD */
-#define COOP_REVIVE_HOLD 45        /* the partner stands where we fell for 3/4 s */
+#define COOP_REVIVE_HOLD 150       /* a partner holds Use beside where we fell for 2.5 s */
+#define COOP_REVIVE_DIST 160.0f    /* ... within this of us (xz), and 250 up or down */
+#define COOP_BLEED_OUT   3600      /* revive only: 60 s down and you are out of this mission */
 s32  coopHudBledOut(void);
+s32  coopHudBleedOut(void);     /* revive only: ticks left before we bleed out, -1 none */
+
+/* revive, cutscenes and the results screen: their own events (coop.c carries
+ * them; coopDesignApply in coop_cutscene.c hands them out) */
+#define COOPEV_DESIGN_FIRST 56
+#define COOPEV_DESIGN_LAST  63
+enum
+{
+    COOPEV_CINEMA = 56      /* host -> all: CoopCinemaMsg, the host's intro is over */
+};
+#define COOP_ALL_PLAYERS 0xFF   /* coopDesignSend's `to`: everyone */
+void coopDesignSend(s32 kind, s32 to, const void *payload, s32 len);
+void coopRunHostScript(u8 *list);   /* host: run script commands as the level would (relayed) */
+void coopCutsceneStandUp(coord3d *pos, StandTile *stan, f32 yaw);
+void coopDesignApply(s32 kind, const u8 *raw, s32 from);
+s32  coopDesignSelf(void);
+s32  coopDesignIsHost(void);
+
+/* cutscenes (coop_cutscene.c) */
+s32  coopCutsceneTick(void);    /* every tick: 1 while an intro or a scripted cinema runs */
+s32  coopCutsceneActive(void);  /* partners play our Bond's cinema animation */
+s32  coopCutscenePuppetPos(s32 player, coord3d *pos, f32 *yaw);   /* 1: stand the puppet here instead */
+void coopCutscenePuppetAnim(ChrRecord *chr);
+s32  coopCutsceneCameraNear(const coord3d *pos);  /* the swirl's camera is about to pass through pos */
+void coopCutsceneApply(const u8 *raw, s32 from);
+s32  coopIntroHostDone(void);   /* bondview2.c: end our intro, the host's is over */
+
+/* reviving a downed partner (coop_revive.c) */
+void coopReviveTick(s32 missionticks);
+s32  coopReviveTarget(void);    /* STATE: the player we hold Use over, + 1; 0 none */
+s32  coopReviveHud(CoopHudPartner *out, s32 *hold);
 
 /* Lobby settings the host picks and the joiner's game copies (coopSetting).
  * Append only: 0 must stay each one's default. */
@@ -74,6 +110,7 @@ s32  coopSetting(s32 which);
 void coopSetSetting(s32 which, s32 value);
 
 /* co-op difficulty (coop_difficulty.c): COOPSET_DIFFICULTY's modes */
+s32  coopLobbyPlayerCount(void);          /* players in the session, us included */
 s32  coopDifficultyCount(void);
 const char *coopDifficultyName(s32 mode);
 f32  coopDifficultyHealthMul(void);
@@ -196,7 +233,7 @@ s32  coopHostLeavesCount(void);         /* COOPSET_HOSTLEAVES's rules */
 const char *coopHostLeavesName(s32 rule);
 
 /* end-of-mission stats and the campaign record (coop_stats.c) */
-enum { COOPSTAT_KILLS, COOPSTAT_SHOTS, COOPSTAT_HITS, COOPSTAT_HEAD, COOPSTAT_DEATHS, COOPSTAT_REVIVED, COOPSTAT_RESPAWNS, COOPSTAT_COUNT };
+enum { COOPSTAT_KILLS, COOPSTAT_SHOTS, COOPSTAT_HITS, COOPSTAT_HEAD, COOPSTAT_DEATHS, COOPSTAT_REVIVED, COOPSTAT_RESPAWNS, COOPSTAT_REVIVES, COOPSTAT_OBJECTIVES, COOPSTAT_DAMAGE, COOPSTAT_COUNT };
 void coopStatsMissionStart(void);
 void coopStatsMissionTick(s32 partnerhere);
 void coopStatsFrontTick(void);
@@ -212,6 +249,7 @@ s32  coopStatsShown(void);              /* 1: the debrief shows the co-op column
 s32  coopStatsColumns(void);            /* the debrief's columns (players), up to COOP_MAX_PLAYERS */
 s32  coopStatsGet(s32 col, s32 stat);    /* -1 not in yet */
 const char *coopStatsName(s32 col);
+s32  coopStatsSelf(s32 stat);            /* our own column's number, -1 not in yet */
 void coopCampaignMissionEnd(void);
 s32  coopCampaignNext(s32 *stage, s32 *difficulty, char *label, s32 labelcap);  /* the host's campaign (cross-save) */
 void coopCampaignTick(void);

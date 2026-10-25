@@ -19,6 +19,13 @@
  * 1.7x (Brutal) the damage a guard deals per second, roughly what the second
  * target takes away from each player.
  *
+ * Three or four players scale it again, in every mode (Normal too, which is
+ * tuned for two): per player past the second, guard health +25% and aim
+ * +10%. Three players on Normal: health x1.25, aim x1.1; four on Brutal:
+ * health x3, aim x1.56. More guards never come from the player count, only
+ * from the mode. The count is taken as the mission starts (health is set as
+ * guards are allocated) and the aim follows it live, as players drop out.
+ *
  * All of it runs on the host, whose game owns the guards: damage to the
  * partner is computed there and sent as a hit, and the extra guards reach the
  * joiner as mid-mission spawns (coopMirrorSpawn). Both games allocate the
@@ -102,10 +109,25 @@ static s32 coopDifficultyMode(void)
     return (mode < COOPDIFF_COUNT) ? mode : COOPDIFF_COUNT - 1;
 }
 
+/* players past the second: 0 for two or fewer */
+static s32 coopDifficultyCrowd(void)
+{
+    s32 n = coopSessionActive() ? coopLobbyPlayerCount() : 1;
+
+    return (n > 2) ? n - 2 : 0;
+}
+
+#define COOPDIFF_CROWD_HEALTH   0.25f   /* per player past two */
+#define COOPDIFF_CROWD_AIM      0.10f
+
 /* get_007_health_mod: guard health, on the host */
 f32 coopDifficultyHealthMul(void)
 {
-    return coopNetIsHost() ? sModes[coopDifficultyMode()].health : 1.0f;
+    if (!coopNetIsHost())
+    {
+        return 1.0f;
+    }
+    return sModes[coopDifficultyMode()].health * (1.0f + COOPDIFF_CROWD_HEALTH * coopDifficultyCrowd());
 }
 
 /* alloc_init_GUARDdata_entries: room for the extra guards, on both games */
@@ -240,24 +262,30 @@ void coopDifficultyTick(void)
     const CoopDiffMode *m = &sModes[mode];
     CoopHudPartner partner;
     s32 i;
+    const s32 crowd = coopDifficultyCrowd();
+    const f32 aim = m->aim * (1.0f + COOPDIFF_CROWD_AIM * crowd);
 
-    if (mode == 0)
+    if (mode == 0 && crowd == 0)
     {
         return;
     }
-    if (!sLogged)
+    if (sLogged != crowd + 1)
     {
-        sLogged = 1;
-        portConLogf("ge: coop: difficulty %s (%s): guard health x%.2f, damage x%.2f, aim x%.2f, extra 1 per %d up to %d\n",
-                    m->name, coopNetIsHost() ? "applied here" : "the host applies it",
-                    m->health, m->damage, m->aim, m->every, m->maxextra);
+        sLogged = crowd + 1;
+        portConLogf("ge: coop: difficulty %s, %d players (%s): guard health x%.2f, damage x%.2f, aim x%.2f, extra 1 per %d up to %d\n",
+                    m->name, crowd + 2, coopNetIsHost() ? "applied here" : "the host applies it",
+                    m->health * (1.0f + COOPDIFF_CROWD_HEALTH * crowd), m->damage, aim, m->every, m->maxextra);
     }
     if (!coopNetIsHost())
     {
         return;
     }
     g_AiDamageModifier *= m->damage;
-    g_AiAccuracyModifier *= m->aim;
+    g_AiAccuracyModifier *= aim;
+    if (m->every == 0)
+    {
+        return;     /* Normal: no extra guards */
+    }
 
     if (!coopHudPartner(&partner))
     {
