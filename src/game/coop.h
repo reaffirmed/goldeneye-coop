@@ -480,6 +480,22 @@ void coopObjKnocked(ObjectRecord *obj, s32 bounce, coord3d *viewdir);
 void coopObjUsed(ObjectRecord *obj);                     /* propobj.c propobjInteract */
 void coopAsciiName(char *out, s32 cap, const char *in, s32 upper);   /* a Steam name for the game's fonts */
 
+/* voice chat (coop_voice.c): Steam Voice in COOPPKT_VOICE packets, heard from
+ * where the talker stands; push to talk (V) or an open mic ([display]
+ * voice_mode), per-player mute on this game alone */
+#define COOPPKT_VOICE 30    /* 30..31 kept for voice */
+void coopVoiceTick(s32 inmission);
+void coopVoiceReceive(const void *raw, s32 len);
+void coopVoiceRenumber(const s32 *newof);
+s32  coopVoiceAvailable(void);      /* in a Steam session with voice, and voice_mode not off */
+s32  coopVoiceSelfTalking(void);    /* our words are going out now */
+s32  coopVoiceSelfOpen(void);       /* the mic is open (push to talk held, or open mic) */
+s32  coopVoiceTalking(s32 p);       /* player p's voice is reaching us now */
+s32  coopVoiceMuted(s32 p);
+void coopVoiceSetMuted(s32 p, s32 muted);
+s32  coopVoiceMuteRowPlayer(s32 k); /* the watch's k-th mute row: which player, -1 none */
+s32  coopVoiceMuteRowMask(void);
+
 /* objective credit (coop_objective.c): the host names who completed each
  * objective and every game shows a toast for a partner's */
 void coopObjNoteActor(s32 player, s32 damage);  /* host: something player did just changed the world */

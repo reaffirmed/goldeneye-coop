@@ -4800,6 +4800,8 @@ static const struct PortSheetRow port_sheet_rows_audio[] = {
     /* not one of the requested rows, but it is audio, so it lives here */
     { SHROW_OPT, "stereo_pan" },
     { SHROW_OPT, "mute_unfocused" },   /* silence while the window has no focus */
+    { SHROW_OPT, "voice_mode" },       /* co-op voice chat (coop_voice.c) */
+    { SHROW_OPT, "voice_volume" },
 };
 static const struct PortSheetRow port_sheet_rows_graphics[] = {
     /* EMPTY: FOV went to VIDEO, High Detail Models to PORT
@@ -8841,7 +8843,7 @@ enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLRO
        CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE, CLROW_FRIENDLYFIRE,
        CLROW_CHARACTER, CLROW_CHAT, CLROW_PUBLIC, CLROW_PASSWORD, CLROW_JOINPUBLIC, CLROW_LAYOUT, CLROW_OPTION,
        CLROW_HOSTLEAVES, CLROW_VSMODE, CLROW_VSARENA, CLROW_VSSCENARIO, CLROW_VSLENGTH, CLROW_VSWEAPONS, CLROW_VSSTART,
-       CLROW_DISCORDYES, CLROW_DISCORDNO, CLROW_PROFILE };
+       CLROW_DISCORDYES, CLROW_DISCORDNO, CLROW_PROFILE, CLROW_VOICEMUTE };
 #define COOP_LOBBY_ROWS     48
 /* the crew strip (coopLobbyStrip): a photo card per player, and the next
  * mission's or the arena's photo, between the title and the rows */
@@ -9184,6 +9186,8 @@ static const char *const coop_lobby_opts[][2] = {
     { "hfov_wide", "Field of View\n" },
     { "mouse", "Mouse Look\n" },
     { "mouse_sens_x", "Mouse Speed\n" },
+    { "voice_mode", "Voice Chat\n" },     /* co-op voice (coop_voice.c) */
+    { "voice_volume", "Voice Volume\n" },
 };
 
 /* port_profiles.c: player 1's profile carries these rows and the character (its [settings]) */
@@ -9358,6 +9362,22 @@ static void coopLobbyBuild(void)
     /* the players are the strip's photo cards (coopLobbyStrip); ours is ours to change */
     coopCharacterName(coopCharacter(), name, sizeof(name));
     coopLobbyAdd(CLROW_CHARACTER, 0, "Your Character\n", portSheetFitText(name, PORT_SHEET_RULE_R - COOP_LOBBY_VALUE_X));
+    for (i = 0; i < COOP_MAX_PLAYERS && (coopLobbyIsHost() || coopLobbyHasPartner()); i++)
+    {   /* hearing each partner or not, on this game alone (coop_voice.c); the strip shows who is talking */
+        if (!coopLobbyPlayerHere(i) || i == coopLobbySelfPlayer() || coopVoiceMuteRowMask() == 0)
+        {
+            continue;
+        }
+        coopLobbyCopyName(name, sizeof(name), coopPlayerName(i));
+        name[strcspn(name, "\n")] = '\0';
+        name[(strlen(name) > 30) ? 30 : strlen(name)] = '\0';
+        strcat(name, " Voice\n");
+        r = coopLobbyAdd(CLROW_VOICEMUTE, i, name, coopVoiceMuted(i) ? "Muted\n" : "On\n");
+        if (r != NULL && coopVoiceMuted(i))
+        {
+            r->colour = 0xA00000FF;
+        }
+    }
     for (i = 0; i < coopLobbyDiscordAsks() && i < 2; i++)
     {   /* Discord's Ask to Join: the host lets them in (port/src/coop_discord.c) */
         char ask[64];
@@ -9731,6 +9751,9 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
         case CLROW_DISCORDYES:
         case CLROW_DISCORDNO:
             coopDiscordRespond(r->arg, r->kind == CLROW_DISCORDYES);
+            break;
+        case CLROW_VOICEMUTE:
+            coopVoiceSetMuted(r->arg, !coopVoiceMuted(r->arg));
             break;
         default:
             break;
@@ -10361,7 +10384,11 @@ static Gfx *coopLobbyStrip(Gfx *DL)
                 continue;
             }
             coopLobbyCopyName(name, sizeof(name), coopPlayerName(i));
-            if (i == 0)
+            if ((i == coopLobbySelfPlayer()) ? coopVoiceSelfTalking() : coopVoiceTalking(i))
+            {   /* their voice is coming through (coop_voice.c) */
+                DL = coopLobbyPlayerCard(DL, x, i, coopPlayerCharacter(i), name, "TALKING", 0x2060C0FF, i == coopLobbySelfPlayer());
+            }
+            else if (i == 0)
             {
                 DL = coopLobbyPlayerCard(DL, x, i, coopPlayerCharacter(i), name, "HOST", 0x7A5A00FF, i == coopLobbySelfPlayer());
             }

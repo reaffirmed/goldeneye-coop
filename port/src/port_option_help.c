@@ -130,6 +130,11 @@ static const struct PortOptHelp sHelp[] = {
     { "sfx_volume",         "How loud sound effects play." },
     { "stereo_pan",         "Effects pan left and right by position." },
     { "mute_unfocused",     "Mutes the game in the background." },
+    { "voice_mode",         "Co-op voice: hold V to talk, or keep the mic open." },
+    { "voice_volume",       "How loud your partners' voices play." },
+    { "voice_mute_1",       "Stop hearing this player. Only on your game." },
+    { "voice_mute_2",       "Stop hearing this player. Only on your game." },
+    { "voice_mute_3",       "Stop hearing this player. Only on your game." },
 
     /* CONTROL, the player pages and the rebind list */
     { "@player",            "Set up this player's device, binds and controls." },

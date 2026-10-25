@@ -13,6 +13,7 @@ void coopExtTick(s32 inmission)
     coopObjTick(inmission);
     coopTeamTimeTick(inmission);
     coopBrowseTick(inmission);
+    coopVoiceTick(inmission);
     if (!inmission)
     {
         coopCampaignTick();

@@ -81,6 +81,21 @@ int  coopSteamPresenceOpen(void);       /* Steam up for presence and invites, no
 void coopSteamPresenceTick(void);       /* callbacks, when no session is pumping them */
 void coopSteamSetPresence(const char *status, int phase, unsigned long long group, int groupsize, int joinable);  /* phase: COOP_PRESENCE_* */
 
+/* Steam Voice (coop_steam.c), for src/game/coop_voice.c */
+int  coopSteamVoiceAvailable(void);     /* Steam is up and has the voice calls */
+void coopSteamVoiceRecord(int on);      /* the microphone on or off */
+int  coopSteamVoiceRead(void *buf, int cap);    /* compressed voice since the last call: bytes, 0 none */
+int  coopSteamVoiceDecode(const void *in, int len, short *out, int cap, int rate);  /* mono samples, 0 on a fault */
+
+/* the voice mixer (port/src/voice_pc.c): one stream per player, mixed into
+ * the game's output by audio_pc.c */
+#define PORT_VOICE_RATE 22050           /* audio_pc.c's output rate */
+void portVoicePush(int player, const short *pcm, int n);
+void portVoiceSetGain(int player, float left, float right);
+void portVoiceDrop(int player);         /* stop and forget what is queued */
+void portVoiceMix(short *stereo, int frames);   /* audio_pc.c: add the voices to one output frame */
+int  portVoiceLevel(int player);        /* 0..100, how loud they are right now (what is playing) */
+
 /* Rich presence and joins from outside the game (port/src/coop_presence.c):
  * the game says what it is doing, and takes the joins Steam and Discord hand
  * it (an accepted invite, Join Game, Ask to Join). */

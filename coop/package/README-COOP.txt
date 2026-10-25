@@ -90,6 +90,13 @@ Rules
 - T opens a chat line (in a mission and in the lobby). Type and press Enter
   to send it to everyone, or Escape to close it. Lines show at the bottom
   left in each player's colour. The key can be changed (Chat).
+- Voice chat goes through Steam Voice. Hold V to talk (Push to Talk in the
+  controls), or set Voice Chat to Open Mic or Off in Options > Audio. You
+  hear partners from where they stand in a mission: quieter far away, and
+  from the left or right with Stereo Pan on. A speaker icon shows next to
+  whoever is talking, and TALK at the top while your mic is open. Voice
+  Volume sets how loud partners are, and each partner can be muted in the
+  lobby (the Voice row under their name) or on the watch's Audio page.
 - When a partner completes an objective, a note across the middle of the
   screen says who did it: "MOCK COMPLETED OBJECTIVE A" and the objective.
 - While you are down, the screen fades back in through a partner's eyes

@@ -84,7 +84,8 @@ extern void portConLogf(const char *fmt, ...);
                           9: shared pickups, thrown items, drops, knocks, Use, host blasts (COOPEV 17, 18, 25..28) */
 
 enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7, COOPPKT_AISYNC = 8, COOPPKT_BYE = 9 };
-/* 10 and 11 (COOPPKT_EXT_FIRST..LAST in coop.h) are coop_ext.c's features' own packets */
+/* 10 and 11 (COOPPKT_EXT_FIRST..LAST in coop.h) are coop_ext.c's features' own packets;
+ * 30 (COOPPKT_VOICE, 30..31 kept for it) is voice chat's (coop_voice.c) */
 
 typedef struct
 {
@@ -805,6 +806,31 @@ static void coopVersionMismatch(s32 c, s32 theirs)
     coopScreenError("Different Versions", text);
 }
 
+/* a VOICE packet (coop_voice.c): the host stamps who is talking and passes a
+ * joiner's on to the other joiners, as a VERSUS packet */
+static void coopRecvVoice(s32 c, u8 *buf, s32 n)
+{
+    s32 q;
+    u8 *player = buf + 8;   /* CoopVoicePkt.player, after the magic, version and type */
+
+    if (n < 16)
+    {
+        return;
+    }
+    if (coopNetIsHost())
+    {
+        *player = (u8) coopPlayerOfChan(c);
+        for (q = 0; q < COOP_NET_MAX_PEERS; q++)
+        {
+            if (q != c && coopNetPeerConnected(q))
+            {
+                coopNetSendTo(q, buf, n);
+            }
+        }
+    }
+    coopVoiceReceive(buf, n);
+}
+
 static void coopPollNet(void)
 {
     u8 buf[1500];
@@ -913,6 +939,10 @@ static void coopPollNet(void)
         if (p->type == COOPPKT_VERSUS && n >= coopVersusPktSize())
         {
             coopRecvVersus(c, buf, n);
+        }
+        if (p->type == COOPPKT_VOICE)
+        {
+            coopRecvVoice(c, buf, n);
         }
         if (p->type >= COOPPKT_EXT_FIRST && p->type <= COOPPKT_EXT_LAST)
         {
@@ -4688,6 +4718,7 @@ static void coopRenumber(const s32 *newof)
         sChan[c].heardMs = now;
     }
     coopStatsRemap(newof);
+    coopVoiceRenumber(newof);
 }
 
 /* The host is gone: pick the next one and go over to it. */
