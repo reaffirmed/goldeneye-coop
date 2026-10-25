@@ -798,3 +798,28 @@ satellite-console work and the Runway plane did nothing on the host.
   animation)"; Brutal (health x2), a flinch, then "dies ... after the AI
   sync", confirmed, same animation.
 
+## Netcode 5: lag compensation for hits (2026-10-25)
+
+- Our shots on guards already favour the shooter: a joiner hits what its own
+  screen shows and the host applies the hit to that chrnum wherever the guard
+  has got to. Nothing to add there.
+- Guards against joiners were the unfair side: the host's guards see and
+  shoot at the joiner's puppet, which (with netcode 3) is drawn a trip plus
+  the drawing delay in the past.
+  - Aim (host): coopRemoteAim keeps, per joiner, where they are about now:
+    the newest sample run on at its speed for its age plus half the round
+    trip, at most 250 ms, on the floor (coopFindStan). coopChrTickBegin moves
+    the puppet there for each guard tick aimed at that joiner (sight, aim,
+    hit chance) and coopChrTickEnd puts it back where it is drawn.
+  - Cover (joiner): COOPEV_HIT now carries the guard's chrnum. A hit from a
+    guard whose line to our Bond, from its newest snapshot position, fails
+    chrCanSeeBond's own floor test right now is dropped: we got behind cover
+    before it landed ("lagcomp: guard N's hit (...) dropped"). Friendly fire
+    and blasts are not guard hits and always count.
+- GE_COOP_NOLAGCOMP=1 turns both off. Harness GE_COOP_TESTHIT=<s> (host):
+  <s> seconds in, a 0.01 hit on player 2 from the nearest guard that can see
+  their puppet and one from the farthest guard. Verified on Dam at NETSIM
+  60:20: the farthest (guard 43, 330 m off through the rock) dropped; real
+  guard hits during a walk at NETSIM 150:50 all counted (in sight). The host
+  logs the aim lead every 5 s ("guards aim at player 2 250 ms ahead ...").
+

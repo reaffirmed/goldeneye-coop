@@ -180,7 +180,7 @@ typedef struct
     u8 pad;
     union
     {
-        struct { f32 damage; f32 angle; } hit;                                  /* host -> client */
+        struct { f32 damage; f32 angle; s16 chrnum; u8 pad[2]; } hit;           /* host -> client; chrnum: the guard that fired, -1 not a guard */
         struct { s16 chrnum; s16 hitpart; s32 weaponid; f32 vector[3]; u8 predicted; u8 predidx; u8 pad[2]; } shot;  /* client -> host; predicted: COOPPRED_* the shooter's game played, predidx which one */
         struct { s32 doorofs; s32 state; } door;                                /* both ways */
         struct { s32 objofs; f32 damage; f32 pos[3]; s16 item; s16 player; } obj; /* both ways */
@@ -304,6 +304,8 @@ enum { COOPNOTE_LOST = 1, COOPNOTE_BACK, COOPNOTE_GONE, COOPNOTE_LEFT, COOPNOTE_
 
 static s32 sEnabled = -1;
 static s32 sNoInterp;   /* GE_COOP_NOINTERP=1: draw each packet as it lands (to compare) */
+static s32 sNoLagComp;  /* GE_COOP_NOLAGCOMP=1: guards aim at the drawn puppet, every hit counts */
+static s32 sCoverSaves; /* joiner: guards' hits dropped behind cover, this run */
 #define COOP_MAX_PEERHELD 32
 static s32 sPeerHeld[COOP_MAX_PEERHELD];
 static s32 sNumPeerHeld;
@@ -354,6 +356,8 @@ typedef struct
     u32 lostMs;         /* when */
     u32 seenMs;         /* the newest STATE, wall clock */
     CoopTrack track;    /* its recent positions, by its clock: the puppet is drawn between them */
+    coord3d aimPos;     /* host: where this player is about now, for the guards (lag compensation) */
+    StandTile *aimStan; /* NULL: use the drawn spot */
 } CoopRemote;
 /* each level script's last "either player" check passer (coopAltBondCredit) */
 #define COOP_SCRIPTPASS 32
@@ -398,6 +402,9 @@ typedef struct
 #define COOP_MAX_CHRS 256
 static CoopChrTarget sChrTarget[COOP_MAX_CHRS];
 static ChrRecord *sTickChr;         /* guard whose tick has the puppet as Bond */
+static PropRecord *sAimSwapped;     /* the puppet moved to its aim position for that tick */
+static coord3d sAimSavedPos;
+static StandTile *sAimSavedStan;
 PropRecord *g_CoopPropOverride;     /* read by getCurrentPlayerProp() */
 
 static s32 sEvForwarding;   /* host: passing a joiner's event on, keep its sender */
@@ -869,6 +876,8 @@ static void coopTimeTick(void)
 
         envread = 1;
         sNoInterp = (e != NULL && atoi(e) != 0);
+        e = getenv("GE_COOP_NOLAGCOMP");
+        sNoLagComp = (e != NULL && atoi(e) != 0);
     }
     for (c = 0; c < COOP_NET_MAX_PEERS; c++)
     {
@@ -1086,6 +1095,7 @@ static void coopPuppetSpawn(CoopRemote *r)
     prop->chr->sleep = 0;
 
     r->puppet = prop;
+    r->aimStan = NULL;
     r->puppetPrev = pos;
     r->puppetAnim = -1;
     r->puppetGhost = 1;
@@ -1224,6 +1234,7 @@ void coopStageStart(void)
         sR[i].valid = 0;
         sR[i].lost = 0;
         coopTrackReset(&sR[i].track);
+        sR[i].aimStan = NULL;
     }
     coopDifficultyStageStart();
     coopVersusStageStart();
@@ -1346,6 +1357,107 @@ static void coopTickBody(void)
     coopRemotesTick();
 }
 
+/* ---- lag compensation -------------------------------------------------------
+ * Guards against joiners: the host's guards see and shoot at a joiner's
+ * puppet, which is drawn a moment in the past (the trip here and the drawing
+ * delay). For each guard tick aimed at a joiner, the puppet stands where the
+ * joiner is about now instead: their newest sample run on at its speed by its
+ * age plus half the round trip, at most COOP_AIM_LEAD_MS, along the floor
+ * (coopRemoteAim; swapped in coopChrTickBegin and back in coopChrTickEnd).
+ * And on the joiner, a guard's hit that comes in after we got behind cover
+ * is dropped: the line from the guard (its newest snapshot) to our Bond, the
+ * same floor test chrCanSeeBond uses, is blocked now (coopHitBehindCover).
+ * Our own shots need nothing: a joiner already hits what it sees, and the
+ * host applies the hit to that guard wherever it has got to. */
+
+#define COOP_AIM_LEAD_MS 250
+
+static void coopRemoteAim(CoopRemote *r, s32 p)
+{
+    const CoopTrack *t = &r->track;
+    const CoopSample *a, *b;
+    s32 lead, span, k;
+    coord3d pos;
+
+    r->aimStan = NULL;
+    if (!coopNetIsHost() || r->puppet == NULL || t->n < 2 || !sClock[p].valid || sNoLagComp)
+    {
+        return;
+    }
+    a = &t->s[t->n - 2];
+    b = &t->s[t->n - 1];
+    span = (s32) (b->ms - a->ms);
+    /* the sender's clock now, about: ours less the offset, plus the half trip the offset took off */
+    lead = (s32) (coopNowMs() - (u32) sClock[p].off - b->ms) + coopNetRttMs(p) / 2;
+    if (lead < 0)
+    {
+        lead = 0;
+    }
+    if (lead > COOP_AIM_LEAD_MS)
+    {
+        lead = COOP_AIM_LEAD_MS;
+    }
+    for (k = 0; k < 3; k++)
+    {
+        pos.f[k] = b->pos[k];
+        if (span > 0 && span < 250)
+        {
+            pos.f[k] += (b->pos[k] - a->pos[k]) * (f32) lead / (f32) span;
+        }
+    }
+    r->aimStan = coopFindStan(&pos, r->puppet->stan, &r->puppet->pos);
+    r->aimPos = pos;
+    if ((sTick % 300) == 0 && r->aimStan != NULL)
+    {
+        f32 dx = pos.f[0] - r->puppet->pos.f[0], dz = pos.f[2] - r->puppet->pos.f[2];
+
+        portConLogf("ge: coop: lagcomp: guards aim at player %d %d ms ahead, %.0f units from the drawn puppet\n", p + 1, lead, sqrtf(dx * dx + dz * dz));
+    }
+}
+
+/* joiner: a guard's hit that the host decided before we reached cover */
+static s32 coopHitBehindCover(CoopEvent *ev)
+{
+    ChrRecord *chr;
+    PropRecord *bond = getCurrentPlayerProp();
+    StandTile *stan;
+    coord3d from;
+    s32 slot, clear;
+    f32 height;
+
+    if (coopNetIsHost() || sNoLagComp || ev->u.hit.chrnum < 0 || (chr = chrFindByLiteralId(ev->u.hit.chrnum)) == NULL
+        || chr->prop == NULL || chr->prop->stan == NULL || bond == NULL || bond->stan == NULL)
+    {
+        return 0;
+    }
+    from = chr->prop->pos;
+    slot = chr - g_ChrSlots;
+    if (slot >= 0 && slot < COOP_MAX_CHRS && sGuardTrack[slot].n > 0 && sGuardTrackNum[slot] == chr->chrnum)
+    {   /* where it fired from: its newest snapshot, not where it is drawn */
+        const CoopSample *nw = &sGuardTrack[slot].s[sGuardTrack[slot].n - 1];
+
+        from.f[0] = nw->pos[0];
+        from.f[1] = nw->pos[1];
+        from.f[2] = nw->pos[2];
+    }
+    stan = coopFindStan(&from, chr->prop->stan, &chr->prop->pos);
+    if (stan == NULL)
+    {
+        return 0;
+    }
+    height = chr->chrheight - 20.0f;
+    clear = stanTestLineUnobstructed(&stan, from.f[0], from.f[2], bond->pos.f[0], bond->pos.f[2],
+                                     CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_PATHBLOCKER | CDTYPE_AIOPAQUE, height, height, 0.0f, 1.0f)
+            && stan == bond->stan;
+    if (clear)
+    {
+        return 0;
+    }
+    sCoverSaves++;
+    portConLogf("ge: coop: lagcomp: guard %d's hit (%.3f) dropped: we are behind cover now\n", ev->u.hit.chrnum, ev->u.hit.damage);
+    return 1;
+}
+
 /* GE_COOP_MOTIONLOG=1 (tests): how evenly each puppet moves on screen. Every
  * 2 s of movement: the mean step per tick, its coefficient of variation, and
  * the ticks it stood still or jumped (over twice the mean) while moving */
@@ -1454,6 +1566,7 @@ static void coopRemotesTick(void)
         {
             coopPuppetUpdate(r);
             coopPuppetUpdateGhost(r);
+            coopRemoteAim(r, p);
             coopMotionLog(p, &r->puppet->pos);
             if ((sTick % 60) == 0)
             {
@@ -1572,6 +1685,68 @@ static void coopHarnessTick(void)
             portConLogf("ge: coop: testworld: alarm + flag 0x40000000\n");
         }
     }
+    if (coopNetIsHost() && coopInMission() && coopRemoteHere(1) && sR[1].puppet != NULL)
+    {   /* GE_COOP_TESTHIT=<s>: <s> seconds in, a small hit on player 2 from the nearest guard that
+         * can see their puppet and one from the farthest guard (harness only: lag compensation) */
+        static s32 testhit = -2;
+        if (testhit == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTHIT");
+            testhit = (e != NULL) ? atoi(e) * 60 : -1;
+        }
+        if (testhit >= 0 && sMissionTicks == (u32) testhit)
+        {
+            ChrRecord *nearc = NULL, *farc = NULL;
+            f32 nd = 0.0f, fd = 0.0f;
+            s32 i, k;
+
+            for (i = 0; i < g_NumChrSlots; i++)
+            {
+                ChrRecord *c = &g_ChrSlots[i];
+                StandTile *st;
+                f32 dx, dz, d;
+
+                if (c->model == NULL || c->prop == NULL || c->prop->stan == NULL || coopIsPuppet(c->prop) || c->actiontype == ACT_DEAD || c->actiontype == ACT_DIE)
+                {
+                    continue;
+                }
+                dx = c->prop->pos.f[0] - sR[1].puppet->pos.f[0];
+                dz = c->prop->pos.f[2] - sR[1].puppet->pos.f[2];
+                d = dx * dx + dz * dz;
+                st = c->prop->stan;
+                if (stanTestLineUnobstructed(&st, c->prop->pos.f[0], c->prop->pos.f[2], sR[1].puppet->pos.f[0], sR[1].puppet->pos.f[2],
+                                             CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_PATHBLOCKER | CDTYPE_AIOPAQUE, c->chrheight - 20.0f, c->chrheight - 20.0f, 0.0f, 1.0f)
+                    && st == sR[1].puppet->stan && (nearc == NULL || d < nd))
+                {
+                    nearc = c;
+                    nd = d;
+                }
+                if (farc == NULL || d > fd)
+                {
+                    farc = c;
+                    fd = d;
+                }
+            }
+            for (k = 0; k < 2; k++)
+            {
+                ChrRecord *c = k == 0 ? nearc : farc;
+                CoopEvent ev;
+
+                if (c == NULL)
+                {
+                    portConLogf("ge: coop: testhit: no %s guard\n", k == 0 ? "seeing" : "far");
+                    continue;
+                }
+                memset(&ev, 0, sizeof(ev));
+                ev.kind = COOPEV_HIT;
+                ev.u.hit.damage = 0.01f;
+                ev.u.hit.chrnum = (s16) c->chrnum;
+                coopQueueEventTo(&ev, 1);
+                portConLogf("ge: coop: testhit: guard %d (%s, %.0f away) hits player 2\n", c->chrnum, k == 0 ? "sees them" : "farthest", sqrtf(k == 0 ? nd : fd));
+            }
+        }
+    }
+
     if (coopIsMirroringClient())
     {   /* GE_COOP_TESTSHOT=<chrnum>: a chest shot every 2 s (harness only) */
         static s32 testchr = -2;
@@ -2064,12 +2239,26 @@ s32 coopChrTickBegin(ChrRecord *chr)
         }
         sTickChr = chr;
         g_CoopPropOverride = sR[t].puppet;
+        if (sR[t].aimStan != NULL && sR[t].puppet != NULL)
+        {   /* the guard sees and shoots at where they are now, not where they are drawn (lag compensation) */
+            sAimSwapped = sR[t].puppet;
+            sAimSavedPos = sAimSwapped->pos;
+            sAimSavedStan = sAimSwapped->stan;
+            sAimSwapped->pos = sR[t].aimPos;
+            sAimSwapped->stan = sR[t].aimStan;
+        }
     }
     return 1;
 }
 
 void coopChrTickEnd(void)
 {
+    if (sAimSwapped != NULL)
+    {
+        sAimSwapped->pos = sAimSavedPos;
+        sAimSwapped->stan = sAimSavedStan;
+        sAimSwapped = NULL;
+    }
     sTickChr = NULL;
     g_CoopPropOverride = NULL;
 }
@@ -2160,6 +2349,7 @@ s32 coopTargetRecordDamage(f32 damage, f32 angle)
     ev.kind = COOPEV_HIT;
     ev.u.hit.damage = damage;
     ev.u.hit.angle = angle;
+    ev.u.hit.chrnum = (sTickChr != NULL) ? (s16) sTickChr->chrnum : -1;
     coopQueueEventTo(&ev, coopPlayerOfProp(g_CoopPropOverride));
     portConLogf("ge: coop: guard %d hit player %d: %.3f\n", sTickChr ? sTickChr->chrnum : -1,
                 coopPlayerOfProp(g_CoopPropOverride) + 1, damage);
@@ -2812,6 +3002,7 @@ s32 coopShotPuppet(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, s
     ev.kind = COOPEV_HIT;
     ev.u.hit.damage = damage;
     ev.u.hit.angle = 0.0f;
+    ev.u.hit.chrnum = -1;   /* a partner's shot: theirs to aim */
     coopQueueEventTo(&ev, p);
     portConLogf("ge: coop: friendly fire on player %d (part %d, weapon %d): %.3f\n", p + 1, hitpart, weaponid, damage);
     (void) vector;
@@ -2948,7 +3139,7 @@ static void coopApplyEvent(CoopEvent *ev)
     switch (ev->kind)
     {
         case COOPEV_HIT:
-            if (coopInMission() && !g_CurrentPlayer->bonddead)
+            if (coopInMission() && !g_CurrentPlayer->bonddead && !coopHitBehindCover(ev))
             {
                 portConLogf("ge: coop: hit from player %d: %.3f\n", ev->from + 1, ev->u.hit.damage);
                 bondviewCallRecordDamageKills(ev->u.hit.damage, ev->u.hit.angle, -1, 1);
