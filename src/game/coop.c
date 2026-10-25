@@ -3798,7 +3798,8 @@ static void coopApplyObjUse(CoopEvent *ev)
         }
     }
     obj->runtime_bitflags |= RUNTIMEBITFLAG_ACTIVATED;
-    sub_GAME_7F03E6A0(obj->prop);
+    /* no door-switch link here (sub_GAME_7F03E6A0): the joiner's press already ran it and its
+     * DOOR events carry the doors; running it again toggled the gate back shut on the joiner */
     coopObjNoteActor(ev->from, 0);  /* an objective the press completes is theirs (coop_objective.c) */
     sApplyingUse = 0;
     portConLogf("ge: coop: player %d used obj %d (type %d)\n", ev->from + 1, ev->u.use.objofs, obj->type);

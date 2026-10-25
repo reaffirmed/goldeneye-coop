@@ -648,7 +648,7 @@ satellite-console work and the Runway plane did nothing on the host.
   or the Runway plane sets RUNTIMEBITFLAG_ACTIVATED only in its own game,
   and the scripts that wait for it (if_object_was_activated) run on the
   host. COOPEV_OBJUSE (18) sends it to the host, which marks it activated,
-  runs the door-switch link and flips an alarm switch.
+  flips an alarm switch (the door-switch link is not run again: the joiner's press already ran it and sent its DOOR events).
 - **Endings**: the presentation commands the host's script relays to the
   joiners (coopAiCommand) now include AI_MoveObject and Hide/ShowAllChrs.
   The Runway ending moves the plane to its take-off pad from a global list
