@@ -16,11 +16,13 @@
 #
 # Env: STAGES (instead of arguments), PAR, TESTEND (mission ticks before the
 # end, default 900), NETSIM (joiner link, default 60:20:2), LIMIT (seconds a
-# stage may take, default 240), DIFF (0..3, default 0).
+# stage may take, default 240), DIFF (0..3, default 0), JOINAFTER (seconds
+# between starting the host and the joiner, default 2; later is a drop-in to
+# a mission under way, with TESTEND past it).
 BUILD=$(cd "$1" && pwd); OUT=$(mkdir -p "$2" && cd "$2" && pwd); shift 2
 ALL="dam facility runway surface bunker1 silo frigate surface2 bunker2 statue archives streets depot train jungle control caverns cradle aztec egypt"
 STAGES=${*:-${STAGES:-$ALL}}
-PAR=${PAR:-2}; TESTEND=${TESTEND:-900}; NETSIM=${NETSIM:-60:20:2}; LIMIT=${LIMIT:-240}; DIFF=${DIFF:-0}
+JOINAFTER=${JOINAFTER:-2}; PAR=${PAR:-2}; TESTEND=${TESTEND:-900}; NETSIM=${NETSIM:-60:20:2}; LIMIT=${LIMIT:-240}; DIFF=${DIFF:-0}
 
 [ -f "$BUILD/Data/baserom.u.z64" ] || { echo "no $BUILD/Data/baserom.u.z64"; exit 2; }
 [ -f "$BUILD/mock/libsteam_api.so" ] || { echo "no $BUILD/mock/libsteam_api.so"; exit 2; }
@@ -39,7 +41,7 @@ run_stage() {
     sleep 1
     DISPLAY=:$hd GE_MOCK_DIR=$mock GE_MOCK_STEAMID=$a GE_MOCK_FRIEND=$b GE_STAGE=$st GE_DIFF=$DIFF \
         GE_COOP_TESTEND=$TESTEND GE_COOP_TESTWIN=1 timeout -s KILL $LIMIT ./ProjectMidas -coophost > "$hl" 2>&1 & hp=$!
-    sleep 2
+    sleep $JOINAFTER
     DISPLAY=:$jd GE_MOCK_DIR=$mock GE_MOCK_STEAMID=$b GE_MOCK_FRIEND=$a GE_COOP_NETSIM=$NETSIM \
         timeout -s KILL $LIMIT ./ProjectMidas -coopjoin > "$jl" 2>&1 & jp=$!
     # done once the joiner completed the mission (and had a few seconds after), or a copy is gone

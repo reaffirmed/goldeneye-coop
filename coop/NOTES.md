@@ -846,3 +846,15 @@ satellite-console work and the Runway plane did nothing on the host.
   snapshot packet asks for the blocks still missing ("N records of the join
   snapshot lost, asking for M blocks again") and the asked-for records count
   towards the snapshot. All 20 pass locally, PAR=3, in about 6 minutes.
+- Drop-in (the live-plumbing thread's #15) holds a joiner arriving in a
+  mission under way, sending no STATE, until coopReplSnapshotDone(). The
+  host only started the snapshot on the joiner's puppet, which needs STATE,
+  so the two waited on each other until drop-in's 20 s cap. Now a joiner in
+  the stage with no snapshot sends COOPPKT_REPLREQ with join set every
+  second; the host sends the snapshot (and re-asked blocks) to it before its
+  Bond appears, holding the checksum until it does. The lost-records re-ask
+  moved to the joiner's own tick for the same reason. Tested merged with
+  #15: Dam, joiner 30 s late, snapshot in, one lost block re-asked,
+  "dropped in beside player 1 after 2.6 s". JOINAFTER=<s> in
+  mission_runs.sh starts the joiner that late; CI runs Dam, Facility and
+  Frigate that way too.

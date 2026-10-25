@@ -13,9 +13,11 @@
  *
  *  - Join snapshot: when a player's Bond first shows up in the mission (and
  *    after a host migration, for everyone), the host sends every record,
- *    COOPREPL_SNAP_PER_TICK packets a tick. Those apply at once. Records
- *    lost on the way are asked for again (COOPPKT_REPLREQ, below) at the
- *    first checksum a second after the last snapshot packet.
+ *    COOPREPL_SNAP_PER_TICK packets a tick. Those apply at once. A joiner
+ *    held back from dropping in until it has the snapshot (it sends no STATE
+ *    meanwhile) asks for it (COOPPKT_REPLREQ with join set) every second
+ *    until it starts coming. Records lost on the way are asked for again a
+ *    second after the last snapshot packet.
  *  - Desync checksum (periodic resync): the rest of the time the host sends
  *    each joiner a hash of every block of COOPREPL_PER_PKT records twice a
  *    second (COOPPKT_REPLSUM), with a hash of the stage flags and alarm and
@@ -81,6 +83,7 @@ extern StandTile *stanFindTileBelowPos(coord3d *pos, u8 *rooms, f32 *yRtn);
 #define COOPREPL_SNAP_PER_TICK  2
 #define COOPREPL_BLOCKS         (COOPREPL_MAX / COOPREPL_PER_PKT)
 #define COOPREPL_SUM_TICKS      30      /* a checksum to each joiner twice a second */
+#define COOPREPL_EARLY_TICKS    1800    /* how long an asked-for snapshot waits for the asker's Bond */
 #define COOPREPL_SUM_MISSES     3       /* checks in a row a block differs before it is asked for */
 #define COOPREPL_STUCK_SUMS     20      /* a difference still there after this many (10 s) is reported */
 #define COOPREPL_POS_EPS        24.0f   /* units: closer than this counts as the same spot */
@@ -147,6 +150,7 @@ typedef struct
     u16 type;       /* COOPPKT_REPLREQ */
     s32 stage;
     u32 want[COOPREPL_BLOCKS / 32];
+    u32 join;       /* 1: in the stage, not yet dropped in, no snapshot yet: send me one */
 } CoopReplReqPkt;
 
 /* engine-owned bits that differ between worlds and must not be copied */
@@ -160,7 +164,9 @@ static s32 sListStage;
 /* host: per player */
 static struct
 {
-    s32 seen;       /* their Bond is in this mission */
+    s32 seen;       /* their Bond is in this mission, or they asked for the snapshot before it */
+    s32 early;      /* asked for the snapshot before their Bond appeared (COOPREPL_EARLY_TICKS ago at most) */
+    u32 earlyAt;
     s32 snapAt;     /* next record of the snapshot being sent, -1 none */
     u32 snapid;
     u32 want[COOPREPL_BLOCKS / 32];     /* blocks they asked for */
@@ -453,9 +459,14 @@ static void coopReplHostTick(void)
     {
         s32 n;
 
-        if (!coopReplPlayerHere(p))
+        if (coopReplPlayerHere(p))
+        {
+            sOut[p].early = 0;
+        }
+        else if (!sOut[p].early || sTick - sOut[p].earlyAt > COOPREPL_EARLY_TICKS)
         {
             sOut[p].seen = 0;
+            sOut[p].early = 0;
             continue;
         }
         if (!sOut[p].seen)
@@ -491,7 +502,7 @@ static void coopReplHostTick(void)
                 n++;
             }
         }
-        if ((sTick % COOPREPL_SUM_TICKS) == (u32) p * 7)
+        if (!sOut[p].early && (sTick % COOPREPL_SUM_TICKS) == (u32) p * 7)
         {
             coopReplSendSum(p);
         }
@@ -505,6 +516,7 @@ void coopReplMigrated(void)
     for (p = 0; p < COOP_MAX_PLAYERS; p++)
     {
         sOut[p].seen = 0;
+        sOut[p].early = 0;
         sOut[p].snapAt = -1;
         sOut[p].wantAt = COOPREPL_BLOCKS;
     }
@@ -741,37 +753,13 @@ static void coopReplRecvSum(const CoopReplSumPkt *p, s32 len)
     s32 b, ask = 0, differ = 0;
 
     if (p->nblocks > COOPREPL_BLOCKS || len < hdr + p->nblocks * 4 || p->total != sNum || p->nblocks != coopReplBlocks()
-        || sSnapLeft < 0)
+        || sSnapLeft != 0)
     {
-        return;     /* another setup, or no join snapshot yet */
+        return;     /* another setup, or the join snapshot is still coming (coopReplJoinerTick) */
     }
     memset(&req, 0, sizeof(req));
     req.type = COOPPKT_REPLREQ;
     req.stage = p->stage;
-    if (sSnapLeft > 0)
-    {   /* the join snapshot is still coming; a second after its last packet, ask for the blocks lost on the way */
-        if (sTick - sSnapLast < 60)
-        {
-            return;
-        }
-        for (b = 0; b < p->nblocks; b++)
-        {
-            s32 i;
-
-            for (i = b * COOPREPL_PER_PKT; i < sNum && i < (b + 1) * COOPREPL_PER_PKT; i++)
-            {
-                if (!sSnapGot[i])
-                {
-                    req.want[b / 32] |= 1u << (b % 32);
-                    ask++;
-                    break;
-                }
-            }
-        }
-        portConLogf("ge: coop: repl: %d records of the join snapshot lost, asking for %d blocks again\n", sSnapLeft, ask);
-        coopExtSendPacket(&req, sizeof(req), 0);
-        return;
-    }
     for (b = 0; b < p->nblocks; b++)
     {
         u32 ours = coopReplBlockHash(b);
@@ -827,11 +815,69 @@ static void coopReplRecvReq(const CoopReplReqPkt *p, s32 len, s32 from)
     {
         return;
     }
+    if (p->join && !sOut[from].seen && !coopReplPlayerHere(from))
+    {   /* waiting to drop in (a mission under way): no STATE from them until this is all in */
+        sOut[from].seen = 1;
+        sOut[from].early = 1;
+        sOut[from].earlyAt = sTick;
+        memset(sOut[from].want, 0, sizeof(sOut[from].want));
+        coopReplSendSnapshot(from);
+        return;
+    }
+    if (p->join && sOut[from].seen && sOut[from].snapAt < 0)
+    {   /* asked again: none of it got there */
+        sOut[from].earlyAt = sTick;
+        coopReplSendSnapshot(from);
+        return;
+    }
     for (k = 0; k < COOPREPL_BLOCKS / 32; k++)
     {
         sOut[from].want[k] |= p->want[k];
     }
     sOut[from].wantAt = 0;
+}
+
+/* joiner: ask for the join snapshot until some of it comes (a joiner held back until it is in
+ * sends no STATE, so the host can't tell it is here), and a second after its last packet ask
+ * for the blocks lost on the way */
+static void coopReplJoinerTick(void)
+{
+    CoopReplReqPkt req;
+    s32 b, ask = 0;
+
+    if (!coopReplHostHere() || (sTick % 60) != 0 || sSnapLeft == 0)
+    {
+        return;
+    }
+    memset(&req, 0, sizeof(req));
+    req.type = COOPPKT_REPLREQ;
+    req.stage = bossGetStageNum();
+    if (sSnapLeft < 0)
+    {
+        req.join = 1;
+        coopExtSendPacket(&req, sizeof(req), 0);
+        return;
+    }
+    if (sTick - sSnapLast < 60)
+    {
+        return;
+    }
+    for (b = 0; b < coopReplBlocks(); b++)
+    {
+        s32 i;
+
+        for (i = b * COOPREPL_PER_PKT; i < sNum && i < (b + 1) * COOPREPL_PER_PKT; i++)
+        {
+            if (!sSnapGot[i])
+            {
+                req.want[b / 32] |= 1u << (b % 32);
+                ask++;
+                break;
+            }
+        }
+    }
+    portConLogf("ge: coop: repl: %d records of the join snapshot lost, asking for %d blocks again\n", sSnapLeft, ask);
+    coopExtSendPacket(&req, sizeof(req), 0);
 }
 
 void coopReplPacket(const void *buf, s32 len, s32 from)
@@ -999,6 +1045,7 @@ void coopReplStageStart(void)
     for (p = 0; p < COOP_MAX_PLAYERS; p++)
     {
         sOut[p].seen = 0;
+        sOut[p].early = 0;
         sOut[p].snapAt = -1;
         sOut[p].wantAt = COOPREPL_BLOCKS;
     }
@@ -1021,5 +1068,9 @@ void coopReplTick(u32 missionticks)
     {
         coopReplHarness(missionticks);
         coopReplHostTick();
+    }
+    else
+    {
+        coopReplJoinerTick();
     }
 }
