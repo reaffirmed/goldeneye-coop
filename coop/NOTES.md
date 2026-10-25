@@ -550,3 +550,26 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscen
   solo mission. two_player_lobby.sh invite/wait and versus.sh still pass.
 - Not tested: real Steam's friends list display and real Discord (needs a
   Discord application id and the two accounts).
+
+## Lobby scrolling (2026-10-25)
+
+- The lobby showed 19 rows from y 53, past the bottom of the folder's 4:3
+  picture: at real resolutions everything below When Down was cut off, and
+  the cursor-edge scroll and the "more" mark sat on rows nobody could see.
+  COOP_LOBBY_VISIBLE is now the sheets' 13 (PORT_SHEET_PAGE_ROWS, down to
+  Rare's last line, 293); "more" marks sit beside the title and under the
+  last row, so no row gives up its slot.
+- coopLobbyScrollTick: the wheel scrolls the view a row per notch (hover
+  still picks, the watch's rule); the D-pad, a pad's digital Move and the
+  arrow keys (watch_up / watch_down) walk the actionable rows and scroll to
+  keep the picked one on the paper with a row to spare; past the last
+  actionable row they scroll on through text rows (the joiner's rules). C
+  buttons are left out: on the keyboard they are WASD, which already moves
+  the crosshair. Resting the crosshair above or below the rows still scrolls.
+- Scale: the lobby is a folder screen like the rest of the frontend, pinned to
+  a centred 4:3 on any window (video.c, non-wide frames). hud_scale and the
+  wide HUD options only touch the in-game HUD, so they don't change the
+  lobby, which matches the other sheets' size.
+- Verified at 1280x720 with the mock Steam (host + joiner): arrow keys from
+  the title to Steam Invite Window and back, wheel both ways, joiner's arrow
+  keys to its last row. Shots: screens/lobby-scroll/ in the project files.

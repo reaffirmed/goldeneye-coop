@@ -8840,7 +8840,7 @@ enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLRO
        CLROW_HOSTLEAVES, CLROW_VSMODE, CLROW_VSARENA, CLROW_VSSCENARIO, CLROW_VSLENGTH, CLROW_VSWEAPONS, CLROW_VSSTART,
        CLROW_DISCORDYES, CLROW_DISCORDNO };
 #define COOP_LOBBY_ROWS     48
-#define COOP_LOBBY_VISIBLE  19  /* rows that fit on the paper; more scroll (coop_lobby_scroll) */
+#define COOP_LOBBY_VISIBLE  PORT_SHEET_PAGE_ROWS  /* rows down to Rare's last line (293); more scroll (coop_lobby_scroll) */
 #define COOP_LOBBY_CHAT_LINES 3
 #define COOP_LOBBY_X        PORT_SHEET_LABEL_X
 #define COOP_LOBBY_VALUE_X  0xFA
@@ -9744,6 +9744,7 @@ void init_menu1D_cooplobby(void)
     coop_lobby_hot = -1;
     coop_lobby_ticks = 0;
     coop_lobby_scroll = 0;
+    (void) portMouseWheelSteps();   /* notches banked in play are not for these rows */
     selected_folder_num = (selected_folder_num >= FOLDER1) ? selected_folder_num : FOLDER1;
     if (gamemode == GAMEMODE_MULTI && coopVsPlayers() >= 2)
     {   /* back from an online versus match, in co-op's mode of play */
@@ -9885,6 +9886,121 @@ static void coopLobbyHarness(void)
     }
 }
 
+static s32 coopLobbyScrollMax(void)
+{
+    return (coop_lobby_nrows > COOP_LOBBY_VISIBLE) ? coop_lobby_nrows - COOP_LOBBY_VISIBLE : 0;
+}
+
+/* the row under the crosshair, actionable or not; -1 off the rows */
+static s32 coopLobbyRowAtCursor(void)
+{
+    s32 i;
+
+    if (cursor_h_pos < (f32) (COOP_LOBBY_X - 8) || cursor_h_pos >= (f32) PORT_SHEET_HELP_X1)
+    {
+        return -1;
+    }
+    for (i = coop_lobby_scroll; i < coop_lobby_nrows && i < coop_lobby_scroll + COOP_LOBBY_VISIBLE; i++)
+    {
+        const f32 y = (f32) (COOP_LOBBY_Y0 + (i - coop_lobby_scroll) * COOP_LOBBY_PITCH);
+
+        if (cursor_v_pos >= y - 3.0f && cursor_v_pos < y - 3.0f + (f32) COOP_LOBBY_PITCH)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* More rows than the paper holds. The wheel scrolls the view (the watch's
+ * rule: hover still picks), the crosshair resting above or below the rows
+ * scrolls a row at a time, and up / down (the D-pad, a pad's digital Move,
+ * the arrow keys' watch_up / watch_down; not the C buttons, which are WASD and
+ * already steer the crosshair) walk the actionable rows, scrolling to keep the
+ * one picked on the paper. */
+static void coopLobbyScrollTick(void)
+{
+    extern s32 portJoyPortWatchStepUpDown(void);   /* joy_port.c: -1 up, +1 down */
+    const s32 wheel = portMouseWheelSteps();
+    const s32 onrows = cursor_h_pos >= (f32) (COOP_LOBBY_X - 8) && cursor_h_pos < (f32) PORT_SHEET_HELP_X1;
+    s32 dpx, dpy;
+    s32 step;   /* +1 down, -1 up */
+
+    portSheetDpadStep(&dpx, &dpy);
+    if (dpy != 0)
+    {
+        step = (dpy < 0) ? 1 : -1;
+    }
+    else if (joyGetButtonsPressedThisFrame(PLAYER_1, D_JPAD))
+    {
+        step = 1;
+    }
+    else if (joyGetButtonsPressedThisFrame(PLAYER_1, U_JPAD))
+    {
+        step = -1;
+    }
+    else
+    {
+        step = portJoyPortWatchStepUpDown();
+    }
+    if (coop_lobby_ticks <= 10)
+    {   /* a press or notch from the last screen is not for these rows */
+        return;
+    }
+
+    if (wheel != 0)
+    {
+        coop_lobby_scroll -= wheel;   /* wheel up (+) shows the rows above */
+    }
+    else if ((coop_lobby_ticks % 6) == 0 && onrows && step == 0)
+    {
+        if (cursor_v_pos >= (f32) (COOP_LOBBY_Y0 + COOP_LOBBY_VISIBLE * COOP_LOBBY_PITCH - 3))
+        {
+            coop_lobby_scroll++;
+        }
+        else if (cursor_v_pos < (f32) (COOP_LOBBY_Y0 - 6))
+        {
+            coop_lobby_scroll--;
+        }
+    }
+
+    if (step != 0 && coop_lobby_nrows > 0)
+    {
+        const s32 cur = coopLobbyRowAtCursor();
+        s32 i = (cur >= 0) ? cur + step : ((step > 0) ? coop_lobby_scroll : coop_lobby_scroll + COOP_LOBBY_VISIBLE - 1);
+
+        while (i >= 0 && i < coop_lobby_nrows && !coopLobbyActionable(&coop_lobby_rows[i]))
+        {
+            i += step;
+        }
+        if (i >= 0 && i < coop_lobby_nrows)
+        {   /* onto that row, the view following it with a row to spare where there is one */
+            if (i - 1 < coop_lobby_scroll)
+            {
+                coop_lobby_scroll = i - 1;
+            }
+            else if (i + 1 >= coop_lobby_scroll + COOP_LOBBY_VISIBLE)
+            {
+                coop_lobby_scroll = i + 2 - COOP_LOBBY_VISIBLE;
+            }
+            coop_lobby_scroll = (coop_lobby_scroll > coopLobbyScrollMax()) ? coopLobbyScrollMax() : coop_lobby_scroll;
+            coop_lobby_scroll = (coop_lobby_scroll < 0) ? 0 : coop_lobby_scroll;
+            cursor_v_pos = (f32) (COOP_LOBBY_Y0 + (i - coop_lobby_scroll) * COOP_LOBBY_PITCH + 6);
+            if (!onrows)
+            {
+                cursor_h_pos = (f32) (COOP_LOBBY_X + 0x20);
+            }
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CLICK2_SFX, 0);
+        }
+        else
+        {   /* nothing to pick that way: show the text rows there anyway */
+            coop_lobby_scroll += step;
+        }
+    }
+    coop_lobby_scroll = (coop_lobby_scroll > coopLobbyScrollMax()) ? coopLobbyScrollMax() : coop_lobby_scroll;
+    coop_lobby_scroll = (coop_lobby_scroll < 0) ? 0 : coop_lobby_scroll;
+}
+
 void interface_menu1D_cooplobby(void)
 {
     s32 i;
@@ -9929,22 +10045,7 @@ void interface_menu1D_cooplobby(void)
         frontUpdateControlStickPosition();
         return;
     }
-    if (coop_lobby_scroll > coop_lobby_nrows - COOP_LOBBY_VISIBLE)
-    {
-        coop_lobby_scroll = (coop_lobby_nrows > COOP_LOBBY_VISIBLE) ? coop_lobby_nrows - COOP_LOBBY_VISIBLE : 0;
-    }
-    if ((coop_lobby_ticks % 6) == 0 && cursor_h_pos >= (f32) (COOP_LOBBY_X - 8) && cursor_h_pos < (f32) PORT_SHEET_HELP_X1)
-    {   /* more rows than the paper holds: the cursor at the top or bottom edge scrolls */
-        if (cursor_v_pos >= (f32) (COOP_LOBBY_Y0 + (COOP_LOBBY_VISIBLE - 1) * COOP_LOBBY_PITCH + 8)
-            && coop_lobby_scroll + COOP_LOBBY_VISIBLE < coop_lobby_nrows)
-        {
-            coop_lobby_scroll++;
-        }
-        else if (cursor_v_pos < (f32) (COOP_LOBBY_Y0 - 6) && coop_lobby_scroll > 0)
-        {
-            coop_lobby_scroll--;
-        }
-    }
+    coopLobbyScrollTick();
 
     coop_lobby_hot = -1;
     if (frontCheckCursorOnPreviousTab())
@@ -10037,18 +10138,6 @@ Gfx *constructor_menu1D_cooplobby(Gfx *DL)
         const char *label = portSheetFitText(r->label, r->wide ? PORT_SHEET_RULE_R - lx : COOP_LOBBY_LABEL_W);
         s32 colour = r->dim ? PORT_SHEET_COL_DIM : r->colour;
 
-        if ((slot == 0 && coop_lobby_scroll > 0) || (slot == COOP_LOBBY_VISIBLE - 1 && i + 1 < coop_lobby_nrows))
-        {   /* more above or below: a small mark at the right */
-            s32 mx = PORT_SHEET_RULE_R - 0x10;
-            s32 my = COOP_LOBBY_Y0 + slot * COOP_LOBBY_PITCH;
-
-            DL = frontPrintText(DL, &mx, &my, (slot == 0) ? "...\n" : "more\n", ptrFontZurichBoldChars, ptrFontZurichBold,
-                                PORT_SHEET_COL_DIM, viGetX(), viGetY(), 0, 0);
-            if (slot != 0)
-            {
-                continue;
-            }
-        }
         if (r->kind == CLROW_HEAD)
         {   /* a heading with a pencil rule under it, like the Control sheet's */
             const s32 ry = COOP_LOBBY_Y0 + slot * COOP_LOBBY_PITCH + 0xF;
@@ -10072,6 +10161,21 @@ Gfx *constructor_menu1D_cooplobby(Gfx *DL)
                                 (r->colour == COOP_LOBBY_COL_OK) ? COOP_LOBBY_COL_OK : (r->dim ? PORT_SHEET_COL_DIM : 0xFF),
                                 viGetX(), viGetY(), 0, 0);
         }
+    }
+
+    if (coop_lobby_scroll > 0)
+    {   /* more above: a small mark by the title */
+        x = PORT_SHEET_RULE_R - 0x28;
+        y = PORT_SHEET_TITLE_Y;
+        DL = frontPrintText(DL, &x, &y, "more\n", ptrFontZurichBoldChars, ptrFontZurichBold,
+                            PORT_SHEET_COL_DIM, viGetX(), viGetY(), 0, 0);
+    }
+    if (coop_lobby_scroll + COOP_LOBBY_VISIBLE < coop_lobby_nrows)
+    {   /* more below: under the last row */
+        x = PORT_SHEET_RULE_R - 0x28;
+        y = COOP_LOBBY_Y0 + COOP_LOBBY_VISIBLE * COOP_LOBBY_PITCH;
+        DL = frontPrintText(DL, &x, &y, "more\n", ptrFontZurichBoldChars, ptrFontZurichBold,
+                            PORT_SHEET_COL_DIM, viGetX(), viGetY(), 0, 0);
     }
 
     DL = frontAddPreviousTabText(DL);
