@@ -77,11 +77,12 @@ void set_missionstate(MISSION_STATE_ID state);
 extern void portConLogf(const char *fmt, ...);
 
 #define COOP_MAGIC   0x50434547u /* "GECP" */
-#define COOP_VERSION 9 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
+#define COOP_VERSION 10/* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
                           6: host migration (AI sync, bye, addresses in the roster);
                           7: pings, chat, objective credit, team times, cross-save (COOPEV 16, 20..31, COOPPKT 10);
                           8: versus (COOPEV 32..36, COOPPKT 16);
-                          9: shared pickups, thrown items, drops, knocks, Use, host blasts (COOPEV 17, 18, 25..28) */
+                          9: shared pickups, thrown items, drops, knocks, Use, host blasts (COOPEV 17, 18, 25..28);
+                          10: sender clocks in STATE and GUARDS (smooth movement), round trip (COOPPKT_TIME) */
 
 enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7, COOPPKT_AISYNC = 8, COOPPKT_BYE = 9 };
 /* 10 and 11 (COOPPKT_EXT_FIRST..LAST in coop.h) are coop_ext.c's features' own packets */
@@ -106,6 +107,7 @@ typedef struct
     u8 pad;
     u16 calm;       /* ticks since the sender was last in a fight (capped) */
     CoopLook look;  /* guns, movement, shots and character (coop_look.c) */
+    u32 ms;         /* the sender's clock (coopNowMs) as it sent this: the puppet is drawn by it (coop_interp.c) */
 } CoopStatePkt;
 
 #define COOP_ALL 0xFF   /* CoopEvent.to: everyone */
@@ -236,6 +238,7 @@ typedef struct
     u16 version;
     u16 type;
     u32 snap;       /* snapshot id; one snapshot spans several packets */
+    u32 ms;         /* the host's clock as it took the snapshot */
     u16 first;      /* index of the first entry in the snapshot */
     u16 count;
     CoopGuardEnt ent[COOP_GUARDS_PER_PKT];
@@ -298,6 +301,7 @@ enum { COOPNOTE_LOST = 1, COOPNOTE_BACK, COOPNOTE_GONE, COOPNOTE_LEFT, COOPNOTE_
 
 
 static s32 sEnabled = -1;
+static s32 sNoInterp;   /* GE_COOP_NOINTERP=1: draw each packet as it lands (to compare) */
 #define COOP_MAX_PEERHELD 32
 static s32 sPeerHeld[COOP_MAX_PEERHELD];
 static s32 sNumPeerHeld;
@@ -347,6 +351,7 @@ typedef struct
     s32 lost;           /* its connection dropped: the Bond stands idle, guards and scripts leave it be */
     u32 lostMs;         /* when */
     u32 seenMs;         /* the newest STATE, wall clock */
+    CoopTrack track;    /* its recent positions, by its clock: the puppet is drawn between them */
 } CoopRemote;
 /* each level script's last "either player" check passer (coopAltBondCredit) */
 #define COOP_SCRIPTPASS 32
@@ -358,6 +363,7 @@ static struct
 static s32 sScriptPassNext;
 
 static CoopRemote sR[COOP_MAX_PLAYERS];
+static CoopClock sClock[COOP_MAX_PLAYERS];  /* each player's clock against ours (coop_interp.c) */
 
 /* a reliable event channel per transport peer (host: a joiner each; joiner: the host) */
 typedef struct
@@ -397,6 +403,9 @@ static s32 sEvForwarding;   /* host: passing a joiner's event on, keep its sende
 /* client guard mirroring */
 static u32 sGuardSnap;
 static u32 sChrLastSync[COOP_MAX_CHRS]; /* sTick of the last snapshot entry */
+static CoopTrack sGuardTrack[COOP_MAX_CHRS];   /* joiner: each mirrored chr's recent positions, by the host's clock */
+static s16 sGuardTrackNum[COOP_MAX_CHRS];      /* the chrnum its track is of */
+static u32 sGuardPktMs;                         /* the guard packet being applied: its clock */
 static u8 sChrFireSeen[COOP_MAX_CHRS][2]; /* host: firecount at the last snapshot */
 static u8 sChrFiring[COOP_MAX_CHRS];      /* client: GSF_FIRE_* from the last snapshot */
 static u32 sLastSnapTick;
@@ -425,6 +434,7 @@ static StandTile *coopFindStan(coord3d *pos, StandTile *from, coord3d *frompos);
 static s32 coopIsMirroringClient(void);
 static void coopSendGuards(void);
 static void coopReapGuards(void);
+static void coopGuardsInterpTick(void);
 static void coopClientGunfire(void);
 static void coopHarnessTick(void);
 static void coopPuppetRemove(CoopRemote *r);
@@ -583,6 +593,7 @@ static void coopSendState(void)
     p.downrule = sDownRule;
     p.player = (u8) coopSelf();
     p.calm = (u16) coopLocalCalm();
+    p.ms = coopNowMs();
     coopNetSend(&p, sizeof(p));
 
     if ((sTick % 300) == 1)
@@ -733,6 +744,18 @@ static void coopRecvState(s32 c, CoopStatePkt *p)
         return;
     }
     r = &sR[p->player];
+    if (p->stage == bossGetStageNum())
+    {   /* every sample counts for the drawing, a late one too (coop_interp.c) */
+        CoopSample smp;
+
+        coopClockSample(&sClock[p->player], p->ms, coopNowMs());
+        smp.ms = p->ms;
+        smp.pos[0] = p->pos[0];
+        smp.pos[1] = p->pos[1];
+        smp.pos[2] = p->pos[2];
+        smp.yaw = p->yaw;
+        coopTrackPush(&r->track, &smp);
+    }
     /* datagrams can arrive out of order; keep the newest */
     if (r->valid && (s32) (p->tick - r->st.tick) <= 0 && r->st.stage == p->stage)
     {
@@ -770,6 +793,122 @@ static void coopRecvVersus(s32 c, u8 *buf, s32 n)
     {
         coopVersusRecvPkt(buf, *player);
     }
+}
+
+/* ---- round trip ------------------------------------------------------------
+ * Every half second, each game pings each transport peer with its clock; the
+ * answer echoes it, and the difference is a round trip. Wall clock, so a
+ * paused game still answers (coopKeepAlive). */
+
+typedef struct
+{
+    u32 magic;
+    u16 version;
+    u16 type;       /* COOPPKT_TIME */
+    u32 ms;         /* the sender's clock */
+    u32 echo;       /* an answer: the ping's ms */
+    u8 answer;
+    u8 pad[3];
+} CoopTimePkt;
+
+static u32 sTimeSent[COOP_NET_MAX_PEERS];
+static f32 sRtt[COOP_NET_MAX_PEERS];     /* smoothed, ms; 0 not measured yet */
+
+static void coopSendTime(s32 c, s32 answer, u32 echo)
+{
+    CoopTimePkt t;
+
+    memset(&t, 0, sizeof(t));
+    t.magic = COOP_MAGIC;
+    t.version = COOP_VERSION;
+    t.type = COOPPKT_TIME;
+    t.ms = coopNowMs();
+    t.echo = echo;
+    t.answer = (u8) answer;
+    coopNetSendTo(c, &t, sizeof(t));
+}
+
+static void coopRecvTime(s32 c, CoopTimePkt *t)
+{
+    if (!t->answer)
+    {
+        coopSendTime(c, 1, t->ms);
+        return;
+    }
+    {
+        f32 rtt = (f32) (s32) (coopNowMs() - t->echo);
+
+        if (rtt < 0.0f || rtt > 10000.0f)
+        {
+            return;
+        }
+        sRtt[c] = (sRtt[c] == 0.0f) ? rtt : sRtt[c] + (rtt - sRtt[c]) * 0.2f;
+        if (sRtt[c] < 1.0f)
+        {
+            sRtt[c] = 1.0f;     /* measured: under a millisecond on one machine */
+        }
+    }
+}
+
+static void coopTimeTick(void)
+{
+    u32 now = coopNowMs();
+    s32 c;
+    static s32 envread;
+    static u32 lastLog;
+
+    if (!envread)
+    {
+        const char *e = getenv("GE_COOP_NOINTERP");
+
+        envread = 1;
+        sNoInterp = (e != NULL && atoi(e) != 0);
+    }
+    for (c = 0; c < COOP_NET_MAX_PEERS; c++)
+    {
+        if (!coopNetPeerConnected(c))
+        {
+            sRtt[c] = 0.0f;
+            continue;
+        }
+        if (now - sTimeSent[c] >= 500)
+        {
+            sTimeSent[c] = now;
+            coopSendTime(c, 0, 0);
+        }
+    }
+    if (now - lastLog >= 10000 && coopInMission())
+    {
+        s32 p;
+
+        lastLog = now;
+        for (p = 0; p < COOP_MAX_PLAYERS; p++)
+        {
+            if (p != coopSelf() && sR[p].valid && sClock[p].valid)
+            {
+                portConLogf("ge: coop: net: player %d round trip %d ms, drawn %d ms behind (send every %.0f ms, jitter %.1f)\n", p + 1,
+                            coopNetRttMs(p), coopClockDelay(&sClock[p]), sClock[p].interval, sClock[p].jitter);
+            }
+        }
+    }
+}
+
+/* the round trip to player p in ms, 0 when not known; a joiner's partner is reached through the host */
+s32 coopNetRttMs(s32 p)
+{
+    s32 c;
+
+    if (sEnabled <= 0 || p < 0 || p >= COOP_MAX_PLAYERS || p == coopSelf())
+    {
+        return 0;
+    }
+    if (coopNetIsHost())
+    {
+        c = coopChanOfPlayer(p);
+        return (c >= 0 && c < COOP_NET_MAX_PEERS) ? (s32) (sRtt[c] + 0.5f) : 0;
+    }
+    /* a joiner only talks to the host: another joiner is two of those away (about) */
+    return (s32) (sRtt[0] * (p == 0 ? 1.0f : 2.0f) + 0.5f);
 }
 
 static void coopPollNet(void)
@@ -828,6 +967,8 @@ static void coopPollNet(void)
             }
             if (coopInMission() && coopRemoteHere(0))
             {
+                coopClockSample(&sClock[0], g->ms, coopNowMs());
+                sGuardPktMs = g->ms;
                 for (k = 0; k < g->count; k++)
                 {
                     coopApplyGuard(&g->ent[k]);
@@ -879,6 +1020,11 @@ static void coopPollNet(void)
         if (p->type >= COOPPKT_EXT_FIRST && p->type <= COOPPKT_EXT_LAST)
         {
             coopExtPacket(buf, n, coopPlayerOfChan(c));
+        }
+        if (p->type == COOPPKT_TIME && n >= (s32) sizeof(CoopTimePkt))
+        {
+            coopRecvTime(c, (CoopTimePkt *) buf);
+            continue;
         }
         if (p->type >= COOPPKT_REPL && p->type <= COOPPKT_REPLREQ)
         {
@@ -948,10 +1094,19 @@ static void coopPuppetUpdate(CoopRemote *r)
     ChrRecord *chr = r->puppet->chr;
     coord3d pos;
     StandTile *stan;
+    CoopSample at;
+    f32 yaw = r->st.yaw;
 
     pos.f[0] = r->st.pos[0];
     pos.f[1] = r->st.pos[1];
     pos.f[2] = r->st.pos[2];
+    if (!sNoInterp && coopTrackAt(&r->track, coopClockRenderMs(&sClock[r->st.player], coopNowMs()), &at) >= 0)
+    {   /* a moment behind, between two of their samples: smooth however the packets came */
+        pos.f[0] = at.pos[0];
+        pos.f[1] = at.pos[1];
+        pos.f[2] = at.pos[2];
+        yaw = at.yaw;
+    }
 
     stan = coopFindStan(&pos, r->puppet->stan, &r->puppet->pos);
     if (stan == NULL)
@@ -963,7 +1118,7 @@ static void coopPuppetUpdate(CoopRemote *r)
     r->puppet->stan = stan;
     r->puppet->pos = pos;
     setsuboffset(chr->model, &pos);
-    setsubroty(chr->model, r->st.yaw);
+    setsubroty(chr->model, yaw);
     sub_GAME_7F01FC10(chr->model, &r->puppet->pos, &r->puppet->pos, &chr->ground);
     chrDetectRooms(chr);
 
@@ -1036,6 +1191,8 @@ void coopStageStart(void)
     }
     for (i = 0; i < COOP_MAX_CHRS; i++)
     {
+        coopTrackReset(&sGuardTrack[i]);
+        sGuardTrackNum[i] = -1;
         sChrLastSync[i] = 0;
         sChrFireSeen[i][0] = sChrFireSeen[i][1] = 0;
         sChrFiring[i] = 0;
@@ -1058,6 +1215,7 @@ void coopStageStart(void)
         sR[i].puppetAnim = -1;
         sR[i].valid = 0;
         sR[i].lost = 0;
+        coopTrackReset(&sR[i].track);
     }
     coopDifficultyStageStart();
     coopVersusStageStart();
@@ -1101,6 +1259,7 @@ static void coopTickBody(void)
 
     sTick++;
     coopPollNet();
+    coopTimeTick();
     coopSessionTick();
     if (bossGetStageNum() != LEVELID_TITLE)
     {
@@ -1168,11 +1327,81 @@ static void coopTickBody(void)
     {
         coopReapGuards();
         coopClientGunfire();
+        if (!sNoInterp)
+        {
+            coopGuardsInterpTick();
+        }
     }
 
     coopHarnessTick();
 
     coopRemotesTick();
+}
+
+/* GE_COOP_MOTIONLOG=1 (tests): how evenly each puppet moves on screen. Every
+ * 2 s of movement: the mean step per tick, its coefficient of variation, and
+ * the ticks it stood still or jumped (over twice the mean) while moving */
+static void coopMotionLog(s32 p, coord3d *pos)
+{
+    static s32 on = -1;
+    static coord3d prev[COOP_MAX_PLAYERS];
+    static f32 sum[COOP_MAX_PLAYERS], sum2[COOP_MAX_PLAYERS];
+    static s32 n[COOP_MAX_PLAYERS], still[COOP_MAX_PLAYERS], jump[COOP_MAX_PLAYERS];
+    static f32 last[COOP_MAX_PLAYERS];
+    f32 dx, dz, d;
+
+    if (on < 0)
+    {
+        const char *e = getenv("GE_COOP_MOTIONLOG");
+
+        on = (e != NULL && atoi(e) != 0);
+    }
+    if (!on)
+    {
+        return;
+    }
+    dx = pos->f[0] - prev[p].f[0];
+    dz = pos->f[2] - prev[p].f[2];
+    prev[p] = *pos;
+    d = sqrtf(dx * dx + dz * dz);
+    if (d > 200.0f)
+    {
+        return;     /* spawned or respawned */
+    }
+    if (d < 0.01f && last[p] < 0.01f)
+    {
+        if (n[p] >= 120)
+        {
+            goto report;
+        }
+        return;     /* standing */
+    }
+    last[p] = d;
+    n[p]++;
+    sum[p] += d;
+    sum2[p] += d * d;
+    if (d < 0.01f)
+    {
+        still[p]++;
+    }
+    if (n[p] > 10 && d > 2.0f * sum[p] / (f32) n[p])
+    {
+        jump[p]++;
+    }
+    if (n[p] < 120)
+    {
+        return;
+    }
+report:
+    {
+        f32 mean = sum[p] / (f32) n[p];
+        f32 var = sum2[p] / (f32) n[p] - mean * mean;
+
+        portConLogf("ge: coop: motion: player %d step %.2f cv %.2f still %d jumps %d of %d ticks\n", p + 1, mean,
+                    mean > 0.0f ? sqrtf(var > 0.0f ? var : 0.0f) / mean : 0.0f, still[p], jump[p], n[p]);
+    }
+    n[p] = still[p] = jump[p] = 0;
+    sum[p] = sum2[p] = 0.0f;
 }
 
 /* the puppets: one per other player in this mission */
@@ -1217,6 +1446,7 @@ static void coopRemotesTick(void)
         {
             coopPuppetUpdate(r);
             coopPuppetUpdateGhost(r);
+            coopMotionLog(p, &r->puppet->pos);
             if ((sTick % 60) == 0)
             {
                 ChrRecord *c = r->puppet->chr;
@@ -1944,6 +2174,7 @@ static void coopSendGuards(void)
     pkt.version = COOP_VERSION;
     pkt.type = COOPPKT_GUARDS;
     pkt.snap = sGuardSnap;
+    pkt.ms = coopNowMs();
 
     for (i = 0; i < g_NumChrSlots; i++)
     {
@@ -2118,6 +2349,27 @@ static void coopApplyGuard(CoopGuardEnt *e)
     pos.f[0] = e->pos[0];
     pos.f[1] = e->pos[1];
     pos.f[2] = e->pos[2];
+    if (slot >= 0 && slot < COOP_MAX_CHRS && !sNoInterp)
+    {   /* drawn between samples each tick (coopGuardsInterpTick); placed here only the first time */
+        CoopSample smp;
+        s32 first = sGuardTrackNum[slot] != chr->chrnum || sGuardTrack[slot].n == 0;
+
+        if (sGuardTrackNum[slot] != chr->chrnum)
+        {
+            coopTrackReset(&sGuardTrack[slot]);
+            sGuardTrackNum[slot] = chr->chrnum;
+        }
+        smp.ms = sGuardPktMs;
+        smp.pos[0] = e->pos[0];
+        smp.pos[1] = e->pos[1];
+        smp.pos[2] = e->pos[2];
+        smp.yaw = e->yaw;
+        coopTrackPush(&sGuardTrack[slot], &smp);
+        if (!first)
+        {
+            goto placed;
+        }
+    }
     stan = coopFindStan(&pos, prop->stan, &prop->pos);
     if (stan != NULL)
     {
@@ -2127,6 +2379,7 @@ static void coopApplyGuard(CoopGuardEnt *e)
         chrDetectRooms(chr);
     }
     setsubroty(chr->model, e->yaw);
+placed:
     chr->chrflags |= CHRFLAG_INIT;
 
     if (e->animoff >= 0)
@@ -2159,6 +2412,40 @@ static void coopApplyGuard(CoopGuardEnt *e)
                 modelSetAnimSpeed(chr->model, e->speed, 0.0f);
             }
         }
+    }
+}
+
+/* Client: each mirrored chr where the host's was a moment ago, between two
+ * snapshots (coop_interp.c), so guards move smoothly between packets */
+static void coopGuardsInterpTick(void)
+{
+    u32 rt = coopClockRenderMs(&sClock[0], coopNowMs());
+    s32 i;
+
+    for (i = 0; i < g_NumChrSlots && i < COOP_MAX_CHRS; i++)
+    {
+        ChrRecord *chr = &g_ChrSlots[i];
+        CoopSample at;
+        coord3d pos;
+        StandTile *stan;
+
+        if (sGuardTrack[i].n == 0 || chr->model == NULL || chr->prop == NULL || chr->chrnum != sGuardTrackNum[i]
+            || coopIsPuppet(chr->prop) || coopTrackAt(&sGuardTrack[i], rt, &at) < 0)
+        {
+            continue;
+        }
+        pos.f[0] = at.pos[0];
+        pos.f[1] = at.pos[1];
+        pos.f[2] = at.pos[2];
+        stan = coopFindStan(&pos, chr->prop->stan, &chr->prop->pos);
+        if (stan != NULL)
+        {
+            chr->prop->stan = stan;
+            chr->prop->pos = pos;
+            setsuboffset(chr->model, &pos);
+            chrDetectRooms(chr);
+        }
+        setsubroty(chr->model, at.yaw);
     }
 }
 
@@ -3644,6 +3931,7 @@ s32 coopFrontTick(void)
     }
     sTick++;
     coopPollNet();
+    coopTimeTick();
     coopSessionTick();
     coopExtTick(0);         /* chat, objective credit, ... (coop_ext.c) */
     coopStatsFrontTick();   /* back from a mission: send our stats column */

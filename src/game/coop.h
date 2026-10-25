@@ -466,6 +466,38 @@ void coopObjApply(s32 kind, const u8 *raw, s32 from);
 #define COOPPKT_REPL 20     /* records */
 #define COOPPKT_REPLSUM 21  /* the desync checksum */
 #define COOPPKT_REPLREQ 22  /* send me these blocks */
+#define COOPPKT_TIME 23     /* round trip pings */
+s32  coopNetRttMs(s32 player);          /* round trip to that player in ms, 0 when not known yet */
+
+/* smooth movement (coop_interp.c): timed samples drawn a moment behind */
+#define COOPINTERP_SAMPLES 8
+typedef struct
+{
+    u32 ms;         /* the sender's clock */
+    f32 pos[3];
+    f32 yaw;
+} CoopSample;
+typedef struct
+{
+    CoopSample s[COOPINTERP_SAMPLES];   /* oldest first */
+    s32 n;
+} CoopTrack;
+typedef struct
+{
+    s32 valid;
+    s32 off;        /* our clock minus the sender's, for its quickest packet */
+    f32 creep;
+    u32 lastSend;
+    f32 interval;   /* ms between its samples, smoothed */
+    f32 jitter;     /* ms its packets come later than the quickest, smoothed */
+} CoopClock;
+void coopClockReset(CoopClock *c);
+void coopClockSample(CoopClock *c, u32 sendms, u32 arrivems);
+s32  coopClockDelay(const CoopClock *c);
+u32  coopClockRenderMs(const CoopClock *c, u32 nowms);
+void coopTrackReset(CoopTrack *t);
+void coopTrackPush(CoopTrack *t, const CoopSample *s);
+s32  coopTrackAt(const CoopTrack *t, u32 rt, CoopSample *out);
 void coopReplStageStart(void);
 void coopReplTick(u32 missionticks);
 void coopReplPacket(const void *buf, s32 len, s32 from);

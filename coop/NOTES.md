@@ -740,3 +740,31 @@ satellite-console work and the Runway plane did nothing on the host.
   corrected", block 13 (the door lock) 1, then block 4 again for the debris
   that settled after the destroy; nothing asked after that, no unresolved.
 
+## Netcode 3: smooth partners and guards, round trip, network simulator (2026-10-25, COOP_VERSION 10)
+
+- STATE and GUARDS carry the sender's clock (ms, coopNowMs), so COOP_VERSION
+  is 10. src/game/coop_interp.c: CoopClock maps a sender's clock onto ours
+  (offset from the quickest packet, creeping up slowly if the route gets
+  longer; send interval and jitter smoothed); CoopTrack keeps the last 8
+  timed samples (late ones go in their place).
+- Partners' puppets and a joiner's mirrored guards are drawn at
+  now - offset - delay, between the two samples around that moment, delay =
+  1.5 send intervals + 2 x jitter, 30..200 ms. Past the newest sample a
+  track runs on at its speed for 100 ms, then holds; a step over 3 m (a
+  respawn) is not drawn as a slide. Guard snapshots place a guard directly
+  only the first time; animation is untouched (it already runs locally and
+  resyncs past 6 frames). GE_COOP_NOINTERP=1 draws each packet as it lands.
+- Round trip: COOPPKT_TIME (23) pings each transport peer every 500 ms, wall
+  clock; coopNetRttMs(player) (a joiner's partner: twice the host's).
+  "net: player N round trip .. drawn .. behind .." in the log every 10 s.
+- port/src/coop_net.c GE_COOP_NETSIM=<ms>:<jitter>[:<loss %>]: every packet
+  arriving is held that long (plus up to the jitter, so out of order too) and
+  some dropped. Works on UDP and the Steam mock.
+- GE_COOP_MOTIONLOG=1: per puppet, every 2 s of movement, the mean step per
+  tick, its coefficient of variation, ticks it froze and ticks it jumped.
+- Measured on Dam, host walking (GE_AUTOSTICK), both copies at
+  NETSIM=60:40:2: without interpolation cv 0.81..0.87, 25..31 frozen ticks
+  and 17..20 jumps per 120; with it cv 0.35, none frozen, 3 jumps (the rest
+  is Xvfb's uneven frame time). Guard 6 traced on both: the joiner's follows
+  the host's path about 120 ms behind.
+
