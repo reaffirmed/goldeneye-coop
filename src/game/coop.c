@@ -1335,12 +1335,29 @@ static void coopHarnessTick(void)
         }
     }
     if (coopIsMirroringClient())
-    {   /* GE_COOP_TESTSHOT=<chrnum>: a chest shot every 2 s (harness only) */
+    {   /* GE_COOP_TESTSHOT=<chrnum>: a chest shot every 2 s; key: the first guard that holds a setup key (harness only) */
         static s32 testchr = -2;
         if (testchr == -2)
         {
             const char *e = getenv("GE_COOP_TESTSHOT");
-            testchr = (e != NULL) ? atoi(e) : -1;
+            testchr = (e == NULL) ? -1 : (strcmp(e, "key") == 0) ? -5 : atoi(e);
+        }
+        if (testchr == -5 && sTick > 300 && g_ChrSlots != NULL)
+        {
+            s32 i;
+            for (i = 0; i < g_NumChrSlots && testchr == -5; i++)
+            {
+                PropRecord *c = (g_ChrSlots[i].prop != NULL) ? g_ChrSlots[i].prop->child : NULL;
+                for (; c != NULL; c = c->prev)
+                {
+                    if (c->type == PROP_TYPE_OBJ && c->obj != NULL && c->obj->type == PROPDEF_KEY)
+                    {
+                        testchr = g_ChrSlots[i].chrnum;
+                        portConLogf("ge: coop: testshot: chr %d holds key obj %d\n", testchr, coopSetupOfs(c->obj));
+                        break;
+                    }
+                }
+            }
         }
         if (testchr >= 0 && (sTick % 120) == 0)
         {
@@ -1551,11 +1568,12 @@ static void coopHarnessTick(void)
     }
 
     if (coopPartnerHere())
-    {   /* GE_COOP_TESTPICK=1: every 10 s, grab the nearest pickup in the setup (harness only) */
+    {   /* GE_COOP_TESTPICK=1: every 10 s, grab the nearest pickup in the setup; key or t<PROPDEF>: the nearest of that type (harness only) */
         static s32 testpick = -1;
         if (testpick == -1)
         {
-            testpick = getenv("GE_COOP_TESTPICK") != NULL;
+            const char *e = getenv("GE_COOP_TESTPICK");
+            testpick = (e == NULL) ? 0 : (strcmp(e, "key") == 0) ? 100 + PROPDEF_KEY : (e[0] == 't') ? 100 + atoi(e + 1) : 1;
         }
         if (testpick && (sTick % 600) == 450 && coopInMission())
         {
@@ -1566,8 +1584,9 @@ static void coopHarnessTick(void)
             for (it = g_ActivePropsHead; it != NULL; it = it->next)
             {
                 if ((it->type == PROP_TYPE_WEAPON || it->type == PROP_TYPE_OBJ) && it->obj != NULL
-                    && coopSetupOfs(it->obj) >= 0 && (it->obj->type == PROPDEF_COLLECTABLE || it->obj->type == PROPDEF_AMMO
-                        || it->obj->type == PROPDEF_KEY || it->obj->type == PROPDEF_ARMOUR))
+                    && coopSetupOfs(it->obj) >= 0 && (it->obj->type == testpick - 100 || (testpick == 1
+                        && (it->obj->type == PROPDEF_COLLECTABLE || it->obj->type == PROPDEF_AMMO
+                            || it->obj->type == PROPDEF_KEY || it->obj->type == PROPDEF_ARMOUR))))
                 {
                     f32 dx = it->pos.f[0] - bond->pos.f[0];
                     f32 dz = it->pos.f[2] - bond->pos.f[2];
@@ -1622,6 +1641,62 @@ static void coopHarnessTick(void)
         }
     }
 
+    if (coopPartnerHere())
+    {   /* GE_COOP_TESTSWITCH=<n>:<s>: <s> seconds into the mission press Use on the <n>th door
+         * switch, and 6 s later log where its door is (harness only) */
+        static s32 testsw = -1, swn;
+        if (testsw == -1)
+        {
+            const char *e = getenv("GE_COOP_TESTSWITCH");
+            testsw = 0;
+            if (e != NULL && sscanf(e, "%d:%d", &swn, &testsw) != 2)
+            {
+                testsw = 0;
+            }
+        }
+        if (testsw > 0 && coopInMission() && sMissionTicks == (u32) testsw * 60)
+        {
+            ObjectRecord *l;
+            s32 n = 0;
+            for (l = g_LevelLoadPropSwitch; l != NULL; l = ((LinkRecord *) l)->next)
+            {
+                LinkRecord *link = (LinkRecord *) l;
+                if (link->first != NULL && link->second != NULL && link->second->type == PROP_TYPE_DOOR && n++ == swn)
+                {
+                    TICKOP op;
+                    portConLogf("ge: coop: testswitch obj %d -> door %d\n", coopSetupOfs(link->first->obj), coopSetupOfs(link->second->door));
+                    op = propobjInteract(link->first);
+                    propExecuteTickOperation(link->first, op);
+                    break;
+                }
+            }
+        }
+    }
+    {   /* the doors GE_COOP_TESTSWITCH pressed, here too with GE_COOP_TESTSWITCHLOG=<n>:<s> (harness only) */
+        static s32 swat = -2;
+        if (swat == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTSWITCH") != NULL ? getenv("GE_COOP_TESTSWITCH") : getenv("GE_COOP_TESTSWITCHLOG");
+            s32 n;
+            if (e == NULL || sscanf(e, "%d:%d", &n, &swat) != 2)
+            {
+                swat = -1;
+            }
+        }
+        if (swat > 0 && coopInMission() && sMissionTicks == (u32) swat * 60 + 360 && g_LevelLoadPropSwitch != NULL)
+        {
+            ObjectRecord *l;
+            for (l = g_LevelLoadPropSwitch; l != NULL; l = ((LinkRecord *) l)->next)
+            {
+                LinkRecord *link = (LinkRecord *) l;
+                if (link->first != NULL && link->second != NULL && link->second->type == PROP_TYPE_DOOR)
+                {
+                    DoorRecord *d = link->second->door;
+                    portConLogf("ge: coop: testswitch door %d: state %d open %.2f\n", coopSetupOfs(d), d->openstate, d->openPosition);
+                }
+            }
+        }
+    }
     if (coopPartnerHere())
     {   /* GE_COOP_TESTDOOR=1: toggle the door nearest Bond every 10 s (harness only) */
         static s32 testdoor = -1;
@@ -5328,6 +5403,21 @@ void coopExtSend(s32 kind, s32 to, const void *payload, s32 len)
     ev.kind = (u8) kind;
     memcpy(ev.u.raw, payload, (len < (s32) sizeof(ev.u.raw)) ? len : (s32) sizeof(ev.u.raw));
     coopQueueEventTo(&ev, to);
+}
+
+/* a setup record's offset (-1 for things made at run time), and back */
+s32 coopExtSetupOfs(void *rec)
+{
+    return coopSetupOfs(rec);
+}
+
+void *coopExtSetupRec(s32 ofs)
+{
+    if (g_CurrentSetup.propDefs == NULL || ofs < 0 || coopSetupOfs((u8 *) g_CurrentSetup.propDefs + ofs) < 0)
+    {
+        return NULL;
+    }
+    return (u8 *) g_CurrentSetup.propDefs + ofs;
 }
 
 s32 coopExtSelf(void)

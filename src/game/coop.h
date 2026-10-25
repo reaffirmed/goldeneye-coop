@@ -450,6 +450,8 @@ void coopItemsPickedUp(ObjectRecord *obj);
 s32  coopInMissionNow(void);
 void coopObjKnockChildren(s32 haschildren);             /* propobj.c objHit */
 void coopObjKnocked(ObjectRecord *obj, s32 bounce, coord3d *viewdir);
+s32 coopExtSetupOfs(void *rec);                 /* coop_items.c: setup record offset, -1 run time */
+void *coopExtSetupRec(s32 ofs);
 void coopObjUsed(ObjectRecord *obj);                     /* propobj.c propobjInteract */
 void coopAsciiName(char *out, s32 cap, const char *in, s32 upper);   /* a Steam name for the game's fonts */
 

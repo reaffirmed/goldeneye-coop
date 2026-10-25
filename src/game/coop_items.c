@@ -94,11 +94,12 @@ typedef struct
 {
     u16 id;
     s16 chrnum;         /* the guard that dropped it */
-    s8 item;            /* ITEM_IDS */
+    s8 item;            /* ITEM_IDS, for a gun made at run time */
     u8 pad;
     s16 model;          /* PROP_ */
     s32 stage;
     f32 pos[3];         /* where it was, for a guard we do not have */
+    s32 objofs;         /* a setup object (a keycard, a key, the guard's own gun): every game has it; -1 none */
 } CoopDropMsg;          /* COOPEV_DROP */
 
 #define COOP_ITEMS_MAX 64
@@ -355,28 +356,36 @@ void coopItemsChrDropped(ChrRecord *chr, PropRecord *prop)
     WeaponObjRecord *w;
     CoopDropMsg m;
 
-    if (!coopItemsOn() || !coopExtIsHost() || chr == NULL || prop == NULL || prop->type != PROP_TYPE_WEAPON
+    if (!coopItemsOn() || !coopExtIsHost() || chr == NULL || prop == NULL || prop->obj == NULL
+        || (prop->type != PROP_TYPE_WEAPON && prop->type != PROP_TYPE_OBJ)
         || prop->parent != NULL || chr->prop == NULL || coopPropIsPartner(chr->prop))
     {
         return;
     }
-    w = prop->weapon;
-    if (w == NULL || w->weaponnum <= ITEM_UNARMED)
-    {
-        return;
-    }
     memset(&m, 0, sizeof(m));
+    m.objofs = coopExtSetupOfs(prop->obj);
+    if (m.objofs < 0)
+    {   /* made at run time: only a gun can be made again from its item */
+        w = (prop->type == PROP_TYPE_WEAPON) ? prop->weapon : NULL;
+        if (w == NULL || w->weaponnum <= ITEM_UNARMED)
+        {
+            return;
+        }
+        m.item = w->weaponnum;
+        m.model = (s16) w->obj;
+    }
     m.id = coopItemNewId();
     m.chrnum = (s16) chr->chrnum;
-    m.item = w->weaponnum;
-    m.model = (s16) w->obj;
     m.stage = bossGetStageNum();
     m.pos[0] = chr->prop->pos.f[0];
     m.pos[1] = chr->prop->pos.f[1];
     m.pos[2] = chr->prop->pos.f[2];
-    coopItemAdd(m.id, COOPITEM_DROP, (ObjectRecord *) w);
+    if (m.objofs < 0)
+    {
+        coopItemAdd(m.id, COOPITEM_DROP, prop->obj);  /* a setup object's pickup is shared by its offset */
+    }
     coopExtSend(COOPEV_DROP, 0xFF, &m, sizeof(m));
-    portConLogf("ge: coop: guard %d dropped item %d (id %04x)\n", m.chrnum, m.item, m.id);
+    portConLogf("ge: coop: guard %d dropped item %d obj %d (id %04x)\n", m.chrnum, m.item, m.objofs, m.id);
 }
 
 static void coopItemsApplyDrop(const CoopDropMsg *m)
@@ -388,6 +397,25 @@ static void coopItemsApplyDrop(const CoopDropMsg *m)
 
     if (m->stage != bossGetStageNum() || coopItemById(m->id) != NULL)
     {
+        return;
+    }
+    if (m->objofs >= 0)
+    {   /* our copy of the same setup object, still on our stand-in: drop it from
+         * the stand-in's position (an ONSCREEN flag left from an earlier frame
+         * would make objDrop read its stale matrices, as below) */
+        obj = (ObjectRecord *) coopExtSetupRec(m->objofs);
+        if (obj == NULL || obj->prop == NULL || obj->prop->parent == NULL)
+        {
+            portConLogf("ge: coop: host guard %d's drop obj %d: not held here\n", m->chrnum, m->objofs);
+            return;
+        }
+        sApplying = 1;
+        obj->prop->flags &= ~PROPFLAG_ONSCREEN;
+        propobjSetDropped(obj->prop, DROPTYPE_DEFAULT);
+        objDrop(obj->prop);
+        sApplying = 0;
+        portConLogf("ge: coop: host guard %d dropped obj %d at %.0f %.0f %.0f\n", m->chrnum, m->objofs,
+            obj->prop->pos.f[0], obj->prop->pos.f[1], obj->prop->pos.f[2]);
         return;
     }
     sApplying = 1;

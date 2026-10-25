@@ -694,3 +694,19 @@ satellite-console work and the Runway plane did nothing on the host.
   "host guard N dropped item I ... at x y z", "our Bond runs the ending's
   list". Harness: GE_COOP_TESTPAD=<pad>:<s> stands on that pad (330 is the
   Dam bungee room).
+- **Keycards and everything else a guard carries**: the host's COOPEV_DROP
+  now also covers setup objects (keys, keycards, mission items, the guard's
+  own setup gun), named by their setup offset (CoopDropMsg.objofs). Every
+  game has that object on its copy of the guard, so the joiner drops its
+  own copy (ONSCREEN cleared first, for the same stale-matrix reason) and
+  the pickup is the normal shared pickup by offset: whoever takes it, the
+  team has it. Guns made at run time still go by item and a fresh spawn.
+- Joiner sweep on two copies (joiner doing it, host checked): setup guns,
+  ammo boxes, setup keys, armour (both ways, one copy per map), the Bunker 2
+  guard's key dropped and taken, a Facility door switch (door open on both,
+  no flip back), plus the earlier Dam modem, Surface console, Runway plane,
+  thrown items and blasts.
+- Harness: GE_COOP_TESTSHOT=key shoots the first guard holding a setup key;
+  GE_COOP_TESTPICK=key or t<PROPDEF> grabs the nearest of that type;
+  GE_COOP_TESTSWITCH=<n>:<s> presses Use on the n-th door switch <s> s in,
+  and logs its door 6 s later (GE_COOP_TESTSWITCHLOG=<n>:<s> logs only).
