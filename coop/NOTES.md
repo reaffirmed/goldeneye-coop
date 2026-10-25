@@ -585,3 +585,20 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; cutscen
 - Verified at 1280x720 with the mock Steam (host + joiner): arrow keys from
   the title to Steam Invite Window and back, wheel both ways, joiner's arrow
   keys to its last row. Shots: screens/lobby-scroll/ in the project files.
+
+## Auto-aim ignores partners (2026-10-25)
+
+- Real Steam test: auto-aim locked onto the partner's Bond instead of guards.
+  chrpropUpdateAutoaimTarget (chrprop.c) is the one place auto-aim picks a
+  target (autoaim_target_x/y, which the gun swivel and aim assist follow);
+  it took any armed PROP_TYPE_CHR, and co-op puppets are armed chrs. It now
+  skips coopPropIsPartner. Shots still hit partners (Friendly Fire decides
+  the damage); versus opponents are VIEWER props, not puppets, so versus
+  auto-aim is unchanged.
+- Checked, no change needed: the crosshair colour is the fixed midas.ini
+  crosshair_color (no target highlight), and the ping's chr pick
+  (coop_ping.c) already skips partners, so a partner is never an ENEMY ping.
+- Harness: GE_COOP_TESTLOOK now logs "autoaim x <none|partner|chr> ..." each
+  second while facing the partner (mouse_auto_aim=1 in midas.ini for Xvfb
+  runs, since the mouse blocks auto-aim by default). Verified on Dam with the
+  mock Steam: without the fix "partner 30001" every second, with it "none".

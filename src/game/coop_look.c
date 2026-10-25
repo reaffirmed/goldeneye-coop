@@ -802,6 +802,16 @@ void coopLookTestTick(s32 missionticks)
             g_CurrentPlayer->vv_theta += 360.0f;
         }
     }
+    if ((missionticks - sTestLookAt) % 60 == 30)
+    {   /* what auto-aim holds while the partner is centred (none, partner or chr <n>) */
+        PropRecord *ax = g_CurrentPlayer->autoaim_target_x;
+        PropRecord *ay = g_CurrentPlayer->autoaim_target_y;
+
+        portConLogf("ge: coop: testlook: autoaim x %s %d y %s %d (enabled %d)\n",
+            ax == NULL ? "none" : coopPropIsPartner(ax) ? "partner" : "chr", (ax != NULL && ax->chr != NULL) ? ax->chr->chrnum : -1,
+            ay == NULL ? "none" : coopPropIsPartner(ay) ? "partner" : "chr", (ay != NULL && ay->chr != NULL) ? ay->chr->chrnum : -1,
+            (s32) currentPlayerGetYAutoAimEnabledRedirect());
+    }
 }
 
 u16 coopLookTestButtons(u16 buttons)
