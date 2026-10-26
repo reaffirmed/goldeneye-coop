@@ -4,15 +4,21 @@ name: Co-op Windows zip
 # Rare's served data (GE_ROMDATA_FALLBACK=OFF) and players supply their own
 # cart image at run time. Every push to coop/story (or a manual run from it)
 # replaces the zip on the rolling "coop-latest" prerelease, so its download
-# link never changes. Pushing a v* tag publishes a versioned release with
-# the zip and the notes in coop/release-notes/<tag>.md. Other branches only
-# get the zip as a run artifact.
+# link never changes. Pushing a v* tag, or a manual run with a release tag,
+# publishes a versioned release with the zip and the notes in
+# coop/release-notes/<tag>.md (a manual run tags the commit it built).
+# Other branches only get the zip as a run artifact.
 on:
   push:
     paths-ignore:
     - '*.md'
     - 'docs/**'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Publish a release with this tag (e.g. v0.1.0) on the commit built; leave empty for none'
+        required: false
+        default: ''
 
 env:
   SDL2_VERSION: 2.30.11
@@ -108,13 +114,14 @@ jobs:
             --notes "$notes"
 
       - name: Publish a versioned release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_INPUT: ${{ inputs.release_tag }}
         run: |
-          tag="${GITHUB_REF_NAME}"
+          tag="${RELEASE_INPUT:-$GITHUB_REF_NAME}"
           cp GoldenEye-Coop-win32.zip "GoldenEye-Coop-${tag}-win32.zip"
           gh release create "$tag" "GoldenEye-Coop-${tag}-win32.zip" \
-            --verify-tag \
+            --target "$GITHUB_SHA" \
             --title "GoldenEye Co-op ${tag}" \
             --notes-file "coop/release-notes/${tag}.md"
