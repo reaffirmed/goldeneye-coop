@@ -116,6 +116,28 @@ enum {
      * watch_next, injected as D-pad up / down edges while the watch is open. */
     PORTACT_WATCH_UP,
     PORTACT_WATCH_DOWN,
+    /* Appended for the co-op build: hide / show the objective list
+     * (coop_hud.c) and the weapon menu's five slots (weapon_menu.c). */
+    PORTACT_OBJECTIVE_LIST,
+    PORTACT_WEAPON_SLOT1,
+    PORTACT_WEAPON_SLOT2,
+    PORTACT_WEAPON_SLOT3,
+    PORTACT_WEAPON_SLOT4,
+    PORTACT_WEAPON_SLOT5,
+    /* Appended for the co-op build: give ammo (and the gun) in hand to the
+     * partner (coop_give.c). */
+    PORTACT_GIVE_PARTNER,
+    /* Appended for the co-op build: the weapon menu's mission item slot. */
+    PORTACT_WEAPON_SLOT6,
+    /* Appended for the co-op build: ping the spot or guard under the
+     * crosshair for the partners (coop_ping.c). */
+    PORTACT_PING,
+    /* Appended for the co-op build: open the chat line (coop_chat.c). */
+    PORTACT_CHAT,
+    /* Appended for the co-op build: photo mode (coop_photo.c). */
+    PORTACT_PHOTO,
+    /* Appended for the co-op build: push to talk, held (coop_voice.c). */
+    PORTACT_PUSH_TO_TALK,
     PORTACT_COUNT
 };
 
@@ -166,6 +188,18 @@ static const struct {
      * nothing outside the watch takes these presses. */
     [PORTACT_WATCH_UP]         = { "watch_up",         "Up",       1 },
     [PORTACT_WATCH_DOWN]       = { "watch_down",       "Down",     1 },
+    [PORTACT_OBJECTIVE_LIST]   = { "objective_list",   "O",        1 },
+    [PORTACT_WEAPON_SLOT1]     = { "weapon_slot_1",    "1",        1 },
+    [PORTACT_WEAPON_SLOT2]     = { "weapon_slot_2",    "2",        1 },
+    [PORTACT_WEAPON_SLOT3]     = { "weapon_slot_3",    "3",        1 },
+    [PORTACT_WEAPON_SLOT4]     = { "weapon_slot_4",    "4",        1 },
+    [PORTACT_WEAPON_SLOT5]     = { "weapon_slot_5",    "5",        1 },
+    [PORTACT_GIVE_PARTNER]     = { "give_partner",     "G",        1 },
+    [PORTACT_WEAPON_SLOT6]     = { "weapon_slot_6",    "6",        1 },
+    [PORTACT_PING]             = { "ping",             "Mouse Middle", 1 },
+    [PORTACT_CHAT]             = { "chat",             "T",        1 },
+    [PORTACT_PHOTO]            = { "photo_mode",       "P",        1 },
+    [PORTACT_PUSH_TO_TALK]     = { "push_to_talk",     "V",        0 },
 };
 
 /* [input] detonate_use_reload (default ON): with remote mines in the right
@@ -184,6 +218,10 @@ static s32 sShootTap[4];    /* shoot went down this tick */
 /* [input] no_aim_crouch (default OFF = vanilla): 1 = aim + down no longer
  * crouches (bondview2.c); the crouch binds still do. */
 static s32 sNoAimCrouch = 0;
+/* [input] crouch_key / walk_key (accessibility, default 0 = hold): 1 = the
+ * crouch_hold and walk keys toggle instead, one press on, the next off */
+static s32 sCrouchKeyToggles = 0;
+static s32 sWalkKeyToggles = 0;
 static s32 joyPortPad(void);
 
 /* Per pad: the keyboard feeds pad 0 (video.c portJoyPortPoll) and a controller
@@ -292,6 +330,14 @@ s32 portJoyPortSetOption(const char *key, const char *value)
     }
     if (strcmp(key, "no_aim_crouch") == 0) {
         sNoAimCrouch = atoi(value) != 0;
+        return 1;
+    }
+    if (strcmp(key, "crouch_key") == 0) {
+        sCrouchKeyToggles = atoi(value) != 0;
+        return 1;
+    }
+    if (strcmp(key, "walk_key") == 0) {
+        sWalkKeyToggles = atoi(value) != 0;
         return 1;
     }
     /* padN_<the same two>: input_pc.c's padN_ arm is asked first and turns
@@ -421,6 +467,14 @@ s32 portJoyPortOptionGet(const char *key, s32 *out)
         *out = sNoAimCrouch;
         return 1;
     }
+    if (strcmp(key, "crouch_key") == 0) {
+        *out = sCrouchKeyToggles;
+        return 1;
+    }
+    if (strcmp(key, "walk_key") == 0) {
+        *out = sWalkKeyToggles;
+        return 1;
+    }
     return 0;
 }
 
@@ -442,8 +496,19 @@ s32 portJoyPortOptionSet(const char *key, s32 v)
         sNoAimCrouch = v != 0;
         return 1;
     }
+    if (strcmp(key, "crouch_key") == 0) {
+        sCrouchKeyToggles = v != 0;
+        return 1;
+    }
+    if (strcmp(key, "walk_key") == 0) {
+        sWalkKeyToggles = v != 0;
+        return 1;
+    }
     return 0;
 }
+
+s32 portJoyPortCrouchKey(void) { return sCrouchKeyToggles; }
+s32 portJoyPortWalkKey(void)   { return sWalkKeyToggles; }
 
 /* ---- harness: GE_JOYPORT_AUTO ------------------------------------------- */
 
@@ -717,12 +782,96 @@ s32 portJoyPortClassicTogglePressed(s32 pad)
 s32 portJoyPortActZoomIn(void)    { return PORTACT_ZOOM_IN; }
 s32 portJoyPortActZoomOut(void)   { return PORTACT_ZOOM_OUT; }
 
+/** coop_hud.c: a fresh objective_list press for this tick's player. */
+s32 portJoyPortObjectiveListPressed(void)
+{
+    s32 pad = joyPortPad();
+
+    return pad >= 0 && portJoyPortTake(pad, PORTACT_OBJECTIVE_LIST);
+}
+
+/** weapon_menu.c: 1..6 for a fresh weapon_slot_N press, 0 for none.
+ * Consumes every slot's latch, so a press never fires later. */
+s32 portJoyPortWeaponSlotPressed(void)
+{
+    s32 pad = joyPortPad();
+    s32 slot = 0;
+    s32 i;
+
+    if (pad < 0)
+    {
+        return 0;
+    }
+    for (i = 0; i < 5; i++)
+    {
+        if (portJoyPortTake(pad, PORTACT_WEAPON_SLOT1 + i) && slot == 0)
+        {
+            slot = i + 1;
+        }
+    }
+    if (portJoyPortTake(pad, PORTACT_WEAPON_SLOT6) && slot == 0)
+    {
+        slot = 6;
+    }
+    return joyPortPermitted() ? slot : 0;
+}
+
+/** coop_give.c: a fresh give_partner press for this tick's player. */
+s32 portJoyPortGivePartnerPressed(void)
+{
+    s32 pad = joyPortPad();
+
+    return pad >= 0 && portJoyPortTake(pad, PORTACT_GIVE_PARTNER) && joyPortPermitted();
+}
+
+/** coop_ping.c: a fresh ping press for this tick's player. */
+s32 portJoyPortPingPressed(void)
+{
+    s32 pad = joyPortPad();
+
+    return pad >= 0 && portJoyPortTake(pad, PORTACT_PING) && joyPortPermitted();
+}
+
+/** coop_chat.c: a fresh chat press for this tick's player. */
+s32 portJoyPortChatPressed(void)
+{
+    s32 pad = joyPortPad();
+
+    return pad >= 0 && portJoyPortTake(pad, PORTACT_CHAT) && joyPortPermitted();
+}
+
+/** coop_photo.c: a fresh photo-mode press for this tick's player. Not gated
+ * on live controls: photo mode locks them, and the same key leaves it. */
+s32 portJoyPortPhotoPressed(void)
+{
+    s32 pad = joyPortPad();
+
+    return pad >= 0 && portJoyPortTake(pad, PORTACT_PHOTO);
+}
+
+/** coop_voice.c: push to talk is held. Player 1's (pad 0's), in menus too:
+ * the lobby talks as well, and no tick's player is set there. */
+s32 portJoyPortPushToTalkHeld(void)
+{
+    return sHeld[0][PORTACT_PUSH_TO_TALK] != 0;
+}
+
 /** MoveBond: 1 while Bond should move at half speed. */
 s32 portJoyPortWalkActive(void)
 {
     s32 pad = joyPortPad();
     if (pad < 0) {
         return 0;
+    }
+    if (sWalkKeyToggles) {
+        /* Walk Key: Toggle (accessibility) - each press flips walking */
+        static s32 walkWas[PORT_PADS], walkOn[PORT_PADS];
+
+        if (sHeld[pad][PORTACT_WALK] && !walkWas[pad]) {
+            walkOn[pad] = !walkOn[pad];
+        }
+        walkWas[pad] = sHeld[pad][PORTACT_WALK];
+        return walkOn[pad];
     }
     return sAlwaysWalk[pad] ? !sHeld[pad][PORTACT_RUN] : sHeld[pad][PORTACT_WALK];
 }
@@ -876,6 +1025,20 @@ s32 portJoyPortUseHeld(s32 pad)
 }
 
 /**
+ * USE HELD in play: co-op's hold-to-revive (coop_revive.c) wants the level of
+ * the use bind while Bond's controls are live. Plain level of the last poll;
+ * nothing taken, so a tap still opens doors.
+ */
+s32 portJoyPortUseHeldInPlay(void)
+{
+    s32 pad = joyPortPad();
+    if (pad < 0 || !joyPortPermitted()) {
+        return 0;
+    }
+    return sPrevDown[pad][PORTACT_USE] != 0;
+}
+
+/**
  * INVENTORY = BACK in menus: front.c menu_init takes a fresh prev/next
  * inventory press and injects B for that pad. Both are taken so one press never
  * fires twice; in play portJoyPortPlayerTick takes them first.
@@ -1012,6 +1175,7 @@ typedef struct {
     s32 standPending; /* stand-up owed (toggle off / hold release) */
     s32 wasSquat;     /* we have seen crouchpos == SQUAT while active */
     s32 holdEaten;    /* this hold press was spent clearing the latch, not crouching */
+    s32 keyWas;       /* crouch_key toggle: the hold key was down on the previous tick */
 } JoyPortCrouch;
 static JoyPortCrouch sCrouch[PORT_PADS];
 
@@ -1030,6 +1194,15 @@ s32 portJoyPortCrouchStep(void)
     c = &sCrouch[pad];
     toggle = portJoyPortTake(pad, PORTACT_CROUCH_TOGGLE);
     hold = sHeld[pad][PORTACT_CROUCH_HOLD];
+    if (sCrouchKeyToggles) {
+        /* Crouch Key: Toggle (accessibility): the hold key's press is a toggle
+         * press, and it is never held */
+        if (hold && !c->keyWas) {
+            toggle = 1;
+        }
+        c->keyWas = hold;
+        hold = 0;
+    }
     if (g_PlayerIsInTank) {
         c->wanted = 0;
         c->wasSquat = 0;

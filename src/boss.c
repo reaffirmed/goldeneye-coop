@@ -794,7 +794,9 @@ void bossMainloop(void)
                                * last so it covers every screen, and a no-op
                                * until opened or while fonts are unloaded. */
                                 extern Gfx *portConRender(Gfx *gdl);
+                                extern void portReportTick(void);
                                 gdl = portConRender(gdl);
+                                portReportTick();   /* F8's bug report (port_report.c) */
                             }
 #endif
                             gDPFullSync(gdl++); // 0xe9000000, 0x00000000
@@ -930,6 +932,12 @@ LEVELID bossGetStageNum() {
  *     return to title screen from stage
  */
 void bossReturnTitleStage(void) {
+#ifndef TARGET_N64
+    {
+        extern void coopMissionComplete(void);
+        coopMissionComplete(); /* co-op: the partner's mission ends with ours */
+    }
+#endif
 #ifdef BUGFIX_R1
     display_objective_status_text_on_status_change();
     objectivestatusDisableStatusDisplay();
@@ -941,7 +949,11 @@ void bossReturnTitleStage(void) {
         portMissionEndLog(bossGetStageNum(), objectiveIsAllComplete());
     }
 #endif
+#ifndef TARGET_N64
+    if ((bossGetStageNum() != LEVELID_CUBA) && (objectiveIsAllComplete() != 0x0 || getenv("GE_COOP_TESTWIN") != NULL)) { /* harness: any end is a win */
+#else
     if ((bossGetStageNum() != LEVELID_CUBA) && (objectiveIsAllComplete() != 0x0)) {
+#endif
         end_of_mission_briefing();
     }
     bossRunTitleStage();

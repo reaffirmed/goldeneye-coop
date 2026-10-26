@@ -1935,6 +1935,8 @@ typedef enum MENU
     MENU_PORT_SHEET,   /* PORT: the Options folder's placeholder pages (Gameplay
                         * / Control / Display rows, CREDITS tab) - front.c
                         * menu1C */
+    MENU_COOP_LOBBY,   /* PORT: co-op lobby, from the Files menu's CO-OP row -
+                        * front.c, src/game/coop.c */
     MENU_MAX
 } MENU;
 

@@ -3,6 +3,7 @@
 #include <bondtypes.h>
 #include <boss.h>
 #include <fr.h>
+#include "coop.h"
 #include <joy.h>
 #include <music.h>
 #include <snd.h>
@@ -1406,6 +1407,10 @@ void bondviewFrozenCameraTick(u16 buttons, u16 oldbuttons, struct coord3d *pos, 
                     s_PortIntroSkipMask = buttons & ~oldbuttons & PORT_INTRO_SKIP_BUTTONS;
                     s_PortIntroSkipPort = portskip;
                 }
+                if (coopIntroHostDone())
+                {   /* co-op: the host's intro is over, so is ours (coop_cutscene.c) */
+                    g_CameraAfterCinema = CAMERAMODE_INTRO;
+                }
             }
 #else
             if ((lvlGetControlsLockedFlag() == 0)
@@ -1609,7 +1614,11 @@ void bondviewFrozenCameraTick(u16 buttons, u16 oldbuttons, struct coord3d *pos, 
             s32 portskip = 0;
 #endif
             if ((lvlGetControlsLockedFlag() == 0)
-                && ((buttons & ~oldbuttons & (A_BUTTON | B_BUTTON | Z_TRIG | START_BUTTON | L_TRIG | R_TRIG)) || portskip))
+                && ((buttons & ~oldbuttons & (A_BUTTON | B_BUTTON | Z_TRIG | START_BUTTON | L_TRIG | R_TRIG)) || portskip
+#ifndef TARGET_N64
+                    || coopIntroHostDone()  /* co-op: the host is already playing */
+#endif
+                    ))
             {
                 camera_fade_active = 1;
                 currentPlayerSetFadeColour(0, 0, 0, g_CurrentPlayer->colourscreenfrac);
@@ -6536,6 +6545,13 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
                        g_CurrentPlayer->vv_verta, g_CurrentPlayer->vv_theta);
             }
         }
+        { /* photo mode (coop_photo.c): the look is the photo camera's, taken
+           * before the locked controls drop it below */
+            f32 pdy = moveData.invertPitch ? moveData.freeLookDy : -moveData.freeLookDy;
+            f32 pdeg = moveData.invertPitch ? g_portMousePitchDeg : -g_portMousePitchDeg;
+
+            coopPhotoTick(moveData.freeLookDx, pdy, g_portMouseDirect, g_portMouseYawDeg, pdeg);
+        }
         /* Permission (see portMouseLookPermitted): drain the delta every tick
          * but discard it unless the stick could move Bond, so motion never
          * banks up; this single predicate replaces per-consumer checks that
@@ -6636,7 +6652,18 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         extern s32 get_is_ramrom_flag(void);
         extern void portRamromEscapeExit(const char *reason); /* ramromreplay.c */
 
-        if (get_cur_playernum() == 0 && portEscPressed())
+        if (get_cur_playernum() == 0 && coopPhotoActive())
+        {
+            if (portEscPressed())
+            {
+                coopPhotoStop();    /* photo mode's Escape: back to Bond, not the pause (coop_photo.c) */
+            }
+        }
+        else if (get_cur_playernum() == 0 && coopChatEatEscape())
+        {
+            portEscPressed();   /* the chat line's Escape, not the pause's (coop_chat.c) */
+        }
+        else if (get_cur_playernum() == 0 && portEscPressed())
         {
             if (get_is_ramrom_flag() != 0)
             {   /* demo playback: Escape is a PC key the replay's "any real
@@ -8885,7 +8912,30 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
 #ifndef TARGET_N64
     { /* Port suite prev/next weapon (joy_port.c) = the A-tap / A+Z paths */
         extern s32 portJoyPortWeaponStep(void);
+        extern s32 portJoyPortObjectiveListPressed(void);
+        extern void portObjectivesHudToggle(void);
+        extern s32 portJoyPortGivePartnerPressed(void);
+        extern s32 portJoyPortPingPressed(void);
+        extern s32 portJoyPortChatPressed(void);
         s32 step = portJoyPortWeaponStep();
+
+        step = weapmenuInput(step);   /* the weapon menu and its slot keys (weapon_menu.c) */
+        if (portJoyPortObjectiveListPressed())
+        {
+            portObjectivesHudToggle();   /* the objective list (coop_hud.c) */
+        }
+        if (portJoyPortGivePartnerPressed())
+        {
+            coopGivePress();   /* co-op: ammo and the gun in hand to the partner (coop_give.c) */
+        }
+        if (portJoyPortPingPressed())
+        {
+            coopPingPress();   /* co-op: mark what the crosshair is on for the partners (coop_ping.c) */
+        }
+        if (portJoyPortChatPressed())
+        {
+            coopChatPress();   /* co-op: the chat line (coop_chat.c) */
+        }
         if (step < 0)
         {
             moveData.weaponBackOffset = 1;
@@ -9550,6 +9600,10 @@ void MoveBond(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
     currentPlayerSetCameraMode(0);
     bondviewPlayerTickDamageAndHealth();
     bondviewPlayerTickExplode();
+#ifndef TARGET_N64
+    buttons = weapmenuFilterButtons(buttons, oldbuttons);   /* fire picks from an open weapon menu */
+    buttons = coopLookTestButtons(buttons);                 /* harness: GE_COOP_TESTFIRE holds fire */
+#endif
     bondviewProcessInput(stick_x, stick_y, buttons, oldbuttons);
 
     if (lvlGetControlsLockedFlag())
@@ -11089,7 +11143,7 @@ s32 portFullHeightActive(void)
 
 s16 bondviewGetCurrentPlayerViewportWidth(void)
 {
-    if (getPlayerCount() >= 3)
+    if (getViewPlayerCount() >= 3)
     {
         return VIEWPORT_WIDTH_4P;
     }
@@ -11114,7 +11168,7 @@ s16 bondviewGetCurrentPlayerViewportWidth(void)
 
 s16 get_curplayer_viewport_ulx(void)
 {
-    if (2 < getPlayerCount())
+    if (2 < getViewPlayerCount())
     {
         if ((get_cur_playernum() == 1) || (get_cur_playernum() == 3))
         {
@@ -11135,7 +11189,7 @@ s16 bondviewGetCurrentPlayerViewportHeight(void)
 {
     f32 t;
 
-    if (getPlayerCount() >= 2)
+    if (getViewPlayerCount() >= 2)
     {
 #if !defined(TARGET_N64) && !defined(VERSION_EU)
         if (portFullHeightActive())
@@ -11196,7 +11250,7 @@ s16 bondviewGetCurrentPlayerViewportUly(void)
 {
     f32 t;
 
-    if (getPlayerCount() == 2)
+    if (getViewPlayerCount() == 2)
     {
         if (get_cur_playernum() == 0)
         {
@@ -11216,7 +11270,7 @@ s16 bondviewGetCurrentPlayerViewportUly(void)
         return VIEWPORT_ULY_2P_PLAYER_2;
     }
 
-    if (getPlayerCount() >= 3)
+    if (getViewPlayerCount() >= 3)
     {
         if (get_cur_playernum() < 2)
         {
@@ -11381,7 +11435,7 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
         {   /* PILLARBOX (video.c portSetScenePillar): an MP gameplay frame asks
              * for the centred 4:3 - set before the wide factor, which then reads 1 */
             extern void portSetScenePillar(s32 on);
-            portSetScenePillar(getPlayerCount() >= 2);
+            portSetScenePillar(getViewPlayerCount() >= 2);
         }
         wf = portWideFactor();
 
@@ -11402,7 +11456,7 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
              * anamorphic fallback (portMpPinActive). */
             extern void portSetSceneMp(s32 mp);
             extern s32 portMpPinActive(void); /* video.c; weak 0 headless */
-            s32 mp = getPlayerCount() >= 3 && !portMpPinActive();
+            s32 mp = getViewPlayerCount() >= 3 && !portMpPinActive();
             portSetSceneMp(mp);
             g_bondviewSceneWideFactor = mp ? 1.0f : wf; /* aim pin/unpin helpers follow the real presentation */
         }
@@ -11717,6 +11771,10 @@ Gfx *bondviewRenderDebugBondView(Gfx *gdl)
         cam_up.z = collision->applied_view2.z;
     }
 
+#ifndef TARGET_N64
+    coopSpectateCamera(&cam_pos, &cam_look, &cam_up);   /* down in co-op: a partner's view */
+    coopPhotoCamera(&cam_pos, &cam_look, &cam_up);      /* photo mode's free camera */
+#endif
     bondviewUpdateCameraMatrices(&cam_pos, &cam_look, &cam_up);
     sub_GAME_7F068190(&zeropos, &vec);
 
@@ -12099,7 +12157,7 @@ Gfx *bondviewRenderGaugeBars(Gfx *gdl)
         f32 owf = portFrameWideFactor();
         f32 bandfar = 800.0f * D_800364CC * (2.0f * owf - 1.0f);
         f32 gsq = 1.0f;
-        s32 split = getPlayerCount() >= 2;
+        s32 split = getViewPlayerCount() >= 2;
 
         if (split)
         {   /* SPLIT SCREEN: the arcs were authored round for the solo viewport
@@ -12119,8 +12177,8 @@ Gfx *bondviewRenderGaugeBars(Gfx *gdl)
                 gsq = 1.0f;
             }
         }
-        if (healthAnchorsToEdges() && getPlayerCount() != 2
-            && (getPlayerCount() < 3 || portHealthIsWide()))
+        if (healthAnchorsToEdges() && getViewPlayerCount() != 2
+            && (getViewPlayerCount() < 3 || portHealthIsWide()))
         {
             /* Arcs flush to the VIEWPORT's edges: solo Wide and, per quadrant,
              * 3P/4P under Wide (4:3 takes the centred branch below). 2P keeps
@@ -12187,6 +12245,8 @@ Gfx *bondviewRenderGaugeBars(Gfx *gdl)
 
 #ifndef TARGET_N64
 #include "mp_weapon.h"
+#ifndef TARGET_N64
+#endif
 
 /**
  * SPAWN WITH WEAPON (Multiplayer Options): gives the CURRENT player slot 1's
@@ -12233,6 +12293,116 @@ s32 portMpSpawnWithWeapon(void)
         give_cur_player_ammo(get_ptr_item_statistics(set[0].itemID)->AmmoType, amount);
     }
     return set[0].itemID;
+}
+#endif
+
+#ifndef TARGET_N64
+/* Co-op: bring the dead solo player back at the given spot with full health,
+ * keeping inventory and ammo (mission items included). Called by coop.c. */
+void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon)
+{
+    g_CurrentPlayer->bonddead = 0;
+    g_CurrentPlayer->deathanimfinished = 0;
+    g_CurrentPlayer->redbloodfinished = 0;
+    g_CurrentPlayer->startnewbonddie = 1;
+    g_CurrentPlayer->bondhealth = 1.0f;
+    g_CurrentPlayer->healthdamagetype = 7;
+    g_CurrentPlayer->damagetype = 7;
+    g_CurrentPlayer->gunammooff = 0;
+    g_CurrentPlayer->gunsightmode = 2;
+    hudmsgsSetOn(-1);
+    bondviewClearUpperTextDisplayFlag(-1);
+    coopTeleportPlayerTo(pos, stan, yaw);
+    currentPlayerEquipWeaponWrapper(GUNRIGHT, weapon);
+    currentPlayerSetFadeFrac(60.0f, 0.0f);
+    currentPlayerStartChrFade(120.0f, 1.0f);
+}
+
+/* Co-op: move the solo player to the given spot (floor under pos, yaw the
+ * view's), as coopRespawnPlayerAt does, and nothing else: a cutscene moves
+ * everyone to its star (coop_cutscene.c). */
+void coopTeleportPlayerTo(coord3d *pos, StandTile *stan, f32 yaw)
+{
+    coord3d start_pos;
+    f32 stan_height;
+
+    stan_height = bondviewYPositionRelated(stan, pos->f[0], pos->f[2]);
+    start_pos.f[0] = pos->f[0];
+    start_pos.f[1] = g_CurrentPlayer->eyeheight + stan_height;
+    start_pos.f[2] = pos->f[2];
+    g_CurrentPlayer->field_70 = stan_height;
+    g_CurrentPlayer->stanHeight = stan_height;
+#if defined(VERSION_EU)
+    g_CurrentPlayer->field_6C = (f32) (stan_height / 0.2004f);
+#else
+    g_CurrentPlayer->field_6C = (f32) (stan_height / 0.17000002f);
+#endif
+    g_CurrentPlayer->vv_theta = (f32) ((yaw * 360.0f) / 6.2831855f);
+    change_player_pos_to_target(&g_CurrentPlayer->field_488, &start_pos, stan);
+    g_CurrentPlayer->field_488.theta_transform.x = -sinf(yaw);
+    g_CurrentPlayer->field_488.theta_transform.y = 0.0f;
+    g_CurrentPlayer->field_488.theta_transform.z = cosf(yaw);
+    g_CurrentPlayer->prop->pos.x = g_CurrentPlayer->bondprevpos.x = start_pos.f[0];
+    g_CurrentPlayer->prop->pos.y = g_CurrentPlayer->bondprevpos.y = start_pos.f[1];
+    g_CurrentPlayer->prop->pos.z = g_CurrentPlayer->bondprevpos.z = start_pos.f[2];
+    g_CurrentPlayer->prop->stan = stan;
+#if defined(VERSION_EU)
+    g_CurrentPlayer->field_3B8.x = (f32) (g_CurrentPlayer->field_488.pos.x / 0.118799984f);
+    g_CurrentPlayer->field_3B8.y = (f32) (g_CurrentPlayer->field_488.pos.y / 0.118799984f);
+    g_CurrentPlayer->field_3B8.z = (f32) (g_CurrentPlayer->field_488.pos.z / 0.118799984f);
+#else
+    g_CurrentPlayer->field_3B8.x = (f32) (g_CurrentPlayer->field_488.pos.x / 0.100000024f);
+    g_CurrentPlayer->field_3B8.y = (f32) (g_CurrentPlayer->field_488.pos.y / 0.100000024f);
+    g_CurrentPlayer->field_3B8.z = (f32) (g_CurrentPlayer->field_488.pos.z / 0.100000024f);
+#endif
+    g_CurrentPlayer->field_78 = 0.0f;
+    g_CurrentPlayer->field_7C = -0.0001f;
+    g_CurrentPlayer->field_80 = 0.0f;
+    if (g_CurrentPlayer->prop->chr != NULL && g_CurrentPlayer->prop->chr->model != NULL)
+    {   /* in a cinema Bond is a chr (solo_char_load): move its body too, as AI_TRYTeleportingChrToPad does */
+        ChrRecord *chr = g_CurrentPlayer->prop->chr;
+        coord3d at = *pos;
+
+        sub_GAME_7F03D058(chr->prop, FALSE);
+        if (chrAdjustPosForSpawn(&at, &stan, 6.2831855f - yaw, TRUE))
+        {
+            chr->prop->pos.x = at.x;
+            chr->prop->pos.y = at.y;
+            chr->prop->pos.z = at.z;
+            chr->prop->stan = stan;
+            chr->chrflags |= CHRFLAG_INIT;
+            setsubroty(chr->model, 6.2831855f - yaw);
+            setsuboffset(chr->model, &at);
+            chrDetectRooms(chr);
+            g_CurrentPlayer->field_488.collision_position.x = at.x;
+            g_CurrentPlayer->field_488.collision_position.y = at.y;
+            g_CurrentPlayer->field_488.collision_position.z = at.z;
+            g_CurrentPlayer->field_488.current_tile_ptr = stan;
+        }
+        sub_GAME_7F03D058(chr->prop, TRUE);
+    }
+}
+
+/* Co-op: where a scripted cinema (CAMERAMODE_POSEND) is set: the pad its
+ * camera looks from or orbits. 0 when none is running. */
+s32 coopCinemaFocus(coord3d *out)
+{
+    PadRecord *pad;
+    s32 padnum;
+
+    if (g_CameraMode != CAMERAMODE_POSEND)
+    {
+        return 0;
+    }
+    if (g_CameraLookAtBondPad != NULL)
+    {
+        *out = g_CameraLookAtBondPad->pos;
+        return 1;
+    }
+    padnum = (gBondViewCutscene != NULL) ? gBondViewCutscene->pad : dword_CODE_bss_80079A14;
+    pad = isNotBoundPad(padnum) ? &g_CurrentSetup.pads[padnum] : (PadRecord *) &g_CurrentSetup.boundpads[getBoundPadNum(padnum)];
+    *out = pad->pos;
+    return 1;
 }
 #endif
 
@@ -12655,7 +12825,7 @@ static Gfx *portDrawFpsCounter(Gfx *gdl)
        * frames per second, drawn in-window for fullscreen use, from gfx_sdl2's
        * 500ms stat window via g_PortStatFps (0 headless). */
         extern s32 portVideoShowFps(void); /* video.c; weak 0 headless */
-        if (portVideoShowFps() && (getPlayerCount() == 1 || get_cur_playernum() == 0))
+        if (portVideoShowFps() && (getViewPlayerCount() == 1 || get_cur_playernum() == 0))
         {
             /* Just the number, in the small Gothic font, two units in from the
              * view's top-left so it stays above the top text box; always
@@ -12667,7 +12837,7 @@ static Gfx *portDrawFpsCounter(Gfx *gdl)
             /* Solo full height keeps the top row while paused, since the view
              * snaps 10 lines down at the end of the pause-box ease; the black
              * bar the digits sit on is drawn before them. */
-            if (getPlayerCount() == 1 && portFullHeightActive())
+            if (getViewPlayerCount() == 1 && portFullHeightActive())
             {
                 fp_y = 2;
             }
@@ -12759,6 +12929,12 @@ Gfx *maybe_mp_interface(Gfx *gdl)
     s32 i;
     s32 total;
 
+#ifndef TARGET_N64
+    if (coopPhotoActive())
+    {
+        return coopPhotoRender(gdl);    /* photo mode: no HUD, no gun (coop_photo.c) */
+    }
+#endif
     if (g_CurrentPlayer->cameramode == 1)
     {
         bondviewIntroCameraTextTick();
@@ -12918,6 +13094,9 @@ blood_frame_held:;
                 {
                     if (getPlayerCount() == 1)
                     {
+#ifndef TARGET_N64
+                        if (!coopDeadTick()) /* co-op: wait to respawn by the partner */
+#endif
                         bondviewSetCameraMode(CAMERAMODE_DEATH_CAM_SP);
                     }
                     else
@@ -12968,6 +13147,7 @@ blood_frame_held:;
     gdl = countdownTimerRender(gdl);
     gdl = display_red_blue_on_radar(gdl);
 #ifndef TARGET_N64
+    gdl = coopHudRender(gdl); /* co-op partner, objectives list (coop_hud.c) */
     gdl = portPillarOverlayDraw(gdl);
     gdl = portDrawFpsCounter(gdl); /* over the pillars and bars */
 #endif
@@ -13047,6 +13227,12 @@ f32 bondviewGetPlayerDuckingHeightRelated(struct player *player)
 
 
 PropRecord* getCurrentPlayerProp(void) {
+#ifndef TARGET_N64
+    if (g_CoopPropOverride != NULL)
+    {
+        return g_CoopPropOverride; /* co-op: a guard tick aimed at the peer */
+    }
+#endif
     return g_CurrentPlayer->prop;
 }
 
@@ -13158,6 +13344,13 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
         {
             return;
         }
+    }
+#endif
+
+#ifndef TARGET_N64
+    if (coopVersusDamage(damage_amount, vectorx, vectorz, playerid, affects_armor))
+    {
+        return;     /* online versus: another PC's player; its own game deals this (coop_versus.c) */
     }
 #endif
 
@@ -13309,6 +13502,9 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
                             if(1);
 
                             g_playerPlayerData[playerid].kill_counts[sp2C]++;
+#ifndef TARGET_N64
+                            coopVersusKilled(sp2C, playerid, sp28);  /* online versus: and on every other PC */
+#endif
                         }
 
                         bondviewKillCurrentPlayer();
@@ -13455,6 +13651,14 @@ s32 get_obj_collision_flag(void) {
  */
 u8 bondviewGetCurrentPlayersRoom(void)
 {
+#ifndef TARGET_N64
+    u8 spectating;
+
+    if (coopSpectateRoom(&spectating) || coopPhotoRoom(&spectating))
+    {
+        return spectating;
+    }
+#endif
     if ((g_CurrentPlayer->cameramode == 1) && (g_CurrentPlayer->cameratile != 0))
     {
         return g_CurrentPlayer->cameratile->room;
@@ -13471,6 +13675,16 @@ u8 bondviewGetCurrentPlayersRoom(void)
  */
 coord3d *bondviewGetCurrentPlayersPosition(void)
 {
+#ifndef TARGET_N64
+    if (coopSpectatePos(0) != NULL)
+    {
+        return coopSpectatePos(0);
+    }
+    if (coopPhotoPos(0) != NULL)
+    {
+        return coopPhotoPos(0);
+    }
+#endif
     if (g_CurrentPlayer->cameramode == 1)
     {
         return &g_CurrentPlayer->pos;
@@ -13483,6 +13697,16 @@ coord3d *bondviewGetCurrentPlayersPosition(void)
 
 coord3d * bondviewGetCurrentPlayersPosition3(void)
 {
+#ifndef TARGET_N64
+    if (coopSpectatePos(1) != NULL)
+    {
+        return coopSpectatePos(1);
+    }
+    if (coopPhotoPos(1) != NULL)
+    {
+        return coopPhotoPos(1);
+    }
+#endif
 
     if (g_CurrentPlayer->cameramode == 1)
     {
@@ -13931,13 +14155,13 @@ Gfx* hudmsgBottomRender(Gfx* arg0)
             {
                 PORT_HUD_ANCHOR(arg0, PORT_HUD_ANCHOR_LEFT);
             }
-            /* HUD Scale: the message is laid out from the view's bottom-left */
-            arg0 = portHudScaleBegin(arg0, (f32) viGetViewLeft(), (f32) (viGetViewTop() + viGetViewHeight()));
+            /* HUD Scale and Text Size (coop_access.c): the message is laid out from the view's bottom-left */
+            arg0 = coopTextScaleBegin(arg0, (f32) viGetViewLeft(), (f32) (viGetViewTop() + viGetViewHeight()));
 #endif
             arg0 = draw_blackbox_to_screen(arg0, (s32) &view_left, (s32) &view_vert, (s32) &view_horiz, (s32) &view_top);
             arg0 = combiner_bayer_lod_perspective(textRenderOutlined(arg0, &view_left, &view_vert, stringbuffer_lowerleft[status_bar_text_buffer_index], BONDVIEW_2ND_FONTTABLE(status_bar_text_buffer_index), BONDVIEW_1ST_FONTTABLE(status_bar_text_buffer_index), -1, 0x646464FFU, (s16) (s32) viGetX(), (s16) viGetY(), 0, 0));
 #ifndef TARGET_N64
-            arg0 = portHudScaleEnd(arg0);
+            arg0 = coopTextScaleEnd(arg0);
             if (portMsgAnchor)
             {
                 PORT_HUD_ANCHOR_OFF(arg0);
@@ -14204,7 +14428,7 @@ Gfx *sub_GAME_7F08AAE8(Gfx *gdl)
             static char sticktext[24];
             s32 in_x = viGetViewLeft() + 0x11;
             s32 in_y = viGetViewTop() + (get_debug_testingmanpos_flag() ? 0x20 : 0x11)
-                     + ((getPlayerCount() >= 3) ? PORT_OVERLAY_MP_DROP : 0);
+                     + ((getViewPlayerCount() >= 3) ? PORT_OVERLAY_MP_DROP : 0);
             s32 in_bot = in_y + 0xa;
 
             sprintf(sticktext, "X %d  Y %d", joyGetStickX(0), joyGetStickY(0));

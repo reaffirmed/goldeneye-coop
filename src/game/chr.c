@@ -42,6 +42,9 @@
  * the uneven 60-in-144 field pattern. Identical whenever the delta is a
  * whole number (tickhz=60, demo playback). */
 #include "frametiming.h"
+#ifndef TARGET_N64
+#include "coop.h"
+#endif
 typedef f32 chranimticks_t;
 #define chrModelTickAnim(m, t, u) modelTickAnimF(m, t, u)
 #else
@@ -2432,7 +2435,15 @@ s32 chrTick(PropRecord *prop)
         }
         else
         {
+#ifndef TARGET_N64
+            if (coopChrTickBegin(chr)) /* co-op client: the host runs guard AI */
+            {
+                chrlvActionTick(chr);
+            }
+            coopChrTickEnd();
+#else
             chrlvActionTick(chr);
+#endif
 
             if (chr->model == NULL)
             {
@@ -2862,11 +2873,20 @@ after_position_update:
             PropRecord *dropprop = prop->child;
             PropRecord *unusedprop;
 
+#ifndef TARGET_N64
+            if (coopItemsChrDropping(chr))
+            {
+                dropprop = NULL;    /* co-op joiner: the host's guard drops, and says so (coop_items.c) */
+            }
+#endif
             while (dropprop != NULL)
             {
                 PropRecord *nextprop = dropprop->prev;
 
                 objDrop(dropprop);
+#ifndef TARGET_N64
+                coopItemsChrDropped(chr, dropprop);
+#endif
 
                 dropprop = nextprop;
             }
@@ -2874,7 +2894,15 @@ after_position_update:
             chr->hidden &= ~CHRHIDDEN_DROP_HELD_ITEMS;
         }
 
+#ifndef TARGET_N64
+        if (coopChrTickBegin(chr))
+        {
+            chrlvTriggerFireWeapon(chr);
+        }
+        coopChrTickEnd();
+#else
         chrlvTriggerFireWeapon(chr);
+#endif
     }
 
     return TICKOP_NONE;
@@ -3752,6 +3780,9 @@ void chrHandleBulletHit(struct ShotData *shot, struct BulletHit *bhit)
 
     // Point the tracer effect towards the impact position.
     gunSetTracerTarget(&nearhitpos);
+#ifndef TARGET_N64
+    coopLookShotChr(bhit->prop, &nearhitpos);  /* co-op: the partners see the hit */
+#endif
 
     // Make a fleshy impact sound.
     recall_joy2_hits_edit_detail_edit_flag(shot->weapon, bhit->prop, -1);
@@ -3773,6 +3804,11 @@ void chrHandleBulletHit(struct ShotData *shot, struct BulletHit *bhit)
                  * If a character is holding an explosive such as a grenade, and the explosive is shot, detonate it.
                  */
                 if (weaponobj->model == bhit->model) {
+#ifndef TARGET_N64
+                    if (coopPropIsPartner(bhit->prop)) {
+                        break;  /* co-op: a partner's gun is a picture of theirs; it never drops or goes off here */
+                    }
+#endif
                     if (
                         ((WeaponObjRecord *)weaponobj)->weaponnum == ITEM_GRENADE ||
                         ((WeaponObjRecord *)weaponobj)->weaponnum == ITEM_GRENADEROUND ||

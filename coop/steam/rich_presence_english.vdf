@@ -1,0 +1,14 @@
+"lang"
+{
+	"Language"	"english"
+	"Tokens"
+	{
+		// port/src/coop_steam.c coopSteamSetPresence: with the game's own
+		// AppID (steam_appid.txt not 480), steam_display is #Status and the
+		// friends list shows the "status" key as the game wrote it:
+		// "Co-op: Dam, 00 Agent (2/4)", "In the co-op lobby (2/4)", ...
+		// Upload under Steamworks > Community > Rich Presence. Spacewar (480)
+		// has its own tokens and doesn't read this file.
+		"#Status"	"%status%"
+	}
+}

@@ -22,6 +22,8 @@ Files next to the executable:
 | `midas.ini` | Settings. Written on first run; delete it to restore the defaults. See `midas_ini_help.txt`. |
 | `Data/` | Your cart image goes here. |
 | `Data/Saves/eeprom.bin` | Save file. |
+| `Data/Saves/coop_*.txt` | Co-op campaign record and character pick (older builds kept them next to the executable; they move here by themselves). |
+| `Data/Saves/Backups/` | A copy of the saves from before each new build first ran, newest five kept. |
 | `Data/Profiles/` | Player profiles (`.geprofile`) and lifetime multiplayer stats (`.gestats`). |
 | `Data/WeaponSets/` | Custom multiplayer weapon sets (`.gewset`). |
 | `Data/MatchSettings/` | Saved multiplayer settings (`.gemp`), from Load / Save Settings. |
@@ -31,6 +33,8 @@ Files next to the executable:
 | `gamecontrolleruser.txt` | Your saved controller layouts. |
 | `Data/Logs/ge_direct.log` | The run log on Windows (the game opens no console window). |
 | `Data/Logs/crash.log` | Written if the game crashes. |
+| `Data/Crashes/` | Crash reports (log, co-op state, settings, minidump), newest ten kept. |
+| `Data/Reports/` | Bug reports made with F8, newest ten kept. |
 | `Mods/` | Reserved for modded carts. This build loads the stock cart only. |
 
 An older `ge.ini` is renamed to `midas.ini` automatically on first run.

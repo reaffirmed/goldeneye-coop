@@ -38,6 +38,9 @@
 #include "vtxstore.h"
 #include "initunk_005450.h"
 #include "initobjects.h"
+#ifndef TARGET_N64
+#include "coop.h"
+#endif
 #include "initguards.h"
 #include "prop.h"
 #include "initexplosioncasing.h"
@@ -739,6 +742,7 @@ void lvlStageLoad(s32 stage)
 #ifndef TARGET_N64
     g_PortCheatCountdown = 60; /* apply GE_CHEATS ~1s into the mission */
     g_PortSpawnWepCountdown = 120; /* GE_SPAWNWEAPON drops ~2s in */
+    coopStageStart();
     portDebugPosApply();
     portCheatApplyLoadTimeSafe(); /* GE_CHEATS=rockets must be live before
                                    * proplvreset2/weaponAssignToHome below */
@@ -1155,6 +1159,12 @@ Gfx* lvlRender(Gfx* DL)
 
         for(i = 0; i < pcount; i++)
         {
+#ifndef TARGET_N64
+            if (coopVsRemote(get_nth_player_from_shuffled(i)))
+            {
+                continue;   /* online versus: another PC's player, no view here (coop_versus.c) */
+            }
+#endif
             set_cur_player(get_nth_player_from_shuffled(i));
 
             viSetViewSize(g_CurrentPlayer->viewx, g_CurrentPlayer->viewy);
@@ -1162,9 +1172,9 @@ Gfx* lvlRender(Gfx* DL)
 #ifndef TARGET_N64
             /* the vanilla height of this view: 220 solo, 109 in a split (whose
              * views are 119 under full height - same compensation, same reason) */
-            if (g_CurrentPlayer->viewy > ((getPlayerCount() == 1) ? VIEWPORT_HEIGHT_DEFAULT : VIEWPORT_HEIGHT_4P))
+            if (g_CurrentPlayer->viewy > ((getViewPlayerCount() == 1) ? VIEWPORT_HEIGHT_DEFAULT : VIEWPORT_HEIGHT_4P))
             {
-                const f32 vanillah = (f32) ((getPlayerCount() == 1) ? VIEWPORT_HEIGHT_DEFAULT : VIEWPORT_HEIGHT_4P);
+                const f32 vanillah = (f32) ((getViewPlayerCount() == 1) ? VIEWPORT_HEIGHT_DEFAULT : VIEWPORT_HEIGHT_4P);
                 /* Full height (bondview2.c portFullHeightActive) makes the view
                  * 240 lines instead of 220, so widen fovy in tan space by
                  * 240/220 to keep the horizontal FOV vanilla. The math
@@ -1345,6 +1355,12 @@ Gfx* lvlRender(Gfx* DL)
     }
 
     gDPSetScissor(DL++, G_SC_NON_INTERLACE, 0, 0, viGetX(), viGetY());
+#ifndef TARGET_N64
+    if (g_CurrentStageToLoad != LEVELID_TITLE)
+    {
+        DL = coopScreensRender(DL); /* co-op's mission card and reconnecting panel (coop_screens.c) */
+    }
+#endif
 
     return DL;
 }
@@ -1501,6 +1517,13 @@ void lvlTick(void)
         portRunning = 0;
 #endif
     }
+#ifndef TARGET_N64
+    else if (coopHoldWorld())
+    {   /* co-op's mission card: still until every player has loaded in (coop.c) */
+        g_ClockTimer = 0;
+        portRunning = 0;
+    }
+#endif
     else
     {
         g_ClockTimer = speedgraphframes;
@@ -1940,6 +1963,9 @@ void lvlTick(void)
     {
         sub_GAME_7F09BBBC();
         lvlSetMultipliersForDifficulty();
+#ifndef TARGET_N64
+        coopDifficultyTick(); /* co-op difficulty: scale on top, extra guards */
+#endif
         updateRoomStatusFlags();
 
 #ifndef TARGET_N64
@@ -1962,6 +1988,9 @@ void lvlTick(void)
         update_bullet_casings();
         update_broken_windows();
         explosionUpdateFlyingParticles();
+#ifndef TARGET_N64
+        coopTick(); /* co-op: send local Bond, move the peer's puppet */
+#endif
         chrpropTick();
         reset_all_music_slots();
         langTick();
@@ -2217,6 +2246,12 @@ void lvlViewMoveTick(void)
                 bondviewMovePlayerUpdateViewport(joyGetStickX(local_player_number), joyGetStickY(local_player_number), 0);
             }
 
+#ifndef TARGET_N64
+            {
+                extern void coopVersusHarnessInput(void);
+                coopVersusHarnessInput();   /* harness only (GE_VS_RESPAWN) */
+            }
+#endif
             mpwatchMenuTick();
         }
         break;

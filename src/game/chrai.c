@@ -34,6 +34,10 @@
 #include <snd.h>
 #include <ultra64.h>
 
+#ifndef TARGET_N64
+static s32 coopk;  /* the partner a level script check is asking about (coopAltBondBegin) */
+#endif
+
 // hack? used to match as called with 2 args, but decompiled code takes 1
 extern s32 objectiveGetStatus_WEAK(s32 objectiveNum, s32);
 
@@ -930,6 +934,9 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
              * GE uses long Switch/case while PD uses Bool functions and tests
              * for TRUE/FALSE if(funcpointer[ai]) break;
              */
+#ifndef TARGET_N64
+            coopAiCommand((u8 *) AiListp, Offset, ChrEntityp); /* co-op: cutscene and HUD commands reach the joiner */
+#endif
             switch ((AiListp + Offset)->cmd)
             {
                 // unfortunately we cannot use the cmdbuilder in matching rom as the ordering is not sequential
@@ -941,6 +948,9 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                                                                      */                                                    \
             CODE
     #include "aicommands.def"
+#ifndef TARGET_N64
+#include "coop.h"
+#endif
 #else
                 case AI_GotoNext:
                 {
@@ -2103,7 +2113,19 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     AiIFBondDistanceToPadLessThanDecimeterRecord *ai    = AiListp + Offset;
                     u16                                           pad   = ntohs(ai->PAD);
                     f32                                           value = ntohs(ai->DISTANCE) * 10.0f;
-                    if (value > chrGetDistanceFromBondToPad(ChrEntityp, pad))
+                    s32                                           near  = value > chrGetDistanceFromBondToPad(ChrEntityp, pad);
+#ifndef TARGET_N64
+                    for (coopk = 0; !near && coopAltBondBegin(coopk); coopk++) /* co-op: either player counts */
+                    {
+                        near = value > chrGetDistanceFromBondToPad(ChrEntityp, pad);
+                        coopAltBondEnd();
+                    }
+                    if (near)
+                    {
+                        coopAltBondCredit(Entityp, coopk);  /* whose check it was (coop.c, objective credit) */
+                    }
+#endif
+                    if (near)
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -2118,7 +2140,15 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     AiIFBondDistanceToPadGreaterThanDecimeterRecord *ai    = AiListp + Offset;
                     u16                                              pad   = ntohs(ai->PAD);
                     f32                                              value = ntohs(ai->DISTANCE) * 10.0f;
-                    if (value < chrGetDistanceFromBondToPad(ChrEntityp, pad))
+                    s32                                              far   = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
+#ifndef TARGET_N64
+                    for (coopk = 0; far && coopAltBondBegin(coopk); coopk++) /* co-op: both players must be away */
+                    {
+                        far = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
+                        coopAltBondEnd();
+                    }
+#endif
+                    if (far)
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -2146,7 +2176,19 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 {
                     AiIFBondInRoomWithPadRecord *ai     = AiListp + Offset;
                     u16                          pad_id = ntohs(ai->PAD);
-                    if (check_if_actor_is_at_preset(ChrEntityp, pad_id))
+                    s32                          inroom = check_if_actor_is_at_preset(ChrEntityp, pad_id);
+#ifndef TARGET_N64
+                    for (coopk = 0; !inroom && coopAltBondBegin(coopk); coopk++) /* co-op: either player counts */
+                    {
+                        inroom = check_if_actor_is_at_preset(ChrEntityp, pad_id);
+                        coopAltBondEnd();
+                    }
+                    if (inroom)
+                    {
+                        coopAltBondCredit(Entityp, coopk);  /* whose check it was (coop.c, objective credit) */
+                    }
+#endif
+                    if (inroom)
                     {
     #ifdef ENABLE_LOG
                         osSyncPrintf("BOND IN ROOM\n");
@@ -2166,7 +2208,11 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 {
                     AiIFBondCollectedObjectRecord *ai  = AiListp + Offset;
                     ObjectRecord                  *obj = objFindByTagId(ai->OBJECT_TAG);
-                    if (obj && obj->prop && bondinvHasPropInInv(obj->prop))
+                    if (obj && obj->prop && (bondinvHasPropInInv(obj->prop)
+#ifndef TARGET_N64
+                                             || coopPeerHolds(obj) /* co-op: the team's items */
+#endif
+                                             ))
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -3129,7 +3175,16 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 {
                     AiSetObjectiveBitfieldRecord *ai    = AiListp + Offset;
                     s32                           flags = ntohl(ai->BITFIELD);
+#ifndef TARGET_N64
+                    s32 coopflags = objectiveregisters1;
+#endif
                     chrSetStageFlags(ChrEntityp, flags);
+#ifndef TARGET_N64
+                    if (objectiveregisters1 != coopflags)
+                    {   /* co-op: a new flag is whoever passed this script's last check */
+                        coopScriptSetsFlags(Entityp);
+                    }
+#endif
                     Offset += sizeof(AiSetObjectiveBitfieldRecord);
                     break;
                 }
@@ -4081,7 +4136,19 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 {
                     AiIFBondYPosLessThanRecord *ai      = AiListp + Offset;
                     f32                         bondpos = (s16)ntohs(ai->Y_POS);
-                    if (getCurrentPlayerProp()->pos.y < bondpos)
+                    s32                         below   = getCurrentPlayerProp()->pos.y < bondpos;
+#ifndef TARGET_N64
+                    for (coopk = 0; !below && coopAltBondBegin(coopk); coopk++) /* co-op: either player counts */
+                    {
+                        below = getCurrentPlayerProp()->pos.y < bondpos;
+                        coopAltBondEnd();
+                    }
+                    if (below)
+                    {
+                        coopAltBondCredit(Entityp, coopk);  /* whose check it was (coop.c, objective credit) */
+                    }
+#endif
+                    if (below)
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -4379,7 +4446,11 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 case AI_IFBondIsDead:
                 {
                     AiIFBondIsDeadRecord *ai = AiListp + Offset;
+#ifndef TARGET_N64
+                    if (coopTargetIsDead())
+#else
                     if (g_CurrentPlayer->bonddead)
+#endif
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }

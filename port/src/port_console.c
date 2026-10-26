@@ -323,6 +323,10 @@ void portConLogf(const char *fmt, ...)
 
     fputs(tmp, stderr);
     portConPrint(0, tmp);
+    {   /* the longer tail a crash or bug report sends (port_report.c) */
+        extern void portReportTap(const char *text);
+        portReportTap(tmp);
+    }
 }
 
 /* ---- commands ------------------------------------------------------------- */
@@ -783,6 +787,11 @@ static void conExecute(char *line)
             snprintf(value, sizeof(value), "%s", arg1);
         }
         conCmdClient(cmd + 3, arg1 != NULL ? value : NULL);
+    }
+    else if (conStrEqI(cmd, "bugreport"))
+    {   /* same as F8 (port_report.c) */
+        extern void portReportBugRequest(void);
+        portReportBugRequest();
     }
     else if (conStrEqI(cmd, "clear"))
     {

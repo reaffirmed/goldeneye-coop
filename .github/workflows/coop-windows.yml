@@ -1,0 +1,120 @@
+name: Co-op Windows zip
+
+# Builds GoldenEye-Coop-win32.zip without the ROM: the exe carries none of
+# Rare's served data (GE_ROMDATA_FALLBACK=OFF) and players supply their own
+# cart image at run time. Every push to coop/story (or a manual run from it)
+# replaces the zip on the rolling "coop-latest" prerelease, so its download
+# link never changes. Pushing a v* tag publishes a versioned release with
+# the zip and the notes in coop/release-notes/<tag>.md. Other branches only
+# get the zip as a run artifact.
+on:
+  push:
+    paths-ignore:
+    - '*.md'
+    - 'docs/**'
+  workflow_dispatch:
+
+env:
+  SDL2_VERSION: 2.30.11
+  SDL2_MINGW_SHA1: a44b17a6521b40e04d7beaae90b4b3ce19e62e7b
+  STEAMWORKS_NET_VERSION: 2025.164.1
+  STEAM_API_DLL_SHA256: fdafb7c65ec7d4182b42bf92cc8671c68e4dc547cc6e613899d2618a47eb65da
+  RELEASE_TAG: coop-latest
+
+concurrency:
+  group: coop-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # full history: the build number is git's commit count (G136)
+          fetch-depth: 0
+
+      - name: Install Windows (i686) cross-build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake zip gcc-mingw-w64-i686 g++-mingw-w64-i686 binutils-mingw-w64-i686
+
+      - name: Cache SDL2 mingw devel package
+        id: cache-sdl2-windows
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: third_party/SDL2-${{ env.SDL2_VERSION }}
+          key: sdl2-windows-mingw-${{ env.SDL2_VERSION }}-v1
+
+      - name: Get SDL2 mingw devel package
+        if: steps.cache-sdl2-windows.outputs.cache-hit != 'true'
+        run: |
+          wget -O sdl2-mingw.tar.gz "https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-devel-${SDL2_VERSION}-mingw.tar.gz"
+          echo "${SDL2_MINGW_SHA1}  sdl2-mingw.tar.gz" | sha1sum -c -
+          mkdir -p third_party
+          tar -xzf sdl2-mingw.tar.gz -C third_party
+
+      - name: Get steam_api.dll (Steamworks.NET Standalone, Windows-x86)
+        run: |
+          wget -O steamworks.zip "https://github.com/rlabrecque/Steamworks.NET/releases/download/${STEAMWORKS_NET_VERSION}/Steamworks.NET-Standalone_${STEAMWORKS_NET_VERSION}.zip"
+          unzip -p steamworks.zip Windows-x86/steam_api.dll > "$RUNNER_TEMP/steam_api.dll"
+          echo "${STEAM_API_DLL_SHA256}  $RUNNER_TEMP/steam_api.dll" | sha256sum -c -
+
+      - name: Configure and build for Windows (x86)
+        run: |
+          cmake -B build_win -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-i686.cmake -DCMAKE_BUILD_TYPE=Release -DGE_VIDEO=ON
+          cmake --build build_win -j$(nproc)
+
+      - name: Pack the zip
+        run: coop/package/make_zip.sh "$RUNNER_TEMP/steam_api.dll" GoldenEye-Coop-win32.zip
+
+      # checksums to compare a download or a local build against; the exe's
+      # code and data sections, unlike the whole file, carry no build times
+      - name: List the zip's checksums
+        run: |
+          mkdir zipcheck && unzip -q GoldenEye-Coop-win32.zip -d zipcheck
+          (cd zipcheck && find . -type f | sort | xargs -d '\n' sha256sum)
+          for sec in .text .data .idata .rsrc; do
+            i686-w64-mingw32-objcopy -O binary -j $sec zipcheck/GoldenEye-Coop/ProjectMidas.exe section.bin
+            echo "ProjectMidas.exe $sec $(sha256sum < section.bin | cut -d' ' -f1)"
+          done
+
+      - name: Upload the zip
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: GoldenEye-Coop-win32
+          path: GoldenEye-Coop-win32.zip
+          retention-days: 14
+
+      - name: Publish to the coop-latest release
+        if: github.ref == 'refs/heads/coop/story'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          build=$(git rev-list --count HEAD)
+          short=$(git rev-parse --short HEAD)
+          notes="Latest co-op build from coop/story: build ${build}, commit ${short} ($(date -u '+%Y-%m-%d %H:%M UTC')).
+
+          Unzip, put your own GoldenEye 007 (USA) cart image in the Data folder, and see README-COOP.txt inside the zip."
+          # recreate rather than edit, so the tag moves to this commit
+          gh release delete "$RELEASE_TAG" --cleanup-tag --yes || true
+          gh release create "$RELEASE_TAG" GoldenEye-Coop-win32.zip \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "GoldenEye Co-op - latest (build ${build})" \
+            --notes "$notes"
+
+      - name: Publish a versioned release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          cp GoldenEye-Coop-win32.zip "GoldenEye-Coop-${tag}-win32.zip"
+          gh release create "$tag" "GoldenEye-Coop-${tag}-win32.zip" \
+            --verify-tag \
+            --title "GoldenEye Co-op ${tag}" \
+            --notes-file "coop/release-notes/${tag}.md"

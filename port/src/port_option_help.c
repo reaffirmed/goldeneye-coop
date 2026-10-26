@@ -34,12 +34,22 @@ static const struct PortOptHelp sHelp[] = {
     { "high_lod",           "Always draws the most detailed models." },
     { "setting_help",       "Shows this help box." },
 
+    /* Accessibility */
+    { "captions",           "Shows gunfire, blasts, alarms and doors as text." },
+    { "colorblind",         "Player colours you can tell apart." },
+    { "screen_shake",       "Explosions shake the view." },
+    { "text_size",          "Size of co-op text, captions and messages." },
+    { "crouch_key",         "Crouch key: hold it, or press on and off." },
+    { "walk_key",           "Walk key: hold it, or press on and off." },
+
     /* HUD */
     { "sight_on_screen",    "Shows the aiming sight." },
     { "always_crosshair",   "Small target at the gun's aim point." },
     { "crosshair_color",    "Colour of both crosshairs." },
     { "ammo_on_screen",     "Shows your ammo count." },
     { "mission_timer",      "Shows elapsed mission time." },
+    { "objectives_hud",     "Lists the mission's objectives in the top right. The Objective List key hides it." },
+    { "weapon_menu",        "Number keys and the wheel open a weapon menu; fire picks. Off: they switch at once." },
     { "pause_pillars",      "Black side bars ease in while paused." },
     { "hud_wide",           "Wide moves ammo and messages to the screen edges." },
     { "health_wide",        "Wide moves the health and armor arcs to the screen edges." },
@@ -128,6 +138,11 @@ static const struct PortOptHelp sHelp[] = {
     { "sfx_volume",         "How loud sound effects play." },
     { "stereo_pan",         "Effects pan left and right by position." },
     { "mute_unfocused",     "Mutes the game in the background." },
+    { "voice_mode",         "Co-op voice: hold V to talk, or keep the mic open." },
+    { "voice_volume",       "How loud your partners' voices play." },
+    { "voice_mute_1",       "Stop hearing this player. Only on your game." },
+    { "voice_mute_2",       "Stop hearing this player. Only on your game." },
+    { "voice_mute_3",       "Stop hearing this player. Only on your game." },
 
     /* CONTROL, the player pages and the rebind list */
     { "@player",            "Set up this player's device, binds and controls." },
@@ -147,6 +162,7 @@ static const struct PortOptHelp sHelp[] = {
     { "@page_general",      "Look, aim and view options." },
     { "@page_hud",          "What the in-game HUD shows and where." },
     { "@page_portopts",     "The port's own gameplay switches." },
+    { "@page_access",       "Captions, colours, shake, text size, hold or toggle." },
     { "@page_video",        "Display mode, resolution and picture quality." },
     { "@page_audio",        "Volume and sound options." },
 };

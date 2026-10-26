@@ -57,6 +57,9 @@
 #ifndef TARGET_N64
 #include "frametiming.h"   /* portAnimTicks / portLagStep: sub-field smoothing */
 #include "cheat.h"         /* cheatIsActive(CHEAT_PORT_UNLOCK_DOORS) - propdoorInteract */
+#ifndef TARGET_N64
+#include "coop.h"
+#endif
 extern s32 g_PortFadeDbg;  /* the fade diagnostic (cl_fadedbg), defined beside posIsOnScreen */
 static void portFadeNote(PropRecord *prop, s32 state, s32 alpha, f32 foga);
 #endif
@@ -3382,6 +3385,9 @@ void propExplode(PropRecord *prop, s32 /* enum EXPLOSION_DEF */ explosionType)
 
     prop_obj = prop->obj;
     playernum = (prop_obj->runtime_bitflags & RUNTIMEBITFLAG_OWNER) >> RUNTIMEBITSHIFT_OWNER;
+#ifndef TARGET_N64
+    coopItemsExplodeBegin(prop);    /* co-op: a thrown item's copies go off together (coop_items.c) */
+#endif
 
     if (prop->parent)
     {
@@ -3442,6 +3448,9 @@ void propExplode(PropRecord *prop, s32 /* enum EXPLOSION_DEF */ explosionType)
             prop->rooms,
             (prop->flags & PROPFLAG_00000008) != 0);
     }
+#ifndef TARGET_N64
+    coopItemsExplodeEnd();
+#endif
 
 #if defined(VERSION_JP) || defined(VERSION_EU)
     return ret;
@@ -3551,6 +3560,12 @@ void chrobjWeaponTick(struct PropRecord* prop)
             {
                 owner_player_number = (obj->runtime_bitflags & RUNTIMEBITFLAG_OWNER) >> RUNTIMEBITSHIFT_OWNER;
                 owner_player_as_bitflag = (1 << owner_player_number);
+#ifndef TARGET_N64
+                if (coopItemsIsPartners(obj))
+                {
+                    owner_player_as_bitflag = 0;    /* co-op: a partner's mine; their detonator, not ours */
+                }
+#endif
                 if (g_RemoteMineOwnerTriggerFlag & owner_player_as_bitflag)
                 {
                     weapon->timer = 0;
@@ -9910,6 +9925,13 @@ void objApplyDamage(ObjectRecord *obj, f32 damage, coord3d *pos, ITEM_IDS itemnu
     AmmoCrateRecord *crate;
     PropRecord *nextchild;
     ObjectRecord tmpobj;
+
+#ifndef TARGET_N64
+    if (coopObjDamage(obj, damage, pos, itemnum, playernum)) /* co-op: the host owns object damage */
+    {
+        return;
+    }
+#endif
     
     /**
      * Set the OWNER field (bits 17-18) to the player index; clear-then-set, equivalent to obj->owner = playernum.
@@ -10380,6 +10402,16 @@ void objHit(ShotData *shotdata, BulletHit *hit)
 #endif
 
     bullet_spark_create(&pos, 1, 26.0f, rootprop->stan->room);
+#ifndef TARGET_N64
+    if (hit->countsAsPenetration != 0)
+    {
+        coopLookShotObj(hit->prop, &pos, rootprop->stan->room, hit->hit.texturenum, FALSE);
+    }
+    else
+    {
+        coopLookShotObj(hit->prop, &pos, rootprop->stan->room, -1, TRUE);
+    }
+#endif
 
     if ((objIsHealthy(obj) && objIsMortal(obj)) && (hit->countsAsPenetration != 0))
     {
@@ -10489,6 +10521,9 @@ void objHit(ShotData *shotdata, BulletHit *hit)
         }
     }
 
+#ifndef TARGET_N64
+    coopObjKnockChildren(hit->prop->child != NULL);
+#endif
     objDropRecursively(hit->prop);
 
     {
@@ -10521,6 +10556,9 @@ void objHit(ShotData *shotdata, BulletHit *hit)
             do_bounce = FALSE;
         }
 
+#ifndef TARGET_N64
+        coopObjKnocked(obj, do_bounce, &shotdata->viewDir);   /* co-op: knocked loose in every world (a padlock) */
+#endif
         if (do_bounce)
         {
             objBounce(obj, &shotdata->viewDir);
@@ -10644,6 +10682,9 @@ TICKOP propobjInteract(PropRecord *prop)
 
     obj->runtime_bitflags |= RUNTIMEBITFLAG_ACTIVATED;
     sub_GAME_7F03E6A0(prop);
+#ifndef TARGET_N64
+    coopObjUsed(obj); /* co-op: the host's level scripts see the press */
+#endif
 
     return op;
 }
@@ -11619,6 +11660,13 @@ TICKOP propPickupByPlayer(PropRecord *prop, bool showstring)
             break;
         }
     }
+
+#ifndef TARGET_N64
+    if (op != TICKOP_NONE) /* co-op: take it out of the other world too */
+    {
+        coopPickedUp(obj, !((op == TICKOP_FREE) && ((obj->runtime_bitflags & RUNTIMEBITFLAG_TAGGED) == 0)));
+    }
+#endif
 
     if ((op == TICKOP_FREE) && ((obj->runtime_bitflags & RUNTIMEBITFLAG_TAGGED) == 0))
     {
@@ -14394,6 +14442,14 @@ void doorFinishClose(DoorRecord* door)
  */
 void doorSetOpenState(DoorRecord *door, s32 newstate)
 {
+#ifndef TARGET_N64
+    coopDoorStateChanged(door, newstate); /* co-op: mirror to the peer */
+    if (newstate == DOORSTATE_OPENING && door->prop != NULL
+        && (door->openstate == DOORSTATE_STATIONARY || door->openstate == DOORSTATE_WAITING))
+    {
+        coopCaption(COOPCAP_DOOR, &door->prop->pos);   /* Sound Captions (coop_access.c) */
+    }
+#endif
     if (newstate == DOORSTATE_OPENING)
     {
         if (door->openstate == DOORSTATE_STATIONARY || door->openstate == DOORSTATE_WAITING)

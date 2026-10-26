@@ -22,6 +22,12 @@
 #include "assets/obseg/text/LoptionE.h"
 #ifndef TARGET_N64
 #include "port_watchpages.h" /* the port watch pages */
+#ifndef TARGET_N64
+#include <stdio.h>
+#include "coop.h"
+static s32 sPortCoopAbortAsk;   /* co-op host: Abort confirmed once, now hand over or end for everyone */
+static s32 sPortCoopAbortAte;   /* that first confirm press: draw_watch_current_page must not toggle focus off with it */
+#endif
 /* Defined further down, next to the vanilla page drawer they replace; the
  * watch MOUSE layer needs them a few thousand lines earlier. */
 extern s32 g_portWatchPage;
@@ -2515,6 +2521,23 @@ void watch_screen0_navigation(void)
             return;
         }
     }
+#ifndef TARGET_N64
+    /* co-op host, second press: the left choice is END ALL (the right one,
+     * HAND OVER, goes through the confirm below) */
+    else if (sPortCoopAbortAsk && !D_800409A4 && joyGetButtonsPressedThisFrame(PLAYER_1, Z_TRIG|A_BUTTON)
+#ifdef GE_VIDEO
+             && !sPortWatchAteClick
+#endif
+             )
+    {
+        sPortCoopAbortAsk = 0;
+        coopHostAbort(0);
+        set_missionstate(MISSION_STATE_0);
+        bossRunTitleStage();
+        mission_failed_or_aborted = TRUE;
+        deleteCurrentSelectedFolder();
+    }
+#endif
     else if ((D_800409A4) && (joyGetButtonsPressedThisFrame(PLAYER_1, Z_TRIG|A_BUTTON))
 #ifdef GE_VIDEO
              /* a click the watch mouse layer swallowed (this tab's own icon,
@@ -2525,6 +2548,20 @@ void watch_screen0_navigation(void)
 #endif
              )
     {
+#ifndef TARGET_N64
+        if (!sPortCoopAbortAsk && coopHostAbortAsks())
+        {   /* a co-op host is asked first: hand the mission over, or end it
+             * for everyone (draw_abort_cancel_confirm shows the choice) */
+            sPortCoopAbortAsk = 1;
+            sPortCoopAbortAte = 1;
+            return;
+        }
+        if (sPortCoopAbortAsk)
+        {
+            sPortCoopAbortAsk = 0;
+            coopHostAbort(1);
+        }
+#endif
         D_800409A4 = 0;
         set_missionstate(MISSION_STATE_0);
         bossRunTitleStage();
@@ -3798,6 +3835,9 @@ Gfx *draw_background_health_and_armor_transitioning(Gfx *gdl, Mtx *param_2)
 
 Gfx *draw_abort_cancel_confirm(Gfx *gdl)
 {
+#ifndef TARGET_N64
+    s32 coopask;
+#endif
     s32 sp7C;
     s32 sp78;
     s32 sp74;
@@ -3818,6 +3858,32 @@ Gfx *draw_abort_cancel_confirm(Gfx *gdl)
     sp54 = langGet(getStringID(LOPTIONS, OPTION_STR_24_ABORT_LF)); //abort:
     sp50 = langGet(getStringID(LOPTIONS, OPTION_STR_25_CONFIRM_LF)); //confirm
     sp4C = langGet(getStringID(LOPTIONS, OPTION_STR_26_CANCEL_LF)); //cancel
+#ifndef TARGET_N64
+    {   /* GE_COOP_TESTABORTUI=1 (harness only): show the host's choice without the first press, for a capture */
+        static s32 testui = -1;
+        if (testui < 0)
+        {
+            extern char *getenv(const char *);
+            testui = getenv("GE_COOP_TESTABORTUI") != NULL;
+        }
+        if (testui && coopHostAbortAsks())
+        {
+            watch_item_is_actively_selected = 1;
+            sPortCoopAbortAsk = 1;
+        }
+    }
+    if (watch_item_is_actively_selected == 0 || !coopHostAbortAsks())
+    {
+        sPortCoopAbortAsk = 0;  /* unfocused (B) or nobody left to ask about: a plain abort again */
+    }
+    coopask = sPortCoopAbortAsk;
+    if (coopask)
+    {   /* co-op host: END ALL in the cancel place, HAND OVER in confirm's */
+        sp54 = (s32) "HOST:\n";
+        sp50 = (s32) "HAND OVER\n";
+        sp4C = (s32) "END ALL\n";
+    }
+#endif
     sp7C = 0x51;
 
     sp78 = (j_text_trigger ? 0xF : 0) + 0xBD;
@@ -3866,6 +3932,35 @@ Gfx *draw_abort_cancel_confirm(Gfx *gdl)
                 gdl = textRenderOutlined(gdl, &sp74, &sp68, sp4C, pFontChars, pFontFile, -1, 0x7000A0, viGetX(), viGetY(), 0, 0);
             }
         }
+#ifndef TARGET_N64
+        if (coopask)
+        {   /* what each one does, under them */
+            char help[64];
+            s32 hx = 0x51;
+            s32 hy = (j_text_trigger ? 3 : 0) + (PAL ? 0x4E : 0x4C) + 0x0C;
+
+            if (D_800409A4 != 0)
+            {
+                snprintf(help, sizeof(help), "%s HOSTS, YOU LEAVE\n", coopHostAbortNextName());
+            }
+            else
+            {
+                snprintf(help, sizeof(help), "EVERYONE BACK TO THE LOBBY\n");
+            }
+            for (sp60 = 0; help[sp60] != '\0'; sp60++)
+            {
+                if (help[sp60] >= 'a' && help[sp60] <= 'z')
+                {
+                    help[sp60] -= 'a' - 'A';
+                }
+                else if ((u8) help[sp60] >= 0x80)
+                {
+                    help[sp60] = '?';
+                }
+            }
+            gdl = textRender(gdl, &hx, &hy, help, pFontChars, pFontFile, 0xA0FFA0F0, viGetX(), viGetY(), 0, 0);
+        }
+#endif
     }
     else
     {
@@ -8333,6 +8428,10 @@ const char D_80058454[] = " \n\n";
  */
 Gfx *draw_watch_current_page(Gfx *gdl, Mtx *arg1, s32 watch_transitioning)
 {
+#ifndef TARGET_N64
+    s32 coopabortate;
+#endif
+
     set_page_rectangle_colors(watch_screen_index, (struct WatchVertex *)g_CurrentPlayer->buffer_for_watch_greenbackdrop_vertices);
 
     if (watch_transitioning == TRUE)
@@ -8346,6 +8445,8 @@ Gfx *draw_watch_current_page(Gfx *gdl, Mtx *arg1, s32 watch_transitioning)
          * swallow left armed would eat A on the other four). NOT the tick
          * itself: that would run the listener twice a frame. */
         portWatchAssignSwallowPoll();
+        coopabortate = sPortCoopAbortAte;   /* only ever this frame's press */
+        sPortCoopAbortAte = 0;
 #endif
         // Handle A or Z button click when in any page but inventory page
         if ((watch_screen_index != WATCH_INDEX_INVENTORY) && (joyGetButtonsPressedThisFrame(PLAYER_1, Z_TRIG|A_BUTTON))
@@ -8354,6 +8455,14 @@ Gfx *draw_watch_current_page(Gfx *gdl, Mtx *arg1, s32 watch_transitioning)
 #endif
             )
         {
+#ifndef TARGET_N64
+            if (coopabortate)
+            {   /* the press that opened the co-op host's choice: the toggle
+                 * would unfocus the row and draw_abort_cancel_confirm would
+                 * then drop the choice, so Abort did nothing */
+            }
+            else
+#endif
 #ifndef TARGET_N64
             if (portInputAssignActive() || portWatchAssignSwallowing())
             {

@@ -355,10 +355,18 @@ s32 portMpWeaponIsPortSet(void)
     return mp_weapon_set >= PORT_MP_WEAPONSET_CUSTOM;
 }
 
+static u32 sPortMpWeaponRandState;
+
+/* online versus (coop_versus.c): every PC rolls the same random weapons */
+void portMpWeaponSeed(u32 seed)
+{
+    sPortMpWeaponRandState = seed | 1u;
+}
+
 static u32 portMpWeaponRand(void)
 {
     extern unsigned long long portProfNow(void);   /* pcsched.c */
-    static u32 state;
+    u32 state = sPortMpWeaponRandState;
 
     if (state == 0)
     {
@@ -367,6 +375,7 @@ static u32 portMpWeaponRand(void)
     state ^= state << 13;   /* xorshift32 */
     state ^= state >> 17;
     state ^= state << 5;
+    sPortMpWeaponRandState = state;
     return state;
 }
 

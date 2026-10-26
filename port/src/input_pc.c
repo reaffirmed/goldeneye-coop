@@ -149,7 +149,7 @@ enum
      * +20 classic_toggle (Classic Mode bindable on a pad, as Tab is on the keyboard),
      * +21 / +22 watch_up / watch_down (unbound: a pad's D-pad or Move already
      * steps the watch lists) */
-    PM_PORT_LAST = PM_PORT_FIRST + 22,
+    PM_PORT_LAST = PM_PORT_FIRST + 34,   /* +23 objective_list, +24..+28 weapon_slot_1..5, +29 give_partner, +30 weapon_slot_6, +31 ping, +32 chat, +33 photo_mode, +34 push_to_talk */
     PM_COUNT
 };
 #define PM_PORT_COUNT (PM_PORT_LAST - PM_PORT_FIRST + 1)
@@ -171,6 +171,14 @@ static const char *sPadMapNames[PM_COUNT] =
     "menu_accept", "menu_back",
     "mouse_unlock", "classic_toggle",
     "watch_up", "watch_down",
+    "objective_list",
+    "weapon_slot_1", "weapon_slot_2", "weapon_slot_3", "weapon_slot_4", "weapon_slot_5",
+    "give_partner",
+    "weapon_slot_6",
+    "ping",
+    "chat",
+    "photo_mode",
+    "push_to_talk",
 };
 /* The raw (unmapped DInput) fallback layout of portInputPadMerge expressed as
  * map tokens, so the launcher, first-rebind seed and bind rows can describe it.
@@ -777,6 +785,9 @@ static bool s_InputInitDone = false;
 static int s_MouseLocked = 0;
 static int s_MouseFreed = 0;  /* smart lock: Escape handed the pointer back - hold off until a click */
 static int s_ClickIsTouch = 0; /* the last mouse press was a touch tap */
+/* the menus' button prompts follow whatever was pressed last
+ * (portInputGlyphStyle): the keyboard and mouse, or a pad of some family */
+static int s_GlyphStyle = 0;    /* PORT_GLYPH_* below */
 /* the game window's keyboard focus, from SDL's FOCUS_GAINED / FOCUS_LOST
  * (inputEventWatch); starts at 1 so a run that never gets a focus event is focused */
 static volatile int s_WindowFocused = 1;
@@ -1849,6 +1860,17 @@ static int inputFixedKeyDown(const SDL_KeyboardEvent *key)
         return 1; /* console open: the keyboard is the prompt's, not the game's */
     }
 
+    if (sc == SDL_SCANCODE_F8)
+    {   /* bug report: logs, co-op state and a screenshot, zipped to the
+         * Desktop (port_report.c) */
+        extern void portReportBugRequest(void);
+        if (!repeat)
+        {
+            portReportBugRequest();
+        }
+        return 1;
+    }
+
     if (sc == SDL_SCANCODE_F1)
     {
         /* F1 is only the default mouse-unlock key: while [controls]
@@ -1880,6 +1902,52 @@ static int inputFixedKeyDown(const SDL_KeyboardEvent *key)
         return 1;
     }
     return 0;
+}
+
+/* PORT_GLYPH_*: keep in step with src/game/menu_glyphs.c */
+enum { PORT_GLYPH_KEYS, PORT_GLYPH_XBOX, PORT_GLYPH_PS, PORT_GLYPH_NINTENDO, PORT_GLYPH_N64 };
+
+/* a pad was pressed: its family's prompts, N64 ones for a pad in N64 mode */
+static void inputGlyphFromInstance(SDL_JoystickID id)
+{
+    extern s32 portInputPadIsN64(s32 slot);
+    const int slot = inputSlotForInstance(id);
+    SDL_GameController *gc = SDL_GameControllerFromInstanceID(id);
+
+    if (slot >= 0 && portInputPadIsN64(slot))
+    {
+        s_GlyphStyle = PORT_GLYPH_N64;
+        return;
+    }
+    switch (inputPadStyle(gc))
+    {
+    case PADSTYLE_PS:
+        s_GlyphStyle = PORT_GLYPH_PS;
+        break;
+    case PADSTYLE_NINTENDO:
+        s_GlyphStyle = PORT_GLYPH_NINTENDO;
+        break;
+    default:
+        s_GlyphStyle = (gc != NULL) ? PORT_GLYPH_XBOX : PORT_GLYPH_N64;   /* an unmapped stick: most are N64 adapters */
+        break;
+    }
+}
+
+/**
+ * Which button prompts the menus show: 0 keyboard and mouse, 1 Xbox, 2
+ * PlayStation, 3 Nintendo, 4 N64. GE_GLYPHS=<n> pins one (harness).
+ */
+s32 portInputGlyphStyle(void)
+{
+    static int s_Pinned = -2;
+
+    if (s_Pinned == -2)
+    {
+        const char *e = getenv("GE_GLYPHS");
+
+        s_Pinned = (e != NULL && e[0] >= '0' && e[0] <= '4') ? e[0] - '0' : -1;
+    }
+    return (s_Pinned >= 0) ? s_Pinned : s_GlyphStyle;
 }
 
 /**
@@ -1922,11 +1990,27 @@ static int inputEventWatch(void *userdata, SDL_Event *event)
             inputLogSlots("REMOVED");
         }
         break;
+    case SDL_CONTROLLERBUTTONDOWN:
+        inputGlyphFromInstance(event->cbutton.which);
+        break;
+    case SDL_CONTROLLERAXISMOTION:
+        if (event->caxis.value > 20000 || event->caxis.value < -20000)
+        {   /* a stick pushed well over, not drift */
+            inputGlyphFromInstance(event->caxis.which);
+        }
+        break;
+    case SDL_JOYBUTTONDOWN:
+        if (SDL_GameControllerFromInstanceID(event->jbutton.which) == NULL)
+        {   /* a stick SDL has no mapping for (the controller events cover the rest) */
+            inputGlyphFromInstance(event->jbutton.which);
+        }
+        break;
     case SDL_MOUSEBUTTONDOWN:
         /* a tap is a left press SDL synthesises with no motion, and in
          * relative mode it never moves the cursor - so a tap must not capture
          * the pointer (portInputMouseUpdate). Whichever device pressed last. */
         s_ClickIsTouch = (event->button.which == SDL_TOUCH_MOUSEID);
+        s_GlyphStyle = PORT_GLYPH_KEYS;
         break;
     case SDL_WINDOWEVENT:
         if (event->window.event == SDL_WINDOWEVENT_FOCUS_GAINED || event->window.event == SDL_WINDOWEVENT_FOCUS_LOST)
@@ -1945,6 +2029,7 @@ static int inputEventWatch(void *userdata, SDL_Event *event)
         }
         break;
     case SDL_KEYDOWN:
+        s_GlyphStyle = PORT_GLYPH_KEYS;
         inputFixedKeyDown(&event->key);
         break;
     case SDL_TEXTINPUT:
@@ -7492,6 +7577,40 @@ s32 portInputPadDigMoveP1(s32 *dx, s32 *dy)
     *dx = s_PadDigMove[0][0];
     *dy = s_PadDigMove[0][1];
     return *dx != 0 || *dy != 0;
+}
+
+/** front.c's co-op character select: the keyboard's Left / Right arrows, -1 /
+ *  +1 on the press and again while held (after a pause, about 8 a second),
+ *  0 otherwise. Read straight from the keyboard: the arrows are not a bind. */
+s32 portInputArrowStepLR(void)
+{
+    static int prev;
+    static unsigned heldAt;
+    const Uint8 *keys = SDL_GetKeyboardState(NULL);
+    const unsigned now = SDL_GetTicks();
+    int dir = 0;
+
+    if (keys != NULL && s_WindowFocused)
+    {
+        dir = keys[SDL_SCANCODE_LEFT] ? -1 : (keys[SDL_SCANCODE_RIGHT] ? 1 : 0);
+    }
+    if (dir == 0)
+    {
+        prev = 0;
+        return 0;
+    }
+    if (dir != prev)
+    {
+        prev = dir;
+        heldAt = now + 400;
+        return dir;
+    }
+    if ((int) (now - heldAt) >= 0)
+    {
+        heldAt = now + 120;
+        return dir;
+    }
+    return 0;
 }
 
 /**

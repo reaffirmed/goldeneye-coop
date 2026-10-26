@@ -42,6 +42,9 @@
 #include "bondinv.h"
 #include "stan.h"
 #include "gbi_extension.h"
+#ifndef TARGET_N64
+#include "coop.h"   /* coopAudioCue */
+#endif
 
 
 #ifdef REFRESH_PAL
@@ -4266,6 +4269,9 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
 #endif
                )
             {
+#ifndef TARGET_N64
+                coopAudioCue(COOPCUE_DRAW, var_s1);   /* partners hear it from where we stand (coop_audio.c) */
+#endif
                 switch (var_s1)
                 {
                     case ITEM_LASER:
@@ -4467,6 +4473,9 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
                         break;
                     }
                 }
+#endif
+#ifndef TARGET_N64
+                coopAudioCue(COOPCUE_RELOAD, var_s1);
 #endif
                 sndPlaySfx((struct ALBankAlt_s *) g_musicSfxBufferPtr, GUN_RIFLECOCK_SFX, NULL);
                 break;
@@ -5006,6 +5015,12 @@ void analyzeGEKey(void)
     {
    	    HUDMESSAGEBOTTOM(langGet(getStringID(LGUN, GUN_STR_D8_ANALYZINGTHEGOLDENEYEKEY_LF))); //Analyzing the GoldenEye key...
     	g_CurrentPlayer->copiedgoldeneye = TRUE;
+#ifndef TARGET_N64
+    	{
+    	    extern void coopObjNoteSelf(void);
+    	    coopObjNoteSelf();  /* co-op: we copied it (coop_objective.c) */
+    	}
+#endif
     	sndPlaySfx(g_musicSfxBufferPtr, KEY_ANALYSER_SFX, 0x0);
     	currentPlayerEquipWeaponWrapper(GUNRIGHT, ITEM_GOLDENEYEKEY);
     	currentPlayerEquipWeaponWrapper(GUNLEFT, ITEM_UNARMED);
@@ -7068,6 +7083,16 @@ static Gfx *portDrawMpPlayerName(Gfx *gdl)
         return gdl;
     }
     name = portProfilePlayerLabel(get_cur_playernum());
+    {   /* an online versus match: our own name, from Steam */
+        extern s32 coopVersus(void);
+        extern s32 coopVsNetOfLocal(s32 li);
+        extern const char *coopPlayerName(s32 p);
+
+        if (coopVersus())
+        {
+            name = coopPlayerName(coopVsNetOfLocal(get_cur_playernum()));
+        }
+    }
     if (name != NULL)
     {
         /* Map every byte >= 0x80 to '?': textMeasure treats such a byte as the

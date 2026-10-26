@@ -95,6 +95,14 @@ void shuffle_player_ids(void);
 s32 get_nth_player_from_shuffled(PLAYER_ID id);
 void set_cur_player(s32 playernum);
 s32 getPlayerCount(void);
+#ifndef TARGET_N64
+/* the views on this screen: getPlayerCount(), but 1 in an online versus
+ * match, where only our own player has a view (coop_versus.c) */
+s32 coopVsViewCount(void);
+#define getViewPlayerCount() coopVsViewCount()
+#else
+#define getViewPlayerCount() getPlayerCount()
+#endif
 void set_cur_player_screen_size(u32 width, u32 height);
 void set_cur_player_viewport_size(u32 ulx, u32 uly);
 

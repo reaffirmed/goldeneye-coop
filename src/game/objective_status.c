@@ -7,6 +7,7 @@
 #include "PR/os.h"
 #include "str.h"
 #include "bondview.h"
+#include "coop.h"
 
 //Public variables - move to header
 // bss
@@ -231,7 +232,11 @@ OBJECTIVESTATUS get_status_of_objective(s32 objectiveNum) //#MATCH
                             {
                                 currentstatus = OBJECTIVESTATUS_FAILED;
                             }
-                            else if (!bondinvHasPropInInv(obj->prop))
+                            else if (!bondinvHasPropInInv(obj->prop)
+#ifndef TARGET_N64
+                                     && !coopPeerHolds(obj) /* co-op: the team's inventory */
+#endif
+                                     )
                             {
                                 currentstatus = OBJECTIVESTATUS_INCOMPLETE;
                             }
@@ -370,6 +375,12 @@ void display_objective_status_text_on_status_change(void)
         status = get_status_of_objective(i);
         if (objectiveStatuses[i] != status) {
             objectiveStatuses[i] = status;
+#ifndef TARGET_N64
+            if (get_difficulty_for_objective(i) <= lvlGetSelectedDifficulty())
+            {
+                coopObjStatusChanged(i, availableindex, status);   /* co-op: who gets the credit (coop_objective.c) */
+            }
+#endif
             if (get_difficulty_for_objective(i) <= lvlGetSelectedDifficulty()) {
                 if (j_text_trigger != 0)
                 {
@@ -438,6 +449,7 @@ void objectivestatusCheckRoomEntered(s32 roomid)
             if ((stan != NULL) && (roomid == stan->room))
             {
                 var_v0->status = 1;
+                coopObjNoteSelf();  /* co-op: we walked in (coop_objective.c) */
             }
         }
 
@@ -476,6 +488,7 @@ void objectivestatusCheckDeposit(s32 weaponnum, s32 roomid)
             if (pad->stan != NULL && roomid == pad->stan->room)
             {
                 dep->flag = 1;
+                coopObjNoteSelf();  /* co-op: we threw it there */
             }
         }
     }
@@ -527,6 +540,7 @@ void objectiveTakePictureHandler(void)
                                     if (sp64.up < (getPlayer_c_screentop() + getPlayer_c_screenheight()))
                                     {
                                         criteria->flag = 1;
+                                        coopObjNoteSelf();  /* co-op: our camera took it */
                                     }
                                 }
                             }

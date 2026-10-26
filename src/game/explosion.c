@@ -7,6 +7,7 @@
 #include <limits.h>
 #include "bg.h"
 #include "bondview.h"
+#include "coop.h"
 #include "cheat.h"
 #include "chrai.h"
 #include "chraction.h"
@@ -266,6 +267,14 @@ explosionCreate(PropRecord *arg0, struct coord3d *target_pos, StandTile *target_
     sp44 = &g_ExplosionTypes[explosion_type];
     sp40 = NULL;
 
+#ifndef TARGET_N64
+    { /* co-op: the joiner's own grenades, mines and rockets go off on the host too */
+        extern void coopExplosionCreated(PropRecord *source, coord3d *pos, s32 type, u8 *rooms);
+        coopExplosionCreated(arg0, target_pos, explosion_type, rooms);
+        coopCaption(COOPCAP_EXPLOSION, target_pos);   /* Sound Captions (coop_access.c) */
+    }
+#endif
+
 #if defined(VERSION_US)
     if ((explosion_type != 0x10) && (explosion_type != 1))
     {
@@ -349,6 +358,12 @@ explosionCreate(PropRecord *arg0, struct coord3d *target_pos, StandTile *target_
             sp40->prop = sp30;
             sp40->source = arg0;
             sp40->player = (s8) player;
+#ifndef TARGET_N64
+            {   /* co-op stats: remember the blasts set off for the partner */
+                extern void coopStatsExplosionMade(void *explosion);
+                coopStatsExplosionMade(sp40);
+            }
+#endif
 
             if (arg4 != 0)
             {
@@ -648,7 +663,17 @@ void explosionInflictDamage(PropRecord *arg0, f32 horiz_range, f32 vert_range)
 
                         if (temp_s0->type == PROP_TYPE_CHR)
                         {
+#ifndef TARGET_N64
+                            /* co-op stats: the partner's blast, the partner's kill */
+                            extern void coopStatsBlameBegin(s32 player);
+                            extern void coopStatsBlameEnd(void);
+                            extern s32 coopStatsExplosionIsPartner(void *explosion);
+                            coopStatsBlameBegin(coopStatsExplosionIsPartner(temp_s2));
+#endif
                             chrlvExplosionDamage(temp_s0->chr, &arg0->pos, minfrac, 1);
+#ifndef TARGET_N64
+                            coopStatsBlameEnd();
+#endif
                         }
                         else
                         {
@@ -674,7 +699,14 @@ void explosionInflictDamage(PropRecord *arg0, f32 horiz_range, f32 vert_range)
                                 minfrac *= 2.0f;
                             }
 
+#ifndef TARGET_N64
+                            extern void coopVersusBlast(s32 on);
+                            coopVersusBlast(1);  /* online versus: each PC hurts its own player with its copy of the blast */
+#endif
                             record_damage_kills(minfrac, xdist, zdist, (s32) temp_s2->player, 1);
+#ifndef TARGET_N64
+                            coopVersusBlast(0);
+#endif
                             set_cur_player(sp90);
                         }
                     }

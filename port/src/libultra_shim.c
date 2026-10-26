@@ -122,6 +122,12 @@ __attribute__((weak)) s32 portArmorHud(void)   /* video.c: [display] armor_hud, 
     return 0;
 }
 
+/* video.c: the accessibility keys, at their defaults */
+__attribute__((weak)) s32 portAccessCaptions(void)    { return 0; }
+__attribute__((weak)) s32 portAccessColorblind(void)  { return 0; }
+__attribute__((weak)) s32 portAccessScreenShake(void) { return 1; }
+__attribute__((weak)) s32 portAccessTextSize(void)    { return 100; }
+
 __attribute__((weak)) s32 portWeaponFov(void)   /* video.c: [display] weapon_fov, vanilla off (Match View) */
 {
     return 0;
@@ -250,6 +256,18 @@ __attribute__((weak)) s32 portStereoPan(void)
     return 1;
 }
 
+/** Weak defaults: co-op voice chat on push to talk at full volume; video.c
+ * overrides ([display] voice_mode, voice_volume). */
+__attribute__((weak)) s32 portVideoVoiceMode(void)
+{
+    return 0;
+}
+
+__attribute__((weak)) s32 portVideoVoiceVolume(void)
+{
+    return 100;
+}
+
 /** Weak default: no aim lock (vanilla aiming); video.c overrides. */
 __attribute__((weak)) s32 portAimLock(void)
 {
@@ -270,6 +288,18 @@ __attribute__((weak)) s32 portMpSightAdjust(void)
 
 /** Weak default: no keyboard, so no key is holding the stick; video.c overrides. */
 __attribute__((weak)) s32 portVideoKbdStickDown(void)
+{
+    return 0;
+}
+
+/** Weak default: Rare's weapon cycling; video.c overrides. */
+__attribute__((weak)) s32 portWeaponMenuOn(void)
+{
+    return 0;
+}
+
+/** Weak default: no objective list; video.c overrides. */
+__attribute__((weak)) s32 portObjectivesHudShown(void)
 {
     return 0;
 }

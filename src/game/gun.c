@@ -1921,6 +1921,12 @@ void gunInitProjectileFromPlayer(ObjectRecord *obj, coord3d *targetpos, Mtxf *ar
 
     bondviewUpdateGuardTankFlagsRelated(playerprop, 1);
 
+#ifndef TARGET_N64
+    {   /* co-op: the partners' games throw the same thing from here (coop_items.c) */
+        extern void coopItemsThrown(ObjectRecord *obj, coord3d *pos, Mtxf *rot, coord3d *vel, Mtxf *spin);
+        coopItemsThrown(obj, &pos, arg2, velocity, arg4);
+    }
+#endif
     gunInitProjectileObject(obj, &pos, tile, arg2, velocity, arg4, playerprop);
 
     if (obj->runtime_bitflags & 0x80) {
@@ -2346,6 +2352,83 @@ void generate_player_thrown_object(s32 hand)
         }
     }
 }
+
+
+#ifndef TARGET_N64
+/**
+ * Co-op: a partner's throw (coop_items.c), launched here as
+ * generate_player_thrown_grenade / _object launched it in their game: the
+ * same object from the same point at the same speed, owned by their puppet.
+ */
+ObjectRecord *gunCoopSpawnThrown(s32 item, coord3d *pos, Mtxf *rot, coord3d *velocity, Mtxf *spin, s32 timer, PropRecord *owner)
+{
+    struct WeaponObjRecord *wor;
+    StandTile *tile;
+    s32 proptype;
+    u8 rooms[8];
+    s32 roomnums[0x14];
+    s32 nrooms;
+    ALSoundState *sfx_state;
+
+    switch (item)
+    {
+        case ITEM_GRENADE:       proptype = PROP_CHRGRENADE; break;
+        case ITEM_REMOTEMINE:    proptype = PROP_CHRREMOTEMINE; break;
+        case ITEM_PROXIMITYMINE: proptype = PROP_CHRPROXIMITYMINE; break;
+        case ITEM_TIMEDMINE:     proptype = PROP_CHRTIMEDMINE; break;
+        case ITEM_BOMBCASE:      proptype = PROP_CHRBOMBCASE; break;
+        case ITEM_BUG:           proptype = PROP_CHRBUG; break;
+        case ITEM_MICROCAMERA:   proptype = PROP_CHRMICROCAMERA; break;
+        case ITEM_GOLDENEYEKEY:  proptype = PROP_CHRGOLDENEYEKEY; break;
+        case ITEM_PLASTIQUE:     proptype = PROP_CHRPLASTIQUE; break;
+        default:
+            return NULL;
+    }
+
+    tile = stanFindTileBelowPos(pos, NULL, NULL);
+    if (tile == NULL && owner != NULL)
+    {
+        tile = owner->stan;
+    }
+    if (tile == NULL)
+    {
+        return NULL;
+    }
+
+    wor = (struct WeaponObjRecord *) create_new_item_instance_of_model(proptype, item);
+    if (wor == NULL || wor->prop == NULL)
+    {
+        return NULL;
+    }
+    wor->timer = timer;
+    wor->runtime_bitflags &= ~(RUNTIMEBITFLAG_OWNER);  /* player 0's: coop_items.c keeps our detonator off it */
+
+    gunInitProjectileObject((ObjectRecord *) wor, pos, tile, rot, velocity, spin, owner);
+
+    if ((wor->runtime_bitflags & RUNTIMEBITFLAG_HASPROJECTILE) != 0)
+    {
+        wor->projectile->flags = (s32) (wor->projectile->flags | 2);
+        wor->projectile->unk8C = (item == ITEM_GRENADE) ? 0.3f : 0.1f;
+        if (item == ITEM_GRENADE)
+        {
+            wor->projectile->unk94 = 0.13333333f;
+        }
+        wor->projectile->refreshrate = THROWN_ITEM_REFRESH_RATE;
+
+        rooms[0] = tile->room;
+        rooms[1] = 0xff;
+        bgFindRoomsAlongSegment(pos, pos, rooms, wor->projectile->unkCC, roomnums, &nrooms, 0x14);
+
+        sfx_state = sndPlaySfx((struct ALBankAlt_s *) g_musicSfxBufferPtr, GRENADE_THROW_SFX, NULL);
+        if (sfx_state != NULL)
+        {
+            chrobjSndCreatePostEventDefault(sfx_state, (struct coord3d *) &wor->runtime_pos);
+        }
+    }
+
+    return (ObjectRecord *) wor;
+}
+#endif
 
 
 /**

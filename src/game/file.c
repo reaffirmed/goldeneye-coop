@@ -3,6 +3,9 @@
 #include "file2.h"
 #include "front.h"
 #ifndef TARGET_N64
+#include "coop.h"
+#endif
+#ifndef TARGET_N64
 #include <stdio.h> /* stderr - mission-end diagnostics */
 #endif
 
@@ -16,10 +19,15 @@ f32 get_007_reaction_speed(void)
 
 f32 get_007_health_mod(void)
 {
+#ifndef TARGET_N64
+    f32 coop = coopDifficultyHealthMul(); /* co-op difficulty: tougher guards */
+#else
+    f32 coop = 1.f;
+#endif
     if (lvlGetSelectedDifficulty() == DIFFICULTY_007) {
-        return slider_007_mode_health;
+        return slider_007_mode_health * coop;
     }
-    return 1.f;
+    return coop;
 }
 
 f32 get_007_damage_mod(void)
@@ -60,17 +68,25 @@ void portMissionEndLog(s32 stage, s32 allcomplete)
 void end_of_mission_briefing(void)
 {
     s16 var1;
+#ifndef TARGET_N64
+    const s32 timer = coopTeamTimer();  /* co-op: the team's (the host's) time (coop_teamtime.c) */
+#else
+    const s32 timer = getMissiontimer();
+#endif
 
 #ifndef TARGET_N64
     fprintf(stderr, "ge: debrief: briefingpage=%d stage=%d difficulty=%d cheats_active=%d folder=%d time=%ds\n",
             briefingpage,
             (briefingpage >= 0) ? (s32) mission_folder_setup_entries[briefingpage].mission_num : -1,
-            selected_difficulty, g_AppendCheatSinglePlayer, selected_folder_num, getMissiontimer() / 0x3c);
+            selected_difficulty, g_AppendCheatSinglePlayer, selected_folder_num, timer / 0x3c);
 #endif
     if ((-1 < briefingpage) && selected_difficulty != DIFFICULTY_007 && g_AppendCheatSinglePlayer == FALSE)
     {
         var1 = solo_target_time_array[mission_folder_setup_entries[briefingpage].mission_num][selected_difficulty];
-        fileUnlockStageInFolderAtDifficulty(selected_folder_num, mission_folder_setup_entries[briefingpage].mission_num, selected_difficulty, getMissiontimer() / 0x3c);
+        fileUnlockStageInFolderAtDifficulty(selected_folder_num, mission_folder_setup_entries[briefingpage].mission_num, selected_difficulty, timer / 0x3c);
+#ifndef TARGET_N64
+        coopTeamTimeUsed(selected_folder_num, mission_folder_setup_entries[briefingpage].mission_num, selected_difficulty, timer);
+#endif
 #ifndef TARGET_N64
         fprintf(stderr, "ge: debrief: stage %d @ difficulty %d status=%d; aztec agent=%d secret=%d 00=%d (0 locked 1 unlocked 3 completed)\n",
                 mission_folder_setup_entries[briefingpage].mission_num, selected_difficulty,
@@ -79,7 +95,7 @@ void end_of_mission_briefing(void)
                 fileIsStageUnlockedAtDifficulty(selected_folder_num, SP_LEVEL_AZTEC, DIFFICULTY_SECRET),
                 fileIsStageUnlockedAtDifficulty(selected_folder_num, SP_LEVEL_AZTEC, DIFFICULTY_00));
 #endif
-        if ((getMissiontimer() / GAME_TICKRATE) <= var1)
+        if ((timer / GAME_TICKRATE) <= var1)
         {
 #ifndef TARGET_N64
             /* the save's own bit: under Unlock All fileGetIsCheatUnlocked reports

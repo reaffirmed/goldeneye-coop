@@ -22,6 +22,7 @@
 
 #include "port_watchpages.h"
 
+extern s32         coopVoiceMuteRowMask(void);   /* src/game/coop_voice.c: the Audio page's mute rows */
 /* port_options.c */
 extern s32         portOptFind(const char *key);
 extern const char *portOptLabel(s32 i);
@@ -374,6 +375,18 @@ static const struct PortBindDef sBindsKbmOnly[] = {
  * PORTACT_CLASSIC_TOGGLE). */
 static const struct PortBindDef sBindsAllExtra[] = {
     { "Classic Mode\n",      "classic_toggle", "classic_toggle" }, /* keyboard default Tab */
+    { "Objective List\n",    "objective_list", "objective_list" }, /* keyboard default O */
+    { "Weapon Slot 1\n",     "weapon_slot_1",  "weapon_slot_1"  }, /* keyboard defaults 1..5 */
+    { "Weapon Slot 2\n",     "weapon_slot_2",  "weapon_slot_2"  },
+    { "Weapon Slot 3\n",     "weapon_slot_3",  "weapon_slot_3"  },
+    { "Weapon Slot 4\n",     "weapon_slot_4",  "weapon_slot_4"  },
+    { "Weapon Slot 5\n",     "weapon_slot_5",  "weapon_slot_5"  },
+    { "Mission Items\n",     "weapon_slot_6",  "weapon_slot_6"  }, /* keyboard default 6 */
+    { "Give To Partner\n",   "give_partner",   "give_partner"   }, /* keyboard default G (co-op) */
+    { "Ping\n",              "ping",           "ping"           }, /* keyboard default the middle mouse button (co-op) */
+    { "Chat\n",              "chat",           "chat"           }, /* keyboard default T (co-op) */
+    { "Photo Mode\n",        "photo_mode",     "photo_mode"     }, /* keyboard default P */
+    { "Push to Talk\n",      "push_to_talk",   "push_to_talk"   }, /* keyboard default V (co-op voice) */
 };
 #define PORTBIND_ALL_EXTRA ((s32) (sizeof(sBindsAllExtra) / sizeof(sBindsAllExtra[0])))
 
@@ -570,7 +583,9 @@ static void dynPush(s32 kind, const char *key, const char *label, s32 arg)
 static void dynBuild(s32 page)
 {
     s32 i;
-    const s32 shape = (portInputDeviceIsRaphnet(sDevice) ? 1 : 0) | (bindModeIsN64() ? 2 : 0); /* derived, never trusted */
+    /* bits 2..4: which co-op voice mute rows the Audio page has (coop_voice.c) */
+    const s32 shape = (portInputDeviceIsRaphnet(sDevice) ? 1 : 0) | (bindModeIsN64() ? 2 : 0)
+                    | (coopVoiceMuteRowMask() << 2); /* derived, never trusted */
 
     if (sDynPage == page && sDynDevice == sDevice && sDynShape == shape)
     {
@@ -580,6 +595,29 @@ static void dynBuild(s32 page)
     sDynDevice = sDevice;
     sDynShape = shape;
     sDynCount = 0;
+
+    if (page == PORTWATCH_AUDIO)
+    {   /* the fixed rows, then co-op voice chat: how we talk, how loud they
+         * are, and a mute row for each partner in this session */
+        static const char *const muteKeys[] = { "voice_mute_1", "voice_mute_2", "voice_mute_3" };
+        const s32 mask = coopVoiceMuteRowMask();
+
+        for (i = 0; i < (s32) (sizeof(sAudio) / sizeof(sAudio[0])) - 1; i++)
+        {
+            sDyn[sDynCount++] = sAudio[i];
+        }
+        dynPush(PWROW_OPT, "voice_mode", NULL, 0);
+        dynPush(PWROW_OPT, "voice_volume", NULL, 0);
+        for (i = 0; i < 3; i++)
+        {
+            if (mask & (1 << i))
+            {
+                dynPush(PWROW_OPT, muteKeys[i], NULL, 0);
+            }
+        }
+        dynPush(PWROW_BACK, NULL, "Back\n", 0);
+        return;
+    }
 
     if (page == PORTWATCH_CONTROLLER)
     {
@@ -695,7 +733,7 @@ static void dynBuild(s32 page)
 static s32 pageIsDynamic(s32 page)
 {
     return page == PORTWATCH_CONTROLLER || page == PORTWATCH_CONTROLLER_MORE
-        || page == PORTWATCH_BINDS || page == PORTWATCH_CTLGENERAL;
+        || page == PORTWATCH_BINDS || page == PORTWATCH_CTLGENERAL || page == PORTWATCH_AUDIO;
 }
 
 static const struct PortWatchPageDef {
@@ -710,7 +748,7 @@ static const struct PortWatchPageDef {
     [PORTWATCH_HUD]         = PWPAGE(sHud),
     [PORTWATCH_PORTOPTS]    = PWPAGE(sPortOpts),
     [PORTWATCH_VIDEO]       = PWPAGE(sVideo),
-    [PORTWATCH_AUDIO]       = PWPAGE(sAudio),
+    /* PORTWATCH_AUDIO is dynamic too: sAudio, then the voice rows (dynBuild) */
     [PORTWATCH_GRAPHICS]    = PWPAGE(sGraphics),
     /* PORTWATCH_CONTROLLER, _MORE and _BINDS are dynamic (dynBuild): { NULL, 0 } */
     /* PORTWATCH_CTLGENERAL too (the raphnet's gadget switch) */

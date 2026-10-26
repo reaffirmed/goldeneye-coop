@@ -4,6 +4,7 @@
 #include <str.h>
 #include <memp.h>
 #include <macro.h>
+#include <bondconstants.h>
 
 #ifndef TARGET_N64
 #include <stdio.h> /* GE_ROOM_AUDIT dyn-pool watch (see bg.c) */
@@ -61,6 +62,15 @@ void dynInitMemory(void) {
     // Double graphics buffers size on PC to avoid graphics corruption bugs
     g_GfxSizesByPlayerCount[getPlayerCount() - 1] *= 2;
     g_VtxSizesByPlayerCount[getPlayerCount() - 1] *= 2;
+    {   /* the menus' stage asks for 20 KB of vertices and matrices; the co-op
+         * lobby draws up to fifteen characters a frame (coop_charsel.c) */
+        extern s32 g_StageNum;
+
+        if (g_StageNum == LEVELID_TITLE && g_VtxSizesByPlayerCount[getPlayerCount() - 1] < 0x40000)
+        {
+            g_VtxSizesByPlayerCount[getPlayerCount() - 1] = 0x40000;
+        }
+    }
 #endif
 
     g_GfxBuffers[0] = mempAllocBytesInBank(g_GfxSizesByPlayerCount[getPlayerCount() - 1] * 2, MEMPOOL_STAGE);

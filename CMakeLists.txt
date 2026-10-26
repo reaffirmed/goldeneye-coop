@@ -336,9 +336,11 @@ endif()
 # .incbin's the gunbarrel swirl RLE blob and the 14 attract-demo
 # recordings. Give the assembler the include paths and re-assemble when
 # the blobs change.
+# Only GE_ROMDATA_FALLBACK assembles the .incbin's, so only it depends on the
+# blobs: without it the build needs no ROM-extracted files besides the three
+# PORT_ASSET_KEEP_SYMS models (the CI release build relies on this).
 set_source_files_properties(port/src/segments.c PROPERTIES
-    COMPILE_OPTIONS "-Wa,-I${CMAKE_SOURCE_DIR}/assets/images/combined;-Wa,-I${CMAKE_SOURCE_DIR}/assets/music"
-    OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/assets/images/combined/combined.bin;${CMAKE_SOURCE_DIR}/assets/music/sfx.ctl;${CMAKE_SOURCE_DIR}/assets/music/sfx.tbl;${CMAKE_SOURCE_DIR}/assets/music/instruments.ctl;${CMAKE_SOURCE_DIR}/assets/music/instruments.tbl;${CMAKE_SOURCE_DIR}/assets/music/music.sbk")
+    COMPILE_OPTIONS "-Wa,-I${CMAKE_SOURCE_DIR}/assets/images/combined;-Wa,-I${CMAKE_SOURCE_DIR}/assets/music")
 set(PORT_RAMROM_DEMO_BINS
     ramrom_Dam_1 ramrom_Dam_2 ramrom_Facility_1 ramrom_Facility_2
     ramrom_Facility_3 ramrom_Runway_1 ramrom_Runway_2 ramrom_BunkerI_1
@@ -347,8 +349,13 @@ set(PORT_RAMROM_DEMO_BINS
 list(TRANSFORM PORT_RAMROM_DEMO_BINS PREPEND ${CMAKE_SOURCE_DIR}/assets/ramrom/)
 list(TRANSFORM PORT_RAMROM_DEMO_BINS APPEND .bin)
 set_source_files_properties(port/src/ramrom_data.c PROPERTIES
-    COMPILE_OPTIONS "-Wa,-I${CMAKE_SOURCE_DIR}/assets"
-    OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/assets/ge007.u.2A4D50.usedby7F008DE4.bin;${PORT_RAMROM_DEMO_BINS}")
+    COMPILE_OPTIONS "-Wa,-I${CMAKE_SOURCE_DIR}/assets")
+if(GE_ROMDATA_FALLBACK)
+    set_source_files_properties(port/src/segments.c PROPERTIES
+        OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/assets/images/combined/combined.bin;${CMAKE_SOURCE_DIR}/assets/music/sfx.ctl;${CMAKE_SOURCE_DIR}/assets/music/sfx.tbl;${CMAKE_SOURCE_DIR}/assets/music/instruments.ctl;${CMAKE_SOURCE_DIR}/assets/music/instruments.tbl;${CMAKE_SOURCE_DIR}/assets/music/music.sbk")
+    set_source_files_properties(port/src/ramrom_data.c PROPERTIES
+        OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/assets/ge007.u.2A4D50.usedby7F008DE4.bin;${PORT_RAMROM_DEMO_BINS}")
+endif()
 # osViModeTable[42]: compile the repo's REAL table (fr.c/sched.c read
 # comRegs.hStart/width/xScale + fldRegs[].vStart/yScale/origin from it)
 # instead of transcribing data into the shim.
@@ -427,7 +434,7 @@ add_dependencies(ge ge_buildinfo)
 target_include_directories(ge PRIVATE ${CMAKE_BINARY_DIR}/generated)
 
 # libm: sinf/cosf/sqrtf (math_sincos.s and gu asm on N64; libm on PC).
-target_link_libraries(ge m)
+target_link_libraries(ge m ${CMAKE_DL_LIBS})
 
 if(GE_VIDEO)
     if(WIN32)
@@ -440,7 +447,7 @@ if(GE_VIDEO)
             set(SDL2_ROOT ${CMAKE_SOURCE_DIR}/third_party/SDL2-2.30.11/i686-w64-mingw32)
         endif()
         target_include_directories(ge PRIVATE ${SDL2_ROOT}/include ${SDL2_ROOT}/include/SDL2)
-        target_link_libraries(ge ${SDL2_ROOT}/lib/libSDL2.dll.a opengl32 gdi32 imm32 winmm setupapi hid version ole32 oleaut32)
+        target_link_libraries(ge ${SDL2_ROOT}/lib/libSDL2.dll.a opengl32 gdi32 imm32 winmm setupapi hid version ole32 oleaut32 ws2_32 shell32)
         # the game needs SDL2.dll beside the exe
         add_custom_command(TARGET ge POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SDL2_ROOT}/bin/SDL2.dll $<TARGET_FILE_DIR:ge>)
