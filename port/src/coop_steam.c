@@ -186,6 +186,7 @@ static int sJoinRefused;    /* 1: the host turned our password down; 2: Steam ke
                              * 3: the host's game is another co-op version */
 static char sRefusedBuild[16]; /* 3: the host's build, "" if it did not say */
 static int sJoinDirect;     /* joining one lobby by its id (not looking for any friend's) */
+static u64s sJoinTarget;    /* the lobby our last JoinLobby asked for: any other entry is stale */
 
 /* the lobby screen's Public Games, see coopSteamBrowseRefresh */
 #define MAX_PUBLIC 16
@@ -590,6 +591,7 @@ static void joinLobby(u64s lobby)
         sLobby = 0;
     }
     portConLogf("ge: steam: joining lobby %llu\n", lobby);
+    sJoinTarget = lobby;
     sJoinCall = pJoinLobby(sMM, lobby);
     sJoinWanted = 0;
 }
@@ -629,6 +631,13 @@ static void onLobbyCreated(const unsigned char *p)
     {
         return; /* real Steam reports it twice: call result and broadcast */
     }
+    if (!sIsHost)
+    {   /* a Host pressed before a Join: that lobby came too late, and holding
+         * it would put us in an empty lobby of our own */
+        portConLogf("ge: steam: lobby %llu came after we chose to join, leaving it\n", lobby);
+        pLeaveLobby(sMM, lobby);
+        return;
+    }
     sLobby = lobby;
     pSetLobbyData(sMM, lobby, LOBBY_KEY, "1");
     applyLobbyOptions();
@@ -645,6 +654,21 @@ static void onLobbyEnter(const unsigned char *p)
     unsigned int response = rd32(p + 16);
     const char *tag;
 
+    if (!sIsHost && lobby == sLobby && sPeers[0] != 0)
+    {
+        return; /* real Steam reports it twice: call result and broadcast. Again
+                 * would close the session the host has just opened with us */
+    }
+    if (!sIsHost && lobby != sJoinTarget)
+    {   /* an entry we no longer want (a lobby we created, then chose to join
+         * another; an earlier join): never take it for the one we are joining */
+        portConLogf("ge: steam: entered lobby %llu, but we are joining %llu: leaving it\n", lobby, sJoinTarget);
+        if (response == 1 && lobby != sLobby)
+        {
+            pLeaveLobby(sMM, lobby);
+        }
+        return;
+    }
     sJoinCall = 0;
     if (sIsHost)
     {
@@ -941,6 +965,7 @@ int coopSteamInit(const char *spec)
     }
     sHostLeft = 0;
     sHostTagged = 1;
+    sJoinTarget = 0;
 
     /* "steam" hosts and opens the invite overlay; "steam:host" hosts (the
      * lobby screen invites in game); "steam:idle" only brings Steam up;

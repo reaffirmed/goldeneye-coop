@@ -1296,3 +1296,22 @@ on the paper) and scroll as before.
   the pick at the accept tick (select ticks). Tested by keyboard and mouse
   with xdotool and by pad with GE_INPUTPLAY on two copies over the mock Steam.
 
+
+## A player who leaves and comes back (2026-10-26)
+
+- Ghost lobby: a joiner who left (BYE, or its game closed) and joined again
+  more than 33 s later sat alone on "Connecting to the host..." for good.
+  The host's channel for that slot kept the old player's last-heard time, so
+  coopSessionTick freed the slot as silent the moment Steam handed it to the
+  newcomer, before its first packet; its next packet asked again, and round
+  it went every frame ("freeing slot N (silent)" / "<name> joined"). Each
+  channel now remembers who holds its slot (CoopChan.peerId): someone new
+  there starts their silence at that moment. Same fix for a drop-in.
+- Steam: a lobby created after the player chose to join another (Host, then
+  Join before Steam answered) is left instead of taken as ours; an entry into
+  a lobby we are no longer joining is left alone; Steam's second report of
+  the same entry no longer closes the session the host just opened.
+- Test: rejoin3.sh-style run (host and partner in the lobby, the third joins,
+  quits, comes back after GAP=40 s): before, 229 frees and the ghost lobby;
+  after, "player 3 rejoined (new session)" and all three cards. The same in a
+  mission: the third drops in again beside the host.

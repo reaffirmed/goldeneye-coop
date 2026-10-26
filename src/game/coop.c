@@ -395,6 +395,7 @@ typedef struct
     u32 helloTick;
     s32 helloSeen;
     u32 heardMs;        /* anything from it, wall clock (coopNowMs) */
+    unsigned long long peerId;  /* host: who holds the slot now (coopNetPeerId), 0 for nobody */
 } CoopChan;
 static CoopChan sChan[COOP_NET_MAX_PEERS];
 
@@ -6114,6 +6115,14 @@ static void coopSessionTick(void)
          * joiner kept for after a migration that never came) is freed */
         for (c = 0; c < COOP_NET_MAX_PEERS; c++)
         {
+            const unsigned long long id = coopNetPeerConnected(c) ? coopNetPeerId(c) : 0;
+
+            if (id != sChan[c].peerId)
+            {   /* someone new in the slot (or the one who left it, back): its silence starts now,
+                 * not when the last one went quiet, or it is freed before its first packet */
+                sChan[c].peerId = id;
+                sChan[c].heardMs = (id != 0) ? now : 0;
+            }
             if (coopNetPeerConnected(c) && sChan[c].heardMs != 0 && now - sChan[c].heardMs > COOP_LOST_MS + COOP_DROP_MS
                 && !sR[coopPlayerOfChan(c)].valid)
             {
