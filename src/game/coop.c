@@ -2026,12 +2026,15 @@ static void coopHarnessTick(void)
         }
     }
     if (coopNetIsHost() && coopPartnerHere())
-    {   /* GE_COOP_TESTSPAWN=<chrnum>: once, at 15 s, spawn a copy of that chr next to Bond (harness only) */
+    {   /* GE_COOP_TESTSPAWN=<chrnum>: once, at 15 s, spawn a copy of that chr next to Bond;
+         * <chrnum>,unarmed leaves it without a gun, like Trevelyan's Statue ambush (harness only) */
         static s32 testspawn = -2;
+        static s32 testspawnarmed = 1;
         if (testspawn == -2)
         {
             const char *e = getenv("GE_COOP_TESTSPAWN");
             testspawn = (e != NULL) ? atoi(e) : -1;
+            testspawnarmed = (e == NULL || strstr(e, "unarmed") == NULL);
         }
         if (testspawn >= 0 && sTick >= 900 && coopInMission())
         {
@@ -2045,7 +2048,7 @@ static void coopHarnessTick(void)
             if (src != NULL && bond != NULL)
             {
                 PropRecord *np = chrSpawnAtCoord(src->bodynum, src->headnum, &src->prop->pos, src->prop->stan, 0.0f, src->ailist, 0x10);
-                if (np != NULL)
+                if (np != NULL && testspawnarmed)
                 {
                     chrGiveWeapon(np->chr, PROP_CHRKALASH, ITEM_AK47, 0);
                 }
@@ -2540,8 +2543,9 @@ static void coopSendGuards(void)
         e = &pkt.ent[pkt.count++];
         index++;
 
+        /* pkt is on the stack: an unarmed chr would otherwise send junk as its gun */
+        memset(e, 0, sizeof(*e));
         e->chrnum = chr->chrnum;
-        e->flags = 0;
         if (i < COOP_MAX_CHRS)
         {   /* firecount ticks on every fire tick, shot or not */
             if (chr->firecount[GUNRIGHT] != sChrFireSeen[i][GUNRIGHT])
@@ -2559,7 +2563,7 @@ static void coopSendGuards(void)
         e->head = (u8) chr->headnum;
         {
             PropRecord *gun = chrGetEquippedWeaponProp(chr, GUNRIGHT);
-            if (gun != NULL && gun->weapon != NULL)
+            if (gun != NULL && gun->type == PROP_TYPE_WEAPON && gun->weapon != NULL)
             {
                 e->gunitem = gun->weapon->weaponnum;
                 e->gunmodel = gun->weapon->obj;
@@ -2654,7 +2658,8 @@ static ChrRecord *coopMirrorSpawn(CoopGuardEnt *e)
     chr->chrnum = e->chrnum;
     chr->bodynum = e->body;
     chr->headnum = e->head;
-    if (e->gunitem > 0)
+    /* an out-of-range item or model would put some other prop in its hand */
+    if (e->gunitem > 0 && e->gunitem < ITEM_IDS_MAX && e->gunmodel >= 0 && e->gunmodel < PROP_MAX)
     {
         chrGiveWeapon(chr, e->gunmodel, e->gunitem, 0);
     }
