@@ -1420,14 +1420,15 @@ void bondviewFrozenCameraTick(u16 buttons, u16 oldbuttons, struct coord3d *pos, 
                 s32 portskip = portJoyPortSkipPressed(get_cur_playernum());
                 if (s_PortIntroSkipArmed
                     && (lvlGetControlsLockedFlag() == 0)
-                    && ((buttons & ~oldbuttons & PORT_INTRO_SKIP_BUTTONS) || portskip))
+                    && ((buttons & ~oldbuttons & PORT_INTRO_SKIP_BUTTONS) || portskip || coopSkipTestPress())
+                    && coopSkipPress(COOPSKIP_INTRO))   /* co-op: a vote, unless nobody else is here (coop_vote.c) */
                 {
                     g_CameraAfterCinema = CAMERAMODE_INTRO;
                     s_PortIntroSkipMask = buttons & ~oldbuttons & PORT_INTRO_SKIP_BUTTONS;
                     s_PortIntroSkipPort = portskip;
                 }
-                if (coopIntroHostDone())
-                {   /* co-op: the host's intro is over, so is ours (coop_cutscene.c) */
+                if (coopIntroHostDone() || coopSkipPassed(COOPSKIP_INTRO))
+                {   /* co-op: the host's intro is over, or the team voted to skip it (coop_cutscene.c, coop_vote.c) */
                     g_CameraAfterCinema = CAMERAMODE_INTRO;
                 }
             }
@@ -1633,9 +1634,13 @@ void bondviewFrozenCameraTick(u16 buttons, u16 oldbuttons, struct coord3d *pos, 
             s32 portskip = 0;
 #endif
             if ((lvlGetControlsLockedFlag() == 0)
-                && ((buttons & ~oldbuttons & (A_BUTTON | B_BUTTON | Z_TRIG | START_BUTTON | L_TRIG | R_TRIG)) || portskip
+                && ((((buttons & ~oldbuttons & (A_BUTTON | B_BUTTON | Z_TRIG | START_BUTTON | L_TRIG | R_TRIG)) || portskip
 #ifndef TARGET_N64
+                      || coopSkipTestPress()) && coopSkipPress(COOPSKIP_INTRO))    /* co-op: a vote (coop_vote.c) */
                     || coopIntroHostDone()  /* co-op: the host is already playing */
+                    || coopSkipPassed(COOPSKIP_INTRO)
+#else
+                     ))
 #endif
                     ))
             {
@@ -6570,6 +6575,7 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
             f32 pdeg = moveData.invertPitch ? g_portMousePitchDeg : -g_portMousePitchDeg;
 
             coopPhotoTick(moveData.freeLookDx, pdy, g_portMouseDirect, g_portMouseYawDeg, pdeg);
+            coopSpectateLook(moveData.freeLookDx, pdy, g_portMouseDirect, g_portMouseYawDeg, pdeg);   /* the free camera while down */
         }
         /* Permission (see portMouseLookPermitted): drain the delta every tick
          * but discard it unless the stick could move Bond, so motion never
@@ -11533,7 +11539,14 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
 
     if (stop_time_flag != 0)
     {
+#ifndef TARGET_N64
+        if (((lvlGetControlsLockedFlag() == 0)
+             && ((buttons & ~(g_CurrentPlayer->buttons_pressed) & (CONT_A | B_BUTTON | Z_TRIG | START_BUTTON | CONT_R | CONT_L)) || coopSkipTestPress())
+             && coopSkipPress(COOPSKIP_ENDING))     /* co-op: a vote to skip the ending (coop_vote.c) */
+            || (stop_time_flag != 2 && coopSkipPassed(COOPSKIP_ENDING)))
+#else
         if ((lvlGetControlsLockedFlag() == 0) && ((buttons & ~(g_CurrentPlayer->buttons_pressed) & (CONT_A | B_BUTTON | Z_TRIG | START_BUTTON | CONT_R | CONT_L))))
+#endif
         {
             stop_time_flag = 2;
 
@@ -12994,6 +13007,9 @@ Gfx *maybe_mp_interface(Gfx *gdl)
         gdl = portDrawFpsCounter(gdl);
 #endif
         gdl = currentPlayerDrawFade(gdl);
+#ifndef TARGET_N64
+        gdl = coopHudSkipVote(gdl);         /* co-op: who wants to skip (coop_vote.c) */
+#endif
         return bondviewRenderCredits(gdl);
     }
 

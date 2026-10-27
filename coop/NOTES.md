@@ -1547,3 +1547,65 @@ stays 12 (everything below talks to a v0.2.0 game).
 - Found on the way: the game builds with -w, so an undeclared fabsf
   compiled as an int function and the jitter read 12, 31, 51, 71, 91...;
   written out by hand now. Check new calls with -Wimplicit-function-declaration.
+
+## Spectator camera, the debrief vote and skip votes (2026-10-27)
+
+Owner's pick from the feature list: spectate between teammates when out, and
+votes after a mission and in cutscenes so the host is not the only one in
+control. COOP_VERSION stays 12 (the new event is in the design range, which
+an older game ignores; see "Mixed versions" below).
+
+- Spectate (coop_spectate.c): Fire next partner (as before), Aim (R) the one
+  before, Use (or B) frees the camera at the watched partner's eyes. The free
+  camera flies as photo mode's (look from coopSpectateLook, which bondview2.c
+  calls beside coopPhotoTick; movement on the stick / C buttons; xz only over
+  walkable floor from its tile, 15..400 above it), with no reach limit.
+  Fire / Aim / Use go back to a partner's eyes. coopSpectateTarget is the
+  partner we look out of (-1 in the free camera, so their puppet and tag
+  draw); coopSpectateHud gives the HUD the mode. The HUD says WATCHING <name>
+  or FREE CAMERA at the top and the keys along the foot (clear of the partner
+  rows). While watching, a partner near our own fallen body is no longer
+  hidden (that rule is for our eyes inside their body), coop.c
+  coopPuppetUpdateGhost. Harness: GE_COOP_TESTSPECNEXT=<s> (Fire at <s> s
+  into watching, Aim 4 s later), GE_COOP_TESTFREECAM=<s> (free the camera,
+  back off 1.5 s, turn).
+- Debrief vote (coop_vote.c, front.c): menu0D gets a third page, WHAT NEXT
+  3/3, while a co-op (not versus) session is up: Replay <mission>, Next
+  mission: <next> (only after a win, and not past Cradle, as the solo Next),
+  Back to the lobby, each with its voters (colour square and name). Up / Down
+  or the cursor pick, Next (A) votes; Previous on page 1 and the report
+  page's Previous no longer go straight to the lobby. The host counts
+  (COOPEV_VOTE 57: RESULT to the host, TALLY to all, again every second
+  while open so a late joiner catches up): decided when everyone present has
+  voted or 30 s after the first vote; most votes win, a tie goes the host's
+  way if the host is in it, else the lobby. 1.5 s later the host starts the
+  mission as the lobby's Continue does (the others follow it in through
+  HELLO) or everyone goes to the lobby. Harness: GE_COOP_TESTVOTE=<0..2>[:<s>],
+  GE_COOP_DEBRIEFPAGE=<0..2> (the debrief opens on that page, and the report
+  page moves on by itself).
+- Skip votes: the intro (overview camera and swirl, one vote for both) and
+  the ending that waits for a press (AI_TriggerFadeAndExitLevelOnButtonPress,
+  now relayed to joiners as a presentation command, so their press counts
+  and they leave the ending themselves like the host). A press calls
+  coopSkipPress: with nobody else in the session it skips at once, else it
+  is a vote to the host (SKIP), which sends SKIPTALLY; it passes at more than
+  half (2 of 2, 2 of 3, 3 of 4) and every game skips (coopSkipPassed at the
+  three bondview2.c sites). The HUD shows "SKIP n/m - WAITING FOR <names>"
+  (or "PRESS TO VOTE") bottom right, in cinemas too (maybe_mp_interface's
+  cameramode 1 branch). The host's intro ending still ends everyone's
+  (INTRODONE). Harness: GE_COOP_TESTSKIP=<s> (press skip <s> s into each
+  cutscene), GE_COOP_TESTCINEMAEND=1 (the test cinema is an ending).
+- Found on the way: the joiner's "host's intro is over" was never cleared
+  between missions (the menus run no stage ticks), so replaying the same
+  mission ended the joiner's intro at once. coopCutsceneStageStart (from
+  coopStageStart) clears it.
+- Mixed versions: an older host never sends a TALLY, so a newer joiner's
+  debrief keeps two pages and the old flow. A newer host with an older
+  joiner waits for that joiner's vote until the 30 s clock (or the intro's
+  own timer for a skip).
+- Tested with two and three copies over the mock Steam (Dam): watching,
+  next / back, free camera; intro skip (one vote waits, the second skips on
+  both); test ending skipped by both votes, both left the mission; debrief
+  Replay (both back in Dam), 1-1 tie Next / Lobby (the host's Next: both in
+  Facility), and one vote for Lobby decided by the clock. Shots:
+  spectate-vote/ in the project files.

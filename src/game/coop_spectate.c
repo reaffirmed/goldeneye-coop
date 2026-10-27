@@ -2,10 +2,14 @@
  * Story co-op: watch a partner while we are down.
  *
  * Once our death has faded to black and co-op has taken it (coopDeadTick:
- * waiting to respawn, or for a revive), the screen fades back in through a
- * partner's eyes: their position and look from their state, our room for
- * the level's visibility swapped for theirs, their own puppet hidden so the
- * camera is not inside it. Fire moves to the next partner who is standing.
+ * waiting to respawn, or for a revive, or out of lives), the screen fades
+ * back in through a partner's eyes: their position and look from their
+ * state, our room for the level's visibility swapped for theirs, their own
+ * puppet hidden so the camera is not inside it. Fire moves to the next
+ * partner who is standing, Aim to the one before. Use frees the camera: it
+ * starts at the partner's eyes and flies as photo mode's does (look turns
+ * it, movement flies it the way it looks, over floor and up to 4 m above
+ * it); Fire or Aim go back to a partner's eyes, Use to the one we left.
  * When we are back (or the mission ends) the view is ours again; the respawn
  * fades in from black as before.
  *
@@ -16,6 +20,7 @@
  *   - bondviewRenderDebugBondView: coopSpectateCamera
  *   - bondviewGetCurrentPlayersRoom / Position / Position3: coopSpectateRoom,
  *     coopSpectatePos
+ * and hands over the look each tick (coopSpectateLook, beside coopPhotoTick).
  */
 #include <ultra64.h>
 #include <string.h>
@@ -25,6 +30,7 @@
 #include <bondtypes.h>
 #include "player.h"
 #include "joy.h"
+#include "stan.h"
 #include <bondgame.h>
 #include "coop.h"
 
@@ -34,8 +40,16 @@ extern f32 cosf(f32);
 extern void currentPlayerAdjustFade(f32 maxfadetime, s32 r, s32 g, s32 b, f32 frac);
 extern s32 getPlayerCount(void);
 extern f32 bondviewYPositionRelated(StandTile *stan, f32 x, f32 z);
+extern s32 portJoyPortUseMenuPressed(s32 pad);
+extern char *getenv(const char *);
+extern int atoi(const char *);
 
 #define COOPSPEC_FADE   30.0f   /* ticks back in from black */
+#define FREE_SPEED      6.0f    /* units a tick at full stick */
+#define FREE_UP         400.0f  /* the most above the floor */
+#define FREE_DOWN       15.0f   /* the least */
+#define FREE_PITCH      1.48f   /* about 85 degrees up or down */
+#define DEG             0.017453292f
 
 static s32 sTarget = -1;        /* the partner we watch, -1: none */
 static s32 sLive;              /* we came back in on a partner */
@@ -45,14 +59,22 @@ static coord3d sPos3;           /* their feet, for the portal walk */
 static f32 sYaw, sPitch;
 static u8 sRoom;
 
-static s32 coopSpectatePick(s32 from)
+/* the free camera: the same yaw convention as a partner's view */
+static s32 sFree;
+static coord3d sFPos, sFPos3;
+static StandTile *sFTile;
+static f32 sFYaw, sFPitch;
+static f32 sLookDx, sLookDy, sLookYaw, sLookPitch;     /* this tick's look (coopSpectateLook) */
+static s32 sLookDirect;
+
+static s32 coopSpectatePick(s32 from, s32 step)
 {
     CoopExtView v;
     s32 i, p;
 
     for (i = 1; i <= COOP_MAX_PLAYERS; i++)
     {
-        p = (from + i) % COOP_MAX_PLAYERS;
+        p = (from + i * step + COOP_MAX_PLAYERS * 2) % COOP_MAX_PLAYERS;
         if (p != coopExtSelf() && coopExtRemoteView(p, &v) && !v.dead && v.stan != NULL)
         {
             return p;
@@ -79,10 +101,155 @@ static s32 coopSpectateFollow(void)
     return 1;
 }
 
+/* bondview2.c, player 1's look sample each tick (as coopPhotoTick gets it) */
+void coopSpectateLook(f32 lookdx, f32 lookdy, s32 direct, f32 yawdeg, f32 pitchdeg)
+{
+    sLookDx = lookdx;
+    sLookDy = lookdy;
+    sLookDirect = direct;
+    sLookYaw = yawdeg;
+    sLookPitch = pitchdeg;
+}
+
+static void coopSpectateFreeStart(void)
+{
+    CoopExtView v;
+
+    if (sTarget < 0 || !coopExtRemoteView(sTarget, &v) || v.stan == NULL)
+    {
+        return;
+    }
+    sFree = 1;
+    sFPos = sPos;
+    sFPos3 = sPos3;
+    sFTile = v.stan;
+    sFYaw = sYaw;
+    sFPitch = sPitch;
+    portConLogf("ge: coop: spectate: free camera at %.0f %.0f %.0f\n", sFPos.f[0], sFPos.f[1], sFPos.f[2]);
+}
+
+/* the free camera flies the way it looks; xz only over floor it can walk to
+ * from where it is, as photo mode's */
+static void coopSpectateFreeMove(f32 fwd, f32 side)
+{
+    const f32 cy = cosf(sFYaw), sy = sinf(sFYaw);
+    const f32 cp = cosf(sFPitch), sp = sinf(sFPitch);
+    coord3d want = sFPos;
+    StandTile *tile = sFTile;
+    f32 floor;
+
+    want.f[0] += (sy * cp * fwd + cy * side) * FREE_SPEED;
+    want.f[1] += sp * fwd * FREE_SPEED;
+    want.f[2] += (cy * cp * fwd - sy * side) * FREE_SPEED;
+    if (tile != NULL && walkTilesBetweenPoints_NoCallback(&tile, sFPos.f[0], sFPos.f[2], want.f[0], want.f[2]) && tile != NULL)
+    {
+        sFTile = tile;
+        sFPos.f[0] = want.f[0];
+        sFPos.f[2] = want.f[2];
+    }
+    floor = bondviewYPositionRelated(sFTile, sFPos.f[0], sFPos.f[2]);
+    sFPos.f[1] = want.f[1];
+    if (sFPos.f[1] < floor + FREE_DOWN)
+    {
+        sFPos.f[1] = floor + FREE_DOWN;
+    }
+    if (sFPos.f[1] > floor + FREE_UP)
+    {
+        sFPos.f[1] = floor + FREE_UP;
+    }
+    sFPos3 = sFPos;
+    sFPos3.f[1] = floor;
+}
+
+/* GE_COOP_TESTFREECAM=<s>: <s> seconds into watching, free the camera, back
+ * off for 1.5 s, then turn a little; GE_COOP_TESTSPECNEXT=<s>: Fire at <s>
+ * seconds, Aim 4 s later (harness only) */
+static void coopSpectateTest(s32 *use, s32 *step, f32 *turn, f32 *fwd)
+{
+    static s32 at = -2, nextat;
+    static s32 n;
+
+    if (at == -2)
+    {
+        const char *e = getenv("GE_COOP_TESTFREECAM");
+        const char *f = getenv("GE_COOP_TESTSPECNEXT");
+
+        at = (e != NULL) ? atoi(e) * 60 : -1;
+        nextat = (f != NULL) ? atoi(f) * 60 : -1;
+    }
+    n++;
+    if (n == nextat)
+    {
+        *step = 1;
+    }
+    else if (nextat > 0 && n == nextat + 240)
+    {
+        *step = -1;
+    }
+    if (at < 0)
+    {
+        return;
+    }
+    if (n == at)
+    {
+        *use = 1;
+    }
+    else if (n > at && n <= at + 90)
+    {
+        *fwd = -1.0f;       /* back off: the partner in front */
+    }
+    else if (n > at + 150 && n <= at + 210)
+    {
+        *turn = 0.75f;      /* degrees a tick */
+    }
+}
+
+static void coopSpectateFreeTick(f32 tturn, f32 tfwd)
+{
+    f32 fwd, side;
+
+    if (sLookDirect)
+    {
+        sFYaw -= sLookYaw * DEG;
+        sFPitch += sLookPitch * DEG;
+    }
+    else
+    {
+        sFYaw -= sLookDx * 2.0f * DEG;
+        sFPitch += sLookDy * 2.0f * DEG;
+    }
+    sFYaw -= tturn * DEG;
+    sLookDx = sLookDy = sLookYaw = sLookPitch = 0.0f;
+    if (sFPitch > FREE_PITCH)
+    {
+        sFPitch = FREE_PITCH;
+    }
+    if (sFPitch < -FREE_PITCH)
+    {
+        sFPitch = -FREE_PITCH;
+    }
+
+    /* movement: the stick, or the keys on the C buttons (WASD by default) */
+    fwd = joyGetStickY(0) / 70.0f;
+    side = joyGetStickX(0) / 70.0f;
+    if (joyGetButtons(0, U_CBUTTONS)) fwd = 1.0f;
+    if (joyGetButtons(0, D_CBUTTONS)) fwd = -1.0f;
+    if (joyGetButtons(0, L_CBUTTONS)) side = -1.0f;
+    if (joyGetButtons(0, R_CBUTTONS)) side = 1.0f;
+    fwd += tfwd;
+    fwd = (fwd > 1.0f) ? 1.0f : (fwd < -1.0f) ? -1.0f : fwd;
+    side = (side > 1.0f) ? 1.0f : (side < -1.0f) ? -1.0f : side;
+    if (fwd > 0.05f || fwd < -0.05f || side > 0.05f || side < -0.05f)
+    {
+        coopSpectateFreeMove(fwd, side);
+    }
+}
+
 /* coopDeadTick: once a tick while we are down and co-op has the death */
 void coopSpectateTick(void)
 {
-    s32 next;
+    s32 next, step = 0, use = 0;
+    f32 tturn = 0.0f, tfwd = 0.0f;
 
     if (getPlayerCount() != 1)
     {
@@ -90,12 +257,13 @@ void coopSpectateTick(void)
     }
     if (!sLive)
     {   /* the death has just faded to black: come back in on a partner */
-        sTarget = coopSpectatePick(COOP_MAX_PLAYERS - 1);
+        sTarget = coopSpectatePick(COOP_MAX_PLAYERS - 1, 1);
         if (sTarget < 0)
         {
             return;
         }
         sLive = 1;
+        sFree = 0;
         if (!sDropIn)
         {
             currentPlayerAdjustFade(COOPSPEC_FADE, 150, 0, 0, 0.18f);   /* a red wash: we are watching */
@@ -104,7 +272,30 @@ void coopSpectateTick(void)
     }
     if (joyGetButtonsPressedThisFrame(0, Z_TRIG))
     {
-        next = coopSpectatePick(sTarget);
+        step = 1;
+    }
+    else if (joyGetButtonsPressedThisFrame(0, R_TRIG))
+    {
+        step = -1;
+    }
+    use = portJoyPortUseMenuPressed(0) || joyGetButtonsPressedThisFrame(0, B_BUTTON);
+    coopSpectateTest(&use, &step, &tturn, &tfwd);
+    if (use)
+    {
+        if (sFree)
+        {
+            sFree = 0;
+            portConLogf("ge: coop: spectate: back to player %d\n", sTarget + 1);
+        }
+        else
+        {
+            coopSpectateFreeStart();
+        }
+    }
+    else if (step != 0)
+    {
+        next = (sFree && step > 0) ? sTarget : coopSpectatePick(sTarget, step);   /* out of the free camera: the one we left first */
+        sFree = 0;
         if (next >= 0 && next != sTarget)
         {
             sTarget = next;
@@ -113,12 +304,16 @@ void coopSpectateTick(void)
     }
     if (!coopSpectateFollow())
     {   /* they went down too, or left: the next one standing */
-        next = coopSpectatePick(sTarget < 0 ? 0 : sTarget);
+        next = coopSpectatePick(sTarget < 0 ? 0 : sTarget, 1);
         if (next >= 0)
         {
             sTarget = next;
             coopSpectateFollow();
         }
+    }
+    if (sFree)
+    {
+        coopSpectateFreeTick(tturn, tfwd);
     }
 }
 
@@ -127,6 +322,7 @@ void coopSpectateStop(void)
 {
     sLive = 0;
     sTarget = -1;
+    sFree = 0;
 }
 
 /* coopDropInTick: start (1) or end (0) watching while we drop in */
@@ -136,53 +332,78 @@ void coopSpectateDropIn(s32 on)
     coopSpectateStop();
 }
 
-/* the partner we watch, -1 when the view is our own */
-s32 coopSpectateTarget(void)
+/* the view is a partner's or the free camera's */
+static s32 coopSpectateOn(void)
 {
     if (!sLive || sTarget < 0 || g_CurrentPlayer == NULL || (!g_CurrentPlayer->bonddead && !sDropIn))
     {
         sLive = 0;
         sTarget = -1;
-        return -1;
+        sFree = 0;
+        return 0;
     }
-    return sTarget;
+    return 1;
+}
+
+/* the partner whose eyes we look out of, -1 when the view is our own or the
+ * free camera's (their puppet and tag are then drawn) */
+s32 coopSpectateTarget(void)
+{
+    return (coopSpectateOn() && !sFree) ? sTarget : -1;
+}
+
+/* coop_hud.c: 1 watching *who, 2 the free camera (*who the one we left), 0 neither */
+s32 coopSpectateHud(s32 *who)
+{
+    if (!coopSpectateOn())
+    {
+        return 0;
+    }
+    *who = sTarget;
+    return sFree ? 2 : 1;
 }
 
 s32 coopSpectateCamera(coord3d *pos, coord3d *look, coord3d *up)
 {
-    f32 cp;
+    f32 cp, yaw, pitch;
 
-    if (coopSpectateTarget() < 0)
+    if (!coopSpectateOn())
     {
         return 0;
     }
-    cp = cosf(sPitch);
+    yaw = sFree ? sFYaw : sYaw;
+    pitch = sFree ? sFPitch : sPitch;
+    cp = cosf(pitch);
     /* the state's yaw is the model's: the view looks along +z turned by it */
-    look->f[0] = sinf(sYaw) * cp;
-    look->f[1] = sinf(sPitch);
-    look->f[2] = cosf(sYaw) * cp;
+    look->f[0] = sinf(yaw) * cp;
+    look->f[1] = sinf(pitch);
+    look->f[2] = cosf(yaw) * cp;
     up->f[0] = 0.0f;
     up->f[1] = 1.0f;
     up->f[2] = 0.0f;
-    *pos = sPos;
+    *pos = sFree ? sFPos : sPos;
     return 1;
 }
 
 s32 coopSpectateRoom(u8 *room)
 {
-    if (coopSpectateTarget() < 0)
+    if (!coopSpectateOn())
     {
         return 0;
     }
-    *room = sRoom;
+    *room = (sFree && sFTile != NULL) ? sFTile->room : sRoom;
     return 1;
 }
 
 coord3d *coopSpectatePos(s32 three)
 {
-    if (coopSpectateTarget() < 0)
+    if (!coopSpectateOn())
     {
         return NULL;
+    }
+    if (sFree)
+    {
+        return three ? &sFPos3 : &sFPos;
     }
     return three ? &sPos3 : &sPos;
 }

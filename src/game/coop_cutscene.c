@@ -21,7 +21,8 @@
  *
  * Harness: GE_COOP_TESTCINEMA=<s>: the host runs a cinema <s> seconds into
  * the mission: a camera orbiting the joiner's Bond, so the joiner is the star,
- * for 10 s. GE_COOP_CINEMASHOT=<ticks>: a screenshot that often while the
+ * for 10 s (GE_COOP_TESTCINEMAEND=1: as an ending, which a press leaves).
+ * GE_COOP_CINEMASHOT=<ticks>: a screenshot that often while the
  * swirl or a cinema runs, cine_p<player>_<n>.bmp beside the game.
  */
 #include <ultra64.h>
@@ -239,6 +240,10 @@ static void coopCinemaTest(void)
     i = 0;
     list[i++] = AI_BondDisableControl;
     list[i++] = 0;
+    if (getenv("GE_COOP_TESTCINEMAEND") != NULL)
+    {   /* an ending: a press (a vote, coop_vote.c) leaves the mission */
+        list[i++] = AI_TriggerFadeAndExitLevelOnButtonPress;
+    }
     list[i++] = AI_CameraOrbitPad;
     list[i++] = 0x01; list[i++] = 0x90;     /* 400 across */
     list[i++] = 0x00; list[i++] = 0x50;     /* 80 up */
@@ -249,6 +254,17 @@ static void coopCinemaTest(void)
     list[i++] = AI_EndList;
     sTestCinemaEnd = 300;
     coopRunHostScript(list);
+}
+
+/* coop.c coopStageStart: a mission starts. The menus run no stage ticks, so
+ * the last mission's news is cleared here: replaying the same mission from
+ * its debrief, the host's old "intro over" would end ours at once. */
+void coopCutsceneStageStart(void)
+{
+    sPrevMode = -1;
+    sIntroSent = 0;
+    sHostIntroDone = 0;
+    sStarSet = 0;
 }
 
 /* every tick in a stage (coop.c coopTickBody): 1 while the intro or a
@@ -363,6 +379,9 @@ void coopDesignApply(s32 kind, const u8 *raw, s32 from)
     {
         case COOPEV_CINEMA:
             coopCutsceneApply(raw, from);
+            break;
+        case COOPEV_VOTE:
+            coopVoteApply(raw, from);
             break;
     }
 }

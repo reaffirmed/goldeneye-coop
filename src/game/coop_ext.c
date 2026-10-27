@@ -15,6 +15,7 @@ void coopExtTick(s32 inmission)
     coopBrowseTick(inmission);
     coopVoiceTick(inmission);
     coopTankTick(inmission);
+    coopVoteTick(inmission);
     if (!inmission)
     {
         coopCampaignTick();

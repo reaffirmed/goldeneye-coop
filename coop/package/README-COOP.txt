@@ -74,7 +74,12 @@ Playing
    Continue), then the mission and difficulty as usual. The friends' games
    follow into the mission by themselves.
 6. After each mission everyone sees a stats page with a column per player,
-   then returns to the lobby, and the host picks the next one. The mission
+   then your own stats, then WHAT NEXT, where everyone votes: Replay the
+   mission, the Next mission (after a win) or Back to the lobby. Pick one
+   with Up / Down (or the cursor) and press A / Enter; you can change your
+   vote until it is decided. It is decided when everyone has voted, or 30
+   seconds after the first vote. Most votes win; a tie goes the host's way
+   if the host is in it, otherwise to the lobby. The mission
    time is the team's (the host's clock), so beating a mission's target time
    together unlocks its cheat for everyone, as in solo.
 7. Your campaign is the host's: a joiner's lobby shows "Next:" with the
@@ -124,9 +129,16 @@ Rules
   lobby (the Voice row under their name) or on the watch's Audio page.
 - When a partner completes an objective, a note across the middle of the
   screen says who did it: "MOCK COMPLETED OBJECTIVE A" and the objective.
-- While you are down, the screen fades back in through a partner's eyes
-  ("WATCHING <NAME>"); fire switches to the next partner. Your own view
-  comes back when you are revived or respawn.
+- While you are down (or out of lives), the screen fades back in through a
+  partner's eyes ("WATCHING <NAME>"); fire switches to the next partner and
+  aim to the one before. Use frees the camera: look around with the mouse
+  and fly with WASD, as in photo mode but without the 8 metre limit; fire
+  or Use goes back to a partner's eyes. Your own view comes back when you
+  are revived or respawn.
+- Skipping a cutscene (the mission intro, or an ending that waits for a
+  press) is a vote: "SKIP 1/2 - WAITING FOR <NAME>" shows in the corner and
+  it skips for everyone once more than half of you have pressed (both of
+  two, two of three, three of four). Otherwise it plays out as usual.
 - P is photo mode, in solo too: the HUD and gun disappear and the camera
   comes loose. Look around with the mouse, fly with WASD (it goes the way you
   look, stays above the floor and within about 8 metres of Bond), and press
