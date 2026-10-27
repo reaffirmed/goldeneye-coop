@@ -60,9 +60,21 @@ static struct GlyphLook glyphLook(s32 action)
         g.ink = 0x202020FF;
         g.round = 0;
         g.text = (action == MENUGLYPH_ACCEPT) ? "ENTER" : (action == MENUGLYPH_BACK) ? "ESC"
-               : (action == MENUGLYPH_CHAT) ? "T" : (action == MENUGLYPH_ARROWS) ? "ARROWS"
+               : (action == MENUGLYPH_CHAT) ? "T" : (action == MENUGLYPH_ARROWS || action == MENUGLYPH_DPAD) ? "ARROWS"
+               : (action == MENUGLYPH_TABS) ? "," : (action == MENUGLYPH_TABS_R) ? "."   /* watch_prev / watch_next */
                : "CLICK";   /* L and R: a click steps the row */
         return g;
+    }
+    if (action == MENUGLYPH_DPAD)
+    {
+        g.round = 0;
+        g.face = 0x383838FF;
+        g.text = "D-PAD";
+        return g;
+    }
+    if (action == MENUGLYPH_TABS || action == MENUGLYPH_TABS_R)
+    {
+        action = (action == MENUGLYPH_TABS) ? MENUGLYPH_LEFT : MENUGLYPH_RIGHT;
     }
     if (action == MENUGLYPH_LEFT || action == MENUGLYPH_RIGHT || action == MENUGLYPH_ARROWS)
     {
@@ -180,7 +192,13 @@ static Gfx *hintWord(Gfx *gdl, s32 x, s32 y, const char *word)
 /* a hint's L stands with its R on a pad; the keyboard has one click for both */
 static s32 hintPaired(const struct MenuHint *h)
 {
-    return (h->action == MENUGLYPH_LEFT || h->action == MENUGLYPH_ARROWS) && portInputGlyphStyle() != GLYPH_KEYS;
+    return ((h->action == MENUGLYPH_LEFT || h->action == MENUGLYPH_ARROWS) && portInputGlyphStyle() != GLYPH_KEYS)
+        || h->action == MENUGLYPH_TABS;     /* the two keys too */
+}
+
+static s32 hintPair(const struct MenuHint *h)
+{
+    return (h->action == MENUGLYPH_TABS) ? MENUGLYPH_TABS_R : MENUGLYPH_RIGHT;
 }
 
 static s32 hintItemW(const struct MenuHint *h)
@@ -189,33 +207,44 @@ static s32 hintItemW(const struct MenuHint *h)
 
     if (hintPaired(h))
     {   /* L and R share one word */
-        w += 2 + menuGlyphWidth(MENUGLYPH_RIGHT);
+        w += 2 + menuGlyphWidth(hintPair(h));
     }
     return w;
 }
 
 Gfx *menuHintBar(Gfx *gdl, const struct MenuHint *hints, s32 n)
 {
-    s32 i, x, w = 0;
+    s32 i, w = 0;
 
     for (i = 0; i < n; i++)
     {
         w += hintItemW(&hints[i]) + ((i > 0) ? HINT_SPACE : 0);
     }
-    x = HINT_RIGHT - w;
+    return menuHintBarAt(gdl, hints, n, HINT_RIGHT - w, HINT_Y, NULL);
+}
+
+Gfx *menuHintBarAt(Gfx *gdl, const struct MenuHint *hints, s32 n, s32 x, s32 y, s32 *edges)
+{
+    s32 i;
+
     for (i = 0; i < n; i++)
     {
         const struct MenuHint *h = &hints[i];
 
-        gdl = menuGlyphDraw(gdl, x, HINT_Y, h->action, 0xFF);
+        if (edges != NULL)
+        {
+            edges[2 * i] = x;
+            edges[2 * i + 1] = x + hintItemW(h);
+        }
+        gdl = menuGlyphDraw(gdl, x, y, h->action, 0xFF);
         x += menuGlyphWidth(h->action);
         if (hintPaired(h))
         {
-            gdl = menuGlyphDraw(gdl, x + 2, HINT_Y, MENUGLYPH_RIGHT, 0xFF);
-            x += 2 + menuGlyphWidth(MENUGLYPH_RIGHT);
+            gdl = menuGlyphDraw(gdl, x + 2, y, hintPair(h), 0xFF);
+            x += 2 + menuGlyphWidth(hintPair(h));
         }
         x += GLYPH_GAP;
-        gdl = hintWord(gdl, x, HINT_Y + 2, h->word);
+        gdl = hintWord(gdl, x, y + 2, h->word);
         x += glyphTextW(h->word) + HINT_SPACE;
     }
     return combiner_bayer_lod_perspective(gdl);

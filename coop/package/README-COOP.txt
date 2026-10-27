@@ -17,14 +17,23 @@ Playing
 -------
 1. Everyone starts ProjectMidas.exe, pick a folder and choose
    "3. CO-OP".
-2. The host picks "Host a Game". Your online Steam friends are listed under
-   "Invite a Friend"; pick one to invite them (or use "Steam Invite Window").
+   The CO-OP screen is laid out like Modern Warfare 2's lobby: tabs along
+   the top (PLAY / LOBBY, GAME SETUP, FIND GAMES / INVITE, CONTROLS, CHAT),
+   the tab's rows down the left, your party and the next mission (or the
+   arena) on the right, a line along the foot saying what the row under the
+   cursor does, and the buttons for the pad (or keys) you used last under
+   that. Change tab with LB / RB (L1 / R1) on a pad, , and . on the keyboard
+   (the watch's page keys), or a click on the tab. Up / Down (D-pad, arrow
+   keys) pick a row; a row with arrows either side of its value steps with
+   Left / Right or a click on an arrow; A / Enter selects; B / Esc goes back.
+2. The host picks "Host a Game". Your online Steam friends are listed on
+   the INVITE tab; pick one to invite them (or use "Steam Invite Window").
    Invite up to three friends.
    Before or after you host you can set "Lobby" to Public, so anyone with
-   this build sees your game under "Public Games", and set a "Password"
+   this build sees your game on FIND GAMES, and set a "Password"
    (type it and press Enter; Enter on an empty line removes it). Your Steam
    friends never need the password; it keeps strangers out.
-   Under "Your Character" (and under your name once you are in a lobby)
+   On the "Character" row (PLAY or LOBBY tab)
    pick who you play as: the multiplayer cast (Bond in each outfit,
    Natalya, Trevelyan, Xenia, Ourumov, Boris, Valentin, Mishkin, Jaws,
    Mayday, Oddjob, Baron Samedi, the guards, scientists and the rest), or
@@ -34,19 +43,20 @@ Playing
    file beside it. Step with the arrow keys, the mouse wheel, a click on the
    strip, or LB / RB or the d-pad on a pad; Enter / A (or a click
    on the photo) takes it, Esc / B leaves your pick as it was. On the row
-   itself L / R still step back and forth without opening it. The pick is
-   looks only: everyone plays the same. The others see your pick on your
-   card in the lobby, and you look like it on their screens. Your pick is
+   itself Left / Right still step back and forth without opening it. The
+   pick is looks only: everyone plays the same. The others see your pick in
+   the party list, and you look like it on their screens. Your pick is
    kept for next time.
 3. Each friend either accepts the Steam invite, or picks the host's name
    (marked "Join") on their own CO-OP screen, then picks "Ready Up".
-   Public games are listed under "Public Games" with the host's name and
+   Public games are listed on the FIND GAMES tab with the host's name and
    how many are in; one marked "Password" asks for it before you join.
    If the CO-OP screen says "Wrong password.", try again.
-   "Your Controls" on the CO-OP screen has the controller layout, Field of
-   View, Mouse Look and Mouse Speed; each click steps to the next setting
+   The CONTROLS tab has your profile, the controller layout, Field of View,
+   Mouse Look, Mouse Speed and voice chat; Left / Right step each one
    (the same settings as in the Options menus).
-4. The host can set the rules in the lobby before starting:
+4. The host can set the rules on the GAME SETUP tab before starting (the
+   others see them there):
    - Continue: jumps to the next mission you have not beaten together.
    - When Down: Revive or Timer, Revive only, or Timer only.
    - Respawn (with a timer): 3-20 s (default, sooner when it is quiet) or
