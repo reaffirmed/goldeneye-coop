@@ -45,9 +45,16 @@ jobs:
           fetch-depth: 0
 
       - name: Install Windows (i686) cross-build dependencies
+        # Same guard as the Linux install: a stalled apt mirror costs a few
+        # minutes, not the whole run
+        timeout-minutes: 25
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake zip gcc-mingw-w64-i686 g++-mingw-w64-i686 binutils-mingw-w64-i686
+          APT="timeout 300 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30"
+          for try in 1 2 3; do
+            sudo $APT update && sudo $APT install -y cmake zip gcc-mingw-w64-i686 g++-mingw-w64-i686 binutils-mingw-w64-i686 && break
+            [ $try = 3 ] && exit 1
+            echo "apt-get try $try stalled or failed, retrying"; sudo dpkg --configure -a || true; sleep 10
+          done
 
       - name: Cache SDL2 mingw devel package
         id: cache-sdl2-windows
