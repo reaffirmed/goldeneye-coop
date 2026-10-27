@@ -50,10 +50,12 @@ jobs:
         run: make convert_props convert_chrs convert_guns combine_images
 
       - name: Install Linux (i686) build dependencies
+        # the runners' apt mirror sometimes crawls: scripts/ci_apt_install.sh
+        # retries from another mirror instead of waiting it out
+        timeout-minutes: 35
         run: |
           sudo dpkg --add-architecture i386
-          sudo apt-get update
-          sudo apt-get install -y cmake gcc-multilib g++-multilib \
+          ./scripts/ci_apt_install.sh cmake gcc-multilib g++-multilib \
             libx11-dev:i386 libxext-dev:i386 libxrandr-dev:i386 libxcursor-dev:i386 \
             libxfixes-dev:i386 libxi-dev:i386 libxss-dev:i386 libasound2-dev:i386 \
             libudev-dev:i386 libgl-dev:i386
@@ -137,9 +139,11 @@ jobs:
         run: make convert_props convert_chrs convert_guns combine_images
 
       - name: Install Windows (i686) cross-build dependencies
+        # the runners' apt mirror sometimes crawls: scripts/ci_apt_install.sh
+        # retries from another mirror instead of waiting it out
+        timeout-minutes: 35
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake gcc-mingw-w64-i686 g++-mingw-w64-i686 binutils-mingw-w64-i686
+          ./scripts/ci_apt_install.sh cmake gcc-mingw-w64-i686 g++-mingw-w64-i686 binutils-mingw-w64-i686
 
       - name: Cache SDL2 mingw devel package
         id: cache-sdl2-windows
