@@ -116,6 +116,11 @@ void coopObjStatusChanged(s32 index, s32 letter, s32 status)
     CoopObjDone d;
     s32 credit;
 
+    if (coopExtMissionTicks() > 1)
+    {
+        portConLogf("ge: coop: objective %d (%c) is now %s\n", index, 'A' + letter,
+                    status == OBJECTIVESTATUS_COMPLETE ? "complete" : status == OBJECTIVESTATUS_FAILED ? "failed" : "incomplete");
+    }
     if (status != OBJECTIVESTATUS_COMPLETE || !coopExtIsHost() || !coopLobbyHasPartner()
         || index < 0 || index >= OBJECTIVES_MAX || !sWasOpen[index] || sShown[index])
     {

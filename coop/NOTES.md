@@ -1402,3 +1402,39 @@ never a partner's. Replaces the "Synced cutscenes" line-up beside the star.
   out. Revive only, 2 lives, the host reviving: revived (1 left), the second
   down out and the host no longer offered the revive. The joiner's lobby
   shows the host's Lives. Shots: lives/ in the project files.
+
+## Mission fixes from the v0.1.0 play-test (2026-10-27, COOP_VERSION 12)
+
+- Bunker 2, Frigate and every exit script: "if Bond is dead" stopped a level
+  script for good when the host went down once, so Bunker 2's exit never ran.
+  coopTargetIsDead now says dead only when the whole team is down.
+- Frigate bombs: a joiner's defuser set the bomb's "used" bit only on its own
+  game, and the script's "has the defuser in hand" checked the host's gun.
+  USE events carry the gadget (COOPEV_USE.gadget), and the host's script
+  takes the joiner's item for that one check (coopGadgetCheck/coopGadgetItem).
+- Stage flags: a flag a joiner's own script set was cleared by the next WORLD
+  packet before the host had it, so objectives flickered. A joiner keeps its
+  own new flags for up to a second until the host's packet has them.
+- Surface 2 mine: a partner drawing or throwing the mine counted as the mine
+  left in the level (the fail check), and a joiner's mine only stuck to the
+  helicopter where the host could see it. The thrower's game now says where
+  each throw settled (COOPEV_ITEMSTUCK 29: the object and the matrix, or
+  loose), and every game embeds it there (objCoopEmbed, without the onscreen
+  check).
+- Runway tank (coop_tank.c): the driver sends the tank's position, heading and
+  turret in COOPPKT_TANK (11) every other tick; the others move their copy,
+  hide the driver's puppet, and can't get in.
+- Dam towers: the game stops animating a standing guard (and walks a
+  patrolling one in "magic" mode) when it is off the screen, and the host's
+  screen is the one that counts, so partners saw tower guards frozen.
+  coopChrNearPartner keeps guards within 60 m of a partner animated.
+- Harness: GE_COOP_TESTTHROWAT=<tag>:<s>[:<dist>] (stand by an object and look
+  at it), GE_COOP_TESTTANK=<s> (get in the nearest tank and turn it),
+  GE_COOP_TESTPAD=<pad>:<s> (stand on a pad).
+- Tests (two-game runs with the US ROM): Surface 2 Agent difficulty, joiner
+  plants the mine (objective B complete, credit player 2) and draws it (no
+  fail); Frigate, joiner defuses after a host death (B complete, credit
+  player 2); Bunker 2, host dies, respawns and reaches the exit pad (the
+  mission ends); Runway, joiner drives the tank and the host's copy follows;
+  Dam, idle tower guards within range animate on the host, one out of range
+  stays still as before.

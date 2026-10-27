@@ -35,6 +35,9 @@
 #include "cheat.h" /* cheatIsActive(CHEAT_PORT_ENEMY_FF) - chrlvFireWeaponRelated */
 #ifndef TARGET_N64
 #include "coop.h"
+#define COOP_NEAR_PARTNER(c) coopChrNearPartner(c)  /* a partner watching: leave magic mode */
+#else
+#define COOP_NEAR_PARTNER(c) 0
 #endif
 
 #ifndef TARGET_N64
@@ -9550,7 +9553,7 @@ void chrlvTickGoPos(ChrRecord *self)
         chrlvActGoposRelated(self, &sp58, &sp54);
 
         if ((sp74 == 0)
-            && ((self_prop->flags & PROPFLAG_ONSCREEN) || (chrlvStanRoomRelated(self, &sp58, sp54) == 0)))
+            && ((self_prop->flags & PROPFLAG_ONSCREEN) || COOP_NEAR_PARTNER(self) || (chrlvStanRoomRelated(self, &sp58, sp54) == 0)))
         {
             chrlvActGoposSetTargetPosRelated(self);
             self->act_gopos.unk9c = g_GlobalTimer;
@@ -9706,7 +9709,7 @@ void chrlvTickPatrol(ChrRecord *self)
     if (self->act_patrol.waydata.mode == WAYMODE_MAGIC)
     {
         if ((sp34 == 0)
-            && ((self_prop->flags & PROPFLAG_ONSCREEN) || (chrlvStanRoomRelatedPad(self, temp_v0) == 0)))
+            && ((self_prop->flags & PROPFLAG_ONSCREEN) || COOP_NEAR_PARTNER(self) || (chrlvStanRoomRelatedPad(self, temp_v0) == 0)))
         {
             self->act_patrol.lastvisible60 = g_GlobalTimer;
             chrlvSetNextActPatrolStepPadPos(self);

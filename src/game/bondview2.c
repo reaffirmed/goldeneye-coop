@@ -7893,7 +7893,7 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
             moveData.weaponForwardOffset = 0;
             moveData.btap = 0;
         }
-        else if (portJoyPortUseTap())
+        else if (portJoyPortUseTap() || coopTankTestTap())
         {
             moveData.btap = 1;
         }
@@ -7934,7 +7934,11 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         else if (g_PlayerTankProp != NULL
             && g_PlayerTankProp->type == PROP_TYPE_OBJ
             && g_PlayerTankProp->obj->type == PROPDEF_TANK
-            && g_BondCanEnterTank)
+            && g_BondCanEnterTank
+#ifndef TARGET_N64
+            && !coopTankTaken(g_PlayerTankProp)     /* a partner is driving it */
+#endif
+            )
         {
             spEC = (struct TankRecord *)g_PlayerTankProp->obj;
 
