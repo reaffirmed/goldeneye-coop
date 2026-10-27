@@ -50,13 +50,21 @@ jobs:
         run: make convert_props convert_chrs convert_guns combine_images
 
       - name: Install Linux (i686) build dependencies
+        # The i386 mirror sometimes stalls for 40+ minutes. Each apt call gets
+        # 5 minutes and a stalled try starts over, so a slow mirror costs a
+        # few minutes instead of the whole run
+        timeout-minutes: 25
         run: |
           sudo dpkg --add-architecture i386
-          sudo apt-get update
-          sudo apt-get install -y cmake gcc-multilib g++-multilib \
+          APT="timeout 300 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30"
+          for try in 1 2 3; do
+            sudo $APT update && sudo $APT install -y cmake gcc-multilib g++-multilib \
             libx11-dev:i386 libxext-dev:i386 libxrandr-dev:i386 libxcursor-dev:i386 \
             libxfixes-dev:i386 libxi-dev:i386 libxss-dev:i386 libasound2-dev:i386 \
-            libudev-dev:i386 libgl-dev:i386
+            libudev-dev:i386 libgl-dev:i386 && break
+            [ $try = 3 ] && exit 1
+            echo "apt-get try $try stalled or failed, retrying"; sudo dpkg --configure -a || true; sleep 10
+          done
 
       - name: Cache SDL2 (i686) build
         id: cache-sdl2-linux
