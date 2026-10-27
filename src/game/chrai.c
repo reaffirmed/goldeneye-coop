@@ -936,6 +936,11 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
              */
 #ifndef TARGET_N64
             coopAiCommand((u8 *) AiListp, Offset, ChrEntityp); /* co-op: cutscene and HUD commands reach the joiner */
+            if (coopAiSkip((u8 *) AiListp, Offset, ChrEntityp))
+            {
+                Offset += chraiitemsize((u8 *) AiListp, Offset);
+                continue;
+            }
 #endif
             switch ((AiListp + Offset)->cmd)
             {
@@ -1040,6 +1045,12 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     else
                     {
                         chr = chrFindById(ChrEntityp, CHR_NUM);
+#ifndef TARGET_N64
+                        if (chr && coopKeepBodyList(chr, ailistFindById(AI_LIST_ID)))
+                        {
+                            chr = NULL; /* co-op: already running it from the host's moment */
+                        }
+#endif
                         if (chr)
                         {
                             chr->ailist   = ailistFindById(AI_LIST_ID);
@@ -4298,7 +4309,14 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     s32 num;
                     for (num = get_numguards() - 1; num >= 0; num--)
                     {
-                        if (g_ChrSlots[num].model != NULL)
+                        if (g_ChrSlots[num].model != NULL
+#ifndef TARGET_N64
+                            /* co-op: a joiner's copy of a level script can hide
+                             * the guards after its own body (the cinema's star)
+                             * has been made for the host's ending */
+                            && !(coopEnabled() && g_CurrentPlayer->prop != NULL && &g_ChrSlots[num] == g_CurrentPlayer->prop->chr)
+#endif
+                        )
                         {
                             g_ChrSlots[num].chrflags |= CHRFLAG_HIDDEN;
                         }
