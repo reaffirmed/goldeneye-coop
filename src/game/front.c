@@ -42,6 +42,7 @@
 #include "matrixmath.h"
 #include "coop.h"
 #include "coop_net.h"
+#include "port_update.h" /* the in-game updater: rows on the CO-OP screen */
 #ifndef TARGET_N64
 #include "menu_glyphs.h"
 #endif
@@ -8856,7 +8857,8 @@ enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLRO
        CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE, CLROW_FRIENDLYFIRE,
        CLROW_CHARACTER, CLROW_CHAT, CLROW_PUBLIC, CLROW_PASSWORD, CLROW_JOINPUBLIC, CLROW_LAYOUT, CLROW_OPTION,
        CLROW_HOSTLEAVES, CLROW_VSMODE, CLROW_VSARENA, CLROW_VSSCENARIO, CLROW_VSLENGTH, CLROW_VSWEAPONS, CLROW_VSSTART,
-       CLROW_DISCORDYES, CLROW_DISCORDNO, CLROW_PROFILE, CLROW_VOICEMUTE, CLROW_LIVES, CLROW_BLEEDOUT, CLROW_RESPAWN };
+       CLROW_DISCORDYES, CLROW_DISCORDNO, CLROW_PROFILE, CLROW_VOICEMUTE, CLROW_LIVES, CLROW_BLEEDOUT, CLROW_RESPAWN,
+       CLROW_UPDATE, CLROW_UPDATECHECK, CLROW_UPDATERESTART };
 #define COOP_LOBBY_ROWS     48
 /* The screen is laid out like Modern Warfare 2's lobbies (coopMw*): the
  * title top left, the tabs under it, the tab's rows down the left with
@@ -9233,6 +9235,7 @@ static const char *const coop_lobby_opts[][2] = {
     { "mouse_sens_x", "Mouse Speed\n" },
     { "voice_mode", "Voice Chat\n" },     /* co-op voice (coop_voice.c) */
     { "voice_volume", "Voice Volume\n" },
+    { "auto_update", "Update Check\n" },   /* the updater (port/src/port_update.c) */
 };
 
 /* port_profiles.c: player 1's profile carries these rows and the character (its [settings]) */
@@ -9293,6 +9296,95 @@ static void coopLobbyAddControls(void)
         }
         coopLobbyAdd(CLROW_OPTION, i, coop_lobby_opts[i][1], value);
     }
+    {   /* the updater (port_update.c): which release this is, and ask now */
+        const char *own = portUpdateOwn();
+
+        snprintf(value, sizeof(value), "%.20s\n", (portUpdateState() == PORTUPD_CHECKING) ? "Checking..."
+                                                   : (own[0] != '\0') ? own : "Unknown");
+        coopLobbyAdd(CLROW_UPDATECHECK, 0, "Check Now\n", value);
+    }
+}
+
+/* the updater's rows at the top of PLAY, outside a lobby: a newer release to
+ * install, its download, Restart once it is in, or why it failed */
+static void coopLobbyAddUpdate(void)
+{
+    struct CoopLobbyRow *r;
+    char label[64], value[24];
+    const char *latest = portUpdateLatest();
+
+    switch (portUpdateState())
+    {
+        case PORTUPD_AVAILABLE:
+            snprintf(label, sizeof(label), "Update to %.20s\n", latest);
+            if (portUpdateHasDownload())
+            {
+                r = coopLobbyAdd(CLROW_UPDATE, 0, label, "Install\n");
+            }
+            else
+            {
+                r = coopLobbyAdd(CLROW_TEXT, 0, label, "Not for this PC\n");
+            }
+            if (r != NULL)
+            {
+                r->colour = COOP_LOBBY_COL_OK;
+            }
+            snprintf(label, sizeof(label), "You have %.20s\n", portUpdateOwn()[0] != '\0' ? portUpdateOwn() : "a build from source");
+            r = coopLobbyAdd(CLROW_TEXT, 0, label, "");
+            if (r != NULL)
+            {
+                r->colour = PORT_SHEET_COL_DIM;
+            }
+            break;
+        case PORTUPD_DOWNLOADING:
+            snprintf(label, sizeof(label), "Downloading %.20s\n", latest);
+            snprintf(value, sizeof(value), "%d%%\n", (int) portUpdateProgress());
+            coopLobbyAdd(CLROW_TEXT, 0, label, value);
+            break;
+        case PORTUPD_INSTALLING:
+            snprintf(label, sizeof(label), "Installing %.20s\n", latest);
+            coopLobbyAdd(CLROW_TEXT, 0, label, "...\n");
+            break;
+        case PORTUPD_READY:
+            snprintf(value, sizeof(value), "%.20s\n", latest);
+            r = coopLobbyAdd(CLROW_UPDATERESTART, 0, "Restart Now\n", value);
+            if (r != NULL)
+            {
+                r->colour = COOP_LOBBY_COL_OK;
+            }
+            break;
+        case PORTUPD_FAILED:
+        {   /* the reason is the foot line of the row to try again on */
+            const s32 newer = latest[0] != '\0' && portUpdateNewer(latest) && portUpdateHasDownload();
+
+            r = coopLobbyAdd(CLROW_TEXT, 0, newer ? "Update failed\n" : "Couldn't check for updates\n", "");
+            if (r != NULL)
+            {
+                r->colour = 0xA00000FF;
+            }
+            if (newer)
+            {
+                snprintf(label, sizeof(label), "Update to %.20s\n", latest);
+                coopLobbyAdd(CLROW_UPDATE, 1, label, "Try Again\n");
+            }
+            else
+            {
+                coopLobbyAdd(CLROW_UPDATECHECK, 1, "Check Again\n", "");
+            }
+            break;
+        }
+        default:
+            if (portUpdateJustUpdated()[0] != '\0')
+            {   /* the game restarted into the update */
+                snprintf(label, sizeof(label), "Updated to %.20s\n", portUpdateJustUpdated());
+                r = coopLobbyAdd(CLROW_TEXT, 0, label, "");
+                if (r != NULL)
+                {
+                    r->colour = COOP_LOBBY_COL_OK;
+                }
+            }
+            break;
+    }
 }
 
 static void coopLobbyBuildRows(void)
@@ -9306,6 +9398,7 @@ static void coopLobbyBuildRows(void)
     coop_lobby_build_tab = CLTAB_MAIN;
     if (state == COOPLOBBY_OFF)
     {
+        coopLobbyAddUpdate();
         coopLobbyAdd(CLROW_TEXT, 0, "Steam is not running.\n", "");
         coopLobbyAdd(CLROW_TEXT, 0, "Start Steam and log in,\n", "");
         coopLobbyAdd(CLROW_TEXT, 0, "then open CO-OP again.\n", "");
@@ -9313,6 +9406,7 @@ static void coopLobbyBuildRows(void)
     }
     if (state == COOPLOBBY_IDLE)
     {
+        coopLobbyAddUpdate();
         if (coopBrowseRefused() > 0)
         {
             r = coopLobbyAdd(CLROW_TEXT, 0, coopBrowseRefusedText(), "");
@@ -9857,6 +9951,15 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
             break;
         case CLROW_OVERLAY:
             coopLobbyInviteOverlay();
+            break;
+        case CLROW_UPDATE:
+            portUpdateInstall();
+            break;
+        case CLROW_UPDATECHECK:
+            portUpdateCheck(1);
+            break;
+        case CLROW_UPDATERESTART:
+            portUpdateRestart();
             break;
         case CLROW_DOWNRULE:
         case CLROW_DIFFICULTY:
@@ -11158,6 +11261,16 @@ static const char *coopLobbyHelp(const struct CoopLobbyRow *r)
         case CLROW_VSSCENARIO:  return "The multiplayer scenario.\n";
         case CLROW_VSLENGTH:    return "When the match ends.\n";
         case CLROW_VSWEAPONS:   return "The weapons on the map.\n";
+        case CLROW_UPDATE:
+        case CLROW_UPDATECHECK:
+            if (r->arg == 1)
+            {   /* Try Again / Check Again: why it failed */
+                snprintf(opt, sizeof(opt), "%.80s.\n", portUpdateError());
+                return opt;
+            }
+            return (r->kind == CLROW_UPDATE) ? "Install it from GitHub. Your saves, settings and cart stay.\n"
+                                             : "Your version. Select to look for a newer one now.\n";
+        case CLROW_UPDATERESTART: return "The update is installed. Restart the game to play it.\n";
         case CLROW_OPTION:
         {
             const char *h = portOptHelp(coop_lobby_opts[r->arg][0]);

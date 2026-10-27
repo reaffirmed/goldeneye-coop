@@ -369,6 +369,8 @@ static const struct PortOpt sOpts[] = {
     ENUMR ("colorblind",        "[display]", "Colour Blind\n",  PORTOPT_CAT_GAMEPLAY, sColorblindVals, sColorblindText, NULL),
     TOGGLE("screen_shake",      "[display]", "Screen Shake\n",  PORTOPT_CAT_GAMEPLAY),
     ENUMR ("text_size",         "[display]", "Text Size\n",     PORTOPT_CAT_GAMEPLAY, sTextSizeVals, sTextSizeText, NULL),
+    /* the in-game updater (port_update.c): ask GitHub for a newer release at startup */
+    TOGGLE("auto_update",       "[display]", "Check for Updates\n", PORTOPT_CAT_GAMEPLAY),
     TOGGLET("crouch_key",       "[input]",   "Crouch Key\n",    PORTOPT_CAT_CONTROLLER, sHoldToggleText),
     TOGGLET("walk_key",         "[input]",   "Walk Key\n",      PORTOPT_CAT_CONTROLLER, sHoldToggleText),
 };

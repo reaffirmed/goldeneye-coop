@@ -197,7 +197,9 @@ with the whole screen to themselves.
      takes two, Bunker three) are skipped.
    - Scenario: Normal, You Only Live Twice, The Living Daylights (Flag Tag),
      The Man with the Golden Gun, Licence to Kill, and the team games when
-     the player count suits them.
+     the player count suits them: 2 v 1 with three players, 2 v 2 and
+     3 v 1 with four. In a team game team-mates can hurt each other, and a
+     team-mate killed takes a point off your team, as in the original.
    - Game Length: no limit, a time limit or a kill limit.
    - Weapons: the original weapon sets (Slappers Only, Pistols, ... Random).
    Everyone's character is the one picked under their name.
@@ -210,6 +212,8 @@ with the whole screen to themselves.
 - Each PC has its own copy of the ordinary weapons and armour lying around,
   so two players can both take the same gun. The Flag Tag flag and the
   Golden Gun are shared: only one player can hold them.
+- Everyone plays by the original rules: your own Multiplayer Options for
+  Friendly Fire and LTK Health don't apply to an online match.
 - Chat (T) works in versus too. A host leaving in the middle of a versus
   match has not been tested yet.
 
@@ -268,6 +272,24 @@ Options > Gameplay > Accessibility:
 - Screen Shake: Off stops explosions shaking the view.
 - Crouch Key and Walk Key: Hold or Toggle (press once on, again off).
 
+Updates
+-------
+When the game starts it asks GitHub whether a newer release is out (one
+small request; nothing downloads by itself). If there is one, the PLAY tab
+of the CO-OP screen shows "Update to v..." at the top. Pick it and the game
+downloads the new zip, checks it against the checksum GitHub lists for it,
+and replaces its own files (ProjectMidas.exe, the DLLs, the .bat files and
+these notes). Then pick "Restart Now". Your cart image, saves, profiles,
+reports and midas.ini are never touched, and the download is thrown away if
+it doesn't match. If a file can't be replaced, everything is put back.
+- A host turned you away with "Update needed to join": the game looks for
+  the update at once and offers it, so you can install it and join again.
+  If the host is the one on the old version, it says so.
+- CONTROLS tab: "Update Check" On / Off (midas.ini [display] auto_update),
+  and "Check Now", which shows your version and asks GitHub again.
+- Behind a firewall that blocks GitHub, download the zip from the releases
+  page instead and unzip it over this folder.
+
 If something goes wrong
 -----------------------
 - Something looks wrong: press F8 (anywhere, in a mission or the menus). The
@@ -281,8 +303,8 @@ If something goes wrong
   If you say no, or the game froze instead, it asks again the next time you
   start it.
 - Press ~ (tilde) in game to open the console. The co-op lines start with
-  "ge: steam:", "ge: coop:", "ge: versus:", "ge: presence:" and
-  "ge: discord:".
+  "ge: steam:", "ge: coop:", "ge: versus:", "ge: presence:",
+  "ge: discord:" and "ge: update:".
 
 Known gaps in this build
 ------------------------

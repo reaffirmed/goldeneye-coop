@@ -199,6 +199,12 @@ padN_stickmode.
   mute_unfocused      | 0          | 1 = silent while the game window is not
                       |            | focused; sound returns at your volumes
                       |            | when it is focused again
+  Updates
+  auto_update         | 1          | 1 = ask GitHub for a newer co-op release
+                      |            | at startup; the CO-OP screen offers it.
+                      |            | Nothing downloads until you pick it.
+                      |            | 0 = only when you pick Check Now, or a
+                      |            | host has another version
   Player options (global, not per save file)
   look_updown         | 1          | 1 = upright, 0 = reverse (inverted)
                       |            | up/down look. Also on the Mouse and

@@ -1548,6 +1548,89 @@ stays 12 (everything below talks to a v0.2.0 game).
   compiled as an int function and the jitter read 12, 31, 51, 71, 91...;
   written out by hand now. Check new calls with -Wimplicit-function-declaration.
 
+## Versus scenarios checked, team games (2026-10-27)
+
+- Every scenario played through over the mock Steam with coop/docker/versus.sh:
+  Teams 2 v 2 (4 copies, first to 3: the team's end screen, the same on all
+  four), 2 v 1 (3 copies) and 3 v 1 (4 copies) with the host's bot killing a
+  team-mate (each kill takes a point off the team, so no limit is reached, on
+  every copy), Golden Gun and Flag Tag (GE_VS_GRAB: the item leaves the other
+  world), Licence to Kill (3 copies, one-hit kills both ways) and You Only
+  Live Twice (two deaths end it). Rare's sides come from session numbers
+  (2 v 2: players 1 and 4 against 2 and 3; 3 v 1: player 4 alone; 2 v 1:
+  player 3 alone), and portMpTeamsEnsure leaves them as they are.
+- Fixed: midas.ini's mp_friendly_fire and mp_ltk_health applied in online
+  versus, per PC. A hit is checked on the shooter's PC and again on the
+  victim's, so friendly fire only worked when both had it on, and LTK Health
+  made one player die in one hit by their own ini. Both are off in versus
+  now (video.c), so everyone plays Rare's rules: team-mates hurt, one-hit
+  kills only in Licence to Kill. No protocol change (COOP_VERSION stays).
+- Harness: versus.sh parks the menu crosshair off the lobby's rows
+  (GE_CURSOR=20,225). With three or four copies something presses accept
+  in the lobby (cause not found), and the crosshair, centred on Leave Lobby
+  since the MW2 lobby, kept dropping the host out, so 3+ copy runs never
+  started. Whether real input can do the same is not known.
+
+## In-game updater (2026-10-27)
+
+Owner's ask: the "update needed" line should lead to the update, not to
+GitHub. No protocol change (COOP_VERSION stays 12); the lobby gains one key.
+
+- The build knows its release: scripts/port/buildinfo.cmake puts
+  `git describe --tags --match "v[0-9]*" --abbrev=0` in PORT_BUILD_RELEASE
+  ("" without tags). CI sets GE_RELEASE_TAG on the Windows build, since a
+  manual release run tags the commit after building it.
+- port/src/port_update.c (worker thread; the menus only read its state):
+  - Check: GET api.github.com/repos/reaffirmed/goldeneye-coop/releases/latest
+    (skips the coop-latest prerelease) at startup unless [display]
+    auto_update=0, when a host refuses us for another co-op version (even
+    with auto_update off), and on Check Now. Forced checks at most one in
+    10 s (GitHub allows 60 an hour without a token). The startup check fails
+    silently (offline is normal); the others show why.
+  - Newer = the tag beats PORT_BUILD_RELEASE by version order. Asset for
+    this system: name ending -win32.zip (-linux.zip on Linux, none
+    published yet: "Not for this PC").
+  - Install: download to Data/Update/<name>.part (WinHTTP, the system
+    proxy; curl on Linux, forked with our fds closed), size and SHA-256
+    against the asset's "digest" (no digest: refused), then every file under
+    the zip's top folder (the one with the exe) that portUpdPathAllowed lets
+    through is inflated, CRC-checked and written to Data/Update/new/. Never
+    written: any cart image extension, *.ini, *.bin, *.sav, anything under
+    Data/ but its own .txt files (Saves, Profiles, Logs, Crashes, Reports
+    are folders there), coop_* beside the exe, "..", absolute or odd paths.
+  - Swap: each target renamed <name>.old (Windows lets a running exe and
+    its loaded DLLs be renamed), the new file moved in; any failure moves
+    every file back. Data/Update/installed.txt lists them.
+  - Restart Now: CreateProcess / fork+exec of the same exe name with
+    "-updatewait <pid>", then portRequestQuit (the normal quit, ini saver
+    included). The new game waits up to 15 s for the old one, deletes the
+    .old files and the zip, and the PLAY tab says "Updated to v...".
+- port/src/port_update_util.c: release JSON, version order, the path rule,
+  SHA-256, CRC-32, inflate (RFC 1951) and a zip reader, no game or OS calls.
+  coop/ci/update_test.c checks them (main.yml), including the v0.2.1
+  release zip read back byte for byte.
+- CO-OP screen (front.c coopLobbyAddUpdate): at the top of PLAY outside a
+  lobby, "Update to v0.2.2 - Install" and "You have v0.2.1"; then
+  "Downloading v0.2.2 - 45%", "Installing", "Restart Now"; on a failure a
+  red line and Try Again / Check Again, whose foot line says why. CONTROLS:
+  "Update Check" (auto_update) and "Check Now" with our version.
+- Refused for another version: the lobby now carries gerel (the host's
+  release). The hint says "Host has v0.2.2, you v0.2.1", or "Host has v0.2.0
+  and needs to update."; the panel says "Update Needed" (it said "Wrong
+  Password" for this refusal before).
+- Harness: GE_UPDATE_API=<url> (coop/mock/update_server.py plays GitHub,
+  --digest good|bad|none), GE_UPDATE_FAKEVER=<tag>, GE_UPDATE_AUTO=install|
+  restart. coop/docker/update.sh runs it end to end and checks the result.
+- Checked: update.sh on Linux (install and restart; AUTO=none installs
+  nothing; bad and missing digests refused, old exe kept; ROM, campaign
+  save and midas.ini untouched; the zip's midas.ini, save, cart image and
+  ../ entry left alone); the Windows exe under Wine against the mock (WinHTTP
+  download, ProjectMidas.exe and SDL2.dll swapped while running, restart,
+  .old files deleted by the new copy); two copies over the mock Steam with
+  the host on "v0.2.2" / version 13 and the joiner on v0.2.1 with
+  auto_update=0 (refusal, forced check, offer). Shots: updater/ in the
+  project files.
+
 ## Spectator camera, the debrief vote and skip votes (2026-10-27)
 
 Owner's pick from the feature list: spectate between teammates when out, and

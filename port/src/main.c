@@ -910,6 +910,12 @@ int main(int argc, char **argv)
         portAnimDataInit();
     }
 
+    {   /* after an in-game update: wait for the old copy to quit, delete its
+         * files (port_update.c). Before the save check, which backs the saves
+         * up for the new build. */
+        extern void portUpdateBoot(int argc, char **argv);
+        portUpdateBoot(argc, argv);
+    }
     {   /* a new build backs the saves up before it touches them (port_save.c) */
         extern void portSaveBootCheck(void);
         portSaveBootCheck();

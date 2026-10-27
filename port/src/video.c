@@ -136,6 +136,7 @@ static int s_CfgWatchStatic = 1;
 static int s_CfgFastPause = 0;     /* [display] fast_pause: the watch opens and closes at Rare's top speed (bondview2.c) */
 static int s_CfgMouseAutoAim = 0;   /* [display] mouse_auto_aim: 1 lets a mouse player use Auto-Aim (default: never) */
 static int s_CfgMuteUnfocused = 0; /* [display] mute_unfocused: audio_pc.c plays silence while the window has no focus */
+static int s_CfgAutoUpdate = 1;    /* [display] auto_update: look for a newer release at startup (port_update.c) */
 static int s_CfgVoiceMode = 0;     /* [display] voice_mode: co-op voice chat 0 push to talk, 1 open mic, 2 off (coop_voice.c) */
 static int s_CfgVoiceVolume = 100; /* [display] voice_volume: partners' voices, percent (0..200) */
 static int s_CfgArmorHud = 0;       /* [display] armor_hud: the health / armour arcs show on a body armour pickup (bondview2.c) */
@@ -357,6 +358,12 @@ extern double atan(double);
 static double videoFovAcross(double deg, double ratio)
 {
     return 2.0 * atan(tan(deg * VIDEO_DEG2RAD * 0.5) * ratio) / VIDEO_DEG2RAD;
+}
+
+/** [display] auto_update: port_update.c checks GitHub at startup */
+int portVideoAutoUpdate(void)
+{
+    return s_CfgAutoUpdate;
 }
 
 /** [display] voice_mode and voice_volume: co-op voice chat (coop_voice.c) */
@@ -1286,6 +1293,7 @@ static int videoSetDisplayOption(const char *key, const char *value)
     if (SDL_strcasecmp(key, "mouse_auto_aim") == 0) { s_CfgMouseAutoAim = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "mute_unfocused") == 0) { s_CfgMuteUnfocused = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "voice_mode") == 0)   { s_CfgVoiceMode = SDL_clamp(SDL_atoi(value), 0, 2); return 1; }
+    if (SDL_strcasecmp(key, "auto_update") == 0)  { s_CfgAutoUpdate = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "voice_volume") == 0) { s_CfgVoiceVolume = SDL_clamp(SDL_atoi(value), 0, 200); return 1; }
     if (SDL_strcasecmp(key, "composite") == 0)    { (void) value; return 1; }   /* a day-one ini line: Classic Mode owns it now */
     if (SDL_strcasecmp(key, "mp_ltk_health") == 0) { s_CfgMpLtkHealth = SDL_atoi(value) != 0; return 1; }
@@ -1560,6 +1568,7 @@ s32 portVideoOptionGet(const char *key, s32 *out)
     if (SDL_strcasecmp(key, "mouse_auto_aim") == 0) { *out = s_CfgMouseAutoAim; return 1; }
     if (SDL_strcasecmp(key, "mute_unfocused") == 0) { *out = s_CfgMuteUnfocused; return 1; }
     if (SDL_strcasecmp(key, "voice_mode") == 0)   { *out = s_CfgVoiceMode; return 1; }
+    if (SDL_strcasecmp(key, "auto_update") == 0)  { *out = s_CfgAutoUpdate; return 1; }
     if (SDL_strcasecmp(key, "voice_volume") == 0) { *out = s_CfgVoiceVolume; return 1; }
     if (SDL_strcasecmp(key, "mp_ltk_health") == 0) { *out = s_CfgMpLtkHealth; return 1; }
     if (SDL_strcasecmp(key, "mp_no_armor") == 0)   { *out = s_CfgMpNoArmor; return 1; }
@@ -2401,6 +2410,7 @@ static void videoWriteDefaultIni(void)
     fprintf(f, "mute_unfocused=%d\n", s_CfgMuteUnfocused);
     fprintf(f, "voice_mode=%d\n", s_CfgVoiceMode);
     fprintf(f, "voice_volume=%d\n", s_CfgVoiceVolume);
+    fprintf(f, "auto_update=%d\n", s_CfgAutoUpdate);
     fprintf(f, "mp_ltk_health=%d\n", s_CfgMpLtkHealth);
     fprintf(f, "mp_no_armor=%d\n", s_CfgMpNoArmor);
     fprintf(f, "mp_friendly_fire=%d\n", s_CfgMpFriendlyFire);
@@ -5878,23 +5888,27 @@ s32 portExplosionCap(void)
 }
 
 /** midas.ini [display] mp_friendly_fire: with it off, bondview2.c drops damage
- * one team-mate deals another in 2v2, 3v1 and 2v1. Never in demo playback. */
+ * one team-mate deals another in 2v2, 3v1 and 2v1. Never in demo playback, and
+ * never in online versus, where every PC plays Rare's rules (team-mates hurt). */
 s32 portMpFriendlyFireOff(void)
 {
     extern s32 get_is_ramrom_flag(void);
+    extern s32 coopVersus(void);
 
-    return !s_CfgMpFriendlyFire && get_is_ramrom_flag() == 0;
+    return !s_CfgMpFriendlyFire && get_is_ramrom_flag() == 0 && !coopVersus();
 }
 
 /** midas.ini [display] mp_ltk_health: Licence to Kill's one-hit kills in any
  * scenario - lv.c's 200 handicap at match start and bondview2.c's
- * health-plus-armour damage. 2+ players only, never in demo playback. */
+ * health-plus-armour damage. 2+ players only, never in demo playback, and not
+ * in online versus, where the victim's PC would decide the hit by its own ini. */
 s32 portMpLtkHealthActive(void)
 {
     extern s32 getPlayerCount(void);
     extern s32 get_is_ramrom_flag(void);
+    extern s32 coopVersus(void);
 
-    return s_CfgMpLtkHealth && getPlayerCount() >= 2 && get_is_ramrom_flag() == 0;
+    return s_CfgMpLtkHealth && getPlayerCount() >= 2 && get_is_ramrom_flag() == 0 && !coopVersus();
 }
 
 /** midas.ini [display] mp_no_armor: prop.c leaves the body armour pickups out of
