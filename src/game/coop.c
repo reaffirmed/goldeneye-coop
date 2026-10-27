@@ -1800,16 +1800,19 @@ static void coopHarnessTick(void)
             }
         }
     }
-    {   /* GE_COOP_TESTDIE=<ticks>: kill our Bond that far into the mission, 900 if not given (harness only) */
-        static s32 testdie = -1;
+    {   /* GE_COOP_TESTDIE=<ticks>: kill our Bond that far into the mission, 900 if not given;
+         * GE_COOP_TESTDIEAGAIN=<ticks>: and again that long after each time (harness only) */
+        static s32 testdie = -1, again;
         if (testdie == -1)
         {
             const char *e = getenv("GE_COOP_TESTDIE");
+            const char *a = getenv("GE_COOP_TESTDIEAGAIN");
             testdie = (e == NULL) ? 0 : (atoi(e) > 1) ? atoi(e) : 900;
+            again = (a != NULL) ? atoi(a) : 0;
         }
         if (testdie && sMissionTicks >= (u32) testdie && coopPartnerHere() && !g_CurrentPlayer->bonddead)
         {
-            testdie = 0;
+            testdie = (again > 0) ? (s32) sMissionTicks + again : 0;
             portConLogf("ge: coop: testdie\n");
             bondviewCallRecordDamageKills(10.0f, 0.0f, -1, 1);
         }

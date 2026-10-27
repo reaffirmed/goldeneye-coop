@@ -1336,4 +1336,13 @@ on the paper) and scroll as before.
   "2 LIVES LEFT" / "LAST LIFE" under the timer.
 - Lobby: the host steps the rows with A (forward) or L / R and the D-pad
   (both ways), like the versus rows.
-- Harness: GE_COOP_LIVES, GE_COOP_BLEEDOUT, GE_COOP_RESPAWN=<index>.
+- Harness: GE_COOP_LIVES, GE_COOP_BLEEDOUT, GE_COOP_RESPAWN=<index> (host
+  only: the joiner's come from HELLO); GE_COOP_TESTDIEAGAIN=<ticks> dies
+  again that long after each GE_COOP_TESTDIE.
+- Tested in Dam with two copies over the mock Steam, rules set on the host
+  and the joiner dying: Timer, 3 lives, 5 s: back after 5.0 s twice ("LAST
+  LIFE" on the second), the third down out ("NO LIVES LEFT", the host's tag
+  OUT). Revive only, 2 lives, 15 s: the bar counts down from 15 and bleeds
+  out. Revive only, 2 lives, the host reviving: revived (1 left), the second
+  down out and the host no longer offered the revive. The joiner's lobby
+  shows the host's Lives. Shots: lives/ in the project files.
