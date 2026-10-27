@@ -1402,3 +1402,54 @@ never a partner's. Replaces the "Synced cutscenes" line-up beside the star.
   out. Revive only, 2 lives, the host reviving: revived (1 left), the second
   down out and the host no longer offered the revive. The joiner's lobby
   shows the host's Lives. Shots: lives/ in the project files.
+
+## The CO-OP screen in the style of Modern Warfare 2 (2026-10-27)
+
+Owner's ask: a lobby laid out like MW2's (IW4x's ui_mp menus were the
+reference for the structure only; nothing of theirs is used). No protocol
+change: it is all front.c and menu_glyphs.c.
+
+- The folder is gone from MENU_COOP_LOBBY: constructor_menu1D_cooplobby
+  draws its own dark screen (coopMwRender): a breadcrumb and the title top
+  left, our Steam name top right, the tabs under them, the tab's rows down
+  the left, the party (a seat per player: colour, 3D head, name, HOST /
+  READY / NOT READY / TALKING; OPEN seats) and the next mission's or the
+  arena's photo on the right, the row's description along the foot
+  (coopLobbyHelp; Port Options rows use port_option_help.c) and the button
+  prompts under it (menuHintBarAt, left-aligned, with each prompt's edges
+  so BACK takes a click). The crew strip and its cards are gone.
+- Tabs: coopLobbyBuildRows is the old builder; each row now carries the tab
+  it was added under (coop_lobby_build_tab) and coopLobbyBuild makes the
+  view of the tab on show (coop_lobby_view). PLAY / LOBBY: host, join,
+  Ready, Select Mission / Continue / Start Match, Character, voice mutes,
+  Discord asks, Leave. GAME SETUP: Mode and the versus rows, When Down,
+  Respawn / Bleed Out, Lives, Guards, Friendly Fire, Host Leaves, Lobby type
+  and Password (read-only rows for joiners). FIND GAMES (not in a lobby):
+  public games and friends. INVITE (host): Steam's window and friends.
+  CONTROLS: profile, layout, the five Port Options. CHAT: the last 8 lines
+  and Type a Message; T jumps there. A tab with no rows is not shown.
+- Input: LB / RB (L_TRIG / R_TRIG) or watch_prev / watch_next (, and .; Q
+  and E were tried but are next_inventory and use, and use is Select, so
+  the press also acted on the new tab's first row) or a click change tab.
+  Up / Down walk the actionable rows as before (coopLobbyScrollTick over
+  the view). Left / Right (D-pad, digital Move, the arrow keys) step any
+  row with a value (coopLobbySteps / coopLobbyStep: both ways for every
+  rule, the character, the options and layout); a click on a value's left
+  or right arrow steps it; A elsewhere is the old action (a step on for
+  values, the select for Character).
+- The highlighted row has MW2's lime bar; the crosshair is hidden while a
+  pad or the keys have a row picked (g_portMenuMouseOwns off) and shown for
+  the mouse. Opening the screen picks the first row, except under
+  GE_SKIPINTRO, whose A taps would press it.
+- The character select keeps its layout on the dark screen: dark cards,
+  lime band and arrows, light ink; its foot sits lower (0x130).
+- Names (friends, public games, voice rows, Discord asks) and info lines
+  keep their case; labels and values are in capitals.
+- Harness: GE_COOP_LOBBYTAB=<0..4> shows that tab, =c each tab in turn (4 s
+  apiece). coop/docker/menu_shots.sh (one copy, not in a lobby) and
+  menu_input.sh (two copies, xdotool keys; CLICK=x,y parks the crosshair
+  and clicks, since the menu mouse is relative under Xvfb).
+- Checked with two copies over the mock Steam, co-op and versus, host and
+  joiner: every tab, keys for tabs / rows / values, a click on a tab, the
+  character select opened, stepped, taken and left. Shots: mw2-menu/ in the
+  project files.

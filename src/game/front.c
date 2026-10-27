@@ -8858,21 +8858,35 @@ enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLRO
        CLROW_HOSTLEAVES, CLROW_VSMODE, CLROW_VSARENA, CLROW_VSSCENARIO, CLROW_VSLENGTH, CLROW_VSWEAPONS, CLROW_VSSTART,
        CLROW_DISCORDYES, CLROW_DISCORDNO, CLROW_PROFILE, CLROW_VOICEMUTE, CLROW_LIVES, CLROW_BLEEDOUT, CLROW_RESPAWN };
 #define COOP_LOBBY_ROWS     48
-/* the crew strip (coopLobbyStrip): a photo card per player, and the next
- * mission's or the arena's photo, between the title and the rows */
-#define COOP_STRIP_Y        0x30
-#define COOP_STRIP_H        0x56
-#define COOP_LOBBY_VISIBLE  9       /* rows down to Rare's last line (293); more scroll (coop_lobby_scroll) */
-#define COOP_LOBBY_CHAT_LINES 3
-#define COOP_LOBBY_X        PORT_SHEET_LABEL_X
-#define COOP_LOBBY_VALUE_X  0xFA
-#define COOP_LOBBY_Y0       (COOP_STRIP_Y + COOP_STRIP_H + 2)
+/* The screen is laid out like Modern Warfare 2's lobbies (coopMw*): the
+ * title top left, the tabs under it, the tab's rows down the left with
+ * their values at the column's right edge, the party and the next mission
+ * (or the arena) on the right, what the row under the cursor does along the
+ * foot, and the button prompts under that. */
+#define COOP_LOBBY_VISIBLE  11      /* rows on show; more scroll (coop_lobby_scroll) */
+#define COOP_LOBBY_CHAT_LINES 8
+#define COOP_LOBBY_X        0x1C    /* the list's left edge */
+#define COOP_LOBBY_R        0x10A   /* its right edge: the values end here */
+#define COOP_LOBBY_VALUE_W  0x78    /* a value's widest */
+#define COOP_LOBBY_Y0       0x52
 #define COOP_LOBBY_PITCH    0x12
-#define COOP_LOBBY_LABEL_W  (COOP_LOBBY_VALUE_X - COOP_LOBBY_X - 6)
-#define COOP_LOBBY_COL_OK   0x006000FF  /* Ready: dark green ink */
-struct CoopLobbyRow { s32 kind; s32 arg; s32 dim; s32 colour; s32 indent; s32 wide; char label[80]; char value[24]; };
+#define COOP_LOBBY_COL_OK   0x006000FF  /* Ready (the builder's ink; drawn light green, coopMwInk) */
+#define COOP_TABS_Y         0x2E
+/* the tabs: rows go under the one coop_lobby_build_tab names as they are added */
+enum { CLTAB_MAIN, CLTAB_SETUP, CLTAB_FIND, CLTAB_CONTROLS, CLTAB_CHAT, CLTAB_COUNT };
+struct CoopLobbyRow { s32 kind; s32 arg; s32 dim; s32 colour; s32 indent; s32 wide; s32 tab; char label[80]; char value[24]; };
 static struct CoopLobbyRow coop_lobby_rows[COOP_LOBBY_ROWS];
 static s32 coop_lobby_nrows;
+static s32 coop_lobby_tab;              /* the tab on show */
+static s32 coop_lobby_build_tab;
+static s32 coop_lobby_view[COOP_LOBBY_ROWS];    /* the rows of the tab on show, in order */
+static s32 coop_lobby_nview;
+static s32 coop_lobby_tabx[CLTAB_COUNT][2];     /* each tab's left and right on screen (0, 0: not shown) */
+static s32 coop_lobby_backx[2];                 /* the BACK prompt, for a click */
+static s32 coop_lobby_hottab = -1;              /* the tab under the crosshair */
+static s32 coop_lobby_arrowx[COOP_LOBBY_VISIBLE][2];   /* each row on show: its value's left and right arrows (0: none) */
+#define COOP_MW_FOOT_Y      0x11E   /* the line over the foot: the row's description, then the prompts */
+#define COOP_MW_HINT_Y      0x136
 static s32 coop_lobby_hot = -1;
 static s32 coop_lobby_ok;           /* Steam (or GE_COOP) is usable */
 static s32 coop_lobby_nfriends;
@@ -8890,6 +8904,13 @@ static f32 coop_charsel_cursor[2];  /* the crosshair when it opened, for when it
 static void coopCharselOpen(void);
 static void coopCharselTick(void);
 static void coopCharselHarness(void);
+#ifdef GE_VIDEO
+extern s32 portInputArrowStepLR(void);      /* input_pc.c: the arrow keys */
+extern u16 portMouseBindMask(void);         /* video.c: the buttons a mouse press drove */
+#else
+#define portInputArrowStepLR() 0
+#define portMouseBindMask() 0
+#endif
 
 /* Steam names can hold anything; the menu font has ASCII */
 static void coopLobbyCopyName(char *out, s32 cap, const char *name)
@@ -8917,6 +8938,7 @@ static struct CoopLobbyRow *coopLobbyAdd(s32 kind, s32 arg, const char *label, c
     r->colour = 0xFF;
     r->indent = 0;
     r->wide = FALSE;
+    r->tab = coop_lobby_build_tab;
     snprintf(r->label, sizeof(r->label), "%s", label);
     snprintf(r->value, sizeof(r->value), "%s", value);
     return r;
@@ -9167,10 +9189,10 @@ static s32 coopLobbyActionable(const struct CoopLobbyRow *r)
     return r->kind != CLROW_TEXT && r->kind != CLROW_HEAD && !r->dim;
 }
 
-/* each player's chat ink on the paper: darker takes on the HUD's colours */
+/* each player's colour in the lobby (chat lines, the party's seats): the HUD's */
 static s32 coopLobbyChatColour(s32 player)
 {
-    static const s32 inks[COOP_MAX_PLAYERS] = { 0x806000FF, 0x00608CFF, 0x902070FF, 0x206820FF };
+    static const s32 inks[COOP_MAX_PLAYERS] = { (s32) 0xF0C850FF, 0x58B8F0FF, (s32) 0xE070C0FF, 0x70D070FF };
 
     return (player >= 0 && player < COOP_MAX_PLAYERS) ? inks[player] : 0xFF;
 }
@@ -9227,7 +9249,7 @@ static void coopLobbyAddControls(void)
     char value[24];
     s32 i;
 
-    coopLobbyAdd(CLROW_HEAD, 0, "Your Controls\n", "");
+    coop_lobby_build_tab = CLTAB_CONTROLS;
     {   /* whose settings these are: loading a profile brings its controls, options and character */
         const char *active = portProfileActive(0);
 
@@ -9273,7 +9295,7 @@ static void coopLobbyAddControls(void)
     }
 }
 
-static void coopLobbyBuild(void)
+static void coopLobbyBuildRows(void)
 {
     const s32 state = coopLobbyState();
     struct CoopLobbyRow *r;
@@ -9281,6 +9303,7 @@ static void coopLobbyBuild(void)
     s32 i, k;
 
     coop_lobby_nrows = 0;
+    coop_lobby_build_tab = CLTAB_MAIN;
     if (state == COOPLOBBY_OFF)
     {
         coopLobbyAdd(CLROW_TEXT, 0, "Steam is not running.\n", "");
@@ -9308,10 +9331,12 @@ static void coopLobbyBuild(void)
         }
         coopLobbyAdd(CLROW_HOST, 0, "Host a Game\n", "");
         coopLobbyAdd(CLROW_JOINANY, 0, "Join a Friend's Game\n", "");
-        coopLobbyAddHostOptions();
         coopCharacterName(coopCharacter(), name, sizeof(name));
-        coopLobbyAdd(CLROW_CHARACTER, 0, "Your Character\n", portSheetFitText(name, PORT_SHEET_RULE_R - COOP_LOBBY_VALUE_X));
+        coopLobbyAdd(CLROW_CHARACTER, 0, "Character\n", portSheetFitText(name, COOP_LOBBY_VALUE_W));
+        coop_lobby_build_tab = CLTAB_SETUP;
+        coopLobbyAddHostOptions();
         coopLobbyAddControls();
+        coop_lobby_build_tab = CLTAB_FIND;
         coopLobbyAdd(CLROW_HEAD, 0, "Public Games\n", "");
         k = coopBrowseCount();
         for (i = 0; i < k && coop_lobby_nrows < COOP_LOBBY_ROWS - 4; i++)
@@ -9380,44 +9405,6 @@ static void coopLobbyBuild(void)
         if (r != NULL)
         {
             r->colour = COOP_LOBBY_COL_OK;
-        }
-    }
-    /* the players are the strip's photo cards (coopLobbyStrip); ours is ours to change */
-    coopCharacterName(coopCharacter(), name, sizeof(name));
-    coopLobbyAdd(CLROW_CHARACTER, 0, "Your Character\n", portSheetFitText(name, PORT_SHEET_RULE_R - COOP_LOBBY_VALUE_X));
-    for (i = 0; i < COOP_MAX_PLAYERS && (coopLobbyIsHost() || coopLobbyHasPartner()); i++)
-    {   /* hearing each partner or not, on this game alone (coop_voice.c); the strip shows who is talking */
-        if (!coopLobbyPlayerHere(i) || i == coopLobbySelfPlayer() || coopVoiceMuteRowMask() == 0)
-        {
-            continue;
-        }
-        coopLobbyCopyName(name, sizeof(name), coopPlayerName(i));
-        name[strcspn(name, "\n")] = '\0';
-        name[(strlen(name) > 30) ? 30 : strlen(name)] = '\0';
-        strcat(name, " Voice\n");
-        r = coopLobbyAdd(CLROW_VOICEMUTE, i, name, coopVoiceMuted(i) ? "Muted\n" : "On\n");
-        if (r != NULL && coopVoiceMuted(i))
-        {
-            r->colour = 0xA00000FF;
-        }
-    }
-    for (i = 0; i < coopLobbyDiscordAsks() && i < 2; i++)
-    {   /* Discord's Ask to Join: the host lets them in (port/src/coop_discord.c) */
-        char ask[64];
-
-        coopLobbyCopyName(name, sizeof(name), coopDiscordAskName(i));
-        name[strcspn(name, "\n")] = '\0';
-        snprintf(ask, sizeof(ask), "%s asks to join\n", name);
-        r = coopLobbyAdd(CLROW_DISCORDYES, i, ask, "Let In\n");
-        if (r != NULL)
-        {
-            r->colour = COOP_LOBBY_COL_OK;
-        }
-        r = coopLobbyAdd(CLROW_DISCORDNO, i, "on Discord\n", "Turn Down\n");
-        if (r != NULL)
-        {
-            r->indent = 0xC;
-            r->colour = PORT_SHEET_COL_DIM;
         }
     }
     if (coopLobbyIsHost())
@@ -9524,6 +9511,44 @@ static void coopLobbyBuild(void)
             }
         }
     }
+    /* the players are the party panel's (coopMwParty); ours is ours to change */
+    coopCharacterName(coopCharacter(), name, sizeof(name));
+    coopLobbyAdd(CLROW_CHARACTER, 0, "Character\n", portSheetFitText(name, COOP_LOBBY_VALUE_W));
+    for (i = 0; i < COOP_MAX_PLAYERS && (coopLobbyIsHost() || coopLobbyHasPartner()); i++)
+    {   /* hearing each partner or not, on this game alone (coop_voice.c); the strip shows who is talking */
+        if (!coopLobbyPlayerHere(i) || i == coopLobbySelfPlayer() || coopVoiceMuteRowMask() == 0)
+        {
+            continue;
+        }
+        coopLobbyCopyName(name, sizeof(name), coopPlayerName(i));
+        name[strcspn(name, "\n")] = '\0';
+        name[(strlen(name) > 30) ? 30 : strlen(name)] = '\0';
+        strcat(name, " Voice\n");
+        r = coopLobbyAdd(CLROW_VOICEMUTE, i, name, coopVoiceMuted(i) ? "Muted\n" : "On\n");
+        if (r != NULL && coopVoiceMuted(i))
+        {
+            r->colour = 0xA00000FF;
+        }
+    }
+    for (i = 0; i < coopLobbyDiscordAsks() && i < 2; i++)
+    {   /* Discord's Ask to Join: the host lets them in (port/src/coop_discord.c) */
+        char ask[64];
+
+        coopLobbyCopyName(name, sizeof(name), coopDiscordAskName(i));
+        name[strcspn(name, "\n")] = '\0';
+        snprintf(ask, sizeof(ask), "%s asks to join\n", name);
+        r = coopLobbyAdd(CLROW_DISCORDYES, i, ask, "Let In\n");
+        if (r != NULL)
+        {
+            r->colour = COOP_LOBBY_COL_OK;
+        }
+        r = coopLobbyAdd(CLROW_DISCORDNO, i, "on Discord\n", "Turn Down\n");
+        if (r != NULL)
+        {
+            r->indent = 0xC;
+            r->colour = PORT_SHEET_COL_DIM;
+        }
+    }
     if (coopLobbyIsHost() && coopLobbyHasPartner())
     {   /* the lobby goes on without us: the next player hosts */
         coopLobbyAdd(CLROW_LEAVE, 0, "Leave Lobby\n", "Hand Over\n");
@@ -9540,7 +9565,7 @@ static void coopLobbyBuild(void)
         s32 who[COOP_LOBBY_CHAT_LINES + 1];
         s32 n = coopFeedLines(COOP_LOBBY_CHAT_LINES, lines, who);
 
-        coopLobbyAdd(CLROW_HEAD, 0, "Chat\n", "");
+        coop_lobby_build_tab = CLTAB_CHAT;
         for (i = 0; i < n; i++)
         {
             if (who[i] == -2)
@@ -9574,7 +9599,7 @@ static void coopLobbyBuild(void)
     }
 
     /* the host's rules; the joiner sees them as the host sets them */
-    coopLobbyAdd(CLROW_HEAD, 0, "Rules\n", "");
+    coop_lobby_build_tab = CLTAB_SETUP;
     coopLobbyAdd(coopLobbyIsHost() ? CLROW_VSMODE : CLROW_TEXT, 0, "Mode\n", COOP_VS_ON() ? "Versus\n" : "Co-op\n");
     if (COOP_VS_ON())
     {
@@ -9625,7 +9650,7 @@ static void coopLobbyBuild(void)
     }
     if (coopLobbyIsHost() && coopLobbyIsSteam() && k < COOP_MAX_PLAYERS)
     {
-        coopLobbyAdd(CLROW_HEAD, 0, "Invite a Friend\n", "");
+        coop_lobby_build_tab = CLTAB_FIND;
         coopLobbyAdd(CLROW_OVERLAY, 0, "Steam Invite Window\n", "");
         for (i = 0; i < coop_lobby_nfriends && coop_lobby_nrows < COOP_LOBBY_ROWS; i++)
         {
@@ -9647,6 +9672,152 @@ static void coopLobbyRuleStep(s32 kind, s32 dir)
     const s32 n = (kind == CLROW_LIVES) ? coopLivesCount() : (kind == CLROW_BLEEDOUT) ? coopBleedOutCount() : coopRespawnCount();
 
     coopSetSetting(which, (coopSetting(which) + n + dir) % n);
+}
+
+/* the rows, and the tab on show's view of them (the first tab with rows if
+ * the one on show has none now, as when a lobby closes) */
+static void coopLobbyBuild(void)
+{
+    s32 i, t;
+
+    coopLobbyBuildRows();
+    for (t = 0; t < CLTAB_COUNT; t++)
+    {
+        const s32 want = (t == 0) ? coop_lobby_tab : t - 1;
+
+        coop_lobby_nview = 0;
+        for (i = 0; i < coop_lobby_nrows; i++)
+        {
+            if (coop_lobby_rows[i].tab == want)
+            {
+                coop_lobby_view[coop_lobby_nview++] = i;
+            }
+        }
+        if (coop_lobby_nview > 0)
+        {
+            coop_lobby_tab = want;
+            return;
+        }
+    }
+}
+
+static s32 coopLobbyTabUsed(s32 t)
+{
+    s32 i;
+
+    for (i = 0; i < coop_lobby_nrows; i++)
+    {
+        if (coop_lobby_rows[i].tab == t)
+        {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+/* the rows with a value to step either way (left / right, or the arrows
+ * either side of the value); the rest act on Select */
+static s32 coopLobbySteps(const struct CoopLobbyRow *r)
+{
+    switch (r->kind)
+    {
+        case CLROW_CHARACTER:
+        case CLROW_DOWNRULE:
+        case CLROW_DIFFICULTY:
+        case CLROW_FRIENDLYFIRE:
+        case CLROW_HOSTLEAVES:
+        case CLROW_PUBLIC:
+        case CLROW_LAYOUT:
+        case CLROW_OPTION:
+        case CLROW_PROFILE:
+        case CLROW_VOICEMUTE:
+        case CLROW_VSMODE:
+        case CLROW_VSARENA:
+        case CLROW_VSSCENARIO:
+        case CLROW_VSLENGTH:
+        case CLROW_VSWEAPONS:
+        case CLROW_LIVES:
+        case CLROW_BLEEDOUT:
+        case CLROW_RESPAWN:
+            return !r->dim;
+        default:
+            return FALSE;
+    }
+}
+
+static void coopLobbyDo(const struct CoopLobbyRow *r);
+
+/* a value one step back (-1) or on (+1), round at the ends; a toggle
+ * (and Profile, which runs on to None) changes whichever way */
+static void coopLobbyStep(const struct CoopLobbyRow *r, s32 dir)
+{
+    switch (r->kind)
+    {
+        case CLROW_CHARACTER:
+            coopSetCharacter(coopCharacterStep(coopCharacter(), dir));
+            break;
+        case CLROW_DOWNRULE:
+            coopSetDownRule((coopDownRule() + dir + COOPDOWN_REVIVE + 1) % (COOPDOWN_REVIVE + 1));
+            break;
+        case CLROW_DIFFICULTY:
+            coopSetSetting(COOPSET_DIFFICULTY, (coopSetting(COOPSET_DIFFICULTY) + dir + coopDifficultyCount()) % coopDifficultyCount());
+            break;
+        case CLROW_HOSTLEAVES:
+            coopSetSetting(COOPSET_HOSTLEAVES, (coopSetting(COOPSET_HOSTLEAVES) + dir + coopHostLeavesCount()) % coopHostLeavesCount());
+            break;
+        case CLROW_VSMODE:
+        case CLROW_VSARENA:
+        case CLROW_VSSCENARIO:
+        case CLROW_VSLENGTH:
+        case CLROW_VSWEAPONS:
+            coopVsStep(r->kind, dir);
+            break;
+        case CLROW_LIVES:
+        case CLROW_BLEEDOUT:
+        case CLROW_RESPAWN:
+            coopLobbyRuleStep(r->kind, dir);
+            break;
+        case CLROW_LAYOUT:
+        {   /* the first controller: the next (or last) shipped or saved layout */
+            const char *shown = portInputLayoutShown(1);
+            const s32 n = portInputLayoutCount();
+            s32 i, cur = (dir > 0) ? -1 : 0;
+
+            for (i = 0; shown != NULL && i < n; i++)
+            {
+                if (strcmp(portInputLayoutName(i), shown) == 0)
+                {
+                    cur = i;
+                    break;
+                }
+            }
+            if (n > 0)
+            {
+                portInputLayoutApply(1, (cur + dir + n) % n);
+            }
+            break;
+        }
+        case CLROW_OPTION:
+        {
+            const s32 opt = portOptFind(coop_lobby_opts[r->arg][0]);
+
+            if (opt >= 0)
+            {
+                const s32 y = (strcmp(coop_lobby_opts[r->arg][0], "mouse_sens_x") == 0) ? portOptFind("mouse_sens_y") : -1;
+                const s32 tied = (y >= 0 && portOptGet(y) == portOptGet(opt));
+
+                portOptStep(opt, dir);
+                if (tied)
+                {
+                    portOptStep(y, dir);  /* up and down kept with it, unless the player set them apart */
+                }
+            }
+            break;
+        }
+        default:
+            coopLobbyDo(r);
+            break;
+    }
 }
 
 static void coopLobbyDo(const struct CoopLobbyRow *r)
@@ -9688,16 +9859,17 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
             coopLobbyInviteOverlay();
             break;
         case CLROW_DOWNRULE:
-            coopSetDownRule((coopDownRule() + 1) % (COOPDOWN_REVIVE + 1));
+        case CLROW_DIFFICULTY:
+        case CLROW_HOSTLEAVES:
+        case CLROW_LAYOUT:
+        case CLROW_OPTION:
+            coopLobbyStep(r, 1);
             break;
         case CLROW_CONTINUE:
             gamemode = GAMEMODE_SOLO;
             set_selected_difficulty(r->arg >> 8);
             set_solo_and_ptr_briefing(r->arg & 0xFF);
             frontChangeMenu(MENU_RUN_STAGE, TRUE);
-            break;
-        case CLROW_DIFFICULTY:
-            coopSetSetting(COOPSET_DIFFICULTY, (coopSetting(COOPSET_DIFFICULTY) + 1) % coopDifficultyCount());
             break;
         case CLROW_CHARACTER:
             coopCharselOpen();     /* L / R on the row still step in place */
@@ -9727,50 +9899,10 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
         case CLROW_JOINPUBLIC:
             coopBrowseJoin(r->arg);
             break;
-        case CLROW_LAYOUT:
-        {   /* the first controller: the next shipped or saved layout */
-            const char *shown = portInputLayoutShown(1);
-            const s32 n = portInputLayoutCount();
-            s32 i, cur = -1;
-
-            for (i = 0; shown != NULL && i < n; i++)
-            {
-                if (strcmp(portInputLayoutName(i), shown) == 0)
-                {
-                    cur = i;
-                    break;
-                }
-            }
-            if (n > 0)
-            {
-                portInputLayoutApply(1, (cur + 1) % n);
-            }
-            break;
-        }
-        case CLROW_OPTION:
-        {
-            const s32 opt = portOptFind(coop_lobby_opts[r->arg][0]);
-
-            if (opt >= 0)
-            {
-                const s32 y = (strcmp(coop_lobby_opts[r->arg][0], "mouse_sens_x") == 0) ? portOptFind("mouse_sens_y") : -1;
-                const s32 tied = (y >= 0 && portOptGet(y) == portOptGet(opt));
-
-                portOptStep(opt, 1);
-                if (tied)
-                {
-                    portOptStep(y, 1);  /* up and down kept with it, unless the player set them apart */
-                }
-            }
-            break;
-        }
-        case CLROW_HOSTLEAVES:
-            coopSetSetting(COOPSET_HOSTLEAVES, (coopSetting(COOPSET_HOSTLEAVES) + 1) % coopHostLeavesCount());
-            break;
         case CLROW_LIVES:
         case CLROW_BLEEDOUT:
         case CLROW_RESPAWN:
-            coopLobbyRuleStep(r->kind, 1);
+            coopLobbyStep(r, 1);
             break;
         case CLROW_PROFILE:
         {   /* the next profile in the list, then none, then round */
@@ -9818,6 +9950,7 @@ void init_menu1D_cooplobby(void)
     coop_lobby_hot = -1;
     coop_lobby_ticks = 0;
     coop_lobby_scroll = 0;
+    coop_lobby_tab = CLTAB_MAIN;
     coop_charsel_open = FALSE;     /* a mission that started under the select took us away */
     (void) portMouseWheelSteps();   /* notches banked in play are not for these rows */
     selected_folder_num = (selected_folder_num >= FOLDER1) ? selected_folder_num : FOLDER1;
@@ -9839,10 +9972,17 @@ void init_menu1D_cooplobby(void)
     coopLobbyBuild();
     load_walletbond();
     fileUpdateBondInCurrentFolder();
-    if (frontCursorSnapAllowed())
-    {
+    if (frontCursorSnapAllowed() && getenv("GE_SKIPINTRO") == NULL)
+    {   /* on the first row to pick, as MW2's menus open (not under the harness's A taps) */
+        s32 i;
+
+        for (i = 0; i < coop_lobby_nview && i < COOP_LOBBY_VISIBLE
+                    && !coopLobbyActionable(&coop_lobby_rows[coop_lobby_view[i]]); i++)
+        {
+            ;
+        }
         cursor_h_pos = (f32) (COOP_LOBBY_X + 0x20);
-        cursor_v_pos = (f32) (PORT_SHEET_TITLE_Y + 6);   /* on the title: no row picked yet */
+        cursor_v_pos = (f32) (COOP_LOBBY_Y0 + ((i < coop_lobby_nview && i < COOP_LOBBY_VISIBLE) ? i : 0) * COOP_LOBBY_PITCH + 6);
     }
 }
 
@@ -9856,6 +9996,35 @@ void init_menu1D_cooplobby(void)
 static void coopLobbyHarness(void)
 {
     const s32 state = coopLobbyState();
+    const char *tab = getenv("GE_COOP_LOBBYTAB");     /* 0..4: show that tab; c: each in turn, 4 s apiece (screenshots) */
+
+    if (tab != NULL && coop_lobby_ticks > 30)
+    {
+        s32 t = atoi(tab);
+
+        if (tab[0] == 'c')
+        {   /* the tabs in use, in turn */
+            s32 n = 0, k;
+
+            for (t = 0; t < CLTAB_COUNT; t++)
+            {
+                n += coopLobbyTabUsed(t);
+            }
+            k = (n > 0) ? (coop_lobby_ticks / 240) % n : 0;
+            for (t = 0; t < CLTAB_COUNT; t++)
+            {
+                if (coopLobbyTabUsed(t) && k-- == 0)
+                {
+                    break;
+                }
+            }
+        }
+        if (t >= 0 && t < CLTAB_COUNT && coopLobbyTabUsed(t) && coop_lobby_tab != t)
+        {
+            coop_lobby_tab = t;
+            coopLobbyBuild();
+        }
+    }
 
     if (coop_vs_harness != NULL && coopLobbyIsHost())
     {   /* GE_COOP_VERSUS=<arena>:<scenario>:<length>:<weapons>, the host's versus rows */
@@ -9963,19 +10132,31 @@ static void coopLobbyHarness(void)
 
 static s32 coopLobbyScrollMax(void)
 {
-    return (coop_lobby_nrows > COOP_LOBBY_VISIBLE) ? coop_lobby_nrows - COOP_LOBBY_VISIBLE : 0;
+    return (coop_lobby_nview > COOP_LOBBY_VISIBLE) ? coop_lobby_nview - COOP_LOBBY_VISIBLE : 0;
 }
 
-/* the row under the crosshair, actionable or not; -1 off the rows */
+static void coopLobbyScrollClamp(void)
+{
+    coop_lobby_scroll = (coop_lobby_scroll > coopLobbyScrollMax()) ? coopLobbyScrollMax() : coop_lobby_scroll;
+    coop_lobby_scroll = (coop_lobby_scroll < 0) ? 0 : coop_lobby_scroll;
+}
+
+/* the crosshair is over the list's column */
+static s32 coopLobbyCursorOnRows(void)
+{
+    return cursor_h_pos >= (f32) (COOP_LOBBY_X - 8) && cursor_h_pos < (f32) (COOP_LOBBY_R + 8);
+}
+
+/* the place in the view under the crosshair, actionable or not; -1 off the rows */
 static s32 coopLobbyRowAtCursor(void)
 {
     s32 i;
 
-    if (cursor_h_pos < (f32) (COOP_LOBBY_X - 8) || cursor_h_pos >= (f32) PORT_SHEET_HELP_X1)
+    if (!coopLobbyCursorOnRows())
     {
         return -1;
     }
-    for (i = coop_lobby_scroll; i < coop_lobby_nrows && i < coop_lobby_scroll + COOP_LOBBY_VISIBLE; i++)
+    for (i = coop_lobby_scroll; i < coop_lobby_nview && i < coop_lobby_scroll + COOP_LOBBY_VISIBLE; i++)
     {
         const f32 y = (f32) (COOP_LOBBY_Y0 + (i - coop_lobby_scroll) * COOP_LOBBY_PITCH);
 
@@ -9987,21 +10168,127 @@ static s32 coopLobbyRowAtCursor(void)
     return -1;
 }
 
-/* More rows than the paper holds. The wheel scrolls the view (the watch's
+/* the crosshair onto place i of the view, the view following it with a row to spare where there is one */
+static void coopLobbyCursorTo(s32 i)
+{
+    if (i - 1 < coop_lobby_scroll)
+    {
+        coop_lobby_scroll = i - 1;
+    }
+    else if (i + 1 >= coop_lobby_scroll + COOP_LOBBY_VISIBLE)
+    {
+        coop_lobby_scroll = i + 2 - COOP_LOBBY_VISIBLE;
+    }
+    coopLobbyScrollClamp();
+    cursor_v_pos = (f32) (COOP_LOBBY_Y0 + (i - coop_lobby_scroll) * COOP_LOBBY_PITCH + 6);
+    if (!coopLobbyCursorOnRows())
+    {
+        cursor_h_pos = (f32) (COOP_LOBBY_X + 0x20);
+    }
+}
+
+/* a new tab: its first row to pick, unless the mouse has the crosshair */
+static void coopLobbyTabSet(s32 t)
+{
+    s32 i;
+
+    if (t == coop_lobby_tab || t < 0 || t >= CLTAB_COUNT || !coopLobbyTabUsed(t))
+    {
+        return;
+    }
+    coop_lobby_tab = t;
+    coopLobbyBuild();
+    coop_lobby_scroll = 0;
+    sndPlaySfx(g_musicSfxBufferPtr, OPTION_CLICK2_SFX, 0);
+    if (!frontCursorSnapAllowed())
+    {
+        return;
+    }
+    for (i = 0; i < coop_lobby_nview && !coopLobbyActionable(&coop_lobby_rows[coop_lobby_view[i]]); i++)
+    {
+        ;
+    }
+    if (i < coop_lobby_nview)
+    {
+        coopLobbyCursorTo(i);
+    }
+    else
+    {   /* nothing to pick (the joiner's Game Setup): rest by the tabs */
+        cursor_h_pos = (f32) (COOP_LOBBY_X + 0x20);
+        cursor_v_pos = (f32) (COOP_TABS_Y - 0x10);
+    }
+}
+
+/* L / R (LB RB, L1 R1) or the watch's page keys (watch_prev / watch_next,
+ * , and . by default; Q and E are next_inventory and use, which Select would
+ * take too): the tab before or after, round, past empty ones */
+static void coopLobbyTabTick(void)
+{
+    extern s32 portJoyPortWatchStep(void);  /* joy_port.c: -1 watch_prev, +1 watch_next */
+    s32 step = portJoyPortWatchStep();
+    s32 t, k;
+
+    if (step == 0)
+    {
+        step = joyGetButtonsPressedThisFrame(PLAYER_1, L_TRIG) ? -1 : (joyGetButtonsPressedThisFrame(PLAYER_1, R_TRIG) ? 1 : 0);
+    }
+    if (step == 0 || coop_lobby_ticks <= 10)
+    {
+        return;
+    }
+    t = coop_lobby_tab;
+    for (k = 0; k < CLTAB_COUNT; k++)
+    {
+        t = (t + step + CLTAB_COUNT) % CLTAB_COUNT;
+        if (coopLobbyTabUsed(t))
+        {
+            break;
+        }
+    }
+    coopLobbyTabSet(t);
+}
+
+/* the tab under the crosshair; -1 none */
+static s32 coopLobbyTabAtCursor(void)
+{
+    s32 t;
+
+    if (cursor_v_pos < (f32) (COOP_TABS_Y - 4) || cursor_v_pos >= (f32) (COOP_TABS_Y + 0xE))
+    {
+        return -1;
+    }
+    for (t = 0; t < CLTAB_COUNT; t++)
+    {
+        if (coop_lobby_tabx[t][1] > coop_lobby_tabx[t][0]
+            && cursor_h_pos >= (f32) coop_lobby_tabx[t][0] && cursor_h_pos < (f32) coop_lobby_tabx[t][1])
+        {
+            return t;
+        }
+    }
+    return -1;
+}
+
+/* the BACK prompt along the foot is under the crosshair (a click goes back) */
+static s32 coopLobbyBackAtCursor(void)
+{
+    return coop_lobby_backx[1] > coop_lobby_backx[0]
+        && cursor_v_pos >= (f32) (COOP_MW_HINT_Y - 3) && cursor_v_pos < (f32) (COOP_MW_HINT_Y + 0xF)
+        && cursor_h_pos >= (f32) coop_lobby_backx[0] && cursor_h_pos < (f32) coop_lobby_backx[1];
+}
+
+/* More rows than the list holds. The wheel scrolls the view (the watch's
  * rule: hover still picks), the crosshair resting above or below the rows
  * scrolls a row at a time, and up / down (the D-pad, a pad's digital Move,
  * the arrow keys' watch_up / watch_down; not the C buttons, which are WASD and
  * already steer the crosshair) walk the actionable rows, scrolling to keep the
- * one picked on the paper. */
-static void coopLobbyScrollTick(void)
+ * one picked on show. dpy is portSheetDpadStep's, taken once a tick. */
+static void coopLobbyScrollTick(s32 dpy)
 {
     extern s32 portJoyPortWatchStepUpDown(void);   /* joy_port.c: -1 up, +1 down */
     const s32 wheel = portMouseWheelSteps();
-    const s32 onrows = cursor_h_pos >= (f32) (COOP_LOBBY_X - 8) && cursor_h_pos < (f32) PORT_SHEET_HELP_X1;
-    s32 dpx, dpy;
+    const s32 onrows = coopLobbyCursorOnRows();
     s32 step;   /* +1 down, -1 up */
 
-    portSheetDpadStep(&dpx, &dpy);
     if (dpy != 0)
     {
         step = (dpy < 0) ? 1 : -1;
@@ -10029,42 +10316,29 @@ static void coopLobbyScrollTick(void)
     }
     else if ((coop_lobby_ticks % 6) == 0 && onrows && step == 0)
     {
-        if (cursor_v_pos >= (f32) (COOP_LOBBY_Y0 + COOP_LOBBY_VISIBLE * COOP_LOBBY_PITCH - 3))
+        if (cursor_v_pos >= (f32) (COOP_LOBBY_Y0 + COOP_LOBBY_VISIBLE * COOP_LOBBY_PITCH - 3)
+            && cursor_v_pos < (f32) (COOP_MW_FOOT_Y))
         {
             coop_lobby_scroll++;
         }
-        else if (cursor_v_pos < (f32) (COOP_LOBBY_Y0 - 6))
+        else if (cursor_v_pos < (f32) (COOP_LOBBY_Y0 - 6) && cursor_v_pos >= (f32) (COOP_TABS_Y + 0xE))
         {
             coop_lobby_scroll--;
         }
     }
 
-    if (step != 0 && coop_lobby_nrows > 0)
+    if (step != 0 && coop_lobby_nview > 0)
     {
         const s32 cur = coopLobbyRowAtCursor();
         s32 i = (cur >= 0) ? cur + step : ((step > 0) ? coop_lobby_scroll : coop_lobby_scroll + COOP_LOBBY_VISIBLE - 1);
 
-        while (i >= 0 && i < coop_lobby_nrows && !coopLobbyActionable(&coop_lobby_rows[i]))
+        while (i >= 0 && i < coop_lobby_nview && !coopLobbyActionable(&coop_lobby_rows[coop_lobby_view[i]]))
         {
             i += step;
         }
-        if (i >= 0 && i < coop_lobby_nrows)
-        {   /* onto that row, the view following it with a row to spare where there is one */
-            if (i - 1 < coop_lobby_scroll)
-            {
-                coop_lobby_scroll = i - 1;
-            }
-            else if (i + 1 >= coop_lobby_scroll + COOP_LOBBY_VISIBLE)
-            {
-                coop_lobby_scroll = i + 2 - COOP_LOBBY_VISIBLE;
-            }
-            coop_lobby_scroll = (coop_lobby_scroll > coopLobbyScrollMax()) ? coopLobbyScrollMax() : coop_lobby_scroll;
-            coop_lobby_scroll = (coop_lobby_scroll < 0) ? 0 : coop_lobby_scroll;
-            cursor_v_pos = (f32) (COOP_LOBBY_Y0 + (i - coop_lobby_scroll) * COOP_LOBBY_PITCH + 6);
-            if (!onrows)
-            {
-                cursor_h_pos = (f32) (COOP_LOBBY_X + 0x20);
-            }
+        if (i >= 0 && i < coop_lobby_nview)
+        {
+            coopLobbyCursorTo(i);
             sndPlaySfx(g_musicSfxBufferPtr, OPTION_CLICK2_SFX, 0);
         }
         else
@@ -10072,23 +10346,19 @@ static void coopLobbyScrollTick(void)
             coop_lobby_scroll += step;
         }
     }
-    coop_lobby_scroll = (coop_lobby_scroll > coopLobbyScrollMax()) ? coopLobbyScrollMax() : coop_lobby_scroll;
-    coop_lobby_scroll = (coop_lobby_scroll < 0) ? 0 : coop_lobby_scroll;
+    coopLobbyScrollClamp();
 }
 
 void interface_menu1D_cooplobby(void)
 {
-    s32 i;
+    s32 dpx, dpy;
 
     viSetFovY(FOV_Y_F);
     viSetAspect(ASPECT_RATIO_SD);
     viSetZRange(100.0f, 10000.0f);
     viSetUseZBuf(TRUE);     /* the characters are 3D (coopFigureDraw); the folder draws without it */
 
-    disable_all_switches(walletinst[0]);
-    set_item_visibility_in_objinstance(walletinst[0], SW_TABS, 1);
-    set_item_visibility_in_objinstance(walletinst[0], SW_PAPER, 1);
-    set_item_visibility_in_objinstance(walletinst[0], SW_CONFIDENTIAL2, 1);   /* no OHMSS stamp: the rows start up there */
+    disable_all_switches(walletinst[0]);    /* no folder: the screen is its own (constructor_menu1D_cooplobby) */
     tab_prev_highlight = FALSE;
 
     coop_lobby_ticks++;
@@ -10124,6 +10394,7 @@ void interface_menu1D_cooplobby(void)
 
         if (portJoyPortChatPressed() && coopLobbyHasPartner())
         {
+            coop_lobby_tab = CLTAB_CHAT;    /* where the line shows */
             coopChatPress();
         }
     }
@@ -10132,59 +10403,66 @@ void interface_menu1D_cooplobby(void)
         frontUpdateControlStickPosition();
         return;
     }
-    coopLobbyScrollTick();
+    portSheetDpadStep(&dpx, &dpy);
+    coopLobbyScrollTick(dpy);
+    coopLobbyTabTick();
 
     coop_lobby_hot = -1;
-    if (frontCheckCursorOnPreviousTab())
+    coop_lobby_hottab = -1;
+    if (coop_lobby_ticks > 10)   /* a press still down from the last screen is not for these rows */
     {
-        tab_prev_highlight = TRUE;
-        if (joyGetButtonsPressedThisFrame(PLAYER_1, START_BUTTON|Z_TRIG|A_BUTTON))
+        const s32 at = coopLobbyRowAtCursor();
+        const u16 accept = joyGetButtonsPressedThisFrame(PLAYER_1, START_BUTTON|Z_TRIG|A_BUTTON);
+        s32 lr = dpx;
+
+        if (lr == 0)
+        {
+            lr = joyGetButtonsPressedThisFrame(PLAYER_1, L_JPAD) ? -1 : (joyGetButtonsPressedThisFrame(PLAYER_1, R_JPAD) ? 1 : 0);
+        }
+        if (lr == 0)
+        {
+            lr = portInputArrowStepLR();
+        }
+        coop_lobby_hottab = coopLobbyTabAtCursor();
+        if (at >= 0 && coopLobbyActionable(&coop_lobby_rows[coop_lobby_view[at]]))
+        {
+            coop_lobby_hot = coop_lobby_view[at];
+        }
+        if (coop_lobby_hot >= 0 && lr != 0 && coopLobbySteps(&coop_lobby_rows[coop_lobby_hot]))
+        {   /* left / right step the row's value */
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CLICK2_SFX, 0);
+            coopLobbyStep(&coop_lobby_rows[coop_lobby_hot], lr);
+        }
+        else if (accept && coop_lobby_hottab >= 0)
+        {
+            coopLobbyTabSet(coop_lobby_hottab);
+        }
+        else if (accept && coopLobbyBackAtCursor())
         {
             tab_prev_selected = TRUE;
             sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, 0);
         }
-    }
-    else if (coop_lobby_ticks > 10   /* a press still down from the last screen is not for these rows */
-             && cursor_h_pos >= (f32) (COOP_LOBBY_X - 8) && cursor_h_pos < (f32) PORT_SHEET_HELP_X1)
-    {
-        for (i = coop_lobby_scroll; i < coop_lobby_nrows && i < coop_lobby_scroll + COOP_LOBBY_VISIBLE; i++)
+        else if (coop_lobby_hot >= 0 && accept)
         {
-            const f32 y = (f32) (COOP_LOBBY_Y0 + (i - coop_lobby_scroll) * COOP_LOBBY_PITCH);
+            const struct CoopLobbyRow *r = &coop_lobby_rows[coop_lobby_hot];
 
-            if (cursor_v_pos >= y - 3.0f && cursor_v_pos < y - 3.0f + (f32) COOP_LOBBY_PITCH)
-            {
-                if (coopLobbyActionable(&coop_lobby_rows[i]))
-                {
-                    coop_lobby_hot = i;
-                }
-                break;
+            sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE_SFX, 0);
+            const s32 slot = at - coop_lobby_scroll;
+
+            if (coopLobbySteps(r) && slot >= 0 && slot < COOP_LOBBY_VISIBLE && coop_lobby_arrowx[slot][0] > 0
+                && cursor_h_pos >= (f32) (coop_lobby_arrowx[slot][0] - 4) && cursor_h_pos < (f32) (coop_lobby_arrowx[slot][0] + 9))
+            {   /* a click on the value's left arrow steps it back */
+                coopLobbyStep(r, -1);
             }
-        }
-        if (coop_lobby_hot >= 0 && coop_lobby_rows[coop_lobby_hot].kind == CLROW_CHARACTER
-            && joyGetButtonsPressedThisFrame(PLAYER_1, L_TRIG|R_TRIG|L_JPAD|R_JPAD))
-        {   /* the character row: L / R (or the d-pad) step back and forth, A forward */
-            sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE_SFX, 0);
-            coopSetCharacter(coopCharacterStep(coopCharacter(),
-                                               joyGetButtonsPressedThisFrame(PLAYER_1, L_TRIG|L_JPAD) ? -1 : 1));
-        }
-        else if (coop_lobby_hot >= 0 && coop_lobby_rows[coop_lobby_hot].kind >= CLROW_VSARENA
-                 && coop_lobby_rows[coop_lobby_hot].kind <= CLROW_VSWEAPONS
-                 && joyGetButtonsPressedThisFrame(PLAYER_1, L_TRIG|R_TRIG|L_JPAD|R_JPAD))
-        {   /* the versus rows step both ways too */
-            sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE_SFX, 0);
-            coopVsStep(coop_lobby_rows[coop_lobby_hot].kind, joyGetButtonsPressedThisFrame(PLAYER_1, L_TRIG|L_JPAD) ? -1 : 1);
-        }
-        else if (coop_lobby_hot >= 0 && coop_lobby_rows[coop_lobby_hot].kind >= CLROW_LIVES
-                 && coop_lobby_rows[coop_lobby_hot].kind <= CLROW_RESPAWN
-                 && joyGetButtonsPressedThisFrame(PLAYER_1, L_TRIG|R_TRIG|L_JPAD|R_JPAD))
-        {   /* so do Lives, Bleed Out and Respawn */
-            sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE_SFX, 0);
-            coopLobbyRuleStep(coop_lobby_rows[coop_lobby_hot].kind, joyGetButtonsPressedThisFrame(PLAYER_1, L_TRIG|L_JPAD) ? -1 : 1);
-        }
-        else if (coop_lobby_hot >= 0 && joyGetButtonsPressedThisFrame(PLAYER_1, START_BUTTON|Z_TRIG|A_BUTTON))
-        {
-            sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE_SFX, 0);
-            coopLobbyDo(&coop_lobby_rows[coop_lobby_hot]);
+            else if (coopLobbySteps(r) && slot >= 0 && slot < COOP_LOBBY_VISIBLE && coop_lobby_arrowx[slot][1] > 0
+                     && cursor_h_pos >= (f32) (coop_lobby_arrowx[slot][1] - 4))
+            {   /* and the right one on (Character too, which a click elsewhere opens) */
+                coopLobbyStep(r, 1);
+            }
+            else
+            {
+                coopLobbyDo(r);
+            }
             if (current_menu != MENU_COOP_LOBBY || menu_update > MENU_INVALID)
             {
                 coopLobbyClose();
@@ -10207,24 +10485,8 @@ void interface_menu1D_cooplobby(void)
     }
 }
 
-/* ---- the crew strip ------------------------------------------------------
- * Under the title: a photo card for each player, clipped to the folder like
- * the dossier's polaroids (their colour along the top, the character's
- * picture from the multiplayer screen, the name, and HOST / READY / NOT
- * READY under it), an OPEN card for each seat still free, and on the right
- * the next mission's photo with its difficulty, or the versus arena's with
- * its scenario. Missions without a photo of their own show the world map
- * from the briefing monitors. */
-#define COOP_CARD_W     0x37
-#define COOP_CARD_H     0x48
-#define COOP_CARD_GAP   0x04
-#define COOP_CARD_X0    0x2E
-#define COOP_PHOTO_HW   0x15    /* the portrait's half size: 42 x 52 */
-#define COOP_PHOTO_HH   0x1A
-#define COOP_MISSION_X  0x11A
-#define COOP_MISSION_W  0x5E
-#define COOP_POLAROID   0xF6F2E6FF
-#define COOP_INK_RED    0x8A1414FF
+/* ---- pictures for the party and the select ----------------------------- */
+#define COOP_POLAROID   0x2C3028FF  /* a card on the dark screen */
 
 /* frontRenderCharacterPortrait's four-texture photo, at any size */
 static Gfx *coopLobbyPortrait(Gfx *DL, s32 cx, s32 cy, s32 hw, s32 hh, s32 chr)
@@ -10322,7 +10584,7 @@ static Gfx *coopLobbySmallText(Gfx *DL, s32 cx, s32 y, s32 w, const char *in, u3
     return textRender(DL, &x, &y, t, ptrFontBankGothicChars, ptrFontBankGothic, colour, viGetX(), viGetY(), 0, 0);
 }
 
-/* a polaroid clipped to the paper: a soft shadow, the white border, a coloured top edge */
+/* a card: a soft shadow, the dark face, a coloured top edge */
 static Gfx *coopLobbyPolaroid(Gfx *DL, s32 x, s32 y, s32 w, s32 h, u32 band)
 {
     DL = microcode_constructor_related_to_menus(DL, x + 2, y + 2, x + w + 2, y + h + 2, 0x00000040);
@@ -10362,34 +10624,6 @@ static struct sImageTableEntry *coopLobbyMissionPhoto(s32 stageid)
         return &mpstageselimages[photo[sp]];
     }
     return &monitorimages[IMGWORLDMAP];
-}
-
-static Gfx *coopLobbyPlayerCard(Gfx *DL, s32 x, s32 slot, s32 pick, const char *name, const char *status, u32 statuscol, s32 self)
-{
-    const s32 y = COOP_STRIP_Y;
-    const s32 cx = x + COOP_CARD_W / 2;
-
-    if (self)
-    {   /* ours: a dark edge round the card */
-        DL = microcode_constructor_related_to_menus(DL, x - 1, y - 1, x + COOP_CARD_W + 1, y + COOP_CARD_H + 1, 0x303030FF);
-    }
-    DL = coopLobbyPolaroid(DL, x, y, COOP_CARD_W, COOP_CARD_H, (u32) coopLobbyChatColour(slot));
-    DL = coopLobbyBackdrop(DL, cx - COOP_PHOTO_HW, y + 5, 2 * COOP_PHOTO_HW, 2 * COOP_PHOTO_HH);
-    DL = coopFigureDraw(DL, pick, cx - COOP_PHOTO_HW, y + 5, 2 * COOP_PHOTO_HW, 2 * COOP_PHOTO_HH, 0.0f, TRUE);
-    DL = microcode_constructor(DL);
-    DL = coopLobbySmallText(DL, cx, y + COOP_CARD_H - 0xA, COOP_CARD_W - 1, name, 0x202020FF);
-    DL = coopLobbySmallText(DL, cx, y + COOP_CARD_H + 4, COOP_CARD_W + COOP_CARD_GAP, status, statuscol);
-    return DL;
-}
-
-static Gfx *coopLobbyOpenCard(Gfx *DL, s32 x)
-{
-    const s32 y = COOP_STRIP_Y;
-
-    DL = microcode_constructor_related_to_menus(DL, x, y, x + COOP_CARD_W, y + COOP_CARD_H, 0x00000018);
-    DL = microcode_constructor_related_to_menus(DL, x + 2, y + 2, x + COOP_CARD_W - 2, y + COOP_CARD_H - 2, 0xE8E0C8FF);
-    DL = microcode_constructor(DL);
-    return coopLobbySmallText(DL, x + COOP_CARD_W / 2, y + COOP_CARD_H / 2 - 4, COOP_CARD_W - 4, "OPEN", 0x00000060);
 }
 
 /* the next mission (co-op) or the arena (versus); 0 = nothing to show */
@@ -10434,80 +10668,580 @@ static s32 coopLobbyMissionInfo(struct sImageTableEntry **img, char *name, s32 n
     return 1;
 }
 
-static Gfx *coopLobbyStrip(Gfx *DL)
+/* ---- the Modern Warfare 2 look ---------------------------------------------
+ * The lobby's own screen in place of the folder: a dark backdrop, the title
+ * and the tabs top left, the tab's rows down the left (a lime bar behind the
+ * one under the cursor, a value's arrows either side of it), the party on the
+ * right (a row per seat: colour, head, name, HOST / READY / NOT READY /
+ * TALKING) with the next mission's or the arena's photo under it, what the
+ * picked row does along the foot, and the button prompts under that. */
+#define MW_TEXT         0xE6E8E0FF
+#define MW_DIM          0x8A8E84FF
+#define MW_FAINT        0x5A5E56FF
+#define MW_ACCENT       0xB6D83CFF  /* MW2's lime */
+#define MW_ACCENT_DK    0x5E7A1CFF
+#define MW_GOLD         0xF0C850FF
+#define MW_RED          0xF06048FF
+#define MW_GREEN        0x8CE05AFF
+#define MW_BLUE         0x6AB8F8FF
+#define MW_PANEL        0x0000007A
+#define MW_EDGE         0x484E42FF
+#define MW_PANEL_X      0x11C       /* the right column */
+#define MW_PANEL_R      0x1AA
+#define MW_SEAT_Y       (COOP_LOBBY_Y0 - 3)
+#define MW_SEAT_H       0x19
+#define MW_SEAT_PITCH   0x1B
+#define MW_PLACE_Y      0xC0        /* the next mission / arena */
+#define MW_PLACE_PHOTO_H 0x30
+
+/* the builder's paper inks, for the dark screen */
+static u32 coopMwInk(s32 colour)
 {
-    struct sImageTableEntry *img = NULL;
-    char name[48], sub[32];
-    const s32 state = coopLobbyState();
-    s32 i, x = COOP_CARD_X0;
-
-    if (state == COOPLOBBY_IDLE || state == COOPLOBBY_OFF || state == COOPLOBBY_BUSY)
-    {   /* not in a lobby yet: our own card */
-        const char *prof = portProfileActive(0);
-
-        coopLobbyCopyName(name, sizeof(name), (prof != NULL && prof[0] != '\0') ? prof : coopLobbySelfName());
-        DL = coopLobbyPlayerCard(DL, x, 0, coopCharacter(), name, "YOU", 0x303030FF, TRUE);
-        x += COOP_CARD_W + COOP_CARD_GAP;
-    }
-    else
+    switch ((u32) colour)
     {
-        for (i = 0; i < COOP_MAX_PLAYERS; i++)
+        case 0xFF:                  return MW_TEXT;
+        case PORT_SHEET_COL_DIM:    return MW_DIM;
+        case COOP_LOBBY_COL_OK:     return MW_GREEN;
+        case 0xA00000FF:            return MW_RED;
+        default:                    return (u32) colour;
+    }
+}
+
+/* text in capitals, the menu font's newline on the end */
+static void coopMwUpper(char *out, s32 cap, const char *in)
+{
+    s32 n;
+
+    for (n = 0; in != NULL && in[n] != '\0' && in[n] != '\n' && n < cap - 2; n++)
+    {
+        out[n] = (in[n] >= 'a' && in[n] <= 'z') ? in[n] - 0x20 : in[n];
+    }
+    out[n] = '\n';
+    out[n + 1] = '\0';
+}
+
+static s32 coopMwTextW(const char *t, s32 small)
+{
+    s32 th = 0, tw = 0;
+
+    textMeasure(&th, &tw, (char *) t, small ? ptrFontBankGothicChars : ptrFontZurichBoldChars,
+                small ? ptrFontBankGothic : ptrFontZurichBold, 0);
+    return tw;
+}
+
+/* Zurich from x (or ending at x when right), cut to fit w */
+static Gfx *coopMwText(Gfx *DL, s32 x, s32 y, s32 w, const char *in, u32 colour, s32 right)
+{
+    const char *t = portSheetFitText(in, w);
+
+    if (right)
+    {
+        x -= coopMwTextW(t, FALSE);
+    }
+    return frontPrintText(DL, &x, &y, (char *) t, ptrFontZurichBoldChars, ptrFontZurichBold, colour, viGetX(), viGetY(), 0, 0);
+}
+
+/* the small font (capitals only) from x, or ending at x */
+static Gfx *coopMwSmall(Gfx *DL, s32 x, s32 y, const char *in, u32 colour, s32 right)
+{
+    char t[64];
+
+    coopMwUpper(t, sizeof(t), in);
+    if (right)
+    {
+        x -= coopMwTextW(t, TRUE);
+    }
+    return textRender(DL, &x, &y, t, ptrFontBankGothicChars, ptrFontBankGothic, colour, viGetX(), viGetY(), 0, 0);
+}
+
+/* a flat triangle pointing left (dir -1) or right (+1), 5 wide and 9 high, from x */
+static Gfx *coopMwArrow(Gfx *DL, s32 x, s32 cy, s32 dir, u32 colour)
+{
+    s32 i;
+
+    for (i = 0; i < 5; i++)
+    {
+        const s32 col = (dir < 0) ? x + i : x + 4 - i;
+
+        DL = microcode_constructor_related_to_menus(DL, col, cy - i, col + 1, cy + i + 1, colour);
+    }
+    return DL;
+}
+
+/* the highlight: a lime block at the left and a bar fading out to the right */
+static Gfx *coopMwBar(Gfx *DL, s32 x0, s32 y0, s32 x1, s32 y1)
+{
+    const s32 steps = 12;
+    s32 i;
+
+    for (i = 0; i < steps; i++)
+    {
+        const s32 a = 0x88 - i * 0x88 / steps;
+
+        DL = microcode_constructor_related_to_menus(DL, x0 + (x1 - x0) * i / steps, y0, x0 + (x1 - x0) * (i + 1) / steps, y1,
+                                                    (MW_ACCENT_DK & 0xFFFFFF00) | (u32) (a + 0x10));
+    }
+    DL = microcode_constructor_related_to_menus(DL, x0, y0, x0 + 3, y1, MW_ACCENT);
+    return DL;
+}
+
+/* the backdrop: near-black with a little olive, lighter at the top, a band behind the title */
+static Gfx *coopMwBackground(Gfx *DL, s32 foot)
+{
+    s32 i;
+
+    for (i = 0; i < 16; i++)
+    {
+        const u32 g = 0x1A - (u32) i;
+
+        DL = microcode_constructor_related_to_menus(DL, 0, 0x14A * i / 16, 0x1B8, 0x14A * (i + 1) / 16,
+                                                    ((g - 2) << 24) | (g << 16) | ((g - 3) << 8) | 0xFF);
+    }
+    DL = microcode_constructor_related_to_menus(DL, 0, 0, 0x1B8, 0x28, 0x00000050);
+    DL = microcode_constructor_related_to_menus(DL, 0, 0x28, 0x1B8, 0x29, MW_EDGE);
+    DL = microcode_constructor_related_to_menus(DL, 0, foot, 0x1B8, 0x14A, 0x00000060);
+    DL = microcode_constructor_related_to_menus(DL, 0, foot, 0x1B8, foot + 1, MW_EDGE);
+    return DL;
+}
+
+static const char *coopLobbyTabName(s32 t)
+{
+    const s32 state = coopLobbyState();
+    const s32 out = (state == COOPLOBBY_IDLE || state == COOPLOBBY_OFF || state == COOPLOBBY_BUSY);
+
+    switch (t)
+    {
+        case CLTAB_MAIN:        return out ? "PLAY" : "LOBBY";
+        case CLTAB_SETUP:       return "GAME SETUP";
+        case CLTAB_FIND:        return out ? "FIND GAMES" : "INVITE";
+        case CLTAB_CONTROLS:    return "CONTROLS";
+        default:                return "CHAT";
+    }
+}
+
+/* the tabs under the title, between the previous- and next-tab buttons */
+static Gfx *coopMwTabs(Gfx *DL)
+{
+    s32 t, n = 0, x = COOP_LOBBY_X;
+
+    for (t = 0; t < CLTAB_COUNT; t++)
+    {
+        coop_lobby_tabx[t][0] = coop_lobby_tabx[t][1] = 0;
+        n += coopLobbyTabUsed(t);
+    }
+    if (n > 1)
+    {
+        DL = menuGlyphDraw(DL, x, COOP_TABS_Y - 1, MENUGLYPH_TABS, 0xFF);
+        x += menuGlyphWidth(MENUGLYPH_TABS) + 8;
+    }
+    for (t = 0; t < CLTAB_COUNT; t++)
+    {
+        char name[24];
+        s32 w;
+
+        if (!coopLobbyTabUsed(t))
         {
-            if (!coopLobbyPlayerHere(i))
-            {
-                if (coopLobbyIsHost() || coopLobbyHasPartner())
-                {
-                    DL = coopLobbyOpenCard(DL, x);
-                }
-                x += COOP_CARD_W + COOP_CARD_GAP;
-                continue;
-            }
-            coopLobbyCopyName(name, sizeof(name), coopPlayerName(i));
-            if ((i == coopLobbySelfPlayer()) ? coopVoiceSelfTalking() : coopVoiceTalking(i))
-            {   /* their voice is coming through (coop_voice.c) */
-                DL = coopLobbyPlayerCard(DL, x, i, coopPlayerCharacter(i), name, "TALKING", 0x2060C0FF, i == coopLobbySelfPlayer());
-            }
-            else if (i == 0)
-            {
-                DL = coopLobbyPlayerCard(DL, x, i, coopPlayerCharacter(i), name, "HOST", 0x7A5A00FF, i == coopLobbySelfPlayer());
-            }
-            else
-            {
-                const s32 ready = coopLobbyPlayerReady(i);
-
-                DL = coopLobbyPlayerCard(DL, x, i, coopPlayerCharacter(i), name, ready ? "READY" : "NOT READY",
-                                         ready ? COOP_LOBBY_COL_OK : 0x707070FF, i == coopLobbySelfPlayer());
-            }
-            x += COOP_CARD_W + COOP_CARD_GAP;
+            continue;
         }
-    }
-
-    if (coopLobbyMissionInfo(&img, name, sizeof(name), sub, sizeof(sub)) && img != NULL)
-    {   /* the place: its photo, the name under it, and how hard (or which game) */
-        const s32 y = COOP_STRIP_Y;
-        const s32 pw = COOP_MISSION_W - 8;
-        const s32 ph = 0x3A;
-        struct coord2d pos;
-        struct coord2d half;
-
-        DL = coopLobbyPolaroid(DL, COOP_MISSION_X, y, COOP_MISSION_W, COOP_CARD_H, COOP_INK_RED);
+        coopMwUpper(name, sizeof(name), coopLobbyTabName(t));
+        w = coopMwTextW(name, FALSE);
+        coop_lobby_tabx[t][0] = x - 5;
+        coop_lobby_tabx[t][1] = x + w + 5;
+        if (t == coop_lobby_tab)
+        {
+            DL = microcode_constructor_related_to_menus(DL, x - 5, COOP_TABS_Y - 3, x + w + 5, COOP_TABS_Y + 0xE, 0xFFFFFF18);
+            DL = microcode_constructor_related_to_menus(DL, x - 5, COOP_TABS_Y + 0xE, x + w + 5, COOP_TABS_Y + 0x10, MW_ACCENT);
+        }
+        else if (t == coop_lobby_hottab)
+        {
+            DL = microcode_constructor_related_to_menus(DL, x - 5, COOP_TABS_Y - 3, x + w + 5, COOP_TABS_Y + 0xE, 0xFFFFFF0C);
+        }
         DL = microcode_constructor(DL);
-        DL = combiner_bayer_lod_perspective(DL);
-        pos.f[0] = (f32) (COOP_MISSION_X + COOP_MISSION_W / 2);
-        pos.f[1] = (f32) (y + 5 + ph / 2);
-        half.f[0] = (f32) pw / 2.0f;
-        half.f[1] = (f32) ph / 2.0f;
-        texSelect(&DL, img, 1, 0, 2);
-        display_image_at_position(&DL, &pos.f[0], &half.f[0], img->width, img->height, 0, 0, 1, 0xFF, 0xFF, 0xFF, 0xFF, img->level > 0, 0);
-        DL = microcode_constructor(DL);
-        DL = coopLobbySmallText(DL, COOP_MISSION_X + COOP_MISSION_W / 2, y + COOP_CARD_H - 0xA, COOP_MISSION_W - 4, name, 0x202020FF);
-        DL = coopLobbySmallText(DL, COOP_MISSION_X + COOP_MISSION_W / 2, y + COOP_CARD_H + 4, COOP_MISSION_W + 8, sub, COOP_INK_RED);
+        DL = coopMwText(DL, x, COOP_TABS_Y, w + 1, name, (t == coop_lobby_tab) ? MW_TEXT : (t == coop_lobby_hottab) ? MW_TEXT : MW_DIM, FALSE);
+        x += w + 0x10;
     }
+    if (n > 1)
+    {
+        DL = menuGlyphDraw(DL, x - 4, COOP_TABS_Y - 1, MENUGLYPH_TABS_R, 0xFF);
+    }
+    DL = microcode_constructor_related_to_menus(DL, COOP_LOBBY_X - 8, COOP_TABS_Y + 0x10, MW_PANEL_R, COOP_TABS_Y + 0x11, MW_EDGE);
     return microcode_constructor(DL);
 }
 
+/* the rows of the tab on show */
+static Gfx *coopMwRows(Gfx *DL)
+{
+    s32 i;
+
+    for (i = 0; i < COOP_LOBBY_VISIBLE; i++)
+    {
+        coop_lobby_arrowx[i][0] = coop_lobby_arrowx[i][1] = 0;
+    }
+    if (coop_lobby_nview == 0)
+    {
+        return DL;
+    }
+    for (i = coop_lobby_scroll; i < coop_lobby_nview && i < coop_lobby_scroll + COOP_LOBBY_VISIBLE; i++)
+    {
+        const struct CoopLobbyRow *r = &coop_lobby_rows[coop_lobby_view[i]];
+        const s32 slot = i - coop_lobby_scroll;
+        const s32 y = COOP_LOBBY_Y0 + slot * COOP_LOBBY_PITCH;
+        const s32 hot = (coop_lobby_view[i] == coop_lobby_hot);
+        const s32 lx = COOP_LOBBY_X + r->indent;
+        const s32 steps = coopLobbySteps(r);
+        char label[96], value[32];
+        s32 vw = 0, vx = COOP_LOBBY_R, lw;
+        u32 ink = r->dim ? MW_FAINT : (r->kind == CLROW_TEXT && r->colour == 0xFF && !r->wide) ? MW_DIM : coopMwInk(r->colour);
+
+        if (r->kind == CLROW_HEAD)
+        {   /* a section: small capitals in lime, a rule running on from them */
+            s32 tw;
+
+            coopMwUpper(label, sizeof(label), r->label);
+            tw = coopMwTextW(label, TRUE);
+            DL = coopMwSmall(DL, lx, y + 3, label, MW_ACCENT, FALSE);
+            DL = microcode_constructor_related_to_menus(DL, lx + tw + 6, y + 7, COOP_LOBBY_R, y + 8, MW_EDGE);
+            DL = microcode_constructor(DL);
+            continue;
+        }
+        if (hot)
+        {
+            DL = coopMwBar(DL, COOP_LOBBY_X - 8, y - 3, COOP_LOBBY_R + 6, y - 3 + COOP_LOBBY_PITCH - 1);
+            DL = microcode_constructor(DL);
+        }
+        if (r->kind == CLROW_TEXT && r->wide)
+        {   /* chat lines, the column's width */
+            DL = coopMwText(DL, lx, y, COOP_LOBBY_R - lx, r->label, ink, FALSE);
+            continue;
+        }
+        if (r->kind == CLROW_TEXT || r->kind == CLROW_JOINFRIEND || r->kind == CLROW_JOINPUBLIC || r->kind == CLROW_INVITE
+            || r->kind == CLROW_VOICEMUTE || r->kind == CLROW_DISCORDYES || r->kind == CLROW_DISCORDNO)
+        {   /* names (and the lines about them) keep their case */
+            snprintf(label, sizeof(label), "%s", r->label);
+        }
+        else
+        {
+            coopMwUpper(label, sizeof(label), r->label);
+        }
+        lw = COOP_LOBBY_R - lx;
+        if (r->value[0] != '\0')
+        {   /* the label as long as it is (up to 3/5 of the column), the value in what is left */
+            const s32 room = COOP_LOBBY_R - lx - (steps ? 0x14 : 8);
+            char upper[32];
+
+            lw = coopMwTextW(label, FALSE);
+
+            lw = (lw > room * 3 / 5) ? room * 3 / 5 : lw;
+            coopMwUpper(upper, sizeof(upper), r->value);
+            snprintf(value, sizeof(value), "%s", portSheetFitText(upper, room - lw - 6));
+            vw = coopMwTextW(value, FALSE);
+            if (steps)
+            {   /* < VALUE > */
+                vx = COOP_LOBBY_R - 9;
+                coop_lobby_arrowx[slot][1] = COOP_LOBBY_R - 5;
+                coop_lobby_arrowx[slot][0] = vx - vw - 4 - 5;
+                DL = coopMwArrow(DL, coop_lobby_arrowx[slot][0], y + 6, -1, hot ? MW_ACCENT : MW_FAINT);
+                DL = coopMwArrow(DL, coop_lobby_arrowx[slot][1], y + 6, 1, hot ? MW_ACCENT : MW_FAINT);
+                DL = microcode_constructor(DL);
+            }
+            DL = coopMwText(DL, vx, y, room, value,
+                            hot ? MW_ACCENT : (r->dim ? MW_FAINT : (r->colour == 0xFF ? MW_TEXT : ink)), TRUE);
+        }
+        DL = coopMwText(DL, lx + (hot ? 3 : 0), y, lw + 1, label, hot ? 0xFFFFFFFF : ink, FALSE);
+    }
+
+    if (coop_lobby_nview > COOP_LOBBY_VISIBLE)
+    {   /* a scroll bar right of the values */
+        const s32 top = COOP_LOBBY_Y0 - 3;
+        const s32 len = COOP_LOBBY_VISIBLE * COOP_LOBBY_PITCH;
+        const s32 th = len * COOP_LOBBY_VISIBLE / coop_lobby_nview;
+        const s32 ty = top + (len - th) * coop_lobby_scroll / coopLobbyScrollMax();
+
+        DL = microcode_constructor_related_to_menus(DL, COOP_LOBBY_R + 9, top, COOP_LOBBY_R + 11, top + len, 0xFFFFFF20);
+        DL = microcode_constructor_related_to_menus(DL, COOP_LOBBY_R + 9, ty, COOP_LOBBY_R + 11, ty + th, MW_DIM);
+        DL = microcode_constructor(DL);
+    }
+    return DL;
+}
+
+/* one seat of the party: the player's colour, their head, name and state */
+static Gfx *coopMwSeat(Gfx *DL, s32 y, s32 slot, s32 pick, const char *name, const char *status, u32 statuscol, s32 self, s32 tag)
+{
+    const s32 x = MW_PANEL_X;
+
+    DL = microcode_constructor_related_to_menus(DL, x, y, MW_PANEL_R, y + MW_SEAT_H, self ? 0xFFFFFF1C : MW_PANEL);
+    DL = microcode_constructor_related_to_menus(DL, x, y, x + 3, y + MW_SEAT_H, (u32) coopLobbyChatColour(slot));
+    DL = coopLobbyBackdrop(DL, x + 6, y + 2, 0x16, MW_SEAT_H - 4);
+    DL = coopFigureDraw(DL, pick, x + 6, y + 2, 0x16, MW_SEAT_H - 4, 0.0f, TRUE);
+    DL = microcode_constructor(DL);
+    DL = coopMwText(DL, x + 0x20, y + 2, MW_PANEL_R - x - 0x24, name, self ? MW_ACCENT : MW_TEXT, FALSE);
+    DL = coopMwSmall(DL, x + 0x20, y + 0x10, status, statuscol, FALSE);
+    if (self && tag)
+    {
+        DL = coopMwSmall(DL, MW_PANEL_R - 4, y + 0x10, "YOU", MW_DIM, TRUE);
+    }
+    return DL;
+}
+
+static Gfx *coopMwParty(Gfx *DL)
+{
+    const s32 state = coopLobbyState();
+    const s32 out = (state == COOPLOBBY_IDLE || state == COOPLOBBY_OFF || state == COOPLOBBY_BUSY);
+    char name[48], count[16];
+    s32 i, n = 0, y = MW_SEAT_Y;
+
+    for (i = 0; i < COOP_MAX_PLAYERS && !out; i++)
+    {
+        n += coopLobbyPlayerHere(i);
+    }
+    DL = coopMwSmall(DL, MW_PANEL_X, MW_SEAT_Y - 0xC, "PARTY", MW_ACCENT, FALSE);
+    snprintf(count, sizeof(count), "%d/%d", out ? 1 : n, COOP_MAX_PLAYERS);
+    DL = coopMwSmall(DL, MW_PANEL_R, MW_SEAT_Y - 0xC, count, MW_DIM, TRUE);
+
+    if (out)
+    {   /* not in a lobby yet: us, named after player 1's profile when there is one */
+        const char *prof = portProfileActive(0);
+
+        coopLobbyCopyName(name, sizeof(name), (prof != NULL && prof[0] != '\0') ? prof : coopLobbySelfName());
+        return coopMwSeat(DL, y, 0, coopCharacter(), name, (state == COOPLOBBY_BUSY) ? "CONNECTING" : "NOT IN A LOBBY", MW_DIM, TRUE, FALSE);
+    }
+    for (i = 0; i < COOP_MAX_PLAYERS; i++, y += MW_SEAT_PITCH)
+    {
+        const s32 self = (i == coopLobbySelfPlayer());
+
+        if (!coopLobbyPlayerHere(i))
+        {   /* a free seat */
+            DL = microcode_constructor_related_to_menus(DL, MW_PANEL_X, y, MW_PANEL_R, y + MW_SEAT_H, 0x00000040);
+            DL = microcode_constructor(DL);
+            DL = coopMwSmall(DL, MW_PANEL_X + 0x20, y + 9, "OPEN", MW_FAINT, FALSE);
+            continue;
+        }
+        coopLobbyCopyName(name, sizeof(name), coopPlayerName(i));
+        if (self ? coopVoiceSelfTalking() : coopVoiceTalking(i))
+        {   /* their voice is coming through (coop_voice.c) */
+            DL = coopMwSeat(DL, y, i, coopPlayerCharacter(i), name, "TALKING", MW_BLUE, self, TRUE);
+        }
+        else if (i == 0)
+        {
+            DL = coopMwSeat(DL, y, i, coopPlayerCharacter(i), name, "HOST", MW_GOLD, self, TRUE);
+        }
+        else
+        {
+            const s32 ready = coopLobbyPlayerReady(i);
+
+            DL = coopMwSeat(DL, y, i, coopPlayerCharacter(i), name, ready ? "READY" : "NOT READY", ready ? MW_GREEN : MW_DIM, self, TRUE);
+        }
+    }
+    return DL;
+}
+
+/* under the party: the next mission's photo (co-op) or the arena's (versus) */
+static Gfx *coopMwPlace(Gfx *DL)
+{
+    struct sImageTableEntry *img = NULL;
+    char name[48], sub[32];
+    struct coord2d pos;
+    struct coord2d half;
+    const s32 y = MW_PLACE_Y;
+
+    if (!coopLobbyMissionInfo(&img, name, sizeof(name), sub, sizeof(sub)) || img == NULL)
+    {
+        return DL;
+    }
+    DL = coopMwSmall(DL, MW_PANEL_X, y, COOP_VS_ON() ? "ARENA" : "NEXT MISSION", MW_ACCENT, FALSE);
+    DL = microcode_constructor_related_to_menus(DL, MW_PANEL_X, y + 0xB, MW_PANEL_R, y + 0xB + MW_PLACE_PHOTO_H + 4, MW_EDGE);
+    DL = microcode_constructor(DL);
+    DL = combiner_bayer_lod_perspective(DL);
+    pos.f[0] = (f32) (MW_PANEL_X + MW_PANEL_R) / 2.0f;
+    pos.f[1] = (f32) (y + 0xD + MW_PLACE_PHOTO_H / 2);
+    half.f[0] = (f32) (MW_PANEL_R - MW_PANEL_X - 4) / 2.0f;
+    half.f[1] = (f32) MW_PLACE_PHOTO_H / 2.0f;
+    texSelect(&DL, img, 1, 0, 2);
+    display_image_at_position(&DL, &pos.f[0], &half.f[0], img->width, img->height, 0, 0, 1, 0xFF, 0xFF, 0xFF, 0xFF, img->level > 0, 0);
+    DL = microcode_constructor(DL);
+    {
+        char t[48];
+
+        coopMwUpper(t, sizeof(t), name);
+        DL = coopMwText(DL, MW_PANEL_X, y + 0x13 + MW_PLACE_PHOTO_H, MW_PANEL_R - MW_PANEL_X, t, MW_TEXT, FALSE);
+    }
+    DL = coopMwSmall(DL, MW_PANEL_X, y + 0x22 + MW_PLACE_PHOTO_H, sub, MW_DIM, FALSE);
+    return DL;
+}
+
+/* what the row under the cursor does, for the foot */
+static const char *coopLobbyHelp(const struct CoopLobbyRow *r)
+{
+    static char opt[96];
+
+    switch (r->kind)
+    {
+        case CLROW_HOST:        return "Open a lobby for your friends. You pick the missions.\n";
+        case CLROW_JOINANY:     return "Join the first friend who is hosting a game.\n";
+        case CLROW_JOINFRIEND:  return "Join this friend's lobby.\n";
+        case CLROW_JOINPUBLIC:  return "Join this public game.\n";
+        case CLROW_CANCEL:      return "Stop and go back.\n";
+        case CLROW_READY:       return "Tell the host you are ready to start.\n";
+        case CLROW_MISSION:     return "Pick any mission and difficulty. The whole party comes along.\n";
+        case CLROW_CONTINUE:    return "Start the next mission of your campaign together.\n";
+        case CLROW_VSSTART:     return "Start the match with everyone in the lobby.\n";
+        case CLROW_INVITE:      return "Send this friend a Steam invite.\n";
+        case CLROW_OVERLAY:     return "Open Steam's own invite window.\n";
+        case CLROW_LEAVE:       return coopLobbyIsHost() && coopLobbyHasPartner() ? "Leave the lobby. The next player becomes the host.\n"
+                                                                                  : "Leave the lobby.\n";
+        case CLROW_CHARACTER:   return "Who you play as. Select for the full roster; looks only.\n";
+        case CLROW_DOWNRULE:    return "When a player goes down: a partner revives them, a timer brings them back, or both.\n";
+        case CLROW_DIFFICULTY:  return "How tough the guards are for the whole team.\n";
+        case CLROW_FRIENDLYFIRE: return "Whether your shots can hurt your partners.\n";
+        case CLROW_HOSTLEAVES:  return "What happens to the game if the host quits.\n";
+        case CLROW_LIVES:       return "How many times each player can come back in a mission.\n";
+        case CLROW_BLEEDOUT:    return "How long a downed player waits for a revive.\n";
+        case CLROW_RESPAWN:     return "How long a downed player waits to come back.\n";
+        case CLROW_PUBLIC:      return "Friends Only is invite only; Public lists the lobby in everyone's Find Games.\n";
+        case CLROW_PASSWORD:    return "Players who are not your friends need this to join.\n";
+        case CLROW_PROFILE:     return "Load a saved profile: its controls, options and character.\n";
+        case CLROW_LAYOUT:      return "The button layout of your first controller.\n";
+        case CLROW_VOICEMUTE:   return "Hear this player's voice, or mute them. Only for you.\n";
+        case CLROW_CHAT:        return "Type a message to the party.\n";
+        case CLROW_DISCORDYES:  return "Let this player into your lobby.\n";
+        case CLROW_DISCORDNO:   return "Turn down this player's request.\n";
+        case CLROW_VSMODE:      return "Co-op plays the story missions together; Versus is a multiplayer match.\n";
+        case CLROW_VSARENA:     return "Where the match is played.\n";
+        case CLROW_VSSCENARIO:  return "The multiplayer scenario.\n";
+        case CLROW_VSLENGTH:    return "When the match ends.\n";
+        case CLROW_VSWEAPONS:   return "The weapons on the map.\n";
+        case CLROW_OPTION:
+        {
+            const char *h = portOptHelp(coop_lobby_opts[r->arg][0]);
+
+            if (h == NULL)
+            {
+                return NULL;
+            }
+            snprintf(opt, sizeof(opt), "%s\n", h);
+            return opt;
+        }
+        default:
+            return NULL;
+    }
+}
+
+/* the button prompts along the foot, in the style of the pad last used */
+static Gfx *coopMwHints(Gfx *DL)
+{
+    struct MenuHint h[6];
+    s32 edges[12];
+    s32 n = 0, back = -1, t, tabs = 0;
+
+
+    coop_lobby_backx[0] = coop_lobby_backx[1] = 0;
+    if (getenv("GE_NOHINTS") != NULL || maybe_prev_menu > MENU_INVALID || menu_update > MENU_INVALID)
+    {
+        return DL;
+    }
+    if (coopScreenErrorUp())
+    {
+        h[n].action = MENUGLYPH_ACCEPT; h[n++].word = "OK";
+    }
+    else if (coop_charsel_open)
+    {
+        h[n].action = MENUGLYPH_ARROWS; h[n++].word = "CHANGE";
+        h[n].action = MENUGLYPH_ACCEPT; h[n++].word = "ACCEPT";
+        h[n].action = MENUGLYPH_BACK; h[n++].word = "BACK";
+    }
+    else if (coopChatTyping() || coopBrowseTyping())
+    {
+        h[n].action = MENUGLYPH_ACCEPT; h[n++].word = "DONE";
+        h[n].action = MENUGLYPH_BACK; h[n++].word = "CANCEL";
+    }
+    else
+    {
+        for (t = 0; t < CLTAB_COUNT; t++)
+        {
+            tabs += coopLobbyTabUsed(t);
+        }
+        if (coop_lobby_hot >= 0 && coopLobbySteps(&coop_lobby_rows[coop_lobby_hot]))
+        {
+            h[n].action = MENUGLYPH_DPAD; h[n++].word = "CHANGE";
+        }
+        if (coop_lobby_hot >= 0)
+        {
+            h[n].action = MENUGLYPH_ACCEPT; h[n++].word = "SELECT";
+        }
+        back = n;
+        h[n].action = MENUGLYPH_BACK; h[n++].word = "BACK";
+        (void) tabs;    /* the tab bar shows its own buttons */
+        if (coopLobbyHasPartner())
+        {
+            h[n].action = MENUGLYPH_CHAT; h[n++].word = "CHAT";
+        }
+    }
+    DL = menuHintBarAt(DL, h, n, COOP_LOBBY_X, COOP_MW_HINT_Y, edges);
+    if (back >= 0)
+    {
+        coop_lobby_backx[0] = edges[2 * back];
+        coop_lobby_backx[1] = edges[2 * back + 1];
+    }
+    return DL;
+}
+
+static Gfx *coopMwRender(Gfx *DL)
+{
+    const s32 state = coopLobbyState();
+    const char *help = NULL;
+    char title[32];
+
+    DL = coopMwBackground(DL, coop_charsel_open ? 0x130 : COOP_MW_FOOT_Y);  /* the select reaches lower */
+    DL = microcode_constructor(DL);
+    if (state == COOPLOBBY_HOSTING || state == COOPLOBBY_JOINED)
+    {
+        snprintf(title, sizeof(title), "%s\n", COOP_VS_ON() ? "VERSUS LOBBY" : "CO-OP LOBBY");
+    }
+    else
+    {
+        snprintf(title, sizeof(title), "CO-OP\n");
+    }
+    DL = coopMwSmall(DL, COOP_LOBBY_X, 0x08, coop_charsel_open ? "CO-OP  /  LOBBY" : "GOLDENEYE 007  /  ONLINE", MW_DIM, FALSE);
+    DL = coopMwText(DL, COOP_LOBBY_X, 0x13, 0x100, coop_charsel_open ? "SELECT CHARACTER\n" : title, MW_TEXT, FALSE);
+    if (!coop_charsel_open && coopLobbyIsSteam() && state != COOPLOBBY_OFF)
+    {   /* top right: who we are on Steam */
+        char name[48];
+
+        coopLobbyCopyName(name, sizeof(name), coopLobbySelfName());
+        DL = coopMwSmall(DL, MW_PANEL_R, 0x08, "STEAM", MW_DIM, TRUE);
+        DL = coopMwText(DL, MW_PANEL_R - coopMwTextW(portSheetFitText(name, 0x90), FALSE), 0x13, 0x90, name, MW_TEXT, FALSE);
+    }
+    if (coop_charsel_open)
+    {
+        return DL;
+    }
+    DL = coopMwTabs(DL);
+    DL = coopMwRows(DL);
+    DL = coopMwParty(DL);
+    DL = coopMwPlace(DL);
+    DL = microcode_constructor(DL);
+
+    if (coop_lobby_hot >= 0)
+    {
+        help = coopLobbyHelp(&coop_lobby_rows[coop_lobby_hot]);
+    }
+    if (help == NULL && coop_lobby_hottab >= 0)
+    {
+        help = "Switch to this tab.\n";
+    }
+    if (help == NULL && coop_lobby_tab == CLTAB_SETUP && (state == COOPLOBBY_JOINED))
+    {
+        help = "The host sets these for the whole party.\n";
+    }
+    if (help != NULL)
+    {
+        DL = coopMwText(DL, COOP_LOBBY_X, COOP_MW_FOOT_Y + 5, MW_PANEL_R - COOP_LOBBY_X, help, MW_DIM, FALSE);
+    }
+    return DL;
+}
+
 /* ---- the character select ------------------------------------------------
- * "Your Character" opens it over the lobby's paper, a select screen in the
+ * "Character" opens it over the lobby, a select screen in the
  * manner of the skating games': a film strip of every character along the
  * top (the one picked lit, the rest in shadow), the picked one large in a
  * photo below, turning slowly, with arrows either side, its name on a red
@@ -10573,13 +11307,6 @@ static const char *coopCharselAffiliation(s32 mp)
     return "Multiplayer Cast";          /* the named faces on Bond's suit */
 }
 
-#ifdef GE_VIDEO
-extern s32 portInputArrowStepLR(void);      /* input_pc.c: the arrow keys */
-extern u16 portMouseBindMask(void);         /* video.c: the buttons a mouse press drove */
-#else
-#define portInputArrowStepLR() 0
-#define portMouseBindMask() 0
-#endif
 
 static s32 coopCharselStripCard(s32 i, s32 *x)
 {
@@ -10793,7 +11520,7 @@ static void coopCharselTick(void)
 /* a red ink arrowhead, pointing left (dir -1) or right (+1), in steps */
 static Gfx *coopCharselArrow(Gfx *DL, s32 x, s32 cy, s32 dir, s32 hot)
 {
-    const u32 ink = hot ? 0xC01818FF : COOP_INK_RED;
+    const u32 ink = hot ? MW_TEXT : MW_ACCENT;
     s32 i;
 
     for (i = 0; i < CS_ARROW_W; i++)
@@ -10837,11 +11564,9 @@ static Gfx *coopCharselRender(Gfx *DL)
     char name[48], line[64], t[16];
     s32 i, x, y, th, tw, n;
 
-    x = COOP_LOBBY_X;
-    y = PORT_SHEET_TITLE_Y;
-    DL = frontPrintText(DL, &x, &y, "SELECT CHARACTER\n", ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
-    snprintf(t, sizeof(t), "%d / %d", coop_charsel_pos + 1, coopCharacterCount());
-    DL = coopLobbySmallText(DL, CS_STRIP_X1 - 0x18, PORT_SHEET_TITLE_Y + 4, 0x40, t, COOP_INK_RED);
+    /* the title is coopMwRender's */
+    snprintf(t, sizeof(t), "%d / %d\n", coop_charsel_pos + 1, coopCharacterCount());
+    DL = coopMwText(DL, MW_PANEL_R - coopMwTextW(t, FALSE), 0x13, 0x60, t, MW_ACCENT, FALSE);
 
     /* the film strip: a dark band, its sprocket holes, and the cards */
     DL = microcode_constructor_related_to_menus(DL, CS_STRIP_X0 + 2, CS_STRIP_Y0 + 2, CS_STRIP_X1 + 2, CS_STRIP_Y1 + 2, 0x00000040);
@@ -10883,34 +11608,34 @@ static Gfx *coopCharselRender(Gfx *DL)
     DL = coopFigureDraw(DL, pick, CS_PHOTO_X + CS_PHOTO_PAD, CS_PHOTO_Y + CS_PHOTO_PAD + 3,
                         CS_PHOTO_W - 2 * CS_PHOTO_PAD, CS_PHOTO_H - CS_PHOTO_PAD - 3 - CS_PHOTO_FOOT, coop_charsel_yaw, FALSE);
     snprintf(t, sizeof(t), "NO. %02d", coop_charsel_pos + 1);
-    DL = coopLobbySmallText(DL, CS_PHOTO_X + CS_PHOTO_W / 2, CS_PHOTO_Y + CS_PHOTO_H - CS_PHOTO_FOOT + 4, CS_PHOTO_W, t, 0x202020FF);
+    DL = coopLobbySmallText(DL, CS_PHOTO_X + CS_PHOTO_W / 2, CS_PHOTO_Y + CS_PHOTO_H - CS_PHOTO_FOOT + 4, CS_PHOTO_W, t, MW_DIM);
     DL = coopCharselArrow(DL, CS_PHOTO_X - CS_ARROW_W - 4, CS_PHOTO_Y + CS_PHOTO_H / 2, -1, coop_charsel_hot == CS_HOT_PREV);
     DL = coopCharselArrow(DL, CS_PHOTO_X + CS_PHOTO_W + 4, CS_PHOTO_Y + CS_PHOTO_H / 2, 1, coop_charsel_hot == CS_HOT_NEXT);
 
-    /* the name on a red band */
+    /* the name on a lime band */
     coopCharacterName(pick, name, sizeof(name));
     DL = microcode_constructor_related_to_menus(DL, CS_PANEL_X + 2, CS_PHOTO_Y + 2, CS_PANEL_R + 2, CS_PHOTO_Y + CS_BAND_H + 2, 0x00000050);
-    DL = microcode_constructor_related_to_menus(DL, CS_PANEL_X, CS_PHOTO_Y, CS_PANEL_R, CS_PHOTO_Y + CS_BAND_H, COOP_INK_RED);
-    DL = microcode_constructor_related_to_menus(DL, CS_PANEL_X, CS_PHOTO_Y + CS_BAND_H - 2, CS_PANEL_R, CS_PHOTO_Y + CS_BAND_H, 0x5A0C0CFF);
+    DL = microcode_constructor_related_to_menus(DL, CS_PANEL_X, CS_PHOTO_Y, CS_PANEL_R, CS_PHOTO_Y + CS_BAND_H, MW_ACCENT_DK);
+    DL = microcode_constructor_related_to_menus(DL, CS_PANEL_X, CS_PHOTO_Y + CS_BAND_H - 2, CS_PANEL_R, CS_PHOTO_Y + CS_BAND_H, MW_ACCENT);
     DL = microcode_constructor(DL);
     {
         const char *fit = portSheetFitText(name, CS_PANEL_R - CS_PANEL_X - 8);
 
         textMeasure(&th, &tw, (char *) fit, ptrFontZurichBoldChars, ptrFontZurichBold, 0);
-        DL = coopCharselText(DL, (CS_PANEL_X + CS_PANEL_R) / 2 - tw / 2, CS_PHOTO_Y + 4, CS_PANEL_R - CS_PANEL_X - 8, fit, 0xF6F2E6FF);
+        DL = coopCharselText(DL, (CS_PANEL_X + CS_PANEL_R) / 2 - tw / 2, CS_PHOTO_Y + 4, CS_PANEL_R - CS_PANEL_X - 8, fit, MW_TEXT);
     }
 
     /* the file */
     y = CS_PHOTO_Y + CS_BAND_H + 8;
-    DL = coopCharselLabel(DL, CS_PANEL_X + 2, y, "AFFILIATION", 0x606060FF);
+    DL = coopCharselLabel(DL, CS_PANEL_X + 2, y, "AFFILIATION", MW_DIM);
     snprintf(line, sizeof(line), "%s\n", coopCharselAffiliation(mp));
-    DL = coopCharselText(DL, CS_PANEL_X + 2, y + 9, CS_PANEL_R - CS_PANEL_X - 4, line, 0xFF);
-    y += 0x20;
-    DL = coopCharselLabel(DL, CS_PANEL_X + 2, y, "GENDER", 0x606060FF);
+    DL = coopCharselText(DL, CS_PANEL_X + 2, y + 9, CS_PANEL_R - CS_PANEL_X - 4, line, MW_TEXT);
+    y += 0x1C;
+    DL = coopCharselLabel(DL, CS_PANEL_X + 2, y, "GENDER", MW_DIM);
     DL = coopCharselText(DL, CS_PANEL_X + 2, y + 9, CS_PANEL_R - CS_PANEL_X - 4,
-                         (mp_chr_setup[mp].gender == FEMALE) ? "Female\n" : "Male\n", 0xFF);
-    y += 0x20;
-    DL = coopCharselLabel(DL, CS_PANEL_X + 2, y, "WORN IN THE LOBBY BY", 0x606060FF);
+                         (mp_chr_setup[mp].gender == FEMALE) ? "Female\n" : "Male\n", MW_TEXT);
+    y += 0x1C;
+    DL = coopCharselLabel(DL, CS_PANEL_X + 2, y, "WORN IN THE LOBBY BY", MW_DIM);
     line[0] = '\0';
     for (i = 0, n = 0; i < COOP_MAX_PLAYERS; i++)
     {   /* the others wearing it now */
@@ -10927,11 +11652,11 @@ static Gfx *coopCharselRender(Gfx *DL)
         snprintf(line + strlen(line), sizeof(line) - strlen(line), "%sYou", n++ ? ", " : "");
     }
     strcat(line, n ? "\n" : "Nobody yet\n");
-    DL = coopCharselText(DL, CS_PANEL_X + 2, y + 9, CS_PANEL_R - CS_PANEL_X - 4, line, n ? COOP_LOBBY_COL_OK : PORT_SHEET_COL_DIM);
-    y += 0x20;
-    DL = microcode_constructor_related_to_menus(DL, CS_PANEL_X, y, CS_PANEL_R, y + 1, PORT_SHEET_COL_RULE);
+    DL = coopCharselText(DL, CS_PANEL_X + 2, y + 9, CS_PANEL_R - CS_PANEL_X - 4, line, n ? MW_GREEN : MW_DIM);
+    y += 0x1C;
+    DL = microcode_constructor_related_to_menus(DL, CS_PANEL_X, y, CS_PANEL_R, y + 1, MW_EDGE);
     DL = microcode_constructor(DL);
-    DL = coopCharselLabel(DL, CS_PANEL_X + 2, y + 4, "COSMETIC ONLY", 0x707070FF);
+    DL = coopCharselLabel(DL, CS_PANEL_X + 2, y + 4, "COSMETIC ONLY", MW_DIM);
 
     /* the team: each player's pick as it stands */
     y += 0x12;
@@ -10956,7 +11681,7 @@ static Gfx *coopCharselRender(Gfx *DL)
         {
             coopLobbyCopyName(name, sizeof(name), coopPlayerName(i));
         }
-        DL = coopLobbySmallText(DL, x + w / 2, y + h + 1, w - 2, name, 0x202020FF);
+        DL = coopLobbySmallText(DL, x + w / 2, y + h + 1, w - 2, name, MW_TEXT);
         x += w + 4;
     }
     return microcode_constructor(DL);
@@ -10964,83 +11689,22 @@ static Gfx *coopCharselRender(Gfx *DL)
 
 Gfx *constructor_menu1D_cooplobby(Gfx *DL)
 {
-    s32 i;
-    s32 x;
-    s32 y;
-    s32 th;
-    s32 tw;
-
     coopFigureBeginFrame();
     DL = viSetFillColor(DL, 0, 0, 0);
     DL = viFillScreen(DL);
-    DL = frontSetupMenuBackground(DL);
     DL = microcode_constructor(DL);
-
+    DL = coopMwRender(DL);
     if (coop_charsel_open)
     {
         DL = coopCharselRender(DL);
-        DL = frontAddPreviousTabText(DL);
-        DL = coopScreenErrorRender(DL);
-        return frontDrawCursor(DL);
     }
-
-    x = COOP_LOBBY_X;
-    y = PORT_SHEET_TITLE_Y;
-    DL = frontPrintText(DL, &x, &y, "CO-OP LOBBY\n", ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
-    DL = coopLobbyStrip(DL);
-
-    for (i = coop_lobby_scroll; i < coop_lobby_nrows && i < coop_lobby_scroll + COOP_LOBBY_VISIBLE; i++)
-    {
-        const struct CoopLobbyRow *r = &coop_lobby_rows[i];
-        const s32 slot = i - coop_lobby_scroll;
-        s32 lx = COOP_LOBBY_X + ((r->kind == CLROW_HEAD) ? 0 : 8) + r->indent;
-        const char *label = portSheetFitText(r->label, r->wide ? PORT_SHEET_RULE_R - lx : COOP_LOBBY_LABEL_W);
-        s32 colour = r->dim ? PORT_SHEET_COL_DIM : r->colour;
-
-        if (r->kind == CLROW_HEAD)
-        {   /* a heading with a pencil rule under it, like the Control sheet's */
-            const s32 ry = COOP_LOBBY_Y0 + slot * COOP_LOBBY_PITCH + 0xF;
-
-            DL = microcode_constructor_related_to_menus(DL, COOP_LOBBY_X - 2, ry, PORT_SHEET_RULE_R, ry + 1, PORT_SHEET_COL_RULE);
-            DL = microcode_constructor(DL);
-        }
-        y = COOP_LOBBY_Y0 + slot * COOP_LOBBY_PITCH;
-        if (i == coop_lobby_hot)
-        {
-            textMeasure(&th, &tw, (char *) label, ptrFontZurichBoldChars, ptrFontZurichBold, 0);
-            DL = microcode_constructor_related_to_menus(DL, lx - 2, y - 1, lx + tw + 5, y + 0xE, 0x32);
-        }
-        x = lx;
-        DL = frontPrintText(DL, &x, &y, (char *) label, ptrFontZurichBoldChars, ptrFontZurichBold, colour, viGetX(), viGetY(), 0, 0);
-        if (r->value[0] != '\0')
-        {
-            x = COOP_LOBBY_VALUE_X;
-            y = COOP_LOBBY_Y0 + slot * COOP_LOBBY_PITCH;
-            DL = frontPrintText(DL, &x, &y, (char *) r->value, ptrFontZurichBoldChars, ptrFontZurichBold,
-                                (r->colour == COOP_LOBBY_COL_OK) ? COOP_LOBBY_COL_OK : (r->dim ? PORT_SHEET_COL_DIM : 0xFF),
-                                viGetX(), viGetY(), 0, 0);
-        }
-    }
-
-    if (coop_lobby_scroll > 0)
-    {   /* more above: a small mark by the title */
-        x = PORT_SHEET_RULE_R - 0x28;
-        y = PORT_SHEET_TITLE_Y;
-        DL = frontPrintText(DL, &x, &y, "more\n", ptrFontZurichBoldChars, ptrFontZurichBold,
-                            PORT_SHEET_COL_DIM, viGetX(), viGetY(), 0, 0);
-    }
-    if (coop_lobby_scroll + COOP_LOBBY_VISIBLE < coop_lobby_nrows)
-    {   /* more below: under the last row */
-        x = PORT_SHEET_RULE_R - 0x28;
-        y = COOP_LOBBY_Y0 + COOP_LOBBY_VISIBLE * COOP_LOBBY_PITCH;
-        DL = frontPrintText(DL, &x, &y, "more\n", ptrFontZurichBoldChars, ptrFontZurichBold,
-                            PORT_SHEET_COL_DIM, viGetX(), viGetY(), 0, 0);
-    }
-
-    DL = frontAddPreviousTabText(DL);
+    DL = coopMwHints(DL);
     DL = coopScreenErrorRender(DL);     /* why we are back here, or a join that failed (coop_screens.c) */
-    DL = frontDrawCursor(DL);
-    return DL;
+    if (coop_lobby_hot >= 0 && !g_portMenuMouseOwns && !coop_charsel_open)
+    {   /* a pad or the keys picked the row: its bar shows it, as MW2's do */
+        return DL;
+    }
+    return frontDrawCursor(DL);
 }
 
 /* After a co-op mission both games come back to the lobby, not to the
@@ -22239,32 +22903,7 @@ static Gfx *frontHintBar(Gfx *DL)
             h[n].action = MENUGLYPH_ACCEPT; h[n++].word = "CONTINUE";
             break;
         case MENU_COOP_LOBBY:
-            if (coopScreenErrorUp())
-            {
-                h[n].action = MENUGLYPH_ACCEPT; h[n++].word = "OK";
-                break;
-            }
-            if (coop_charsel_open)
-            {
-                h[n].action = MENUGLYPH_ARROWS; h[n++].word = "CHANGE";
-                h[n].action = MENUGLYPH_ACCEPT; h[n++].word = "ACCEPT";
-                h[n].action = MENUGLYPH_BACK; h[n++].word = "BACK";
-                break;
-            }
-            if (coop_lobby_hot >= 0 && portInputGlyphStyle() != 0   /* the keyboard's click is Select, which changes it */
-                && (coop_lobby_rows[coop_lobby_hot].kind == CLROW_CHARACTER
-                                        || (coop_lobby_rows[coop_lobby_hot].kind >= CLROW_VSARENA
-                                            && coop_lobby_rows[coop_lobby_hot].kind <= CLROW_VSWEAPONS)))
-            {
-                h[n].action = MENUGLYPH_LEFT; h[n++].word = "CHANGE";
-            }
-            h[n].action = MENUGLYPH_ACCEPT; h[n++].word = "SELECT";
-            h[n].action = MENUGLYPH_BACK; h[n++].word = "BACK";
-            if (coopLobbyHasPartner() && !coopChatTyping())
-            {
-                h[n].action = MENUGLYPH_CHAT; h[n++].word = "CHAT";
-            }
-            break;
+            return DL;  /* its own, along the foot (coopMwHints) */
         case MENU_MODE_SELECT:
         case MENU_PORT_OPTIONS:
         case MENU_PORT_SHEET:
