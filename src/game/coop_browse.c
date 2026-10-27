@@ -17,6 +17,7 @@
 #include <bondtypes.h>
 #include "coop.h"
 #include "coop_net.h"
+#include "port_update.h"
 
 extern void portConLogf(const char *fmt, ...);
 
@@ -164,8 +165,17 @@ const char *coopBrowseRefusedHint(void)
     if (sRefusedWhy == 3)
     {   /* builds are commits: 7 characters is enough to tell them apart */
         const char *theirs = coopSteamRefusedBuild();
+        const char *rel = coopSteamRefusedRelease();
 
-        if (theirs[0] != '\0')
+        if (rel[0] != '\0' && portUpdateOwn()[0] != '\0' && portUpdCompareVersions(rel, portUpdateOwn()) == -1)
+        {   /* we are the newer one: nothing for us to get */
+            snprintf(text, sizeof(text), "Host has %.12s and needs to update.\n", rel);
+        }
+        else if (rel[0] != '\0')
+        {
+            snprintf(text, sizeof(text), "Host has %.12s, you %.12s\n", rel, portUpdateOwn()[0] != '\0' ? portUpdateOwn() : coopSteamOwnBuild());
+        }
+        else if (theirs[0] != '\0')
         {
             snprintf(text, sizeof(text), "Host %.7s, you %.7s\n", theirs, coopSteamOwnBuild());
         }
@@ -343,10 +353,39 @@ void coopBrowseTick(s32 inmission)
         if (why)
         {
             sRefused = (why >= 2) ? 2 * COOPBROWSE_REFUSED : COOPBROWSE_REFUSED;
+            if (why == 3)
+            {   /* another co-op version: the updater looks for a newer release
+                 * (the CO-OP screen offers it), even with auto_update off */
+                const char *rel = coopSteamRefusedRelease();
+
+                if (rel[0] == '\0' || portUpdateNewer(rel))
+                {
+                    portUpdateCheck(1);
+                }
+            }
             sRefusedWhy = why;
             if (why == 2)
             {   /* a panel too (coop_screens.c): the rows' red line is easy to miss */
                 coopScreenError("Couldn't Join", "Steam kept us out of that game.\nIt's full, or friends only.");
+            }
+            else if (why == 3)
+            {   /* (it used to say Wrong Password here too) */
+                const char *rel = coopSteamRefusedRelease();
+                char text[96];
+
+                if (rel[0] != '\0' && !portUpdateNewer(rel) && portUpdateOwn()[0] != '\0')
+                {
+                    snprintf(text, sizeof(text), "The host has %.12s and needs\nto update before you can join.", rel);
+                }
+                else if (rel[0] != '\0')
+                {
+                    snprintf(text, sizeof(text), "The host has %.12s. Pick\nUpdate on PLAY to get it,\nthen join again.", rel);
+                }
+                else
+                {
+                    snprintf(text, sizeof(text), "The host is on another version.\nOne of you needs to update.");
+                }
+                coopScreenError("Update Needed", text);
             }
             else
             {

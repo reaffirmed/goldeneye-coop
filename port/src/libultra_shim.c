@@ -268,6 +268,12 @@ __attribute__((weak)) s32 portVideoVoiceVolume(void)
     return 100;
 }
 
+/** Weak default: look for updates at startup; video.c overrides ([display] auto_update). */
+__attribute__((weak)) s32 portVideoAutoUpdate(void)
+{
+    return 1;
+}
+
 /** Weak default: no aim lock (vanilla aiming); video.c overrides. */
 __attribute__((weak)) s32 portAimLock(void)
 {

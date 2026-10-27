@@ -73,6 +73,7 @@ void coopSteamSetJoinPassword(const char *password);
 int  coopSteamAdmitWaiting(void);       /* joiner: the host is checking our password */
 const char *coopSteamRefusedBuild(void); /* after refusal 3: the host's build */
 const char *coopSteamOwnBuild(void);
+const char *coopSteamRefusedRelease(void); /* after refusal 3: the host's release, "" from older builds */
 int  coopSteamBrowseInMission(int i);   /* the public game is in a mission: Drop In */
 void coopSteamSetInMission(int on);     /* host: in a mission or not */
 int  coopSteamJoinRefused(void);        /* once, after a wrong password */

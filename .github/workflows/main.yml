@@ -102,6 +102,16 @@ jobs:
             -DNONMATCHING -DAVOID_UB -D_LANGUAGE_C -o interp_test coop/ci/interp_test.c -lm
           ./interp_test
 
+      - name: Updater pieces (no cart needed)
+        # port_update_util.c: SHA-256, the release JSON, versions, the paths an
+        # update may never write, and inflate against zips of every kind
+        run: |
+          gcc -O1 -Wall -Iport/include -o update_test coop/ci/update_test.c port/src/port_update_util.c
+          mkdir -p ziptest/src/sub && head -c 300000 /dev/urandom > ziptest/src/rand.bin
+          seq 1 200000 > ziptest/src/seq.txt && : > ziptest/src/empty.txt && cp port/src/video.c ziptest/src/sub/
+          (cd ziptest/src && zip -qr ../d.zip . && zip -qr0 ../s.zip . && zip -qr9 ../d9.zip .)
+          ./update_test ziptest/d.zip ziptest/src ziptest/s.zip ziptest/src ziptest/d9.zip ziptest/src
+
       # upload-artifact drops file permissions, so the binary goes up inside a
       # tar that keeps its exec bit (G334). It still needs an i386 libSDL2 on
       # the machine that runs it: the RUNPATH points at the runner's own copy.

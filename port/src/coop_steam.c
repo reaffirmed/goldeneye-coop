@@ -48,6 +48,7 @@
 
 #include "coop_net.h"
 #include "port_buildinfo.h"
+#include "port_update.h"
 
 extern void portConLogf(const char *fmt, ...);
 extern const char *portRootPath(const char *name);
@@ -59,6 +60,7 @@ typedef unsigned char sbool; /* C++ bool in the DLL: only the low byte is set */
 #define LOBBY_KEY "gecoop"
 #define LOBBY_KEY_VERSION "gever"   /* the game's co-op protocol: the list shows only ours */
 #define LOBBY_KEY_BUILD "gebuild" /* the host's build (commit), for the "update needed" line */
+#define LOBBY_KEY_RELEASE "gerel" /* the host's release (v0.2.2), so a joiner knows who has to update */
 #define LOBBY_KEY_NAME "host"
 #define LOBBY_KEY_MISSION "gemission"   /* "1" while the host is in a mission: Public Games says Drop In */
 #define LOBBY_KEY_PASSWORD "pw"
@@ -185,6 +187,7 @@ static int sAdmitWait;      /* in a passworded lobby: not taken as a player yet 
 static int sJoinRefused;    /* 1: the host turned our password down; 2: Steam kept us out of the lobby;
                              * 3: the host's game is another co-op version */
 static char sRefusedBuild[16]; /* 3: the host's build, "" if it did not say */
+static char sRefusedRelease[24]; /* 3: the host's release, "" from a build older than the updater */
 static int sJoinDirect;     /* joining one lobby by its id (not looking for any friend's) */
 static u64s sJoinTarget;    /* the lobby our last JoinLobby asked for: any other entry is stale */
 
@@ -455,6 +458,7 @@ static void applyLobbyOptions(void)
     pSetLobbyType(sMM, sLobby, sPublic ? 2 /* public */ : 1 /* friends only */);
     pSetLobbyData(sMM, sLobby, LOBBY_KEY_VERSION, sVersion);
     pSetLobbyData(sMM, sLobby, LOBBY_KEY_BUILD, PORT_BUILD_COMMIT);
+    pSetLobbyData(sMM, sLobby, LOBBY_KEY_RELEASE, portUpdateOwn());
     snprintf(buf, sizeof(buf), "%s", pGetFriendPersonaName(sFriends, sSelf));
     pSetLobbyData(sMM, sLobby, LOBBY_KEY_NAME, buf);
     pSetLobbyData(sMM, sLobby, LOBBY_KEY_PASSWORD, sPassword[0] != '\0' ? "1" : "0");
@@ -710,6 +714,8 @@ static void onLobbyEnter(const unsigned char *p)
         snprintf(theirs, sizeof(theirs), "%s", tag);   /* the next GetLobbyData can reuse its buffer */
         b = pGetLobbyData(sMM, lobby, LOBBY_KEY_BUILD);
         snprintf(sRefusedBuild, sizeof(sRefusedBuild), "%s", b != NULL ? b : "");
+        b = pGetLobbyData(sMM, lobby, LOBBY_KEY_RELEASE);
+        snprintf(sRefusedRelease, sizeof(sRefusedRelease), "%s", b != NULL ? b : "");
         portConLogf("ge: steam: lobby %llu is co-op version %s (build %s), ours is %s (build %s): update needed\n",
                 lobby, theirs[0] != '\0' ? theirs : "?", sRefusedBuild[0] != '\0' ? sRefusedBuild : "?", sVersion,
                 PORT_BUILD_COMMIT);
@@ -1587,4 +1593,10 @@ const char *coopSteamRefusedBuild(void)
 const char *coopSteamOwnBuild(void)
 {
     return PORT_BUILD_COMMIT;
+}
+
+/* after a refusal 3: the host's release ("" from a build older than the updater) */
+const char *coopSteamRefusedRelease(void)
+{
+    return sRefusedRelease;
 }

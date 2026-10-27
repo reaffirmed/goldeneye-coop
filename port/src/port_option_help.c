@@ -143,6 +143,7 @@ static const struct PortOptHelp sHelp[] = {
     { "voice_mute_1",       "Stop hearing this player. Only on your game." },
     { "voice_mute_2",       "Stop hearing this player. Only on your game." },
     { "voice_mute_3",       "Stop hearing this player. Only on your game." },
+    { "auto_update",        "Look for a newer co-op release when the game starts." },
 
     /* CONTROL, the player pages and the rebind list */
     { "@player",            "Set up this player's device, binds and controls." },
