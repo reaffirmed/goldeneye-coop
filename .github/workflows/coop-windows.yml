@@ -73,6 +73,10 @@ jobs:
           echo "${STEAM_API_DLL_SHA256}  $RUNNER_TEMP/steam_api.dll" | sha256sum -c -
 
       - name: Configure and build for Windows (x86)
+        env:
+          # the release this build is, for the in-game updater: a manual run's
+          # tag doesn't exist yet when it builds (scripts/port/buildinfo.cmake)
+          GE_RELEASE_TAG: ${{ inputs.release_tag || (startsWith(github.ref, 'refs/tags/v') && github.ref_name) || '' }}
         run: |
           cmake -B build_win -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-i686.cmake -DCMAKE_BUILD_TYPE=Release -DGE_VIDEO=ON
           cmake --build build_win -j$(nproc)

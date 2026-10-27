@@ -435,6 +435,9 @@ target_include_directories(ge PRIVATE ${CMAKE_BINARY_DIR}/generated)
 
 # libm: sinf/cosf/sqrtf (math_sincos.s and gu asm on N64; libm on PC).
 target_link_libraries(ge m ${CMAKE_DL_LIBS})
+if(WIN32)
+    target_link_libraries(ge winhttp)   # the in-game updater (port/src/port_update.c)
+endif()
 
 if(GE_VIDEO)
     if(WIN32)
