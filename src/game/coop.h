@@ -363,7 +363,7 @@ void coopLookReset(CoopLookPuppet *lp);
 void coopLookPuppetTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look, s32 dead, s32 self);
 void coopLookShotBegin(s32 hand, s32 weapon, coord3d *from, coord3d *dir); /* chrprop.c chraiDefaultWeaponFireHandler */
 void coopLookShotBg(coord3d *pos, coord3d *normal, s32 impact, s32 room, s32 texture, s32 spark);
-void coopLookShotChr(PropRecord *prop, coord3d *pos);           /* chr.c chrHandleBulletHit */
+void coopLookShotChr(PropRecord *prop, coord3d *pos, s32 hitpart);           /* chr.c chrHandleBulletHit */
 void coopLookShotObj(PropRecord *prop, coord3d *pos, s32 room, s32 texture, s32 glass); /* propobj.c objHit */
 void coopLookShotEnd(void);
 s32  coopPropIsPartner(PropRecord *prop);
