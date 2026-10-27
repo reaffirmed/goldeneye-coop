@@ -87,7 +87,8 @@ extern void portConLogf(const char *fmt, ...);
                           10: hold Use to revive (STATE revive), more stats (COOPEV 56..63, COOPPKT 24..25 kept for
                               revive, cutscenes and the results);
                           11: sender clocks in STATE and GUARDS (smooth movement), round trip (COOPPKT_TIME);
-                          12: lives, bleed-out and respawn times (COOPSET 8..10, 16 settings in HELLO, STATE out) */
+                          12: lives, bleed-out and respawn times (COOPSET 8..10, 16 settings in HELLO, STATE out);
+                              gadgets in USE, where a throw stuck (COOPEV 29), the tank (COOPPKT 11) */
 
 enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7, COOPPKT_AISYNC = 8, COOPPKT_BYE = 9 };
 /* 10 and 11 (COOPPKT_EXT_FIRST..LAST in coop.h) are coop_ext.c's features' own packets;
@@ -194,7 +195,7 @@ typedef struct
         struct { s32 objofs; f32 damage; f32 pos[3]; s16 item; s16 player; } obj; /* both ways */
         struct { s32 objofs; u8 bounce; u8 children; u8 pad[2]; f32 dir[3]; s32 stage; } knock;  /* to all */
         struct { s32 objofs; s32 kept; s32 stage; } pick;                       /* to all */
-        struct { s32 objofs; s32 stage; } use;                                  /* joiner to host */
+        struct { s32 objofs; s32 stage; s16 gadget; s16 pad; } use;             /* joiner to host; gadget: the item used on it (bomb defuser...), 0 a Use press */
         struct { s32 stage; u32 stageflags; } end;                              /* both ways */
         struct { f32 pos[3]; s16 type; u8 rooms[8]; } boom;                     /* client -> host */
         struct { s16 chrnum; u8 len; u8 cmd[25]; } ai;                          /* host -> client */
@@ -208,6 +209,7 @@ typedef struct
 
 #define COOP_EVENTS_PER_PKT 32
 #define COOP_PUPPET_CHRNUM  30000
+#define COOP_PARTNER_SIGHT  6000.0f    /* coopChrNearPartner */
 #define COOP_EVENT_RING     256
 
 typedef struct
@@ -1273,10 +1275,15 @@ static void coopPuppetUpdateGhost(CoopRemote *r)
     {
         r->puppetGhost = 1;     /* in nobody's way */
     }
+    if (coopTankDriving(r->st.player))
+    {
+        r->puppetGhost = 1;     /* inside the tank (coop_tank.c) */
+    }
     /* our camera inside their body (both start on one pad, or we watch
      * them while we are down), or a cutscene, which shows only our own
      * character: don't draw it */
-    if (d2 < 45.0f * 45.0f || coopSpectateTarget() == r->st.player || coopCutsceneActive())
+    if (d2 < 45.0f * 45.0f || coopSpectateTarget() == r->st.player || coopCutsceneActive()
+        || coopTankDriving(r->st.player))
     {
         r->puppet->chr->chrflags |= CHRFLAG_HIDDEN;
     }
@@ -1296,6 +1303,33 @@ static void coopPuppetRemove(CoopRemote *r)
     portConLogf("ge: coop: puppet for player %d removed\n", r->st.player + 1);
 }
 
+/* host: a guard a partner may be looking at. The game stops animating guards
+ * off the host's screen, and the partners see the frozen pose. */
+s32 coopChrNearPartner(ChrRecord *chr)
+{
+    s32 p;
+
+    if (sEnabled <= 0 || !coopNetIsHost() || chr == NULL || chr->prop == NULL || coopIsPlayerChr(chr))
+    {
+        return 0;
+    }
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        if (coopRemoteAliveHere(p))
+        {
+            f32 dx = sR[p].puppet->pos.f[0] - chr->prop->pos.f[0];
+            f32 dy = sR[p].puppet->pos.f[1] - chr->prop->pos.f[1];
+            f32 dz = sR[p].puppet->pos.f[2] - chr->prop->pos.f[2];
+
+            if (dx * dx + dy * dy + dz * dz < COOP_PARTNER_SIGHT * COOP_PARTNER_SIGHT)
+            {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 s32 coopPropIsGhost(PropRecord *prop)
 {
     s32 p = coopPlayerOfProp(prop);
@@ -1303,12 +1337,16 @@ s32 coopPropIsGhost(PropRecord *prop)
     return p >= 0 && sR[p].puppetGhost;
 }
 
+static u32 sWorldHostFlags;
+static u32 sWorldOwnFlags;
+
 void coopStageStart(void)
 {
     s32 i;
 
     sPendingCinemaList = -1;
     sHostEndingHere = 0;
+    sWorldHostFlags = sWorldOwnFlags = 0;
 
     if (bossGetStageNum() != LEVELID_TITLE)
     {
@@ -2517,13 +2555,26 @@ s32 coopTargetDamageShowTime(void)
 
 s32 coopTargetIsDead(void)
 {
+    s32 p;
+
     if (g_CoopPropOverride != NULL)
     {
-        s32 p = coopPlayerOfProp(g_CoopPropOverride);
+        p = coopPlayerOfProp(g_CoopPropOverride);
 
         return p < 0 || sR[p].st.dead;
     }
-    return g_CurrentPlayer->bonddead;
+    if (!g_CurrentPlayer->bonddead || sEnabled <= 0)
+    {
+        return g_CurrentPlayer->bonddead;
+    }
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {   /* a level script's "Bond is dead" stops it for good (Bunker 2's exit): only the whole team down counts */
+        if (p != coopSelf() && coopRemoteAliveHere(p))
+        {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 /* Damage a guard dealt to "Bond". Returns 1 when it belonged to the peer. */
@@ -3840,8 +3891,51 @@ static void coopApplyObjKnock(CoopEvent *ev)
  * run on the host: the press is sent there. */
 
 static s32 sApplyingUse;
+static ObjectRecord *sGadgetObj;    /* the last object a partner used a gadget on, and the item */
+static s32 sGadgetItem;
+static s32 sGadgetCheck;            /* a script just found that gadget use: the item, for its next check */
+static void *sGadgetScript;
+
+/* chrai.c AI_IFBondUsedGadgetOnObject passed for obj in script: was it a partner's? */
+void coopGadgetCheck(ObjectRecord *obj, void *script)
+{
+    sGadgetCheck = 0;
+    if (obj != NULL && obj == sGadgetObj)
+    {
+        sGadgetCheck = sGadgetItem;
+        sGadgetScript = script;
+        sGadgetObj = NULL;
+    }
+}
+
+/* chrai.c AI_IFBondHasItemEquipped in that script: the partner's item, -1 ours */
+s32 coopGadgetItem(void *script)
+{
+    s32 item = (script == sGadgetScript) ? sGadgetCheck : 0;
+
+    if (script == sGadgetScript)
+    {
+        sGadgetCheck = 0;
+    }
+    return (item > 0) ? item : -1;
+}
+
+static void coopSendObjUse(ObjectRecord *obj, s32 gadget);
 
 void coopObjUsed(ObjectRecord *obj)
+{
+    coopSendObjUse(obj, 0);
+}
+
+/* The same for a gadget (bomb defuser, data thief, door decoder...) used on
+ * an object: gunfire.c marks it PROPSTATE_ACTIVATED here, and the host's
+ * script (Frigate's bombs) checks it was the right item. */
+void coopObjGadgetUsed(ObjectRecord *obj, s32 item)
+{
+    coopSendObjUse(obj, item);
+}
+
+static void coopSendObjUse(ObjectRecord *obj, s32 gadget)
 {
     CoopEvent ev;
     s32 ofs;
@@ -3859,6 +3953,7 @@ void coopObjUsed(ObjectRecord *obj)
     ev.kind = COOPEV_OBJUSE;
     ev.u.use.objofs = ofs;
     ev.u.use.stage = bossGetStageNum();
+    ev.u.use.gadget = (s16) gadget;
     coopQueueEvent(&ev);
 }
 
@@ -3874,6 +3969,15 @@ static void coopApplyObjUse(CoopEvent *ev)
     obj = (ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + ev->u.use.objofs);
     if (obj->prop == NULL)
     {
+        return;
+    }
+    if (ev->u.use.gadget > 0)
+    {   /* the joiner's gadget: its item stands in for ours when the script asks what "Bond" holds */
+        obj->state |= PROPSTATE_ACTIVATED;
+        sGadgetObj = obj;
+        sGadgetItem = ev->u.use.gadget;
+        coopObjNoteActor(ev->from, 0);
+        portConLogf("ge: coop: player %d used item %d on obj %d\n", ev->from + 1, ev->u.use.gadget, ev->u.use.objofs);
         return;
     }
     sApplyingUse = 1;
@@ -3958,6 +4062,13 @@ static void coopSendWorld(void)
     coopNetSend(&p, sizeof(p));
 }
 
+/* A joiner runs the level scripts too, and its own copy of one can set a
+ * flag a moment before the host's does (the joiner planted the mine): the
+ * host's older flags would take it away again for a packet or two, and the
+ * objective would read complete, incomplete, complete. Flags our scripts set
+ * are kept for up to a second while the host catches up. */
+static u32 sWorldOwnTick;
+
 static void coopApplyWorld(CoopWorldPkt *p)
 {
     struct criteria_roomentered *r;
@@ -3967,10 +4078,25 @@ static void coopApplyWorld(CoopWorldPkt *p)
 
     if (!coopNetIsHost())
     {
-        if ((u32) objectiveregisters1 != p->stageflags)
+        u32 own = (u32) objectiveregisters1 & ~sWorldHostFlags & ~sWorldOwnFlags;
+        u32 flags;
+
+        if (own != 0)
         {
-            portConLogf("ge: coop: stage flags %08x -> %08x\n", (u32) objectiveregisters1, p->stageflags);
-            objectiveregisters1 = (s32) p->stageflags;
+            sWorldOwnFlags |= own;
+            sWorldOwnTick = sTick;
+        }
+        sWorldOwnFlags &= ~p->stageflags;
+        if (sTick - sWorldOwnTick > 60)
+        {
+            sWorldOwnFlags = 0;
+        }
+        sWorldHostFlags = p->stageflags;
+        flags = p->stageflags | sWorldOwnFlags;
+        if ((u32) objectiveregisters1 != flags)
+        {
+            portConLogf("ge: coop: stage flags %08x -> %08x\n", (u32) objectiveregisters1, flags);
+            objectiveregisters1 = (s32) flags;
         }
         if (p->alarm && !alarmIsActive())
         {
@@ -6863,6 +6989,11 @@ void coopExtSend(s32 kind, s32 to, const void *payload, s32 len)
     ev.kind = (u8) kind;
     memcpy(ev.u.raw, payload, (len < (s32) sizeof(ev.u.raw)) ? len : (s32) sizeof(ev.u.raw));
     coopQueueEventTo(&ev, to);
+}
+
+s32 coopExtSetupOfs(void *rec)
+{
+    return coopSetupOfs(rec);
 }
 
 s32 coopExtSelf(void)
