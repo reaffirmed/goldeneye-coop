@@ -185,7 +185,9 @@ with the whole screen to themselves.
      takes two, Bunker three) are skipped.
    - Scenario: Normal, You Only Live Twice, The Living Daylights (Flag Tag),
      The Man with the Golden Gun, Licence to Kill, and the team games when
-     the player count suits them.
+     the player count suits them: 2 v 1 with three players, 2 v 2 and
+     3 v 1 with four. In a team game team-mates can hurt each other, and a
+     team-mate killed takes a point off your team, as in the original.
    - Game Length: no limit, a time limit or a kill limit.
    - Weapons: the original weapon sets (Slappers Only, Pistols, ... Random).
    Everyone's character is the one picked under their name.
@@ -198,6 +200,8 @@ with the whole screen to themselves.
 - Each PC has its own copy of the ordinary weapons and armour lying around,
   so two players can both take the same gun. The Flag Tag flag and the
   Golden Gun are shared: only one player can hold them.
+- Everyone plays by the original rules: your own Multiplayer Options for
+  Friendly Fire and LTK Health don't apply to an online match.
 - Chat (T) works in versus too. A host leaving in the middle of a versus
   match has not been tested yet.
 

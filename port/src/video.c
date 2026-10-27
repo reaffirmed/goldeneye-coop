@@ -5888,23 +5888,27 @@ s32 portExplosionCap(void)
 }
 
 /** midas.ini [display] mp_friendly_fire: with it off, bondview2.c drops damage
- * one team-mate deals another in 2v2, 3v1 and 2v1. Never in demo playback. */
+ * one team-mate deals another in 2v2, 3v1 and 2v1. Never in demo playback, and
+ * never in online versus, where every PC plays Rare's rules (team-mates hurt). */
 s32 portMpFriendlyFireOff(void)
 {
     extern s32 get_is_ramrom_flag(void);
+    extern s32 coopVersus(void);
 
-    return !s_CfgMpFriendlyFire && get_is_ramrom_flag() == 0;
+    return !s_CfgMpFriendlyFire && get_is_ramrom_flag() == 0 && !coopVersus();
 }
 
 /** midas.ini [display] mp_ltk_health: Licence to Kill's one-hit kills in any
  * scenario - lv.c's 200 handicap at match start and bondview2.c's
- * health-plus-armour damage. 2+ players only, never in demo playback. */
+ * health-plus-armour damage. 2+ players only, never in demo playback, and not
+ * in online versus, where the victim's PC would decide the hit by its own ini. */
 s32 portMpLtkHealthActive(void)
 {
     extern s32 getPlayerCount(void);
     extern s32 get_is_ramrom_flag(void);
+    extern s32 coopVersus(void);
 
-    return s_CfgMpLtkHealth && getPlayerCount() >= 2 && get_is_ramrom_flag() == 0;
+    return s_CfgMpLtkHealth && getPlayerCount() >= 2 && get_is_ramrom_flag() == 0 && !coopVersus();
 }
 
 /** midas.ini [display] mp_no_armor: prop.c leaves the body armour pickups out of
