@@ -50,6 +50,7 @@ typedef struct
     s32 respawn;        /* ticks, -1 = not waiting */
     s32 revivable;      /* down, and holding Use beside them brings them back */
     s32 revivehold;     /* down: ticks of COOP_REVIVE_HOLD someone has held Use over them */
+    s32 out;            /* down for good this mission: no lives left, or bled out */
     const char *name;
     s32 player;         /* their player number, 0 the host */
 } CoopHudPartner;
@@ -60,9 +61,11 @@ s32  coopHudDownRule(void);
 s32  coopHudReviveHold(void);   /* ticks of COOP_REVIVE_HOLD */
 #define COOP_REVIVE_HOLD 150       /* a partner holds Use beside where we fell for 2.5 s */
 #define COOP_REVIVE_DIST 160.0f    /* ... within this of us (xz), and 250 up or down */
-#define COOP_BLEED_OUT   3600      /* revive only: 60 s down and you are out of this mission */
-s32  coopHudBledOut(void);
+s32  coopBleedOutTicks(void);    /* revive only: this long down and you are out of this mission (COOPSET_BLEEDOUT) */
+s32  coopHudBledOut(void);      /* out until the mission ends: COOPOUT_BLEDOUT or COOPOUT_LIVES, 0 not */
 s32  coopHudBleedOut(void);     /* revive only: ticks left before we bleed out, -1 none */
+s32  coopHudLives(void);        /* our lives left this mission, -1 unlimited */
+enum { COOPOUT_NONE, COOPOUT_BLEDOUT, COOPOUT_LIVES };
 
 /* revive, cutscenes and the results screen: their own events (coop.c carries
  * them; coopDesignApply in coop_cutscene.c hands them out) */
@@ -104,7 +107,10 @@ enum
     COOPSET_VSLENGTH,       /* versus: Game Length, a multi_game_lengths index */
     COOPSET_VSWEAPONS,      /* versus: the weapon set (setMPWeaponSet) */
     COOPSET_HOSTLEAVES,     /* 0: the next player hosts and the mission goes on; 1: everyone back to the lobby */
-    COOPSET_MAX = 8
+    COOPSET_LIVES,          /* lives each player starts a mission with, a coopLivesName index (0 unlimited) */
+    COOPSET_BLEEDOUT,       /* revive only: time down before bleeding out, a coopBleedOutName index (0 60 s) */
+    COOPSET_RESPAWN,        /* the timer's wait, a coopRespawnName index (0 3-20 s, sooner when it is quiet) */
+    COOPSET_MAX = 16
 };
 s32  coopSetting(s32 which);
 void coopSetSetting(s32 which, s32 value);
@@ -122,6 +128,12 @@ void coopDifficultyTick(void);
 enum { COOPDOWN_BOTH, COOPDOWN_TIMER, COOPDOWN_REVIVE };
 s32  coopDownRule(void);
 void coopSetDownRule(s32 rule);
+s32  coopLivesCount(void);              /* COOPSET_LIVES's choices */
+const char *coopLivesName(s32 i);
+s32  coopBleedOutCount(void);           /* COOPSET_BLEEDOUT's */
+const char *coopBleedOutName(s32 i);
+s32  coopRespawnCount(void);            /* COOPSET_RESPAWN's */
+const char *coopRespawnName(s32 i);
 Gfx *coopHudRender(Gfx *gdl);
 u32  coopHudColour(s32 player);         /* each player's colour, as their tag and radar dot */
 

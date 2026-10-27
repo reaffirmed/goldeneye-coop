@@ -49,6 +49,13 @@ Playing
 4. The host can set the rules in the lobby before starting:
    - Continue: jumps to the next mission you have not beaten together.
    - When Down: Revive or Timer, Revive only, or Timer only.
+   - Respawn (with a timer): 3-20 s (default, sooner when it is quiet) or
+     a fixed wait from 5 s to 90 s.
+   - Bleed Out (Revive only): how long a partner has to revive you, from
+     15 s to 3 min (default 60 s).
+   - Lives: Unlimited (default), or 1, 2, 3, 5 or 10 each per mission.
+     Every time you go down costs one; when you go down on your last life
+     you are out until the mission ends.
    - Guards: Normal, Hard (tougher, more of them) or Brutal.
    - Friendly Fire: Off (default, your shots pass your partners by) or On.
    - Host Leaves: Next Player Hosts (default) or Back to Lobby. See "When
@@ -91,8 +98,10 @@ Rules
 - When you go down, what happens depends on the host's When Down rule.
   Revive: a partner stands over you for a moment to bring you back. Timer:
   you come back next to a partner once they have been out of combat for 4
-  seconds, and after 20 seconds at most. If everyone is down at the same
-  time, the mission fails.
+  seconds, and after 20 seconds at most (or after the host's fixed
+  Respawn wait). With Lives set, the screen shows how many you have left
+  while you are down, and a partner who has none left shows OUT. If
+  everyone is down at the same time, the mission fails.
 - T opens a chat line (in a mission and in the lobby). Type and press Enter
   to send it to everyone, or Escape to close it. Lines show at the bottom
   left in each player's colour. The key can be changed (Chat).

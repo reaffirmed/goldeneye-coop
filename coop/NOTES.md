@@ -1371,3 +1371,34 @@ never a partner's. Replaces the "Synced cutscenes" line-up beside the star.
   GE_COOP_TESTCINEMA orbit each show only Bond on the host and only the
   scientist on the joiner, same shots in the same order. mission_runs.sh
   dam runway surface: all pass, 0 corrected desyncs.
+
+## Lives, bleed-out and respawn times (2026-10-27, COOP_VERSION 12)
+
+- Testers asked for lives and for setting the bleed-out and respawn times.
+  Three host rules under When Down, synced in HELLO like the others
+  (COOPSET_LIVES, _BLEEDOUT, _RESPAWN; COOPSET_MAX is now 16, so HELLO grew
+  and the version went up). Each is an index into a table in coop.c; 0 is
+  the old behaviour.
+- Lives: Unlimited, 1, 2, 3, 5, 10, per player per mission (reset in
+  coopStageStart). Every down costs one (coopDeadTick, when the fade ends);
+  the down that spends the last is for good: sBledOut = COOPOUT_LIVES, the
+  same "out until the mission ends" state as bleeding out, spectating a
+  partner. Everyone down still fails the mission as before.
+- Respawn (Timer and Revive or Timer): 3-20 s (the calm rule) or a fixed
+  5..90 s. Bleed Out (Revive only, the row replaces Respawn): 15 s..3 min,
+  default 60 s (was COOP_BLEED_OUT); the draining bar scales with it.
+- Wire: STATE's new `out` byte (COOPOUT_*): a partner with no lives left
+  shows OUT on their tag and is not revivable. Our downed screen adds
+  "2 LIVES LEFT" / "LAST LIFE" under the timer.
+- Lobby: the host steps the rows with A (forward) or L / R and the D-pad
+  (both ways), like the versus rows.
+- Harness: GE_COOP_LIVES, GE_COOP_BLEEDOUT, GE_COOP_RESPAWN=<index> (host
+  only: the joiner's come from HELLO); GE_COOP_TESTDIEAGAIN=<ticks> dies
+  again that long after each GE_COOP_TESTDIE.
+- Tested in Dam with two copies over the mock Steam, rules set on the host
+  and the joiner dying: Timer, 3 lives, 5 s: back after 5.0 s twice ("LAST
+  LIFE" on the second), the third down out ("NO LIVES LEFT", the host's tag
+  OUT). Revive only, 2 lives, 15 s: the bar counts down from 15 and bleeds
+  out. Revive only, 2 lives, the host reviving: revived (1 left), the second
+  down out and the host no longer offered the revive. The joiner's lobby
+  shows the host's Lives. Shots: lives/ in the project files.
