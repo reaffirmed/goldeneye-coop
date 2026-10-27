@@ -2281,7 +2281,13 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 case AI_IFBondHasItemEquipped:
                 {
                     AiIFBondHasItemEquippedRecord *ai = AiListp + Offset;
+#ifndef TARGET_N64
+                    s32 coopitem = coopGadgetItem(AiListp); /* co-op: the item the partner used, when the last check found their gadget */
+                    if (coopitem >= 0 ? ai->ITEM_NUM == coopitem
+                                      : ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNRIGHT) || ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNLEFT))
+#else
                     if (ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNRIGHT) || ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNLEFT)) // order matters
+#endif
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -2341,6 +2347,9 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     if (obj && obj->prop && (obj->state & PROPSTATE_ACTIVATED))
                     {
                         obj->state &= ~PROPSTATE_ACTIVATED;
+#ifndef TARGET_N64
+                        coopGadgetCheck(obj, AiListp);   /* co-op: a joiner's gadget (Frigate's bombs) */
+#endif
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
                     else

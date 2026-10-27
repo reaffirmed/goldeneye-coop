@@ -41,6 +41,7 @@
 #include "chr.h"
 #include "propobj.h"
 #include "quaternion.h"
+#include "math_atan2f.h"
 #include "coop.h"
 
 extern void portConLogf(const char *fmt, ...);
@@ -59,6 +60,8 @@ extern void gunInitProjectileObject(ObjectRecord *obj, coord3d *pos, StandTile *
 extern StandTile *stanFindTileBelowPos(coord3d *pos, u8 *rooms, f32 *yRtn);
 extern void setupUpdateObjectRoomPosition(ObjectRecord *obj);
 extern void matrix_4x4_set_identity(Mtxf *mtx);
+extern void projectileFree(Projectile *projectile);
+extern bool objCoopEmbed(PropRecord *prop, PropRecord *parent);
 
 enum { COOPITEM_THROWN = 1, COOPITEM_DROP = 2 };
 enum { COOPGONE_BOOM = 1, COOPGONE_PICKED = 2 };
@@ -108,6 +111,15 @@ typedef struct
     f32 pos[3];
 } CoopDropRestMsg;      /* COOPEV_DROPREST: the host's copy came to rest here (28 bytes) */
 
+typedef struct
+{
+    u16 id;
+    s16 rot[4];         /* the orientation as a quaternion, x 32767 */
+    u16 pad;
+    s32 objofs;         /* the setup object it stuck to, -1 it landed loose */
+    f32 pos[3];
+} CoopStuckMsg;         /* COOPEV_ITEMSTUCK: where the thrower's own copy ended up (28 bytes) */
+
 #define COOP_ITEMS_MAX 64
 
 typedef struct
@@ -118,6 +130,9 @@ typedef struct
     u8 gone;            /* a partner's copy went off: ours is going off with it */
     u8 rested;          /* host, a guard's drop: where it came to rest has been sent */
     u8 still;           /* host: ticks it has not moved */
+    u8 settled;         /* a throw: ours, where it ended up has been sent; a partner's, their word on it came */
+    u8 embedfix;        /* stuck to an object off our screen: its matrix is worked out when that is drawn */
+    u16 age;            /* ticks since the throw */
     f32 last[3];        /* host: where it was last tick */
     s32 item;
     ObjectRecord *obj;
@@ -219,6 +234,9 @@ static void coopItemAdd(u16 id, s32 kind, ObjectRecord *obj)
     sItems[free].gone = 0;
     sItems[free].rested = 0;
     sItems[free].still = 0;
+    sItems[free].settled = 0;
+    sItems[free].embedfix = 0;
+    sItems[free].age = 0;
     sItems[free].id = id;
     sItems[free].kind = (u8) kind;
     sItems[free].item = ((WeaponObjRecord *) obj)->weaponnum;
@@ -779,6 +797,190 @@ static void coopItemsApplyRest(const CoopDropRestMsg *r)
     portConLogf("ge: coop: drop %04x put where the host's came to rest\n", r->id);
 }
 
+/* ---- where a throw ended up ---------------------------------------------------
+ * The game only sticks a thrown item to something drawn on that screen
+ * (objEmbed), so a partner's mine thrown at a helicopter off our screen
+ * bounced off our copy of it, and Surface 2's script, seeing it lie loose,
+ * failed the objective. The thrower's game decides: once its own copy sticks
+ * to a setup object or comes to rest, COOPEV_ITEMSTUCK says where, and the
+ * other copies are put there, stuck to the same object. Until that word
+ * comes, a partner's copy is not an item lying in the level to the level
+ * scripts (coopItemsUnsettled, propobj.c weaponFindThrown). */
+
+#define COOPITEM_SETTLE_MAX 600     /* 10 s: their word got lost, or they left */
+
+static void coopItemsSendStuck(CoopItem *it, s32 objofs, coord3d *pos)
+{
+    CoopStuckMsg m;
+    f32 q[4];
+    s32 k;
+
+    it->settled = 1;
+    memset(&m, 0, sizeof(m));
+    m.id = it->id;
+    m.objofs = objofs;
+    coopItemsMtxToQuat(&it->obj->mtx, coopItemsMtxScale(&it->obj->mtx), q);
+    for (k = 0; k < 4; k++)
+    {
+        m.rot[k] = (s16) (q[k] * 32767.0f);
+    }
+    m.pos[0] = pos->f[0];
+    m.pos[1] = pos->f[1];
+    m.pos[2] = pos->f[2];
+    coopExtSend(COOPEV_ITEMSTUCK, 0xFF, &m, sizeof(m));
+    portConLogf("ge: coop: our item %04x %s %d at %.0f %.0f %.0f\n", it->id, objofs >= 0 ? "stuck to obj" : "landed",
+                objofs, pos->f[0], pos->f[1], pos->f[2]);
+}
+
+static void coopItemsSettleTick(void)
+{
+    s32 i;
+
+    for (i = 0; i < COOP_ITEMS_MAX; i++)
+    {
+        CoopItem *it = &sItems[i];
+        ObjectRecord *obj = it->obj;
+        PropRecord *parent;
+
+        if (!it->used || it->kind != COOPITEM_THROWN || it->settled || !coopItemLive(it))
+        {
+            continue;
+        }
+        if (it->age < 0xFFFF)
+        {
+            it->age++;
+        }
+        if ((it->id >> 14) != (u16) coopExtSelf())
+        {
+            if (it->age > COOPITEM_SETTLE_MAX)
+            {
+                it->settled = 1;
+            }
+            continue;
+        }
+        parent = obj->prop->parent;
+        if (obj->runtime_bitflags & RUNTIMEBITFLAG_EMBEDDED)
+        {
+            s32 ofs = (parent != NULL && parent->type == PROP_TYPE_OBJ) ? coopExtSetupOfs(parent->obj) : -1;
+
+            if (ofs < 0)
+            {
+                it->settled = 1;    /* stuck to a guard or to something thrown: theirs can stay as it is */
+                continue;
+            }
+            coopItemsSendStuck(it, ofs, &obj->runtime_pos);
+            continue;
+        }
+        if (parent != NULL || coopItemsAirborne(obj))
+        {
+            it->still = 0;
+            continue;
+        }
+        if (it->last[0] != obj->prop->pos.f[0] || it->last[1] != obj->prop->pos.f[1] || it->last[2] != obj->prop->pos.f[2])
+        {
+            it->last[0] = obj->prop->pos.f[0];
+            it->last[1] = obj->prop->pos.f[1];
+            it->last[2] = obj->prop->pos.f[2];
+            it->still = 0;
+            continue;
+        }
+        if (++it->still >= 10)
+        {
+            coopItemsSendStuck(it, -1, &obj->prop->pos);
+        }
+    }
+}
+
+static void coopItemsApplyStuck(const CoopStuckMsg *m, s32 from)
+{
+    CoopItem *it = coopItemById(m->id);
+    ObjectRecord *obj, *host;
+    PropRecord *prop;
+    coord3d pos;
+    f32 q[4];
+    s32 k;
+
+    if (it == NULL || it->kind != COOPITEM_THROWN)
+    {
+        return;
+    }
+    it->settled = 1;
+    obj = it->obj;
+    prop = obj->prop;
+    if (obj->runtime_bitflags & RUNTIMEBITFLAG_EMBEDDED)
+    {
+        return;     /* ours stuck by itself */
+    }
+    if (prop->parent != NULL)
+    {
+        return;     /* in someone's hands */
+    }
+    if (m->objofs < 0)
+    {
+        CoopDropRestMsg r;
+
+        memset(&r, 0, sizeof(r));
+        r.id = m->id;
+        memcpy(r.rot, m->rot, sizeof(r.rot));
+        memcpy(r.pos, m->pos, sizeof(r.pos));
+        coopItemsApplyRest(&r);     /* lies where theirs does */
+        return;
+    }
+    host = (ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + m->objofs);
+    if (g_CurrentSetup.propDefs == NULL || coopExtSetupOfs(host) != m->objofs || host->prop == NULL || host->model == NULL)
+    {
+        return;
+    }
+    if (obj->runtime_bitflags & RUNTIMEBITFLAG_HASPROJECTILE)
+    {
+        projectileFree(obj->projectile);
+        obj->projectile = NULL;
+        obj->runtime_bitflags &= ~RUNTIMEBITFLAG_HASPROJECTILE;
+    }
+    for (k = 0; k < 4; k++)
+    {
+        q[k] = (f32) m->rot[k] / 32767.0f;
+    }
+    coopItemsQuatToMtx(q, coopItemsMtxScale(&obj->mtx), &obj->mtx);
+    pos.f[0] = m->pos[0];
+    pos.f[1] = m->pos[1];
+    pos.f[2] = m->pos[2];
+    prop->pos = pos;
+    obj->runtime_pos = pos;
+    if (objCoopEmbed(prop, host->prop))
+    {
+        it->embedfix = 1;
+        coopObjNoteActor(from, 0);  /* an objective it completes is theirs (coop_objective.c) */
+        portConLogf("ge: coop: player %d's item %04x stuck to obj %d here too\n", from + 1, m->id, m->objofs);
+    }
+}
+
+/* propobj.c: obj was stuck by a partner's word; 1 once, when its matrix is to be worked out */
+s32 coopItemsEmbedPending(ObjectRecord *obj)
+{
+    CoopItem *it = coopItemsOn() ? coopItemByObj(obj) : NULL;
+
+    if (it == NULL || !it->embedfix)
+    {
+        return 0;
+    }
+    it->embedfix = 0;
+    return 1;
+}
+
+/* propobj.c weaponFindThrown: a partner's throw not yet settled by their game */
+s32 coopItemsUnsettled(PropRecord *prop)
+{
+    CoopItem *it;
+
+    if (!coopItemsOn() || prop == NULL || (prop->type != PROP_TYPE_OBJ && prop->type != PROP_TYPE_WEAPON))
+    {
+        return 0;
+    }
+    it = coopItemByObj(prop->obj);
+    return it != NULL && it->kind == COOPITEM_THROWN && !it->settled && (it->id >> 14) != (u16) coopExtSelf();
+}
+
 /* ---- events --------------------------------------------------------------- */
 
 void coopItemsApply(s32 kind, const u8 *raw, s32 from)
@@ -812,6 +1014,17 @@ void coopItemsApply(s32 kind, const u8 *raw, s32 from)
             coopItemsApplyGone(&g, from);
             break;
         }
+        case COOPEV_ITEMSTUCK:
+        {
+            CoopStuckMsg m;
+
+            memcpy(&m, raw, sizeof(m));
+            if (coopInMissionNow())
+            {
+                coopItemsApplyStuck(&m, from);
+            }
+            break;
+        }
         case COOPEV_DROPREST:
         {
             CoopDropRestMsg r;
@@ -840,9 +1053,61 @@ void coopItemsApply(s32 kind, const u8 *raw, s32 from)
 /* ---- harness ----------------------------------------------------------------
  * GE_COOP_TESTAIM=<s>:<yaw>:<pitch>: from <s> seconds into the mission, for
  * 8 s, turn <yaw> degrees from where we stood at the start and look <pitch>
- * degrees up (negative down); with GE_COOP_TESTFIRE it aims a throw. */
+ * degrees up (negative down); with GE_COOP_TESTFIRE it aims a throw.
+ * GE_COOP_TESTTHROWAT=<tag>:<s>[:<dist>]: at <s> seconds stand <dist> units
+ * (default 250) from the object with that tag and look at it for 8 s, so a
+ * GE_COOP_TESTFIRE throw lands on it. */
 static s32 sTestAimAt = -2;
 static f32 sTestAimYaw, sTestAimPitch, sTestAimBase = -1.0f;
+static s32 sTestAtTag = -1, sTestAtAt = -1;
+static f32 sTestAtDist = 250.0f;
+
+extern void coopTeleportPlayerTo(coord3d *pos, StandTile *stan, f32 yaw);
+
+static void coopItemsTestThrowAt(s32 missionticks)
+{
+    ObjectRecord *obj;
+    coord3d to;
+    StandTile *stan = NULL;
+    f32 dx, dy, dz, d;
+    s32 k;
+
+    if (sTestAtAt < 0 || missionticks < sTestAtAt || missionticks >= sTestAtAt + 480
+        || (obj = objFindByTagId(sTestAtTag)) == NULL || obj->prop == NULL)
+    {
+        return;
+    }
+    if (missionticks == sTestAtAt)
+    {
+        for (k = 0; k < 8 && stan == NULL; k++)
+        {   /* the first side of it with floor */
+            to.f[0] = obj->prop->pos.f[0] + sTestAtDist * cosf(k * 0.7853982f);
+            to.f[1] = obj->prop->pos.f[1] + 100.0f;
+            to.f[2] = obj->prop->pos.f[2] + sTestAtDist * sinf(k * 0.7853982f);
+            stan = stanFindTileBelowPos(&to, NULL, NULL);
+        }
+        if (stan == NULL)
+        {
+            portConLogf("ge: coop: testthrowat: no floor by tag %d\n", sTestAtTag);
+            sTestAtAt = -1;
+            return;
+        }
+        dx = obj->prop->pos.f[0] - to.f[0];
+        dz = obj->prop->pos.f[2] - to.f[2];
+        coopTeleportPlayerTo(&to, stan, atan2f(-dx, dz));
+        portConLogf("ge: coop: testthrowat: by tag %d at %.0f %.0f %.0f\n", sTestAtTag, to.f[0], to.f[1], to.f[2]);
+    }
+    dx = obj->prop->pos.f[0] - g_CurrentPlayer->prop->pos.f[0];
+    dy = obj->prop->pos.f[1] - g_CurrentPlayer->prop->pos.f[1];
+    dz = obj->prop->pos.f[2] - g_CurrentPlayer->prop->pos.f[2];
+    d = sqrtf(dx * dx + dz * dz);
+    g_CurrentPlayer->vv_theta = atan2f(-dx, dz) * 57.29578f;
+    if (g_CurrentPlayer->vv_theta < 0.0f)
+    {
+        g_CurrentPlayer->vv_theta += 360.0f;
+    }
+    g_CurrentPlayer->vv_verta = atan2f(dy, (d > 1.0f) ? d : 1.0f) * 57.29578f;
+}
 
 void coopItemsTick(s32 missionticks)
 {
@@ -856,6 +1121,16 @@ void coopItemsTick(s32 missionticks)
         {
             sTestAimAt *= 60;
         }
+        e = getenv("GE_COOP_TESTTHROWAT");
+        if (e != NULL && sscanf(e, "%d:%d:%f", &sTestAtTag, &sTestAtAt, &sTestAtDist) >= 2)
+        {
+            sTestAtAt *= 60;
+        }
+    }
+    coopItemsTestThrowAt(missionticks);
+    if (coopItemsOn())
+    {
+        coopItemsSettleTick();
     }
     if (missionticks == 1)
     {

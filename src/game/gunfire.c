@@ -4941,6 +4941,9 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
                 if (temp_v0_8 != NULL)
                 {
                     temp_v0_8->obj->state |= 0x40;
+#ifndef TARGET_N64
+                    coopObjGadgetUsed(temp_v0_8->obj, var_s1); /* co-op: the host's level scripts see it */
+#endif
                 }
             }
         }

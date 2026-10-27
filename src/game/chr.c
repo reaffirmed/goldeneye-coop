@@ -2533,7 +2533,11 @@ s32 chrTick(PropRecord *prop)
                 chrUpdateAnim(chr, tickamount);
                 headSwitchVisible = posIsOnScreen(prop, &prop->pos, getinstsize(model), 1);
 
+#ifndef TARGET_N64
+                if (headSwitchVisible || coopChrNearPartner(chr))   /* a partner watching: no magic mode */
+#else
                 if (headSwitchVisible)
+#endif
                 {
                     if (chr->actiontype == ACT_PATROL)
                     {
@@ -2550,7 +2554,11 @@ s32 chrTick(PropRecord *prop)
         {
             headSwitchVisible = posIsOnScreen(prop, &prop->pos, getinstsize(model), 1);
 
+#ifndef TARGET_N64
+            if ((headSwitchVisible || coopChrNearPartner(chr)) && (chr->act_anim.noTranslate == 0))
+#else
             if (headSwitchVisible && (chr->act_anim.noTranslate == 0))
+#endif
             {
                 chrUpdateAnim(chr, tickamount);
             }
@@ -2563,7 +2571,11 @@ s32 chrTick(PropRecord *prop)
         {
             headSwitchVisible = posIsOnScreen(prop, &prop->pos, getinstsize(model), 1);
 
+#ifndef TARGET_N64
+            if (headSwitchVisible || (chr->chrflags & CHRFLAG_INIT) || coopChrNearPartner(chr))
+#else
             if (headSwitchVisible || (chr->chrflags & CHRFLAG_INIT))
+#endif
             {
                 chrUpdateAnim(chr, tickamount);
             }
