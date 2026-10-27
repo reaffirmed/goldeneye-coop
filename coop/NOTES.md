@@ -1315,3 +1315,25 @@ on the paper) and scroll as before.
   quits, comes back after GAP=40 s): before, 229 frees and the ghost lobby;
   after, "player 3 rejoined (new session)" and all three cards. The same in a
   mission: the third drops in again beside the host.
+
+## Lives, bleed-out and respawn times (2026-10-27, COOP_VERSION 12)
+
+- Testers asked for lives and for setting the bleed-out and respawn times.
+  Three host rules under When Down, synced in HELLO like the others
+  (COOPSET_LIVES, _BLEEDOUT, _RESPAWN; COOPSET_MAX is now 16, so HELLO grew
+  and the version went up). Each is an index into a table in coop.c; 0 is
+  the old behaviour.
+- Lives: Unlimited, 1, 2, 3, 5, 10, per player per mission (reset in
+  coopStageStart). Every down costs one (coopDeadTick, when the fade ends);
+  the down that spends the last is for good: sBledOut = COOPOUT_LIVES, the
+  same "out until the mission ends" state as bleeding out, spectating a
+  partner. Everyone down still fails the mission as before.
+- Respawn (Timer and Revive or Timer): 3-20 s (the calm rule) or a fixed
+  5..90 s. Bleed Out (Revive only, the row replaces Respawn): 15 s..3 min,
+  default 60 s (was COOP_BLEED_OUT); the draining bar scales with it.
+- Wire: STATE's new `out` byte (COOPOUT_*): a partner with no lives left
+  shows OUT on their tag and is not revivable. Our downed screen adds
+  "2 LIVES LEFT" / "LAST LIFE" under the timer.
+- Lobby: the host steps the rows with A (forward) or L / R and the D-pad
+  (both ways), like the versus rows.
+- Harness: GE_COOP_LIVES, GE_COOP_BLEEDOUT, GE_COOP_RESPAWN=<index>.

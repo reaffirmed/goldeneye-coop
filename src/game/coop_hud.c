@@ -11,7 +11,9 @@
  *     REVIVE tag over where they fell; beside them, "HOLD USE TO REVIVE"
  *     and the revive's progress while we hold it (coop_revive.c)
  *   - under the Revive rule, how long we have before we bleed out, as a
- *     draining bar
+ *     draining bar (the lobby's Bleed Out time)
+ *   - with the lobby's Lives set, our lives left while we are down, and OUT
+ *     for a partner who has none left
  *   - partners' pings (coop_ping.c): a diamond in the pinger's colour where
  *     they pinged, with their name and the distance, held to the edge of the
  *     screen when it is off it, and a square on the radar
@@ -566,7 +568,11 @@ static Gfx *coopHudPartnerStatus(Gfx *gdl, CoopHudPartner *p, s32 row)
     {
         s32 secs = (p->respawn + 59) / 60;
 
-        if (p->revivable && coopHudDownRule() == COOPDOWN_REVIVE)
+        if (p->out)
+        {
+            snprintf(text, sizeof(text), "OUT\n");   /* no lives left, or bled out */
+        }
+        else if (p->revivable && coopHudDownRule() == COOPDOWN_REVIVE)
         {
             snprintf(text, sizeof(text), "DOWN - REVIVE THEM %d\n", (int) secs);   /* before they bleed out */
         }
@@ -637,7 +643,11 @@ static Gfx *coopHudRespawn(Gfx *gdl, s32 eta)
     s32 hold = coopHudReviveHold();
     s32 secs = (eta + 59) / 60;
 
-    if (coopHudBledOut())
+    if (coopHudBledOut() == COOPOUT_LIVES)
+    {
+        snprintf(text, sizeof(text), "NO LIVES LEFT - OUT UNTIL THE MISSION ENDS\n");
+    }
+    else if (coopHudBledOut())
     {
         snprintf(text, sizeof(text), "BLED OUT - OUT UNTIL THE MISSION ENDS\n");
     }
@@ -674,7 +684,20 @@ static Gfx *coopHudRespawn(Gfx *gdl, s32 eta)
     else if (coopHudBleedOut() >= 0)
     {   /* the time left to be revived in, draining */
         gdl = coopHudBar(gdl, viGetViewLeft() + (viGetViewWidth() - 0x50) / 2, y + th + 3, 0x50,
-                         (f32) coopHudBleedOut() / (f32) COOP_BLEED_OUT, 0xD02020E0);
+                         (f32) coopHudBleedOut() / (f32) coopBleedOutTicks(), 0xD02020E0);
+    }
+    if (!coopHudBledOut() && coopHudLives() > 0)
+    {   /* the lobby's Lives: what is left after this down */
+        if (coopHudLives() == 1)
+        {
+            snprintf(text, sizeof(text), "LAST LIFE\n");
+        }
+        else
+        {
+            snprintf(text, sizeof(text), "%d LIVES LEFT\n", (int) coopHudLives());
+        }
+        textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+        gdl = coopHudPrint(gdl, viGetViewLeft() + (viGetViewWidth() - tw) / 2, y + th + 12, text, COOP_HUD_COL_DIM);
     }
     return combiner_bayer_lod_perspective(gdl);
 }
