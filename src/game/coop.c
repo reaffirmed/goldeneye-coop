@@ -1439,6 +1439,7 @@ static void coopPuppetUpdateGhost(CoopRemote *r)
     f32 dx = r->puppet->pos.f[0] - bond->pos.f[0];
     f32 dz = r->puppet->pos.f[2] - bond->pos.f[2];
     f32 d2 = dx * dx + dz * dz;
+    s32 watched;
 
     if (d2 < 60.0f * 60.0f)
     {
@@ -1457,9 +1458,9 @@ static void coopPuppetUpdateGhost(CoopRemote *r)
         r->puppetGhost = 1;     /* inside the tank (coop_tank.c) */
     }
     /* our camera inside their body (both start on one pad, or we watch
-     * them while we are down), or a cutscene, which shows only our own
-     * character: don't draw it */
-    if (d2 < 45.0f * 45.0f || coopSpectateTarget() == r->st.player || coopCutsceneActive()
+     * them while we are down; watching, our own body is not the camera),
+     * or a cutscene, which shows only our own character: don't draw it */
+    if ((d2 < 45.0f * 45.0f && !coopSpectateHud(&watched)) || coopSpectateTarget() == r->st.player || coopCutsceneActive()
         || coopTankDriving(r->st.player))
     {
         r->puppet->chr->chrflags |= CHRFLAG_HIDDEN;
@@ -1578,6 +1579,7 @@ void coopStageStart(void)
     coopAudioStageStart();
     coopItemsStageStart();
     coopReplStageStart();
+    coopCutsceneStageStart();
 }
 
 static void coopTickBody(void);
@@ -7054,6 +7056,7 @@ static s32 coopIsPresentationCmd(u8 cmd)
         case AI_HideAllChrs:
         case AI_ShowAllChrs:
         case AI_MoveObject:     /* the Runway plane to its take-off pad */
+        case AI_TriggerFadeAndExitLevelOnButtonPress:   /* an ending anyone may vote to skip (coop_vote.c) */
             return 1;
         default:
             return 0;

@@ -760,11 +760,13 @@ static Gfx *coopHudReviving(Gfx *gdl)
     return combiner_bayer_lod_perspective(gdl);
 }
 
-/* whose eyes we look out of while we are down, centred near the top */
-static Gfx *coopHudSpectating(Gfx *gdl, s32 who)
+/* whose eyes we look out of while we are down (or the free camera), centred
+ * near the top, and the keys along the foot */
+static Gfx *coopHudSpectating(Gfx *gdl, s32 mode, s32 who)
 {
     char name[40];
     char text[72];
+    char keys[72];
     s32 th = 0, tw = 0;
     s32 x, y;
     s32 p, others = 0;
@@ -776,12 +778,24 @@ static Gfx *coopHudSpectating(Gfx *gdl, s32 who)
     coopHudText(name, sizeof(name), coopPlayerName(who));   /* with "\n" */
     coopHudFit(name, viGetViewWidth() / 2);
     name[strlen(name) - 1] = '\0';
-    snprintf(text, sizeof(text), others ? "WATCHING %s - FIRE FOR NEXT\n" : "WATCHING %s\n", name);
+    if (mode == 2)
+    {
+        snprintf(text, sizeof(text), "FREE CAMERA\n");
+        snprintf(keys, sizeof(keys), "FIRE: WATCH %s   USE: BACK\n", name);
+    }
+    else
+    {
+        snprintf(text, sizeof(text), "WATCHING %s\n", name);
+        snprintf(keys, sizeof(keys), others ? "FIRE / AIM: NEXT / BACK   USE: FREE CAMERA\n" : "USE: FREE CAMERA\n");
+    }
     textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
     x = viGetViewLeft() + (viGetViewWidth() - tw) / 2;
     y = viGetViewTop() + 0x18;
     gdl = microcode_constructor(gdl);
-    gdl = coopHudPrint(gdl, x, y, text, coopHudPlayerColour(who));
+    gdl = coopHudPrint(gdl, x, y, text, (mode == 2) ? COOP_HUD_COL_TEXT : coopHudPlayerColour(who));
+    textMeasure(&th, &tw, keys, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+    x = viGetViewLeft() + (viGetViewWidth() - tw) / 2;
+    gdl = coopHudPrint(gdl, x, viGetViewTop() + viGetViewHeight() - 0x1C, keys, COOP_HUD_COL_DIM);   /* clear of the partner rows */
     return combiner_bayer_lod_perspective(gdl);
 }
 
@@ -894,6 +908,43 @@ static Gfx *coopHudObjectives(Gfx *gdl, s32 below)
     return gdl;
 }
 
+/* in a cutscene, once someone pressed skip: how many want it and who we wait
+ * for, bottom right where solo's skip hint goes (coop_vote.c) */
+Gfx *coopHudSkipVote(Gfx *gdl)
+{
+    char text[96];
+    char name[40];
+    s32 th = 0, tw = 0;
+    s32 need, mine, n, i, who, len;
+
+    n = coopSkipVotes(&need, &mine);
+    if (n <= 0)
+    {
+        return gdl;
+    }
+    len = snprintf(text, sizeof(text), "SKIP %d/%d", (int) n, (int) need);
+    if (!mine)
+    {
+        len += snprintf(text + len, sizeof(text) - len, " - PRESS TO VOTE");
+    }
+    else
+    {
+        for (i = 0; (who = coopSkipWaitingFor(i)) >= 0 && len < (s32) sizeof(text) - 24; i++)
+        {
+            coopHudText(name, sizeof(name), coopPlayerName(who));
+            coopHudFit(name, viGetViewWidth() / 4);
+            name[strlen(name) - 1] = '\0';
+            len += snprintf(text + len, sizeof(text) - len, (i == 0) ? " - WAITING FOR %s" : ", %s", name);
+        }
+    }
+    snprintf(text + len, sizeof(text) - len, "\n");
+    textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+    gdl = microcode_constructor(gdl);
+    gdl = coopHudPrint(gdl, viGetViewLeft() + viGetViewWidth() - tw - 8, viGetViewTop() + viGetViewHeight() - th - 6, text,
+                       mine ? COOP_HUD_COL_DONE : COOP_HUD_COL_TEXT);
+    return combiner_bayer_lod_perspective(gdl);
+}
+
 Gfx *coopHudRender(Gfx *gdl)
 {
     CoopHudPartner p;
@@ -907,7 +958,7 @@ Gfx *coopHudRender(Gfx *gdl)
     }
     if (coopCutsceneActive())
     {
-        return gdl;   /* the partners are in the shot, not tagged */
+        return coopHudSkipVote(gdl);   /* the partners are in the shot, not tagged */
     }
     memset(&p, 0, sizeof(p));
     partner = coopHudPartner(&p);
@@ -941,9 +992,13 @@ Gfx *coopHudRender(Gfx *gdl)
     {
         gdl = coopHudSelfVoice(gdl);
     }
-    if (coopSpectateTarget() >= 0)
     {
-        gdl = coopHudSpectating(gdl, coopSpectateTarget());
+        s32 who, mode = coopSpectateHud(&who);
+
+        if (mode != 0)
+        {
+            gdl = coopHudSpectating(gdl, mode, who);
+        }
     }
     eta = coopHudRespawnEta();
     if (eta >= 0 || coopHudBledOut())
@@ -961,6 +1016,7 @@ Gfx *coopHudRender(Gfx *gdl)
     coopCaptionHarness();
     gdl = coopCaptionsRender(gdl);   /* Sound Captions (coop_access.c) */
     gdl = coopFeedRender(gdl);   /* chat lines and toasts (coop_chat.c) */
+    gdl = coopHudSkipVote(gdl);  /* an ending that waits for a press, outside a cinema */
     gdl = weapmenuRender(gdl);
     return gdl;
 }

@@ -12009,6 +12009,207 @@ static Gfx *coopDebriefStats(Gfx *DL, s32 y0, s32 pitch)
     }
     return DL;
 }
+
+/* ---- WHAT NEXT, the debrief's third page (coop_vote.c counts) ------------- */
+
+s32 frontCompleteAllObjectivesAliveSuccess(void);
+
+/* the mission whose debrief is up (a co-op mission just played), -1 none */
+s32 coopVoteThisStage(void)
+{
+    if ((current_menu != MENU_MISSION_COMPLETE && current_menu != MENU_MISSION_FAILED)
+        || briefingpage < 0 || mission_folder_setup_entries[briefingpage].folder_text_preset == 0)
+    {
+        return -1;
+    }
+    return mission_folder_setup_entries[briefingpage].stage_id;
+}
+
+/* the mission after it, as the solo debrief's Next goes: won, and not
+ * Cradle or past it (those end the campaign) */
+s32 coopVoteNextStage(void)
+{
+    s32 entry;
+
+    if (coopVoteThisStage() < 0 || !(frontCompleteAllObjectivesAliveSuccess() || getenv("GE_COOP_TESTWIN") != NULL)   /* harness: any end is a win */
+        || mission_folder_setup_entries[briefingpage].mission_num >= SP_LEVEL_CRADLE)
+    {
+        return -1;
+    }
+    for (entry = briefingpage + 1; mission_folder_setup_entries[entry].folder_text_preset; entry++)
+    {
+        if (mission_folder_setup_entries[entry].stage_id >= 0)
+        {
+            return mission_folder_setup_entries[entry].stage_id;
+        }
+    }
+    return -1;
+}
+
+/* host: the vote went for a mission; as the lobby's Continue starts one */
+void coopVoteStartMission(s32 stage)
+{
+    gamemode = GAMEMODE_SOLO;
+    set_selected_difficulty(selected_difficulty);
+    set_solo_and_ptr_briefing(stage);
+    frontChangeMenu(MENU_RUN_STAGE, TRUE);
+}
+
+void coopVoteToLobby(void)
+{
+    if (current_menu == MENU_MISSION_COMPLETE || current_menu == MENU_MISSION_FAILED)
+    {
+        frontChangeMenu(MENU_COOP_LOBBY, FALSE);
+    }
+}
+
+#define COOP_VOTE_Y0    0xCC
+#define COOP_VOTE_X1    PORT_SHEET_RULE_R
+
+static s32 coopDebriefVoteHot;
+
+static s32 coopDebriefVotePitch(s32 pitch)
+{
+    return pitch + 10;
+}
+
+static void coopDebriefVoteLabel(char *out, s32 cap, s32 choice)
+{
+    const char *name;
+
+    switch (choice)
+    {
+        case COOPVOTE_REPLAY:
+            name = coopMissionName(coopVoteThisStage());
+            snprintf(out, cap, "Replay: %s\n", name ? name : "this mission");
+            break;
+        case COOPVOTE_NEXT:
+            name = (coopVoteNext() >= 0) ? coopMissionName(coopVoteNext()) : NULL;
+            snprintf(out, cap, name ? "Next mission: %s\n" : "Next mission (after a win)\n", name);
+            break;
+        default:
+            snprintf(out, cap, "Back to the lobby\n");
+            break;
+    }
+}
+
+/* interface_menu0D on WHAT NEXT: up and down (or the cursor) pick a row,
+ * Next (A) votes for it */
+static void coopDebriefVoteInput(s32 pitch)
+{
+    static f32 lastv = -1.0f;
+    s32 dpx = 0, dpy = 0, step = 0, row;
+
+    portSheetDpadStep(&dpx, &dpy);
+    if (dpy != 0)
+    {
+        step = (dpy < 0) ? 1 : -1;
+    }
+    else if (joyGetButtonsPressedThisFrame(PLAYER_1, D_JPAD | D_CBUTTONS))
+    {
+        step = 1;
+    }
+    else if (joyGetButtonsPressedThisFrame(PLAYER_1, U_JPAD | U_CBUTTONS))
+    {
+        step = -1;
+    }
+    if (step != 0)
+    {
+        do
+        {
+            coopDebriefVoteHot = (coopDebriefVoteHot + step + COOPVOTE_COUNT) % COOPVOTE_COUNT;
+        } while (coopDebriefVoteHot == COOPVOTE_NEXT && coopVoteNext() < 0);
+        sndPlaySfx(g_musicSfxBufferPtr, OPTION_CLICK2_SFX, 0);
+    }
+    else if (cursor_v_pos != lastv && cursor_h_pos >= 0x33 && cursor_h_pos < COOP_VOTE_X1
+             && cursor_v_pos >= COOP_VOTE_Y0 - 2)
+    {   /* the cursor moved onto a row */
+        row = (s32) (cursor_v_pos - (COOP_VOTE_Y0 - 2)) / coopDebriefVotePitch(pitch);
+        if (row < COOPVOTE_COUNT && !(row == COOPVOTE_NEXT && coopVoteNext() < 0))
+        {
+            coopDebriefVoteHot = row;
+        }
+    }
+    lastv = cursor_v_pos;
+    if (coopDebriefVoteHot == COOPVOTE_NEXT && coopVoteNext() < 0)
+    {
+        coopDebriefVoteHot = COOPVOTE_REPLAY;
+    }
+}
+
+static Gfx *coopDebriefVote(Gfx *DL, s32 pitch)
+{
+    char buf[64];
+    const s32 rp = coopDebriefVotePitch(pitch);
+    const s32 outcome = coopVoteOutcome();
+    s32 x, y, c, p, voted = 0, here = 0;
+
+    for (c = 0; c < COOPVOTE_COUNT; c++)
+    {
+        const s32 off = (c == COOPVOTE_NEXT && coopVoteNext() < 0);
+        const s32 hot = (outcome < 0 && c == coopDebriefVoteHot) || c == outcome;
+
+        y = COOP_VOTE_Y0 + c * rp;
+        if (hot)
+        {
+            DL = microcode_constructor_related_to_menus(DL, 0x33, y - 2, COOP_VOTE_X1, y + pitch + 1, (outcome >= 0) ? 0x30A03050 : 0xA0000030);
+            DL = microcode_constructor(DL);
+        }
+        coopDebriefVoteLabel(buf, sizeof(buf), c);
+        x = 0x37;
+        DL = frontPrintText(DL, &x, &y, buf, ptrFontZurichBoldChars, ptrFontZurichBold, off ? PORT_SHEET_COL_DIM : (hot ? 0xA00000FF : 0xFF),
+                            viGetX(), viGetY(), 0, 0);
+        x = 0xD8;
+        for (p = 0; p < COOP_MAX_PLAYERS; p++)
+        {   /* who voted for it: their colour, then their name */
+            if (coopVoteOf(p) != c)
+            {
+                continue;
+            }
+            y = COOP_VOTE_Y0 + c * rp;
+            DL = microcode_constructor_related_to_menus(DL, x, y + 2, x + 6, y + 8, coopPlayerColour(p));
+            DL = microcode_constructor(DL);
+            x += 9;
+            coopLobbyCopyName(buf, sizeof(buf), coopPlayerName(p));
+            DL = frontPrintText(DL, &x, &y, (char *) portSheetFitText(buf, 0x40), ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF,
+                                viGetX(), viGetY(), 0, 0);
+            x += 6;
+        }
+    }
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        here += coopLobbyPlayerHere(p);
+        voted += coopLobbyPlayerHere(p) && coopVoteOf(p) != 0xFF;
+    }
+    y = COOP_VOTE_Y0 + COOPVOTE_COUNT * rp + 2;
+    DL = microcode_constructor_related_to_menus(DL, 0x37 - 2, y - 3, COOP_VOTE_X1, y - 2, PORT_SHEET_COL_RULE);
+    DL = microcode_constructor(DL);
+    if (outcome >= 0)
+    {
+        coopDebriefVoteLabel(buf, sizeof(buf), outcome);
+        buf[strlen(buf) - 1] = '\0';
+        x = 0x37;
+        DL = frontPrintText(DL, &x, &y, "Decided: \n", ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+        strcat(buf, "\n");
+        DL = frontPrintText(DL, &x, &y, buf, ptrFontZurichBoldChars, ptrFontZurichBold, 0x207020FF, viGetX(), viGetY(), 0, 0);
+        return DL;
+    }
+    if (coopVoteLeft() >= 0)
+    {
+        snprintf(buf, sizeof(buf), "Voted: %d of %d - decided in %d s\n", voted, here, (coopVoteLeft() + 59) / 60);
+    }
+    else
+    {
+        snprintf(buf, sizeof(buf), "Voted: %d of %d - most votes wins\n", voted, here);
+    }
+    x = 0x37;
+    DL = frontPrintText(DL, &x, &y, buf, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+    x = 0x37;
+    y += pitch + 2;
+    DL = frontPrintText(DL, &x, &y, (coopVoteOf(coopDesignSelf()) == 0xFF) ? "Pick one and press A to vote.\n" : "Press A on another to change your vote.\n",
+                        ptrFontZurichBoldChars, ptrFontZurichBold, PORT_SHEET_COL_DIM, viGetX(), viGetY(), 0, 0);
+    return DL;
+}
 #endif /* !TARGET_N64 */
 
 
@@ -20280,8 +20481,8 @@ void interface_menu0C_missionfailed(void)
     set_item_visibility_in_objinstance(walletinst[0], SW_CLASSIFIED, 1);
     frontUpdateControlStickPosition();
 #ifndef TARGET_N64
-    if (coop_lobby_auto > 0 && coopSessionActive())
-    {   /* the lobby harness: on to the report after a few seconds */
+    if ((coop_lobby_auto > 0 || getenv("GE_COOP_DEBRIEFPAGE") != NULL) && coopSessionActive())
+    {   /* the lobby harness (and the debrief's): on to the report after a few seconds */
         static s32 waited;
 
         if (++waited > 240)
@@ -20289,6 +20490,13 @@ void interface_menu0C_missionfailed(void)
             waited = 0;
             tab_next_selected = TRUE;
         }
+    }
+#endif
+#ifndef TARGET_N64
+    if (tab_prev_selected && coopVoteShown())
+    {   /* co-op: the debrief's WHAT NEXT decides where everyone goes */
+        tab_prev_selected = FALSE;
+        tab_next_selected = TRUE;
     }
 #endif
     if (tab_next_selected)
@@ -20416,6 +20624,10 @@ void init_menu0D_missioncomplete(void)
     tab_prev_selected = 0;
 #ifndef TARGET_N64
     coopDebriefPage = 0;
+    if (getenv("GE_COOP_DEBRIEFPAGE") != NULL)
+    {   /* the debrief opens on this page (0..2; harness only) */
+        coopDebriefPage = atoi(getenv("GE_COOP_DEBRIEFPAGE"));
+    }
 #endif
     load_walletbond();
     load_briefing_text_for_stage();
@@ -20501,20 +20713,50 @@ void interface_menu0D_missioncomplete()
         }
     }
     if (coopStatsShown())
-    {   /* the team's page, then ours (see coopDebriefStats) */
-        if (joyGetButtonsPressedThisFrame(PLAYER_1, L_TRIG | R_TRIG))
+    {   /* the team's page, then ours (see coopDebriefStats), then WHAT NEXT
+         * while a vote is open (coop_vote.c): its Next votes, and the first
+         * page's Previous stays, since the vote decides where everyone goes */
+        const s32 pages = coopVoteShown() ? 3 : 2;
+
+        if (coopDebriefPage >= pages)
         {
-            coopDebriefPage ^= 1;
+            coopDebriefPage = pages - 1;
+        }
+        if (joyGetButtonsPressedThisFrame(PLAYER_1, R_TRIG))
+        {
+            coopDebriefPage = (coopDebriefPage + 1) % pages;
             sndPlaySfx((struct ALBankAlt_s *)g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
         }
-        if (tab_next_selected && coopDebriefPage == 0)
+        else if (joyGetButtonsPressedThisFrame(PLAYER_1, L_TRIG))
         {
-            coopDebriefPage = 1;
-            tab_next_selected = 0;
+            coopDebriefPage = (coopDebriefPage + pages - 1) % pages;
+            sndPlaySfx((struct ALBankAlt_s *)g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
         }
-        else if (tab_prev_selected && coopDebriefPage == 1)
+        if (coopDebriefPage == 2)
         {
-            coopDebriefPage = 0;
+            s32 th = 0, tw = 0;
+
+            textMeasure(&th, &tw, "STATISTICS:\n", ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+            coopDebriefVoteInput(th);
+            if (tab_next_selected)
+            {
+                coopVotePick(coopDebriefVoteHot);
+                tab_next_selected = 0;
+            }
+        }
+        if (tab_next_selected && coopDebriefPage < pages - 1)
+        {
+            coopDebriefPage++;
+            tab_next_selected = 0;
+            coopDebriefVoteHot = (coopVoteOf(coopDesignSelf()) != 0xFF) ? coopVoteOf(coopDesignSelf()) : COOPVOTE_REPLAY;
+        }
+        else if (tab_prev_selected && coopDebriefPage > 0)
+        {
+            coopDebriefPage--;
+            tab_prev_selected = 0;
+        }
+        else if (tab_prev_selected && pages == 3)
+        {
             tab_prev_selected = 0;
         }
     }
@@ -20746,7 +20988,24 @@ Gfx *constructor_menu0D_missioncomplete(Gfx *DL)
     {   /* which page: the team's results, or ours (the solo table below) */
         x = 0xB4;
         y = 0x8F;
-        DL = frontPrintText(DL, &x, &y, (coopDebriefPage == 0) ? "TEAM  1/2\n" : "YOURS  2/2\n", ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+        if (coopVoteShown())
+        {
+            static const char *const three[] = { "TEAM  1/3\n", "YOURS  2/3\n", "WHAT NEXT  3/3\n" };
+
+            DL = frontPrintText(DL, &x, &y, (char *) three[coopDebriefPage % 3], ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+        }
+        else
+        {
+            DL = frontPrintText(DL, &x, &y, (coopDebriefPage == 0) ? "TEAM  1/2\n" : "YOURS  2/2\n", ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+        }
+    }
+    if (coopStatsShown() && coopDebriefPage == 2 && coopVoteShown())
+    {   /* what next: everyone's votes (coop_vote.c) */
+        DL = coopDebriefVote(DL, y2);
+        DL = frontAddNextTabText(DL);
+        DL = frontAddPreviousTabText(DL);
+        DL = frontDrawCursor(DL);
+        return DL;
     }
     if (coopStatsShown() && coopDebriefPage == 0)
     {   /* co-op: every player's numbers instead of the solo table below */

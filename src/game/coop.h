@@ -74,7 +74,8 @@ enum { COOPOUT_NONE, COOPOUT_BLEDOUT, COOPOUT_LIVES };
 #define COOPEV_DESIGN_LAST  63
 enum
 {
-    COOPEV_CINEMA = 56      /* host -> all: CoopCinemaMsg, the host's intro is over */
+    COOPEV_CINEMA = 56,     /* host -> all: CoopCinemaMsg, the host's intro is over */
+    COOPEV_VOTE = 57        /* to the host: a vote; host -> all: the count (coop_vote.c) */
 };
 #define COOP_ALL_PLAYERS 0xFF   /* coopDesignSend's `to`: everyone */
 void coopDesignSend(s32 kind, s32 to, const void *payload, s32 len);
@@ -86,10 +87,34 @@ s32  coopDesignIsHost(void);
 
 /* cutscenes (coop_cutscene.c) */
 s32  coopCutsceneTick(void);    /* every tick: 1 while an intro or a scripted cinema runs */
+void coopCutsceneStageStart(void);
 s32  coopCutsceneActive(void);  /* intro or scripted cinema: partners hidden */
 void coopCutscenePuppetAnim(ChrRecord *chr);
 void coopCutsceneApply(const u8 *raw, s32 from);
 s32  coopIntroHostDone(void);   /* bondview2.c: end our intro, the host's is over */
+
+/* votes after a mission and for skipping a cutscene (coop_vote.c) */
+enum { COOPVOTE_REPLAY, COOPVOTE_NEXT, COOPVOTE_LOBBY, COOPVOTE_COUNT };
+enum { COOPSKIP_INTRO = 1, COOPSKIP_ENDING };
+void coopVoteTick(s32 inmission);
+void coopVoteApply(const u8 *raw, s32 from);
+s32  coopVoteShown(void);           /* the debrief's WHAT NEXT page is up */
+void coopVotePick(s32 choice);
+s32  coopVoteOf(s32 player);        /* COOPVOTE_*, 0xFF none */
+s32  coopVoteOutcome(void);         /* -1 open */
+s32  coopVoteNext(void);            /* the next mission's stage, -1 none */
+s32  coopVoteLeft(void);            /* ticks until it is decided anyway, -1 no clock */
+const char *coopVoteName(s32 choice);
+s32  coopSkipPress(s32 kind);       /* 1: skip now; 0: counted as a vote */
+s32  coopSkipPassed(s32 kind);
+s32  coopSkipVotes(s32 *need, s32 *mine);
+s32  coopSkipWaitingFor(s32 i);
+s32  coopSkipTestPress(void);
+s32  coopVoteThisStage(void);       /* front.c: the mission whose debrief is up, -1 none */
+s32  coopVoteNextStage(void);       /* front.c: the mission after it, -1 none (failed, or the last) */
+void coopVoteStartMission(s32 stage);   /* front.c: host, start it; the others follow */
+void coopVoteToLobby(void);         /* front.c */
+Gfx *coopHudSkipVote(Gfx *gdl);     /* coop_hud.c: the count in a cutscene */
 
 /* reviving a downed partner (coop_revive.c) */
 void coopReviveTick(s32 missionticks);
@@ -315,7 +340,9 @@ Gfx *coopPhotoRender(Gfx *gdl);
 void coopSpectateTick(void);
 void coopSpectateStop(void);
 void coopSpectateDropIn(s32 on);
-s32  coopSpectateTarget(void);
+s32  coopSpectateTarget(void);     /* whose eyes we look out of, -1 none (or the free camera) */
+s32  coopSpectateHud(s32 *who);    /* 1 watching *who, 2 the free camera, 0 neither */
+void coopSpectateLook(f32 lookdx, f32 lookdy, s32 direct, f32 yawdeg, f32 pitchdeg);
 s32  coopSpectateCamera(struct coord3d *pos, struct coord3d *look, struct coord3d *up);
 s32  coopSpectateRoom(u8 *room);
 struct coord3d *coopSpectatePos(s32 three);
