@@ -608,8 +608,25 @@ s32  coopReactionForced(ChrRecord *self);
 s32  coopPredictStats(s32 *confirmed, s32 *wrong);  /* joiner: deaths predicted, confirmed, not */
 f32  coopDifficultyGuardHealthMul(void);    /* the lobby difficulty's guard health, on any game */
 
+/* connection quality (coop.c coopNetLink): a player's line to the host */
+enum { COOPLINK_UNKNOWN, COOPLINK_GOOD, COOPLINK_FAIR, COOPLINK_POOR };
+#define COOP_LINK_FAIR_RTT    120   /* ms round trip */
+#define COOP_LINK_POOR_RTT    250
+#define COOP_LINK_FAIR_LOSS   2     /* % */
+#define COOP_LINK_POOR_LOSS   8
+#define COOP_LINK_FAIR_JITTER 30    /* ms */
+#define COOP_LINK_POOR_JITTER 80
+typedef struct
+{
+    s32 rtt;        /* ms */
+    s32 loss;       /* %, one way */
+    s32 jitter;     /* ms */
+    s32 quality;    /* COOPLINK_* */
+} CoopLink;
+s32  coopNetLink(s32 p, CoopLink *out);     /* 0 when not measured (yet) */
+
 /* smooth movement (coop_interp.c): timed samples drawn a moment behind */
-#define COOPINTERP_SAMPLES 8
+#define COOPINTERP_SAMPLES 32    /* half a second of a 60 fps sender: more than the longest drawing delay (coop/ci/interp_test.c) */
 typedef struct
 {
     u32 ms;         /* the sender's clock */

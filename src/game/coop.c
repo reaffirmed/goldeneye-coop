@@ -154,7 +154,14 @@ typedef struct
     u8 hold;            /* host: bit 0, the mission card holds everyone still; bits 4-7, who has loaded in (coop_screens.c) */
     u8 pad2[2];
     CoopRosterEnt roster[COOP_MAX_PLAYERS];     /* host: every player, by number */
+    /* host: each player's line to it (coopNetLink), for every lobby's party
+     * panel. Added after v0.2.0 without a version change: a shorter hello
+     * from an older build is taken with these zero (not measured). */
+    u16 linkrtt[COOP_MAX_PLAYERS];  /* round trip, ms */
+    u8 linkloss[COOP_MAX_PLAYERS];  /* packet loss, % */
+    u8 linkjit[COOP_MAX_PLAYERS];   /* jitter, ms */
 } CoopHelloPkt;
+#define COOP_HELLO_V020 ((s32) (size_t) &((CoopHelloPkt *) 0)->linkrtt)   /* what a v0.2.0 build sends */
 
 /* Mission state, both ways twice a second. Everything in it is a level
  * (not an edge), so a lost packet costs nothing. */
@@ -432,6 +439,7 @@ static u32 sChrLastSync[COOP_MAX_CHRS]; /* sTick of the last snapshot entry */
 static CoopTrack sGuardTrack[COOP_MAX_CHRS];   /* joiner: each mirrored chr's recent positions, by the host's clock */
 static s16 sGuardTrackNum[COOP_MAX_CHRS];      /* the chrnum its track is of */
 static u32 sGuardPktMs;                         /* the guard packet being applied: its clock */
+static u32 sGuardStale;                         /* joiner: guard entries that came after a newer one (counted for the log) */
 static u8 sChrHostDying[COOP_MAX_CHRS];         /* the host's says this chr is dying or dead */
 static u8 sChrFireSeen[COOP_MAX_CHRS][2]; /* host: firecount at the last snapshot */
 static u8 sChrFiring[COOP_MAX_CHRS];      /* client: GSF_FIRE_* from the last snapshot */
@@ -781,7 +789,10 @@ static void coopRecvEvents(s32 c, CoopEventsPkt *e)
         }
         coopApplyEvent(&ev);
     }
-    ch->ackDirty = 1;
+    if (e->count > 0)
+    {   /* a bare ack needs none back */
+        ch->ackDirty = 1;
+    }
 }
 
 /* a STATE packet on channel c */
@@ -924,6 +935,21 @@ typedef struct
 
 static u32 sTimeSent[COOP_NET_MAX_PEERS];
 static f32 sRtt[COOP_NET_MAX_PEERS];     /* smoothed, ms; 0 not measured yet */
+static f32 sRttDev[COOP_NET_MAX_PEERS];  /* smoothed |round trip - sRtt|: the jitter, ms */
+static f32 sLoss[COOP_NET_MAX_PEERS];    /* smoothed share of pings that got no answer, 0..1 */
+static s32 sLossN[COOP_NET_MAX_PEERS];   /* pings settled (answered or given up on) */
+#define COOP_PINGS_OUT 8
+#define COOP_PING_GIVEUP_MS 2000
+static u32 sPingOut[COOP_NET_MAX_PEERS][COOP_PINGS_OUT];  /* clocks of pings not answered yet, 0 free */
+
+/* a ping settled: answered, or not in COOP_PING_GIVEUP_MS */
+static void coopLossSample(s32 c, s32 lost)
+{
+    f32 k = sLossN[c] < 10 ? 1.0f / (f32) (sLossN[c] + 1) : 0.1f;   /* an average of the first ten, then the last ~10 */
+
+    sLoss[c] += ((lost ? 1.0f : 0.0f) - sLoss[c]) * k;
+    sLossN[c]++;
+}
 
 static void coopSendTime(s32 c, s32 answer, u32 echo)
 {
@@ -948,10 +974,26 @@ static void coopRecvTime(s32 c, CoopTimePkt *t)
     }
     {
         f32 rtt = (f32) (s32) (coopNowMs() - t->echo);
+        s32 k;
 
+        for (k = 0; k < COOP_PINGS_OUT && sPingOut[c][k] != t->echo; k++)
+        {
+        }
+        if (k == COOP_PINGS_OUT || t->echo == 0)
+        {
+            return;     /* a duplicate, or one already given up on */
+        }
+        sPingOut[c][k] = 0;
+        coopLossSample(c, 0);
         if (rtt < 0.0f || rtt > 10000.0f)
         {
             return;
+        }
+        {
+            f32 dev = rtt - sRtt[c];
+
+            dev = (dev < 0.0f) ? -dev : dev;
+            sRttDev[c] = (sRtt[c] == 0.0f) ? 0.0f : sRttDev[c] + (dev - sRttDev[c]) * 0.2f;
         }
         sRtt[c] = (sRtt[c] == 0.0f) ? rtt : sRtt[c] + (rtt - sRtt[c]) * 0.2f;
         if (sRtt[c] < 1.0f)
@@ -961,12 +1003,47 @@ static void coopRecvTime(s32 c, CoopTimePkt *t)
     }
 }
 
+/* In a mission, a line that stays poor for 4 s gets a toast (once a minute at
+ * most): on a joiner about its own line to the host, on the host about each
+ * joiner's. The party panel and the HUD's partner rows show it all along. */
+static void coopLinkWarnTick(u32 now)
+{
+    static u32 poorSince[COOP_MAX_PLAYERS], told[COOP_MAX_PLAYERS];
+    char text[80];
+    s32 p;
+
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        CoopLink l;
+
+        if (p == coopSelf() || (!coopNetIsHost() && p != 0) || !coopNetLink(p, &l) || l.quality != COOPLINK_POOR
+            || !coopInMission() || !coopRemoteHere(p))
+        {
+            poorSince[p] = 0;
+            continue;
+        }
+        if (poorSince[p] == 0)
+        {
+            poorSince[p] = now;
+        }
+        if (now - poorSince[p] < 4000 || (told[p] != 0 && now - told[p] < 60000))
+        {
+            continue;
+        }
+        told[p] = now;
+        /* the host hears about a joiner's line, a joiner about its own: either way it is that pair's */
+        snprintf(text, sizeof(text), "%s|slow connection (%d ms, %d%% loss)", coopPlayerName(p), (int) l.rtt, (int) l.loss);
+        coopFeedToast(text, p);
+        portConLogf("ge: coop: net: player %d's line is poor: %d ms, %d%% loss, %d ms jitter\n", p + 1, (int) l.rtt, (int) l.loss, (int) l.jitter);
+    }
+}
+
 static void coopTimeTick(void)
 {
     u32 now = coopNowMs();
     s32 c;
     static s32 envread;
-    static u32 lastLog;
+    static u32 lastLog, lastLinkLog;
 
     if (!envread)
     {
@@ -979,15 +1056,52 @@ static void coopTimeTick(void)
     }
     for (c = 0; c < COOP_NET_MAX_PEERS; c++)
     {
+        s32 k, slot = -1;
+
         if (!coopNetPeerConnected(c))
         {
-            sRtt[c] = 0.0f;
+            sRtt[c] = sRttDev[c] = sLoss[c] = 0.0f;
+            sLossN[c] = 0;
+            memset(sPingOut[c], 0, sizeof(sPingOut[c]));
             continue;
+        }
+        for (k = 0; k < COOP_PINGS_OUT; k++)
+        {
+            if (sPingOut[c][k] != 0 && now - sPingOut[c][k] > COOP_PING_GIVEUP_MS)
+            {
+                sPingOut[c][k] = 0;
+                coopLossSample(c, 1);
+            }
+            if (sPingOut[c][k] == 0)
+            {
+                slot = k;
+            }
         }
         if (now - sTimeSent[c] >= 500)
         {
             sTimeSent[c] = now;
+            if (slot >= 0 && now != 0)
+            {
+                sPingOut[c][slot] = now;    /* the answer echoes it (coopRecvTime) */
+            }
             coopSendTime(c, 0, 0);
+        }
+    }
+    coopLinkWarnTick(now);
+    if (now - lastLinkLog >= 10000 && !coopInMission())
+    {   /* in the menus too: the party panel shows these */
+        s32 p;
+
+        lastLinkLog = now;
+        for (p = 1; p < COOP_MAX_PLAYERS; p++)
+        {
+            CoopLink l;
+
+            if (coopNetLink(p, &l))
+            {
+                portConLogf("ge: coop: net: player %d's line to the host %d ms, %d%% loss, %d ms jitter (quality %d)\n", p + 1,
+                            (int) l.rtt, (int) l.loss, (int) l.jitter, (int) l.quality);
+            }
         }
     }
     if (now - lastLog >= 10000 && coopInMission())
@@ -995,15 +1109,74 @@ static void coopTimeTick(void)
         s32 p;
 
         lastLog = now;
+        if (sGuardStale != 0)
+        {
+            portConLogf("ge: coop: net: %u guard snapshot entries came after newer ones (positions kept, the rest skipped)\n", sGuardStale);
+        }
         for (p = 0; p < COOP_MAX_PLAYERS; p++)
         {
             if (p != coopSelf() && sR[p].valid && sClock[p].valid)
             {
-                portConLogf("ge: coop: net: player %d round trip %d ms, drawn %d ms behind (send every %.0f ms, jitter %.1f)\n", p + 1,
-                            coopNetRttMs(p), coopClockDelay(&sClock[p]), sClock[p].interval, sClock[p].jitter);
+                CoopLink l;
+
+                coopNetLink(p, &l);
+                portConLogf("ge: coop: net: player %d round trip %d ms, drawn %d ms behind (send every %.0f ms, jitter %.1f), "
+                            "link %d ms %d%% loss %d ms jitter (quality %d)\n", p + 1,
+                            coopNetRttMs(p), coopClockDelay(&sClock[p]), sClock[p].interval, sClock[p].jitter,
+                            (int) l.rtt, (int) l.loss, (int) l.jitter, (int) l.quality);
             }
         }
     }
+}
+
+/* Player p's line to the host: round trip, loss and jitter, and a quality.
+ * The host measures each joiner's itself; a joiner measures its own and has
+ * the host's word (its hello) for the others. The host's own seat (p 0) is
+ * the line from us to it on a joiner, and nothing on the host. */
+s32 coopNetLink(s32 p, CoopLink *out)
+{
+    s32 c;
+
+    memset(out, 0, sizeof(*out));
+    if (sEnabled <= 0 || p < 0 || p >= COOP_MAX_PLAYERS)
+    {
+        return 0;
+    }
+    if (coopNetIsHost() ? (p != 0) : (p == 0 || p == coopSelf()))
+    {
+        c = coopNetIsHost() ? coopChanOfPlayer(p) : 0;
+        if (c < 0 || c >= COOP_NET_MAX_PEERS || !coopNetPeerConnected(c) || sRtt[c] == 0.0f)
+        {
+            return 0;
+        }
+        out->rtt = (s32) (sRtt[c] + 0.5f);
+        out->jitter = (s32) (sRttDev[c] + 0.5f);
+        /* a ping is lost if either leg is: the one-way share is about 1 - sqrt(1 - both) */
+        out->loss = (sLossN[c] >= 4) ? (s32) ((1.0f - sqrtf(1.0f - (sLoss[c] > 0.99f ? 0.99f : sLoss[c]))) * 100.0f + 0.5f) : 0;
+    }
+    else if (!coopNetIsHost() && sHostHello.linkrtt[p] != 0)
+    {
+        out->rtt = sHostHello.linkrtt[p];
+        out->loss = sHostHello.linkloss[p];
+        out->jitter = sHostHello.linkjit[p];
+    }
+    else
+    {
+        return 0;
+    }
+    if (out->rtt >= COOP_LINK_POOR_RTT || out->loss >= COOP_LINK_POOR_LOSS || out->jitter >= COOP_LINK_POOR_JITTER)
+    {
+        out->quality = COOPLINK_POOR;
+    }
+    else if (out->rtt >= COOP_LINK_FAIR_RTT || out->loss >= COOP_LINK_FAIR_LOSS || out->jitter >= COOP_LINK_FAIR_JITTER)
+    {
+        out->quality = COOPLINK_FAIR;
+    }
+    else
+    {
+        out->quality = COOPLINK_GOOD;
+    }
+    return 1;
 }
 
 /* the round trip to player p in ms, 0 when not known; a joiner's partner is reached through the host */
@@ -1095,10 +1268,14 @@ static void coopPollNet(void)
             }
             continue;
         }
-        if (p->type == COOPPKT_HELLO && n >= (s32) sizeof(CoopHelloPkt))
+        if (p->type == COOPPKT_HELLO && n >= COOP_HELLO_V020)
         {
             CoopChan *ch = &sChan[c];
 
+            if (n < (s32) sizeof(CoopHelloPkt))
+            {   /* an older build's: no link numbers */
+                memset(buf + n, 0, sizeof(CoopHelloPkt) - (size_t) n);
+            }
             coopChanSession(c, ((CoopHelloPkt *) buf)->session);
             ch->hello = *(CoopHelloPkt *) buf;
             if (!coopNetIsHost())
@@ -1575,7 +1752,7 @@ static void coopCinemaTick(void)
  * Our own shots need nothing: a joiner already hits what it sees, and the
  * host applies the hit to that guard wherever it has got to. */
 
-#define COOP_AIM_LEAD_MS 250
+#define COOP_AIM_LEAD_MS 400     /* lag compensation: at most this far ahead (a long line: a 500 ms round trip plus the drawing delay) */
 
 static void coopRemoteAim(CoopRemote *r, s32 p)
 {
@@ -2787,6 +2964,22 @@ static void coopApplyGuard(CoopGuardEnt *e)
     }
     prop = chr->prop;
     slot = chr - g_ChrSlots;
+    if (slot >= 0 && slot < COOP_MAX_CHRS && sGuardTrackNum[slot] == chr->chrnum && sGuardTrack[slot].n > 0
+        && (s32) (sGuardTrack[slot].s[sGuardTrack[slot].n - 1].ms - sGuardPktMs) > 0)
+    {   /* an older snapshot than one we applied (jitter reorders them): its spot goes in the
+         * track, but its animation, flags and firing would take the guard back in time */
+        CoopSample smp;
+
+        smp.ms = sGuardPktMs;
+        smp.pos[0] = e->pos[0];
+        smp.pos[1] = e->pos[1];
+        smp.pos[2] = e->pos[2];
+        smp.yaw = e->yaw;
+        coopTrackPush(&sGuardTrack[slot], &smp);
+        sChrLastSync[slot] = sTick;
+        sGuardStale++;
+        return;
+    }
     if ((e->flags & GSF_DYING) && chr->actiontype != ACT_DIE && chr->actiontype != ACT_DEAD)
     {
         coopMirrorDying(chr);   /* the body stops blocking, as the host's does */
@@ -3373,7 +3566,11 @@ static void coopQueueEvent(CoopEvent *ev)
 
 /* Send every unacked event at most every 4 ticks (at once when there is
  * something new or an ack owed). Repeats cover loss; seq numbers drop the
- * duplicates on the other side. */
+ * duplicates on the other side. More than a packet's worth goes as up to
+ * COOP_EVENT_BURST packets at once: on a long line a busy moment (a firefight,
+ * a late joiner's doors and pickups) would otherwise drain at one packet per
+ * round trip and fill the ring. */
+#define COOP_EVENT_BURST 4
 
 static void coopFlushChan(s32 c)
 {
@@ -3381,27 +3578,36 @@ static void coopFlushChan(s32 c)
     CoopEventsPkt pkt;
     s32 hdr = (s32) ((u8 *) &pkt.ev[0] - (u8 *) &pkt);
     u32 seq;
+    s32 burst;
     s32 pending = (s32) (ch->outNext - 1 - ch->outAcked);
     s32 fresh = (s32) (ch->outNext - 1 - ch->outSentUpTo) > 0;
+    s32 due = pending > 0 && (fresh || sTick - ch->evLastSend >= 4);
 
-    if (!coopNetPeerConnected(c) || (!ch->ackDirty && (pending <= 0 || (!fresh && sTick - ch->evLastSend < 4))))
+    if (!coopNetPeerConnected(c) || (!ch->ackDirty && !due))
     {
         return;
     }
 
-    memset(&pkt, 0, hdr);
-    pkt.magic = COOP_MAGIC;
-    pkt.version = COOP_VERSION;
-    pkt.type = COOPPKT_EVENTS;
-    pkt.ack = ch->inDone;
-    pkt.session = coopSelfSession();
-    pkt.firstseq = ch->outAcked + 1;
-    for (seq = ch->outAcked + 1; seq < ch->outNext && pkt.count < COOP_EVENTS_PER_PKT; seq++)
+    seq = ch->outAcked + 1;
+    for (burst = 0; burst < (due ? COOP_EVENT_BURST : 1) && (burst == 0 || seq < ch->outNext); burst++)
     {
-        pkt.ev[pkt.count++] = ch->out[seq % COOP_EVENT_RING];
+        memset(&pkt, 0, hdr);
+        pkt.magic = COOP_MAGIC;
+        pkt.version = COOP_VERSION;
+        pkt.type = COOPPKT_EVENTS;
+        pkt.ack = ch->inDone;
+        pkt.session = coopSelfSession();
+        pkt.firstseq = seq;
+        for (; seq < ch->outNext && pkt.count < COOP_EVENTS_PER_PKT; seq++)
+        {
+            pkt.ev[pkt.count++] = ch->out[seq % COOP_EVENT_RING];
+        }
+        coopNetSendTo(c, &pkt, hdr + (s32) (pkt.count * sizeof(CoopEvent)));
     }
-    coopNetSendTo(c, &pkt, hdr + (s32) (pkt.count * sizeof(CoopEvent)));
-    ch->outSentUpTo = seq - 1;
+    if ((s32) (seq - 1 - ch->outSentUpTo) > 0)
+    {
+        ch->outSentUpTo = seq - 1;
+    }
     ch->evLastSend = sTick;
     ch->ackDirty = 0;
 }
@@ -4066,8 +4272,10 @@ static void coopSendWorld(void)
  * flag a moment before the host's does (the joiner planted the mine): the
  * host's older flags would take it away again for a packet or two, and the
  * objective would read complete, incomplete, complete. Flags our scripts set
- * are kept for up to a second while the host catches up. */
-static u32 sWorldOwnTick;
+ * are kept while the host catches up: a second, plus two round trips on a
+ * long line (what made us set it has to reach the host, and its WORLD come
+ * back). */
+static u32 sWorldOwnMs;
 
 static void coopApplyWorld(CoopWorldPkt *p)
 {
@@ -4084,10 +4292,10 @@ static void coopApplyWorld(CoopWorldPkt *p)
         if (own != 0)
         {
             sWorldOwnFlags |= own;
-            sWorldOwnTick = sTick;
+            sWorldOwnMs = coopNowMs();
         }
         sWorldOwnFlags &= ~p->stageflags;
-        if (sTick - sWorldOwnTick > 60)
+        if (coopNowMs() - sWorldOwnMs > 1000u + 2u * (u32) coopNetRttMs(0))
         {
             sWorldOwnFlags = 0;
         }
@@ -5024,6 +5232,15 @@ static void coopSendHello(void)
         e->ready = (i == 0) ? (u8) sLobbyReady : sChan[i - 1].hello.ready;
         e->inlobby = (i == 0) ? (u8) sOnLobbyScreen : sChan[i - 1].hello.inlobby;
         e->character = (i == 0) ? (u8) coopCharacter() : sChan[i - 1].hello.character;
+        if (i > 0)
+        {
+            CoopLink l;
+
+            coopNetLink(i, &l);
+            p.linkrtt[i] = (u16) l.rtt;
+            p.linkloss[i] = (u8) l.loss;
+            p.linkjit[i] = (u8) (l.jitter > 255 ? 255 : l.jitter);
+        }
     }
     for (c = 0; c < COOP_NET_MAX_PEERS; c++)
     {
@@ -6095,6 +6312,24 @@ static void coopRenumber(const s32 *newof)
     coopVersusRenumber(newof);   /* a versus match's player map too */
     memcpy(old, sR, sizeof(old));
     memset(sR, 0, sizeof(sR));
+    {   /* each player's clock goes with them: a joiner's tracks were timed by it */
+        CoopClock oldclk[COOP_MAX_PLAYERS];
+
+        memcpy(oldclk, sClock, sizeof(oldclk));
+        memset(sClock, 0, sizeof(sClock));
+        for (p = 0; p < COOP_MAX_PLAYERS; p++)
+        {
+            if (p != sMigSelf && newof[p] >= 0)
+            {
+                sClock[newof[p]] = oldclk[p];
+            }
+        }
+    }
+    for (p = 0; p < COOP_MAX_CHRS; p++)
+    {   /* the guards' tracks were timed by the old host's clock */
+        coopTrackReset(&sGuardTrack[p]);
+        sGuardTrackNum[p] = -1;
+    }
     for (p = 0; p < COOP_MAX_PLAYERS; p++)
     {
         sR[p].puppetAnim = -1;

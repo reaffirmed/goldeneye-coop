@@ -10964,9 +10964,43 @@ static Gfx *coopMwRows(Gfx *DL)
     return DL;
 }
 
-/* one seat of the party: the player's colour, their head, name and state */
-static Gfx *coopMwSeat(Gfx *DL, s32 y, s32 slot, s32 pick, const char *name, const char *status, u32 statuscol, s32 self, s32 tag)
+/* Player p's line to the host (coopNetLink), ending at xr: four signal bars
+ * and the round trip, green, gold or red by quality. *left is where it
+ * starts, xr when nothing is measured yet; *link gets the numbers. */
+static Gfx *coopMwLink(Gfx *DL, s32 xr, s32 y, s32 p, s32 *left, CoopLink *link)
 {
+    static const u32 colour[] = { MW_FAINT, MW_GREEN, MW_GOLD, MW_RED };
+    CoopLink l;
+    char text[24];
+    s32 i, lit, x0 = xr - 11;
+
+    *left = xr;
+    if (!coopNetLink(p, &l))
+    {
+        *link = l;
+        return DL;
+    }
+    *link = l;
+    lit = (l.quality == COOPLINK_GOOD) ? 4 : (l.quality == COOPLINK_FAIR) ? 3 : (l.rtt >= 400 || l.loss >= 15) ? 1 : 2;
+    for (i = 0; i < 4; i++)
+    {
+        DL = microcode_constructor_related_to_menus(DL, x0 + i * 3, y + 8 - (i + 1) * 2, x0 + i * 3 + 2, y + 8,
+                                                     i < lit ? colour[l.quality] : MW_FAINT);
+    }
+    DL = microcode_constructor(DL);
+    snprintf(text, sizeof(text), "%dMS", (int) l.rtt);
+    DL = coopMwSmall(DL, x0 - 3, y, text, colour[l.quality], TRUE);
+    *left = x0 - 3 - coopMwTextW(text, TRUE) - 5;
+    return DL;
+}
+
+/* one seat of the party: the player's colour, their head, name and state; link: whose line
+ * to the host to show (coopMwLink), -1 none */
+static Gfx *coopMwSeat(Gfx *DL, s32 y, s32 slot, s32 pick, const char *name, const char *status, u32 statuscol, s32 self, s32 tag, s32 link)
+{
+    s32 right = MW_PANEL_R - 4, nameR = MW_PANEL_R - 4;
+    CoopLink l;
+
     const s32 x = MW_PANEL_X;
 
     DL = microcode_constructor_related_to_menus(DL, x, y, MW_PANEL_R, y + MW_SEAT_H, self ? 0xFFFFFF1C : MW_PANEL);
@@ -10974,11 +11008,24 @@ static Gfx *coopMwSeat(Gfx *DL, s32 y, s32 slot, s32 pick, const char *name, con
     DL = coopLobbyBackdrop(DL, x + 6, y + 2, 0x16, MW_SEAT_H - 4);
     DL = coopFigureDraw(DL, pick, x + 6, y + 2, 0x16, MW_SEAT_H - 4, 0.0f, TRUE);
     DL = microcode_constructor(DL);
-    DL = coopMwText(DL, x + 0x20, y + 2, MW_PANEL_R - x - 0x24, name, self ? MW_ACCENT : MW_TEXT, FALSE);
+    memset(&l, 0, sizeof(l));
+    if (link >= 0)
+    {   /* the round trip top right, beside the name; the loss, once there is some, on the line under it */
+        DL = coopMwLink(DL, MW_PANEL_R - 4, y + 4, link, &nameR, &l);
+    }
+    DL = coopMwText(DL, x + 0x20, y + 2, nameR - x - 0x20, name, self ? MW_ACCENT : MW_TEXT, FALSE);
     DL = coopMwSmall(DL, x + 0x20, y + 0x10, status, statuscol, FALSE);
+    if (l.quality != COOPLINK_UNKNOWN && l.loss >= COOP_LINK_FAIR_LOSS)
+    {
+        char loss[16];
+
+        snprintf(loss, sizeof(loss), "%d%% LOSS", (int) l.loss);
+        DL = coopMwSmall(DL, right, y + 0x10, loss, l.loss >= COOP_LINK_POOR_LOSS ? MW_RED : MW_GOLD, TRUE);
+        tag = FALSE;    /* no room for YOU as well; the lime name says it */
+    }
     if (self && tag)
     {
-        DL = coopMwSmall(DL, MW_PANEL_R - 4, y + 0x10, "YOU", MW_DIM, TRUE);
+        DL = coopMwSmall(DL, right, y + 0x10, "YOU", MW_DIM, TRUE);
     }
     return DL;
 }
@@ -10988,7 +11035,7 @@ static Gfx *coopMwParty(Gfx *DL)
     const s32 state = coopLobbyState();
     const s32 out = (state == COOPLOBBY_IDLE || state == COOPLOBBY_OFF || state == COOPLOBBY_BUSY);
     char name[48], count[16];
-    s32 i, n = 0, y = MW_SEAT_Y;
+    s32 i, n = 0, y = MW_SEAT_Y, link;
 
     for (i = 0; i < COOP_MAX_PLAYERS && !out; i++)
     {
@@ -11003,7 +11050,7 @@ static Gfx *coopMwParty(Gfx *DL)
         const char *prof = portProfileActive(0);
 
         coopLobbyCopyName(name, sizeof(name), (prof != NULL && prof[0] != '\0') ? prof : coopLobbySelfName());
-        return coopMwSeat(DL, y, 0, coopCharacter(), name, (state == COOPLOBBY_BUSY) ? "CONNECTING" : "NOT IN A LOBBY", MW_DIM, TRUE, FALSE);
+        return coopMwSeat(DL, y, 0, coopCharacter(), name, (state == COOPLOBBY_BUSY) ? "CONNECTING" : "NOT IN A LOBBY", MW_DIM, TRUE, FALSE, -1);
     }
     for (i = 0; i < COOP_MAX_PLAYERS; i++, y += MW_SEAT_PITCH)
     {
@@ -11017,19 +11064,20 @@ static Gfx *coopMwParty(Gfx *DL)
             continue;
         }
         coopLobbyCopyName(name, sizeof(name), coopPlayerName(i));
+        link = (i == 0) ? -1 : i;   /* each joiner's line to the host; the host has none */
         if (self ? coopVoiceSelfTalking() : coopVoiceTalking(i))
         {   /* their voice is coming through (coop_voice.c) */
-            DL = coopMwSeat(DL, y, i, coopPlayerCharacter(i), name, "TALKING", MW_BLUE, self, TRUE);
+            DL = coopMwSeat(DL, y, i, coopPlayerCharacter(i), name, "TALKING", MW_BLUE, self, TRUE, link);
         }
         else if (i == 0)
         {
-            DL = coopMwSeat(DL, y, i, coopPlayerCharacter(i), name, "HOST", MW_GOLD, self, TRUE);
+            DL = coopMwSeat(DL, y, i, coopPlayerCharacter(i), name, "HOST", MW_GOLD, self, TRUE, link);
         }
         else
         {
             const s32 ready = coopLobbyPlayerReady(i);
 
-            DL = coopMwSeat(DL, y, i, coopPlayerCharacter(i), name, ready ? "READY" : "NOT READY", ready ? MW_GREEN : MW_DIM, self, TRUE);
+            DL = coopMwSeat(DL, y, i, coopPlayerCharacter(i), name, ready ? "READY" : "NOT READY", ready ? MW_GREEN : MW_DIM, self, TRUE, link);
         }
     }
     return DL;

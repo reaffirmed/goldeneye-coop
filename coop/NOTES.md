@@ -1489,3 +1489,61 @@ change: it is all front.c and menu_glyphs.c.
   mission ends); Runway, joiner drives the tank and the host's copy follows;
   Dam, idle tower guards within range animate on the host, one out of range
   stays still as before.
+
+## Players far apart: smoothing, ordering and a connection readout (2026-10-27)
+
+Tester report: versus and a campaign mission fell out of step once a player
+from another country joined; players in one country were fine. COOP_VERSION
+stays 12 (everything below talks to a v0.2.0 game).
+
+- Found with coop/ci/interp_test.c (coop_interp.c against simulated lines,
+  no game): at 60 frames a second a partner's STATE comes every 16 ms, so
+  the 8 samples a track kept covered 133 ms, while the drawing delay grows
+  to 200 ms once the jitter passes ~90 ms. The moment to draw fell before
+  the oldest sample kept: 150+100 ms starved 11% of frames, 150+150 ms 49%
+  (partners hitched and slid; versus bodies are drawn the same way). The
+  two-copy runs never showed it because Xvfb's software GL runs the game at
+  ~20 fps, where 8 samples span 400 ms. Tracks keep 32 samples now and the
+  delay may grow to 250 ms: 0% starved up to 300+200 ms, 5% loss. CI
+  (main.yml) runs the test; the old values fail it.
+- Guard snapshots (20 a second) are reordered by jitter, and each entry
+  applied its animation, frame, hidden/dying flags and firing at once, so an
+  older one could put a guard back a step (an animation restarted, a burst
+  of gunfire replayed). An entry older than one applied for that guard only
+  adds its spot to the track ("guard snapshot entries came after newer
+  ones" in the 10 s net log).
+- A joiner's own new stage flags were kept 60 ticks for the host to catch
+  up; on a 500 ms line that is not enough for what set them to reach the
+  host and its WORLD to come back. Now 1 s plus two round trips.
+- Reliable events: more than a packet's worth (32) went out one packet per
+  round trip, so a burst on a long line (a late joiner's doors and
+  pickups, a firefight's object damage) drained slowly and could fill the
+  256 ring. Up to 4 packets go at once now. A bare ack no longer asks for
+  an ack back (the two games bounced empty EVENTS packets every tick).
+- Lag compensation: guards may aim up to 400 ms ahead of a joiner (was
+  250, which a 500 ms round trip reached all the time).
+- Host migration: each player's clock (CoopClock) now moves with their new
+  player number, and the guard tracks start again, instead of drawing the
+  new host's guards by the old host's clock offset.
+- Connection quality (coopNetLink): the half-second COOPPKT_TIME pings now
+  also give the jitter (smoothed deviation of the round trip) and the loss
+  (pings unanswered after 2 s; the one-way share shown is 1 - sqrt(1 - both
+  ways)). Good under 120 ms, 2% and 30 ms; poor from 250 ms, 8% or 80 ms.
+  The host measures each joiner; a joiner its own line, and the others' from
+  the host's hello (linkrtt / linkloss / linkjit appended to CoopHelloPkt;
+  a v0.2.0 hello, shorter, is taken with them zero).
+  - Lobby party panel: each joiner's seat shows signal bars and the round
+    trip beside the name, green / gold / red, and "N% LOSS" on the status
+    line once there is some (front.c coopMwLink).
+  - HUD: a partner row with a fair or poor line shows its round trip (and
+    loss) after the name, gold or red.
+  - A line poor for 4 s in a mission toasts "<name> - slow connection (..)",
+    once a minute at most: the host about each joiner, a joiner about its
+    own line.
+- Checked: interp_test before / after (numbers above); the 20-mission CI run
+  with GE_COOP_NETSIM=150:120:4 on both copies, old and new builds; the
+  lobby and HUD readouts with the joiner at 140:60:6 (shots in the project
+  files, far-apart/).
+- Found on the way: the game builds with -w, so an undeclared fabsf
+  compiled as an int function and the jitter read 12, 31, 51, 71, 91...;
+  written out by hand now. Check new calls with -Wimplicit-function-declaration.
