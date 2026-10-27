@@ -1316,6 +1316,62 @@ on the paper) and scroll as before.
   after, "player 3 rejoined (new session)" and all three cards. The same in a
   mission: the third drops in again beside the host.
 
+## Tester fixes after v0.1.0 (2026-10-27)
+
+- Own character: solo_char_load (bondview2.c) built our own Bond (intro
+  swirl, cinemas) from the stage's cuff, so each player saw themselves as
+  the mission's Bond while the partners saw their pick. In a co-op session
+  it now wears coopCharacterBody's pick. Checked with GE_COOP_TESTCINEMA:
+  Natalya and the pick-5 character look the same on both screens.
+- Partner hits on chrs: coopLookPlayShot drew bullet spark type 2, which
+  g_BulletSparkColors makes red. The shooter's game draws chrCreateHitPuffs'
+  smoke (g_HitReactionTable's type and size for the hit part). CoopShot.impact
+  now carries the hit part for COOPSHOT_CHR (it was -1; an older game's shot
+  gets type 1, size 21). No wire size change.
+- Music after a revive: death runs set_missionstate(0) (all tracks stop) and
+  the death tune; nothing put the level music back until a later music event.
+  coopRespawnPlayerAt now restarts it (sub_GAME_7F0C12CC) when the state is
+  still 0, then the alarm or countdown state it had at the death.
+- Voice chat bar: the talking speaker beside a name tag sat 13 px left of the
+  tag, so a tag near the left edge put it at a negative x. gDPFillRectangle
+  keeps 10 bits per edge, so the rect wrapped and ran across the screen in
+  the partner's colour (the tester's yellow bar over the objective list). The
+  speaker skips negative edges and moves right of the tag at the left edge.
+- Versus bodies are drawn from coop_interp.c's track (coopRemoteInfo), as
+  co-op puppets are, instead of each STATE as it lands. Run with
+  GE_COOP_NETSIM=120:40:2 on both: hits, kills and respawns all agree.
+
+## Cutscenes show only your own character (2026-10-27)
+
+Owner's call: in a cutscene each player sees only the character they picked,
+never a partner's. Replaces the "Synced cutscenes" line-up beside the star.
+
+- Partners' puppets are hidden whenever the intro (overview, swirl) or a
+  scripted cinema runs (coopCutsceneActive, coop.c coopPuppetUpdateGhost).
+  The swirl line-up and its camera-near check are gone.
+- A scripted cinema someone else triggered moves our Bond onto the star's
+  spot rather than beside it, unless our own body already runs the ending's
+  list (it walks itself there).
+- Endings with Bond in them (Dam bungee jump): the host's SetChrAiList on
+  CHR_BOND_CINEMA is relayed again, and the joiner's body runs that list in
+  its own character from the host's moment (ported from PR #10's unmerged
+  7152670). The host no longer relays presentation commands its own body's
+  list runs: the joiner's body runs the same ones. The joiner's copy of the
+  level script (chr 254 on Dam) reaches the ending ~4 s late; while our body
+  plays the host's ending, its presentation commands are stepped over
+  (coopAiSkip, its fade blacked out the jump) and its SetChrAiList to our
+  body does not restart the list (coopKeepBodyList).
+- That late script also ran HideAllChrs after our body was made, which hid it
+  and stopped its ticks mid-jump (the joiner's screen went black). In co-op
+  HideAllChrs leaves the local player's body alone (chrai.c).
+- Harness: GE_COOP_TESTPAD=<pad>:<s> stands on an unbound pad <s> seconds in
+  (330: the Dam bungee room, which starts the ending).
+- Checked on Dam with GE_COOP_CHAR=0 (host, Bond) and 14 (joiner, male
+  scientist), GE_COOP_CINEMASHOT=40: the bungee ending, the intro swirl and a
+  GE_COOP_TESTCINEMA orbit each show only Bond on the host and only the
+  scientist on the joiner, same shots in the same order. mission_runs.sh
+  dam runway surface: all pass, 0 corrected desyncs.
+
 ## Lives, bleed-out and respawn times (2026-10-27, COOP_VERSION 12)
 
 - Testers asked for lives and for setting the bleed-out and respawn times.

@@ -164,6 +164,10 @@ static Gfx *coopHudSpeaker(Gfx *gdl, s32 x, s32 y, u32 colour, s32 waves, s32 mu
 {
     s32 k;
 
+    if (x - 1 < 0 || y < 0)
+    {   /* gDPFillRectangle keeps 10 bits: a negative edge wraps and the rect runs across the screen */
+        return gdl;
+    }
     if (muted)
     {
         colour = COOP_HUD_COL_DIM;
@@ -284,10 +288,15 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
     gDPNoOpTag(gdl++, 0x58FFFFFFu);
     gdl = combiner_bayer_lod_perspective(gdl);
     if (coopVoiceTalking(p->player))
-    {   /* talking: a speaker just left of the tag, unscaled */
+    {   /* talking: a speaker just left of the tag, unscaled (right of it at the screen's left edge) */
+        s32 sx = px - (s32) (tw * scale) / 2 - 13;
+
+        if (sx - 1 < viGetViewLeft())
+        {
+            sx = px + (s32) (tw * scale) / 2 + 3;
+        }
         gdl = microcode_constructor(gdl);
-        gdl = coopHudSpeaker(gdl, px - (s32) (tw * scale) / 2 - 13, py - (s32) (th * scale) / 2 - 4,
-                             coopHudPlayerColour(p->player), 1, 0);
+        gdl = coopHudSpeaker(gdl, sx, py - (s32) (th * scale) / 2 - 4, coopHudPlayerColour(p->player), 1, 0);
         gdl = combiner_bayer_lod_perspective(gdl);
     }
     return gdl;

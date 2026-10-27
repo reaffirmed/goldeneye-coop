@@ -451,6 +451,9 @@ static void coopApplyMissionEnd(CoopEvent *ev);
 static void coopSendHello(void);
 static void coopApplyExplosion(CoopEvent *ev);
 static void coopApplyAiCommand(CoopEvent *ev);
+static s32 sPendingCinemaList = -1;
+static s32 sHostEndingHere;    /* joiner: we play the host's ending; its exit is the host's to send */
+static void coopPendingCinemaTick(void);
 static s32 coopLocalCalm(void);
 static void coopTrackCombat(void);
 static void coopApplyWorld(CoopWorldPkt *p);
@@ -1225,8 +1228,6 @@ static void coopPuppetUpdate(CoopRemote *r)
         pos.f[2] = at.pos[2];
         yaw = at.yaw;
     }
-    coopCutscenePuppetPos(r->st.player, &pos, &yaw);   /* the intro's line beside our Bond */
-
     stan = coopFindStan(&pos, r->puppet->stan, &r->puppet->pos);
     if (stan == NULL)
     {
@@ -1270,11 +1271,12 @@ static void coopPuppetUpdateGhost(CoopRemote *r)
     }
     if (coopCutsceneActive())
     {
-        r->puppetGhost = 1;     /* in the shot, and in nobody's way */
+        r->puppetGhost = 1;     /* in nobody's way */
     }
     /* our camera inside their body (both start on one pad, or we watch
-     * them while we are down): don't draw it */
-    if (d2 < 45.0f * 45.0f || coopSpectateTarget() == r->st.player || coopCutsceneCameraNear(&r->puppet->pos))
+     * them while we are down), or a cutscene, which shows only our own
+     * character: don't draw it */
+    if (d2 < 45.0f * 45.0f || coopSpectateTarget() == r->st.player || coopCutsceneActive())
     {
         r->puppet->chr->chrflags |= CHRFLAG_HIDDEN;
     }
@@ -1304,6 +1306,9 @@ s32 coopPropIsGhost(PropRecord *prop)
 void coopStageStart(void)
 {
     s32 i;
+
+    sPendingCinemaList = -1;
+    sHostEndingHere = 0;
 
     if (bossGetStageNum() != LEVELID_TITLE)
     {
@@ -1401,6 +1406,7 @@ static void coopTickBody(void)
     sTick++;
     sInCinema = coopCutsceneTick();     /* before the packets: they ask coopInStage */
     coopPollNet();
+    coopPendingCinemaTick();
     coopTimeTick();
     coopSessionTick();
     if (bossGetStageNum() != LEVELID_TITLE)
@@ -1968,6 +1974,27 @@ static void coopHarnessTick(void)
                 portConLogf("ge: coop: testgoto -> chr %d at %.0f %.0f %.0f\n", testgoto,
                             c->prop->pos.f[0], c->prop->pos.f[1], c->prop->pos.f[2]);
             }
+        }
+    }
+    if (coopPartnerHere() && coopInMission())
+    {   /* GE_COOP_TESTPAD=<pad>:<s>: <s> seconds into the mission, stand on that
+         * (unbound) pad; 330 is the Dam bungee room (harness only) */
+        static s32 testpad = -2, padat;
+        if (testpad == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTPAD");
+            if (e == NULL || sscanf(e, "%d:%d", &testpad, &padat) != 2)
+            {
+                testpad = -1;
+            }
+        }
+        if (testpad >= 0 && sMissionTicks == (u32) padat * 60 && g_CurrentSetup.pads != NULL)
+        {
+            PadRecord *pad = &g_CurrentSetup.pads[testpad];
+            coord3d pos = pad->pos;
+
+            coopRespawnPlayerAt(&pos, pad->stan, 0.0f, sLastWeapon);
+            portConLogf("ge: coop: testpad -> pad %d at %.0f %.0f %.0f\n", testpad, pos.f[0], pos.f[1], pos.f[2]);
         }
     }
     if (coopPartnerHere() && coopInMission())
@@ -3517,6 +3544,7 @@ void coopSendVersusPkt(void *pkt, s32 len)
 s32 coopRemoteInfo(s32 p, CoopRemoteInfo *out)
 {
     CoopRemote *r;
+    CoopSample at;
 
     if (!coopRemoteHere(p))
     {
@@ -3527,6 +3555,13 @@ s32 coopRemoteInfo(s32 p, CoopRemoteInfo *out)
     out->pos[1] = r->st.pos[1];
     out->pos[2] = r->st.pos[2];
     out->yaw = r->st.yaw;
+    if (!sNoInterp && coopTrackAt(&r->track, coopClockRenderMs(&sClock[p], coopNowMs()), &at) >= 0)
+    {   /* drawn between two of their samples, as a co-op puppet is (coopPuppetUpdate) */
+        out->pos[0] = at.pos[0];
+        out->pos[1] = at.pos[1];
+        out->pos[2] = at.pos[2];
+        out->yaw = at.yaw;
+    }
     out->dead = r->st.dead;
     out->health = r->st.health;
     out->armour = r->st.armour;
@@ -4221,6 +4256,11 @@ void coopMissionComplete(void)
     coopCampaignMissionEnd(); /* a win together goes in coop_campaign.txt */
     if (sEnabled <= 0 || sApplyingRemoteEnd || !coopNetHasPeer() || !coopPartnerHere())
     {
+        return;
+    }
+    if (sHostEndingHere && !coopNetIsHost())
+    {   /* our copy of the host's ending ran out first: the host's own ends it for everyone */
+        portConLogf("ge: coop: our copy of the ending finished; the host's ends the mission\n");
         return;
     }
     coopTeamTimeSend();     /* host: the team's time first, so it is in before the debrief (coop_teamtime.c) */
@@ -6667,9 +6707,26 @@ void coopAiCommand(u8 *list, s32 offset, ChrRecord *self)
     s32 len;
     u8 cmd = list[offset];
 
-    if (!coopIsPresentationCmd(cmd) || sApplyingRemoteAi || sEnabled <= 0 || !coopNetIsHost()
+    if (cmd == AI_SetChrAiList && list[offset + 1] == (u8) CHR_BOND_CINEMA)
+    {
+        /* an ending puts the player's own third-person body through a list
+         * (the Dam bungee jump, Runway): each game runs it for its own Bond,
+         * from the host's moment rather than when its own copy of the level
+         * script gets there */
+    }
+    else if (!coopIsPresentationCmd(cmd))
+    {
+        return;
+    }
+    if (sApplyingRemoteAi || sEnabled <= 0 || !coopNetIsHost()
         || !coopNetHasPeer() || !coopPartnerHere())
     {
+        return;
+    }
+    if (self != NULL && g_CurrentPlayer->prop != NULL && self == g_CurrentPlayer->prop->chr)
+    {   /* our own body's list (an ending's walk and jump, its cameras and
+         * fades): every game's level script gives it to that game's own body,
+         * in the character that player picked */
         return;
     }
     len = chraiitemsize(list, offset);
@@ -6684,6 +6741,59 @@ void coopAiCommand(u8 *list, s32 offset, ChrRecord *self)
     ev.u.ai.len = (u8) len;
     memcpy(ev.u.ai.cmd, list + offset, len);
     coopQueueEvent(&ev);
+}
+
+/* joiner: an ending's list for our own third-person body, waiting for the
+ * camera switch to make that body (it can lag the command by a few ticks) */
+static s32 sPendingCinemaWait;
+
+static void coopPendingCinemaTick(void)
+{
+    ChrRecord *bc;
+
+    if (sPendingCinemaList < 0)
+    {
+        if (g_CameraMode == CAMERAMODE_FP)
+        {
+            sHostEndingHere = 0;    /* the intro's list is over, no ending yet */
+        }
+        return;
+    }
+    bc = (g_CurrentPlayer->prop != NULL) ? g_CurrentPlayer->prop->chr : NULL;
+    if (bc != NULL)
+    {
+        bc->ailist = ailistFindById(sPendingCinemaList);
+        bc->aioffset = 0;
+        bc->sleep = 0;
+        portConLogf("ge: coop: our Bond runs the ending's list %04x\n", sPendingCinemaList);
+        sPendingCinemaList = -1;
+        sHostEndingHere = 1;
+    }
+    else if (--sPendingCinemaWait <= 0)
+    {
+        portConLogf("ge: coop: no third-person Bond for the ending's list %04x\n", sPendingCinemaList);
+        sPendingCinemaList = -1;
+    }
+}
+
+/* joiner: while our body plays the host's ending, the host's camera, fade and
+ * text commands reach us from the host (coopApplyAiCommand) and our body's
+ * list runs its own; our copy of the level script gets to the same ending a
+ * few seconds late, and its copies of them would black out the jump (chrai.c
+ * steps over them) */
+s32 coopAiSkip(u8 *list, s32 offset, ChrRecord *self)
+{
+    return sEnabled > 0 && !coopNetIsHost() && sHostEndingHere && !sApplyingRemoteAi
+        && g_CameraMode == CAMERAMODE_POSEND && coopIsPresentationCmd(list[offset])
+        && (self == NULL || g_CurrentPlayer->prop == NULL || self != g_CurrentPlayer->prop->chr);
+}
+
+/* joiner: our own copy of the level script gives our body the list the host's
+ * already started here: keep it going rather than start it over (chrai.c) */
+s32 coopKeepBodyList(ChrRecord *chr, AIRecord *list)
+{
+    return sEnabled > 0 && !coopNetIsHost() && sHostEndingHere && g_CurrentPlayer->prop != NULL
+        && chr == g_CurrentPlayer->prop->chr && chr->ailist == list;
 }
 
 static void coopApplyAiCommand(CoopEvent *ev)
@@ -6714,6 +6824,16 @@ static void coopApplyAiCommand(CoopEvent *ev)
     }
     memcpy(list, ev->u.ai.cmd, ev->u.ai.len);
     list[ev->u.ai.len] = AI_EndList;
+    if (list[0] == AI_SetChrAiList && list[1] == (u8) CHR_BOND_CINEMA)
+    {
+        u16 raw;
+
+        memcpy(&raw, &list[2], sizeof(raw));
+        sPendingCinemaList = ntohs(raw);   /* as the interpreter reads it */
+        sPendingCinemaWait = 300;
+        coopPendingCinemaTick();
+        return;
+    }
     savedlist = chr->ailist;
     savedofs = chr->aioffset;
     chr->ailist = (AIRecord *) list;

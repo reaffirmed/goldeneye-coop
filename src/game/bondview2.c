@@ -84,6 +84,11 @@ static s32 s_PortSwirlAiFields = 0;
 static u16 s_PortIntroSkipMask = 0;
 static s32 s_PortIntroSkipPort = 0;
 static u32 s_PortIntroStartCount = 0;
+/* co-op: the music state when we died (coopRespawnPlayerAt puts it back) */
+static MISSION_STATE_ID sCoopDeathMusicState = MISSION_STATE_0;
+void sub_GAME_7F0C12CC(void);
+extern void portConLogf(const char *fmt, ...);
+extern s32 g_musicXTrack1CurrentTrackNum;
 #endif
 
 #ifdef VERSION_EU
@@ -526,6 +531,20 @@ void solo_char_load(void)
             if (portAdzyMode() && getPlayerCount() == 1)
             {
                 body = BODY_Siberian_Special_Forces;
+            }
+        }
+
+        /* co-op: our own Bond (intro swirl, cinemas) wears the lobby's pick,
+         * as our puppet does on the partners' screens */
+        if (getPlayerCount() == 1 && coopSessionActive())
+        {
+            s32 pickhead;
+            s32 pickbody = coopCharacterBody(coopCharacter(), &pickhead);
+
+            if (pickbody >= 0)
+            {
+                body = pickbody;
+                head = pickhead;
             }
         }
 #endif
@@ -12297,10 +12316,34 @@ s32 portMpSpawnWithWeapon(void)
 #endif
 
 #ifndef TARGET_N64
+/* Co-op: the stage music after a revive or respawn. Death stops it
+ * (MISSION_STATE_0) and plays the death tune; nothing but a later music event
+ * started it again. */
+static void coopRestoreMusic(void)
+{
+    if (get_mission_state() != MISSION_STATE_0)
+    {
+        return;     /* an event (an alarm, a timer) has set it since */
+    }
+    musicTrack1Stop();
+    sub_GAME_7F0C12CC();    /* the level's music, with its background track */
+    if (sCoopDeathMusicState != MISSION_STATE_0 && sCoopDeathMusicState != MISSION_STATE_1
+        && sCoopDeathMusicState != MISSION_STATE_4 && sCoopDeathMusicState != MISSION_STATE_6)
+    {
+        set_missionstate(sCoopDeathMusicState);  /* the alarm or countdown music it had */
+    }
+    portConLogf("ge: coop: music back after the death (state %d, track %d)\n", (int) get_mission_state(),
+                (int) g_musicXTrack1CurrentTrackNum);
+}
+
 /* Co-op: bring the dead solo player back at the given spot with full health,
  * keeping inventory and ammo (mission items included). Called by coop.c. */
 void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon)
 {
+    if (g_CurrentPlayer->bonddead)
+    {
+        coopRestoreMusic();
+    }
     g_CurrentPlayer->bonddead = 0;
     g_CurrentPlayer->deathanimfinished = 0;
     g_CurrentPlayer->redbloodfinished = 0;
@@ -13022,6 +13065,9 @@ Gfx *maybe_mp_interface(Gfx *gdl)
                 die_blood_image_routine(0);
                 if (getPlayerCount() == 1)
                 {
+#ifndef TARGET_N64
+                    sCoopDeathMusicState = get_mission_state();   /* co-op: back on a revive */
+#endif
                     // This unusual comma-expression syntax is required for a byte match.
                     set_missionstate((musicStopSlot(-1), 0));
                     musicTrack1ApplySeqpVol(sub_GAME_7F0C0BF0());

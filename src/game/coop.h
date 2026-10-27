@@ -29,10 +29,12 @@ void coopAltBondEnd(void);
 void coopAltBondCredit(void *script, s32 k);   /* a script's "either player" check passed: k 0 for our Bond, else partner k-1 */
 void coopScriptSetsFlags(void *script);        /* that script sets stage flags: it was whoever passed its last check */
 void coopAiCommand(u8 *list, s32 offset, ChrRecord *self);
+s32  coopAiSkip(u8 *list, s32 offset, ChrRecord *self);   /* joiner: step over our late copy of the host's ending commands */
 s32  coopDeadTick(void); /* 1: co-op owns this death (waiting or respawned) */
 void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon);
 void coopTeleportPlayerTo(coord3d *pos, StandTile *stan, f32 yaw);    /* bondview2.c */
 s32  coopCinemaFocus(coord3d *out);                                     /* bondview2.c: a scripted cinema's pad */
+s32  coopKeepBodyList(ChrRecord *chr, AIRecord *list);  /* joiner: the host's ending list already runs on our body */
 s32  coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid);
 s32  coopShotPuppet(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, s32 isPlayer);
 
@@ -83,10 +85,8 @@ s32  coopDesignIsHost(void);
 
 /* cutscenes (coop_cutscene.c) */
 s32  coopCutsceneTick(void);    /* every tick: 1 while an intro or a scripted cinema runs */
-s32  coopCutsceneActive(void);  /* partners play our Bond's cinema animation */
-s32  coopCutscenePuppetPos(s32 player, coord3d *pos, f32 *yaw);   /* 1: stand the puppet here instead */
+s32  coopCutsceneActive(void);  /* intro or scripted cinema: partners hidden */
 void coopCutscenePuppetAnim(ChrRecord *chr);
-s32  coopCutsceneCameraNear(const coord3d *pos);  /* the swirl's camera is about to pass through pos */
 void coopCutsceneApply(const u8 *raw, s32 from);
 s32  coopIntroHostDone(void);   /* bondview2.c: end our intro, the host's is over */
 
@@ -375,7 +375,7 @@ void coopLookReset(CoopLookPuppet *lp);
 void coopLookPuppetTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look, s32 dead, s32 self);
 void coopLookShotBegin(s32 hand, s32 weapon, coord3d *from, coord3d *dir); /* chrprop.c chraiDefaultWeaponFireHandler */
 void coopLookShotBg(coord3d *pos, coord3d *normal, s32 impact, s32 room, s32 texture, s32 spark);
-void coopLookShotChr(PropRecord *prop, coord3d *pos);           /* chr.c chrHandleBulletHit */
+void coopLookShotChr(PropRecord *prop, coord3d *pos, s32 hitpart);           /* chr.c chrHandleBulletHit */
 void coopLookShotObj(PropRecord *prop, coord3d *pos, s32 room, s32 texture, s32 glass); /* propobj.c objHit */
 void coopLookShotEnd(void);
 s32  coopPropIsPartner(PropRecord *prop);
