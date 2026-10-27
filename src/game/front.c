@@ -8856,7 +8856,7 @@ enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLRO
        CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE, CLROW_FRIENDLYFIRE,
        CLROW_CHARACTER, CLROW_CHAT, CLROW_PUBLIC, CLROW_PASSWORD, CLROW_JOINPUBLIC, CLROW_LAYOUT, CLROW_OPTION,
        CLROW_HOSTLEAVES, CLROW_VSMODE, CLROW_VSARENA, CLROW_VSSCENARIO, CLROW_VSLENGTH, CLROW_VSWEAPONS, CLROW_VSSTART,
-       CLROW_DISCORDYES, CLROW_DISCORDNO, CLROW_PROFILE, CLROW_VOICEMUTE };
+       CLROW_DISCORDYES, CLROW_DISCORDNO, CLROW_PROFILE, CLROW_VOICEMUTE, CLROW_LIVES, CLROW_BLEEDOUT, CLROW_RESPAWN };
 #define COOP_LOBBY_ROWS     48
 /* the crew strip (coopLobbyStrip): a photo card per player, and the next
  * mission's or the arena's photo, between the title and the rows */
@@ -9587,6 +9587,17 @@ static void coopLobbyBuild(void)
 
         coopLobbyAdd(coopLobbyIsHost() ? CLROW_DOWNRULE : CLROW_TEXT, 0, "When Down\n",
                      downrules[(rule >= 0 && rule <= COOPDOWN_REVIVE) ? rule : 0]);
+        if (rule == COOPDOWN_REVIVE)
+        {
+            coopLobbyAdd(coopLobbyIsHost() ? CLROW_BLEEDOUT : CLROW_TEXT, 0, "Bleed Out\n",
+                         coopBleedOutName(coopSetting(COOPSET_BLEEDOUT)));
+        }
+        else
+        {
+            coopLobbyAdd(coopLobbyIsHost() ? CLROW_RESPAWN : CLROW_TEXT, 0, "Respawn\n",
+                         coopRespawnName(coopSetting(COOPSET_RESPAWN)));
+        }
+        coopLobbyAdd(coopLobbyIsHost() ? CLROW_LIVES : CLROW_TEXT, 0, "Lives\n", coopLivesName(coopSetting(COOPSET_LIVES)));
     }
     if (!COOP_VS_ON())
     {
@@ -9627,6 +9638,15 @@ static void coopLobbyBuild(void)
                          (i < (s32) sizeof(coop_lobby_invited) && coop_lobby_invited[i]) ? "Invited\n" : "Invite\n");
         }
     }
+}
+
+/* the Lives, Bleed Out and Respawn rows: the next (dir 1) or last choice, round */
+static void coopLobbyRuleStep(s32 kind, s32 dir)
+{
+    const s32 which = (kind == CLROW_LIVES) ? COOPSET_LIVES : (kind == CLROW_BLEEDOUT) ? COOPSET_BLEEDOUT : COOPSET_RESPAWN;
+    const s32 n = (kind == CLROW_LIVES) ? coopLivesCount() : (kind == CLROW_BLEEDOUT) ? coopBleedOutCount() : coopRespawnCount();
+
+    coopSetSetting(which, (coopSetting(which) + n + dir) % n);
 }
 
 static void coopLobbyDo(const struct CoopLobbyRow *r)
@@ -9746,6 +9766,11 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
         }
         case CLROW_HOSTLEAVES:
             coopSetSetting(COOPSET_HOSTLEAVES, (coopSetting(COOPSET_HOSTLEAVES) + 1) % coopHostLeavesCount());
+            break;
+        case CLROW_LIVES:
+        case CLROW_BLEEDOUT:
+        case CLROW_RESPAWN:
+            coopLobbyRuleStep(r->kind, 1);
             break;
         case CLROW_PROFILE:
         {   /* the next profile in the list, then none, then round */
@@ -10148,6 +10173,13 @@ void interface_menu1D_cooplobby(void)
         {   /* the versus rows step both ways too */
             sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE_SFX, 0);
             coopVsStep(coop_lobby_rows[coop_lobby_hot].kind, joyGetButtonsPressedThisFrame(PLAYER_1, L_TRIG|L_JPAD) ? -1 : 1);
+        }
+        else if (coop_lobby_hot >= 0 && coop_lobby_rows[coop_lobby_hot].kind >= CLROW_LIVES
+                 && coop_lobby_rows[coop_lobby_hot].kind <= CLROW_RESPAWN
+                 && joyGetButtonsPressedThisFrame(PLAYER_1, L_TRIG|R_TRIG|L_JPAD|R_JPAD))
+        {   /* so do Lives, Bleed Out and Respawn */
+            sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE_SFX, 0);
+            coopLobbyRuleStep(coop_lobby_rows[coop_lobby_hot].kind, joyGetButtonsPressedThisFrame(PLAYER_1, L_TRIG|L_JPAD) ? -1 : 1);
         }
         else if (coop_lobby_hot >= 0 && joyGetButtonsPressedThisFrame(PLAYER_1, START_BUTTON|Z_TRIG|A_BUTTON))
         {

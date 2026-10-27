@@ -1,6 +1,6 @@
 /**
  * Co-op cutscenes (port only): the mission intro and the scripted cinemas
- * (the endings, and the few mid-mission ones) with every player in them.
+ * (the endings, and the few mid-mission ones), each player in their own.
  *
  * Each game plays its own intro, and its own copy of a scripted cinema
  * through the host's relayed camera commands (coop.c coopAiCommand). While
@@ -11,14 +11,13 @@
  * shot.
  *
  *  - Intro: the host leaving its intro (its timer or a skip) ends everyone's
- *    (COOPEV_CINEMA), so the team starts playing together. During the Bond
- *    swirl the partners stand in a line beside our Bond and play his intro
- *    animation, where they used to be hidden inside him on the shared pad.
+ *    (COOPEV_CINEMA), so the team starts playing together.
  *  - Scripted cinemas (CAMERAMODE_POSEND): the star is the player nearest the
  *    cinema's pad, the one the script reacted to. Every other game moves its
- *    Bond to a slot beside the star (standing up if it was down), so the
- *    cameras, placed around the star, frame everyone on every screen. The
- *    partners play our Bond's cinema animation, and hold no guns.
+ *    Bond onto the star's spot (standing up if it was down), so the cameras,
+ *    placed around the star, frame our own Bond on every screen.
+ *  - Partners are hidden in every cutscene (coop.c coopPuppetUpdateGhost):
+ *    each player sees only their own character, in the body they picked.
  *
  * Harness: GE_COOP_TESTCINEMA=<s>: the host runs a cinema <s> seconds into
  * the mission: a camera orbiting the joiner's Bond, so the joiner is the star,
@@ -44,7 +43,6 @@ extern void portConLogf(const char *fmt, ...);
 extern int ge_shot_force;
 extern char ge_shot_path[512];
 f32 bondviewGetPlayerYawRadians(void);
-void bondviewCalcIntroSwirlCamera(s32 index, f32 time, coord3d *pos, coord3d *lookat);
 void chrSetWeaponFlag4(ChrRecord *self, s32 hand);
 void coopCutsceneStandUp(coord3d *pos, StandTile *stan, f32 yaw);
 
@@ -64,29 +62,9 @@ static s32 sStarSet;        /* this cinema's star picked (and we moved to it) */
 static s32 sTestCinema = -2;
 static s32 sTestCinemaEnd;
 
-/* where the i-th partner stands beside the one in the middle: right, left,
- * then behind them on both sides (units, along their right and forward) */
-static const f32 sSlotRight[3] = { 110.0f, -110.0f, 0.0f };
-static const f32 sSlotBack[3] = { 0.0f, 0.0f, 130.0f };
-
 static s32 coopModeIsIntro(s32 mode)
 {
     return mode == CAMERAMODE_INTRO || mode == CAMERAMODE_FADESWIRL || mode == CAMERAMODE_SWIRL;
-}
-
-/* a model yaw (CoopStatePkt's) and a slot: the spot beside pos */
-static void coopSlotPos(coord3d *out, const coord3d *pos, f32 yaw, s32 slot)
-{
-    f32 fx = sinf(yaw), fz = cosf(yaw);     /* forward */
-    f32 rx = -fz, rz = fx;                  /* right */
-    f32 r, b;
-
-    slot = (slot < 0) ? 0 : slot % 3;
-    r = sSlotRight[slot];
-    b = sSlotBack[slot];
-    *out = *pos;
-    out->f[0] += rx * r - fx * b;
-    out->f[2] += rz * r - fz * b;
 }
 
 /* a floor under the spot, not too far above or below where we stand */
@@ -149,19 +127,25 @@ static s32 coopCinemaPlayers(s32 *who, coord3d *pos, f32 *yaw)
     return n;
 }
 
-/* a scripted cinema began: if another player is its star, stand beside them
- * (1 once done, 0 to try again next tick: partners show up a tick late) */
+/* a scripted cinema began: if another player is its star, stand where they
+ * stand (1 once done, 0 to try again next tick: partners show up a tick late) */
 static s32 coopCinemaJoinStar(void)
 {
     s32 who[COOP_MAX_PLAYERS];
     coord3d pos[COOP_MAX_PLAYERS];
     f32 yaw[COOP_MAX_PLAYERS];
     coord3d focus, spot;
-    s32 n, i, star = -1, slot = 0, self = coopDesignSelf(), k;
+    StandTile *stan;
+    s32 n, i, star = -1, self = coopDesignSelf();
     f32 bestd = 0.0f;
 
     if (!coopCinemaFocus(&focus))
     {
+        return 1;
+    }
+    if (g_CurrentPlayer->prop != NULL && g_CurrentPlayer->prop->chr != NULL && g_CurrentPlayer->prop->chr->ailist != NULL)
+    {   /* our own body runs the ending's list (the Dam bungee jump): it walks
+         * itself to its spot */
         return 1;
     }
     n = coopCinemaPlayers(who, pos, yaw);
@@ -191,28 +175,16 @@ static s32 coopCinemaJoinStar(void)
         }
         return 1;
     }
-    for (i = 0; i < n && who[i] != self; i++)
-    {
-        if (i != star)
-        {
-            slot++;     /* our place among the others */
-        }
+    spot = pos[star];
+    stan = coopSlotFloor(&spot, &pos[star]);
+    if (stan != NULL)
+    {   /* partners are hidden in the cinema, so we take the star's place */
+        coopCutsceneStandUp(&spot, stan, 6.2831855f - yaw[star]);
+        portConLogf("ge: coop: cutscene: moved to the star's spot, at %.0f %.0f %.0f\n",
+                    spot.f[0], spot.f[1], spot.f[2]);
+        return 1;
     }
-    for (k = 0; k < 3; k++)
-    {   /* our slot, else the next free-standing one */
-        StandTile *stan;
-
-        coopSlotPos(&spot, &pos[star], yaw[star], slot + k);
-        stan = coopSlotFloor(&spot, &pos[star]);
-        if (stan != NULL)
-        {
-            coopCutsceneStandUp(&spot, stan, 6.2831855f - yaw[star]);
-            portConLogf("ge: coop: cutscene: moved beside the star, slot %d, at %.0f %.0f %.0f\n",
-                        (slot + k) % 3, spot.f[0], spot.f[1], spot.f[2]);
-            return 1;
-        }
-    }
-    portConLogf("ge: coop: cutscene: no floor beside the star, staying put\n");
+    portConLogf("ge: coop: cutscene: no floor under the star, staying put\n");
     return 1;
 }
 
@@ -350,55 +322,10 @@ s32 coopIntroHostDone(void)
         && coopModeIsIntro(g_CameraMode);
 }
 
-/* partners in the shot: the swirl and the scripted cinemas */
+/* a cutscene runs (the intro and the scripted cinemas): partners are hidden */
 s32 coopCutsceneActive(void)
 {
-    return bossGetStageNum() != LEVELID_TITLE && (g_CameraMode == CAMERAMODE_SWIRL || g_CameraMode == CAMERAMODE_POSEND);
-}
-
-/* the swirl: the i-th partner stands in the i-th slot beside our Bond (they
- * all start on our pad); a scripted cinema already has everyone beside its
- * star, where they really are */
-s32 coopCutscenePuppetPos(s32 player, coord3d *pos, f32 *yaw)
-{
-    PropRecord *bond = getCurrentPlayerProp();
-    CoopHudPartner p;
-    coord3d spot;
-    s32 i;
-
-    if (g_CameraMode != CAMERAMODE_SWIRL || bond == NULL)
-    {
-        return 0;
-    }
-    for (i = 0; coopHudPartnerAt(i, &p) && p.player != player; i++)
-    {
-    }
-    *yaw = bondviewGetPlayerYawRadians();
-    coopSlotPos(&spot, &bond->pos, *yaw, i);
-    if (coopSlotFloor(&spot, &bond->pos) == NULL)
-    {
-        return 0;
-    }
-    *pos = spot;
-    return 1;
-}
-
-/* the swirl's camera passes close to where a partner stands: hide them
- * rather than fill the screen with the inside of their jacket */
-s32 coopCutsceneCameraNear(const coord3d *pos)
-{
-    coord3d cam, look;
-    f32 dx, dy, dz;
-
-    if (g_CameraMode != CAMERAMODE_SWIRL || g_IntroSwirl == NULL)
-    {
-        return 0;
-    }
-    bondviewCalcIntroSwirlCamera(intro_camera_index, camera_transition_timer, &cam, &look);
-    dx = cam.f[0] - pos->f[0];
-    dy = cam.f[1] - pos->f[1];
-    dz = cam.f[2] - pos->f[2];
-    return dx * dx + dz * dz < 80.0f * 80.0f && dy < 200.0f && dy > -200.0f;
+    return bossGetStageNum() != LEVELID_TITLE && (coopModeIsIntro(g_CameraMode) || g_CameraMode == CAMERAMODE_POSEND);
 }
 
 /* a partner's puppet plays what our Bond's body plays in the cinema */

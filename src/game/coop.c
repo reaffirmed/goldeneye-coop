@@ -87,7 +87,8 @@ extern void portConLogf(const char *fmt, ...);
                           10: hold Use to revive (STATE revive), more stats (COOPEV 56..63, COOPPKT 24..25 kept for
                               revive, cutscenes and the results);
                           11: sender clocks in STATE and GUARDS (smooth movement), round trip (COOPPKT_TIME);
-                          12: gadgets in USE, where a throw stuck (COOPEV 29), the tank (COOPPKT 11) */
+                          12: lives, bleed-out and respawn times (COOPSET 8..10, 16 settings in HELLO, STATE out);
+                              gadgets in USE, where a throw stuck (COOPEV 29), the tank (COOPPKT 11) */
 
 enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7, COOPPKT_AISYNC = 8, COOPPKT_BYE = 9 };
 /* 10 and 11 (COOPPKT_EXT_FIRST..LAST in coop.h) are coop_ext.c's features' own packets;
@@ -113,6 +114,8 @@ typedef struct
     u8 revive;      /* standing: the player we hold Use over to revive, + 1 (0 none); down: ticks of
                        COOP_REVIVE_HOLD the reviver has held (coop_revive.c) */
     u16 calm;       /* ticks since the sender was last in a fight (capped) */
+    u8 out;         /* down for good this mission: no lives left, or bled out (COOPOUT_*) */
+    u8 pad[3];
     CoopLook look;  /* guns, movement, shots and character (coop_look.c) */
     u32 ms;         /* the sender's clock (coopNowMs) as it sent this: the puppet is drawn by it (coop_interp.c) */
 } CoopStatePkt;
@@ -344,7 +347,9 @@ static f32 sLastHealth;
 static s32 sLastWeapon = ITEM_UNARMED;
 static u32 sDeadSince;      /* sTick our Bond's death fade finished, 0 alive */
 static s32 sReviveHold;     /* while down: ticks a partner has held Use over us */
-static s32 sBledOut;        /* revive only: down too long, out until the mission ends */
+static s32 sBledOut;        /* out until the mission ends: COOPOUT_BLEDOUT (revive only, down too long) or COOPOUT_LIVES */
+static s32 sLivesLeft = -1; /* this mission's lives left (COOPSET_LIVES), -1 unlimited */
+static s32 coopLivesStart(void);
 static s32 sDefsBytes;  /* size of the stage's setup prop defs */
 static void *sDefsBase;
 static u32 sTick;
@@ -448,6 +453,9 @@ static void coopApplyMissionEnd(CoopEvent *ev);
 static void coopSendHello(void);
 static void coopApplyExplosion(CoopEvent *ev);
 static void coopApplyAiCommand(CoopEvent *ev);
+static s32 sPendingCinemaList = -1;
+static s32 sHostEndingHere;    /* joiner: we play the host's ending; its exit is the host's to send */
+static void coopPendingCinemaTick(void);
 static s32 coopLocalCalm(void);
 static void coopTrackCombat(void);
 static void coopApplyWorld(CoopWorldPkt *p);
@@ -646,6 +654,7 @@ static void coopSendState(void)
     p.player = (u8) coopSelf();
     p.revive = (u8) (p.dead ? ((sDeadSince != 0 && sReviveHold < 255) ? sReviveHold : 0) : coopReviveTarget());
     p.calm = (u16) coopLocalCalm();
+    p.out = (u8) sBledOut;
     p.ms = coopNowMs();
     coopNetSend(&p, sizeof(p));
 
@@ -1221,8 +1230,6 @@ static void coopPuppetUpdate(CoopRemote *r)
         pos.f[2] = at.pos[2];
         yaw = at.yaw;
     }
-    coopCutscenePuppetPos(r->st.player, &pos, &yaw);   /* the intro's line beside our Bond */
-
     stan = coopFindStan(&pos, r->puppet->stan, &r->puppet->pos);
     if (stan == NULL)
     {
@@ -1266,15 +1273,16 @@ static void coopPuppetUpdateGhost(CoopRemote *r)
     }
     if (coopCutsceneActive())
     {
-        r->puppetGhost = 1;     /* in the shot, and in nobody's way */
+        r->puppetGhost = 1;     /* in nobody's way */
     }
-    /* our camera inside their body (both start on one pad, or we watch
-     * them while we are down): don't draw it */
     if (coopTankDriving(r->st.player))
     {
         r->puppetGhost = 1;     /* inside the tank (coop_tank.c) */
     }
-    if (d2 < 45.0f * 45.0f || coopSpectateTarget() == r->st.player || coopCutsceneCameraNear(&r->puppet->pos)
+    /* our camera inside their body (both start on one pad, or we watch
+     * them while we are down), or a cutscene, which shows only our own
+     * character: don't draw it */
+    if (d2 < 45.0f * 45.0f || coopSpectateTarget() == r->st.player || coopCutsceneActive()
         || coopTankDriving(r->st.player))
     {
         r->puppet->chr->chrflags |= CHRFLAG_HIDDEN;
@@ -1336,7 +1344,10 @@ void coopStageStart(void)
 {
     s32 i;
 
+    sPendingCinemaList = -1;
+    sHostEndingHere = 0;
     sWorldHostFlags = sWorldOwnFlags = 0;
+
     if (bossGetStageNum() != LEVELID_TITLE)
     {
         sMissionSerial++;
@@ -1367,6 +1378,8 @@ void coopStageStart(void)
     memset(sScriptPass, 0, sizeof(sScriptPass));    /* a new mission's scripts */
     sNumTeamPicks = 0;
     sLastHurtTick = sLastFightTick = sDeadSince = 0;
+    sBledOut = 0;
+    sLivesLeft = coopLivesStart();
     sLastHealth = 1.0f;
     sLastWeapon = ITEM_UNARMED;
     sTickChr = NULL;
@@ -1431,6 +1444,7 @@ static void coopTickBody(void)
     sTick++;
     sInCinema = coopCutsceneTick();     /* before the packets: they ask coopInStage */
     coopPollNet();
+    coopPendingCinemaTick();
     coopTimeTick();
     coopSessionTick();
     if (bossGetStageNum() != LEVELID_TITLE)
@@ -1830,16 +1844,19 @@ static void coopHarnessTick(void)
             }
         }
     }
-    {   /* GE_COOP_TESTDIE=<ticks>: kill our Bond that far into the mission, 900 if not given (harness only) */
-        static s32 testdie = -1;
+    {   /* GE_COOP_TESTDIE=<ticks>: kill our Bond that far into the mission, 900 if not given;
+         * GE_COOP_TESTDIEAGAIN=<ticks>: and again that long after each time (harness only) */
+        static s32 testdie = -1, again;
         if (testdie == -1)
         {
             const char *e = getenv("GE_COOP_TESTDIE");
+            const char *a = getenv("GE_COOP_TESTDIEAGAIN");
             testdie = (e == NULL) ? 0 : (atoi(e) > 1) ? atoi(e) : 900;
+            again = (a != NULL) ? atoi(a) : 0;
         }
         if (testdie && sMissionTicks >= (u32) testdie && coopPartnerHere() && !g_CurrentPlayer->bonddead)
         {
-            testdie = 0;
+            testdie = (again > 0) ? (s32) sMissionTicks + again : 0;
             portConLogf("ge: coop: testdie\n");
             bondviewCallRecordDamageKills(10.0f, 0.0f, -1, 1);
         }
@@ -1998,23 +2015,24 @@ static void coopHarnessTick(void)
         }
     }
     if (coopPartnerHere() && coopInMission())
-    {   /* GE_COOP_TESTPAD=<pad>:<s>: <s> seconds into the mission, stand on that pad (harness only) */
-        static s32 testpad = -2;
-        static s32 testpadat;
+    {   /* GE_COOP_TESTPAD=<pad>:<s>: <s> seconds into the mission, stand on that
+         * (unbound) pad; 330 is the Dam bungee room (harness only) */
+        static s32 testpad = -2, padat;
         if (testpad == -2)
         {
             const char *e = getenv("GE_COOP_TESTPAD");
-            testpad = -1;
-            if (e != NULL && sscanf(e, "%d:%d", &testpad, &testpadat) == 2)
+            if (e == NULL || sscanf(e, "%d:%d", &testpad, &padat) != 2)
             {
-                testpadat *= 60;
+                testpad = -1;
             }
         }
-        if (testpad >= 0 && sMissionTicks == (u32) testpadat && g_CurrentSetup.pads != NULL)
+        if (testpad >= 0 && sMissionTicks == (u32) padat * 60 && g_CurrentSetup.pads != NULL)
         {
             PadRecord *pad = &g_CurrentSetup.pads[testpad];
-            coopRespawnPlayerAt(&pad->pos, pad->stan, 0.0f, sLastWeapon);
-            portConLogf("ge: coop: testpad -> pad %d at %.0f %.0f %.0f\n", testpad, pad->pos.f[0], pad->pos.f[1], pad->pos.f[2]);
+            coord3d pos = pad->pos;
+
+            coopRespawnPlayerAt(&pos, pad->stan, 0.0f, sLastWeapon);
+            portConLogf("ge: coop: testpad -> pad %d at %.0f %.0f %.0f\n", testpad, pos.f[0], pos.f[1], pos.f[2]);
         }
     }
     if (coopPartnerHere() && coopInMission())
@@ -3577,6 +3595,7 @@ void coopSendVersusPkt(void *pkt, s32 len)
 s32 coopRemoteInfo(s32 p, CoopRemoteInfo *out)
 {
     CoopRemote *r;
+    CoopSample at;
 
     if (!coopRemoteHere(p))
     {
@@ -3587,6 +3606,13 @@ s32 coopRemoteInfo(s32 p, CoopRemoteInfo *out)
     out->pos[1] = r->st.pos[1];
     out->pos[2] = r->st.pos[2];
     out->yaw = r->st.yaw;
+    if (!sNoInterp && coopTrackAt(&r->track, coopClockRenderMs(&sClock[p], coopNowMs()), &at) >= 0)
+    {   /* drawn between two of their samples, as a co-op puppet is (coopPuppetUpdate) */
+        out->pos[0] = at.pos[0];
+        out->pos[1] = at.pos[1];
+        out->pos[2] = at.pos[2];
+        out->yaw = at.yaw;
+    }
     out->dead = r->st.dead;
     out->health = r->st.health;
     out->armour = r->st.armour;
@@ -4358,6 +4384,11 @@ void coopMissionComplete(void)
     {
         return;
     }
+    if (sHostEndingHere && !coopNetIsHost())
+    {   /* our copy of the host's ending ran out first: the host's own ends it for everyone */
+        portConLogf("ge: coop: our copy of the ending finished; the host's ends the mission\n");
+        return;
+    }
     coopTeamTimeSend();     /* host: the team's time first, so it is in before the debrief (coop_teamtime.c) */
     memset(&ev, 0, sizeof(ev));
     ev.kind = COOPEV_MISSIONEND;
@@ -4388,13 +4419,73 @@ static void coopApplyMissionEnd(CoopEvent *ev)
 
 /* ---- death and respawn -----------------------------------------------------
  * A dead player comes back beside the partner once the partner has been out
- * of combat for a few seconds, or after 20 s regardless. With no living
- * partner to come back to, the death is the normal mission failure. */
+ * of combat for a few seconds, or after 20 s regardless (the lobby's Respawn
+ * can make it a fixed wait instead). With no living partner to come back to,
+ * the death is the normal mission failure. Each down costs a life when the
+ * lobby set Lives; on the last one you are out until the mission ends. */
 
 #define COOP_CALM_CAP        3600
 #define COOP_RESPAWN_MIN     180   /* 3 s after the death fade */
 #define COOP_RESPAWN_CALM    240   /* partner out of combat for 4 s */
 #define COOP_RESPAWN_MAX     1200  /* 20 s */
+
+/* the lobby's choices: COOPSET_LIVES, COOPSET_BLEEDOUT and COOPSET_RESPAWN
+ * index these, 0 being the old fixed behaviour */
+static const u8 sLivesChoices[] = { 0, 1, 2, 3, 5, 10 };                       /* 0 unlimited */
+static const u8 sBleedOutChoices[] = { 60, 90, 120, 180, 15, 20, 30, 45 };     /* seconds */
+static const u8 sRespawnChoices[] = { 0, 5, 10, 15, 30, 45, 60, 90 };          /* seconds, 0 the calm rule */
+static const char *const sLivesNames[] = { "Unlimited\n", "1\n", "2\n", "3\n", "5\n", "10\n" };
+static const char *const sBleedOutNames[] = { "60 s\n", "90 s\n", "2 min\n", "3 min\n", "15 s\n", "20 s\n", "30 s\n", "45 s\n" };
+static const char *const sRespawnNames[] = { "3-20 s\n", "5 s\n", "10 s\n", "15 s\n", "30 s\n", "45 s\n", "60 s\n", "90 s\n" };
+#define COOP_CHOICE(arr, i) ((arr)[((i) >= 0 && (i) < (s32) ARRAYCOUNT(arr)) ? (i) : 0])
+
+s32 coopLivesCount(void)
+{
+    return ARRAYCOUNT(sLivesChoices);
+}
+
+const char *coopLivesName(s32 i)
+{
+    return COOP_CHOICE(sLivesNames, i);
+}
+
+s32 coopBleedOutCount(void)
+{
+    return ARRAYCOUNT(sBleedOutChoices);
+}
+
+const char *coopBleedOutName(s32 i)
+{
+    return COOP_CHOICE(sBleedOutNames, i);
+}
+
+s32 coopRespawnCount(void)
+{
+    return ARRAYCOUNT(sRespawnChoices);
+}
+
+const char *coopRespawnName(s32 i)
+{
+    return COOP_CHOICE(sRespawnNames, i);
+}
+
+static s32 coopLivesStart(void)
+{
+    s32 lives = COOP_CHOICE(sLivesChoices, sSettings[COOPSET_LIVES]);
+
+    return (lives == 0) ? -1 : lives;
+}
+
+s32 coopBleedOutTicks(void)
+{
+    return COOP_CHOICE(sBleedOutChoices, sSettings[COOPSET_BLEEDOUT]) * 60;
+}
+
+/* the timer's fixed wait in ticks, 0 for the calm rule (COOP_RESPAWN_MIN..MAX) */
+static s32 coopRespawnFixed(void)
+{
+    return COOP_CHOICE(sRespawnChoices, sSettings[COOPSET_RESPAWN]) * 60;
+}
 
 static void coopTrackCombat(void)
 {
@@ -4539,9 +4630,33 @@ s32 coopDeadTick(void)
             sDeathPos = bond->pos;
         }
         sDeathYaw = 6.2831855f - bondviewGetPlayerYawRadians();
-        hudmsgBottomShow(sDownRule == COOPDOWN_TIMER ? "Waiting for your partners to get clear...\n"
-                                                     : "Down! A partner can hold Use by you to revive you.\n");
-        portConLogf("ge: coop: dead, rule %d\n", sDownRule);
+        if (sLivesLeft > 0)
+        {
+            sLivesLeft--;
+        }
+        if (sLivesLeft == 0)
+        {
+            sBledOut = COOPOUT_LIVES;
+            hudmsgBottomShow("No lives left. You are out until the mission ends.\n");
+        }
+        else
+        {
+            char text[96];
+            s32 n = snprintf(text, sizeof(text), "%s",
+                             sDownRule == COOPDOWN_TIMER ? "Waiting for your partners to get clear..." : "Down! A partner can hold Use by you to revive you.");
+
+            if (sLivesLeft == 1)
+            {
+                snprintf(text + n, sizeof(text) - n, " Last life.");
+            }
+            else if (sLivesLeft > 1)
+            {
+                snprintf(text + n, sizeof(text) - n, " %d lives left.", (int) sLivesLeft);
+            }
+            strcat(text, "\n");
+            hudmsgBottomShow(text);
+        }
+        portConLogf("ge: coop: dead, rule %d, lives left %d\n", sDownRule, sLivesLeft);
     }
     dead = sTick - sDeadSince;
 
@@ -4585,9 +4700,9 @@ s32 coopDeadTick(void)
     }
     if (sDownRule == COOPDOWN_REVIVE)
     {
-        if (!sBledOut && dead >= COOP_BLEED_OUT)
+        if (!sBledOut && dead >= (u32) coopBleedOutTicks())
         {
-            sBledOut = 1;
+            sBledOut = COOPOUT_BLEDOUT;
             hudmsgBottomShow("You bled out. You are out until the mission ends.\n");
             portConLogf("ge: coop: bled out\n");
         }
@@ -4595,7 +4710,13 @@ s32 coopDeadTick(void)
         return 1;   /* no timer: down until revived, or out */
     }
 
-    if ((dead >= COOP_RESPAWN_MIN && calm >= COOP_RESPAWN_CALM) || dead >= COOP_RESPAWN_MAX)
+    if (sBledOut)
+    {
+        coopSpectateTick();
+        return 1;   /* no lives left: out until the mission ends */
+    }
+    if (coopRespawnFixed() > 0 ? dead >= (u32) coopRespawnFixed()
+                               : ((dead >= COOP_RESPAWN_MIN && calm >= COOP_RESPAWN_CALM) || dead >= COOP_RESPAWN_MAX))
     {
         CoopRemote *r = &sR[partner];
 
@@ -4631,9 +4752,9 @@ static s32 coopRespawnEta(void)
     }
     if (sDeadSince == 0)
     {   /* still falling: count from now, if co-op will take this death */
-        if (!g_CurrentPlayer->bonddead)
+        if (!g_CurrentPlayer->bonddead || sLivesLeft == 1)
         {
-            return -1;
+            return -1;  /* (on our last life this death is for good) */
         }
         dead = 0;
     }
@@ -4643,7 +4764,11 @@ static s32 coopRespawnEta(void)
     }
     if (sDownRule == COOPDOWN_REVIVE)
     {
-        return ((s32) COOP_BLEED_OUT - (s32) dead > 0) ? (s32) COOP_BLEED_OUT - (s32) dead : 0;
+        return (coopBleedOutTicks() - (s32) dead > 0) ? coopBleedOutTicks() - (s32) dead : 0;
+    }
+    if (coopRespawnFixed() > 0)
+    {
+        return (coopRespawnFixed() - (s32) dead > 0) ? coopRespawnFixed() - (s32) dead : 0;
     }
     eta = (s32) COOP_RESPAWN_MIN - (s32) dead;
     if ((s32) COOP_RESPAWN_CALM - (s32) calm > eta)
@@ -4798,8 +4923,9 @@ s32 coopHudPartnerAt(s32 i, CoopHudPartner *out)
     out->health = st->health;
     out->armour = st->armour;
     out->respawn = st->respawn;
-    out->revivable = st->dead && st->downrule != COOPDOWN_TIMER && (st->downrule != COOPDOWN_REVIVE || st->respawn > 0);
+    out->revivable = st->dead && !st->out && st->downrule != COOPDOWN_TIMER && (st->downrule != COOPDOWN_REVIVE || st->respawn > 0);
     out->revivehold = st->dead ? st->revive : 0;
+    out->out = st->dead && st->out;
     out->name = coopPlayerName(p);
     out->player = p;
     return 1;
@@ -4830,12 +4956,21 @@ s32 coopHudBleedOut(void)
         return -1;
     }
     dead = (sDeadSince != 0) ? sTick - sDeadSince : 0;
-    return (dead < COOP_BLEED_OUT) ? (s32) (COOP_BLEED_OUT - dead) : 0;
+    return (dead < (u32) coopBleedOutTicks()) ? (s32) (coopBleedOutTicks() - dead) : 0;
 }
 
 s32 coopHudBledOut(void)
 {
-    return sDeadSince != 0 && sBledOut;
+    return (sDeadSince != 0) ? sBledOut : COOPOUT_NONE;
+}
+
+s32 coopHudLives(void)
+{
+    if (sEnabled <= 0 || sLivesLeft < 0)
+    {
+        return -1;
+    }
+    return (g_CurrentPlayer->bonddead && sDeadSince == 0 && sLivesLeft > 0) ? sLivesLeft - 1 : sLivesLeft;  /* still falling: this down's life is spent */
 }
 
 s32 coopHudRespawnEta(void)
@@ -4907,7 +5042,22 @@ s32 coopFrontTick(void)
             const char *e = getenv("GE_COOP_DIFFICULTY");
             const char *f = getenv("GE_COOP_FRIENDLYFIRE");
             const char *h = getenv("GE_COOP_HOSTLEAVES");
+            const char *l = getenv("GE_COOP_LIVES");
+            const char *b = getenv("GE_COOP_BLEEDOUT");
+            const char *r = getenv("GE_COOP_RESPAWN");
             testdiff = 0;
+            if (l != NULL)
+            {   /* GE_COOP_LIVES, _BLEEDOUT, _RESPAWN=<index>: the lobby's choices */
+                sSettings[COOPSET_LIVES] = (u8) atoi(l);
+            }
+            if (b != NULL)
+            {
+                sSettings[COOPSET_BLEEDOUT] = (u8) atoi(b);
+            }
+            if (r != NULL)
+            {
+                sSettings[COOPSET_RESPAWN] = (u8) atoi(r);
+            }
             if (f != NULL)
             {
                 sSettings[COOPSET_FRIENDLYFIRE] = (u8) atoi(f);
@@ -6683,9 +6833,26 @@ void coopAiCommand(u8 *list, s32 offset, ChrRecord *self)
     s32 len;
     u8 cmd = list[offset];
 
-    if (!coopIsPresentationCmd(cmd) || sApplyingRemoteAi || sEnabled <= 0 || !coopNetIsHost()
+    if (cmd == AI_SetChrAiList && list[offset + 1] == (u8) CHR_BOND_CINEMA)
+    {
+        /* an ending puts the player's own third-person body through a list
+         * (the Dam bungee jump, Runway): each game runs it for its own Bond,
+         * from the host's moment rather than when its own copy of the level
+         * script gets there */
+    }
+    else if (!coopIsPresentationCmd(cmd))
+    {
+        return;
+    }
+    if (sApplyingRemoteAi || sEnabled <= 0 || !coopNetIsHost()
         || !coopNetHasPeer() || !coopPartnerHere())
     {
+        return;
+    }
+    if (self != NULL && g_CurrentPlayer->prop != NULL && self == g_CurrentPlayer->prop->chr)
+    {   /* our own body's list (an ending's walk and jump, its cameras and
+         * fades): every game's level script gives it to that game's own body,
+         * in the character that player picked */
         return;
     }
     len = chraiitemsize(list, offset);
@@ -6700,6 +6867,59 @@ void coopAiCommand(u8 *list, s32 offset, ChrRecord *self)
     ev.u.ai.len = (u8) len;
     memcpy(ev.u.ai.cmd, list + offset, len);
     coopQueueEvent(&ev);
+}
+
+/* joiner: an ending's list for our own third-person body, waiting for the
+ * camera switch to make that body (it can lag the command by a few ticks) */
+static s32 sPendingCinemaWait;
+
+static void coopPendingCinemaTick(void)
+{
+    ChrRecord *bc;
+
+    if (sPendingCinemaList < 0)
+    {
+        if (g_CameraMode == CAMERAMODE_FP)
+        {
+            sHostEndingHere = 0;    /* the intro's list is over, no ending yet */
+        }
+        return;
+    }
+    bc = (g_CurrentPlayer->prop != NULL) ? g_CurrentPlayer->prop->chr : NULL;
+    if (bc != NULL)
+    {
+        bc->ailist = ailistFindById(sPendingCinemaList);
+        bc->aioffset = 0;
+        bc->sleep = 0;
+        portConLogf("ge: coop: our Bond runs the ending's list %04x\n", sPendingCinemaList);
+        sPendingCinemaList = -1;
+        sHostEndingHere = 1;
+    }
+    else if (--sPendingCinemaWait <= 0)
+    {
+        portConLogf("ge: coop: no third-person Bond for the ending's list %04x\n", sPendingCinemaList);
+        sPendingCinemaList = -1;
+    }
+}
+
+/* joiner: while our body plays the host's ending, the host's camera, fade and
+ * text commands reach us from the host (coopApplyAiCommand) and our body's
+ * list runs its own; our copy of the level script gets to the same ending a
+ * few seconds late, and its copies of them would black out the jump (chrai.c
+ * steps over them) */
+s32 coopAiSkip(u8 *list, s32 offset, ChrRecord *self)
+{
+    return sEnabled > 0 && !coopNetIsHost() && sHostEndingHere && !sApplyingRemoteAi
+        && g_CameraMode == CAMERAMODE_POSEND && coopIsPresentationCmd(list[offset])
+        && (self == NULL || g_CurrentPlayer->prop == NULL || self != g_CurrentPlayer->prop->chr);
+}
+
+/* joiner: our own copy of the level script gives our body the list the host's
+ * already started here: keep it going rather than start it over (chrai.c) */
+s32 coopKeepBodyList(ChrRecord *chr, AIRecord *list)
+{
+    return sEnabled > 0 && !coopNetIsHost() && sHostEndingHere && g_CurrentPlayer->prop != NULL
+        && chr == g_CurrentPlayer->prop->chr && chr->ailist == list;
 }
 
 static void coopApplyAiCommand(CoopEvent *ev)
@@ -6730,6 +6950,16 @@ static void coopApplyAiCommand(CoopEvent *ev)
     }
     memcpy(list, ev->u.ai.cmd, ev->u.ai.len);
     list[ev->u.ai.len] = AI_EndList;
+    if (list[0] == AI_SetChrAiList && list[1] == (u8) CHR_BOND_CINEMA)
+    {
+        u16 raw;
+
+        memcpy(&raw, &list[2], sizeof(raw));
+        sPendingCinemaList = ntohs(raw);   /* as the interpreter reads it */
+        sPendingCinemaWait = 300;
+        coopPendingCinemaTick();
+        return;
+    }
     savedlist = chr->ailist;
     savedofs = chr->aioffset;
     chr->ailist = (AIRecord *) list;

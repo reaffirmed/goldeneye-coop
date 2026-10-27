@@ -30,10 +30,12 @@ void coopAltBondEnd(void);
 void coopAltBondCredit(void *script, s32 k);   /* a script's "either player" check passed: k 0 for our Bond, else partner k-1 */
 void coopScriptSetsFlags(void *script);        /* that script sets stage flags: it was whoever passed its last check */
 void coopAiCommand(u8 *list, s32 offset, ChrRecord *self);
+s32  coopAiSkip(u8 *list, s32 offset, ChrRecord *self);   /* joiner: step over our late copy of the host's ending commands */
 s32  coopDeadTick(void); /* 1: co-op owns this death (waiting or respawned) */
 void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon);
 void coopTeleportPlayerTo(coord3d *pos, StandTile *stan, f32 yaw);    /* bondview2.c */
 s32  coopCinemaFocus(coord3d *out);                                     /* bondview2.c: a scripted cinema's pad */
+s32  coopKeepBodyList(ChrRecord *chr, AIRecord *list);  /* joiner: the host's ending list already runs on our body */
 s32  coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid);
 s32  coopShotPuppet(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, s32 isPlayer);
 
@@ -49,6 +51,7 @@ typedef struct
     s32 respawn;        /* ticks, -1 = not waiting */
     s32 revivable;      /* down, and holding Use beside them brings them back */
     s32 revivehold;     /* down: ticks of COOP_REVIVE_HOLD someone has held Use over them */
+    s32 out;            /* down for good this mission: no lives left, or bled out */
     const char *name;
     s32 player;         /* their player number, 0 the host */
 } CoopHudPartner;
@@ -59,9 +62,11 @@ s32  coopHudDownRule(void);
 s32  coopHudReviveHold(void);   /* ticks of COOP_REVIVE_HOLD */
 #define COOP_REVIVE_HOLD 150       /* a partner holds Use beside where we fell for 2.5 s */
 #define COOP_REVIVE_DIST 160.0f    /* ... within this of us (xz), and 250 up or down */
-#define COOP_BLEED_OUT   3600      /* revive only: 60 s down and you are out of this mission */
-s32  coopHudBledOut(void);
+s32  coopBleedOutTicks(void);    /* revive only: this long down and you are out of this mission (COOPSET_BLEEDOUT) */
+s32  coopHudBledOut(void);      /* out until the mission ends: COOPOUT_BLEDOUT or COOPOUT_LIVES, 0 not */
 s32  coopHudBleedOut(void);     /* revive only: ticks left before we bleed out, -1 none */
+s32  coopHudLives(void);        /* our lives left this mission, -1 unlimited */
+enum { COOPOUT_NONE, COOPOUT_BLEDOUT, COOPOUT_LIVES };
 
 /* revive, cutscenes and the results screen: their own events (coop.c carries
  * them; coopDesignApply in coop_cutscene.c hands them out) */
@@ -81,10 +86,8 @@ s32  coopDesignIsHost(void);
 
 /* cutscenes (coop_cutscene.c) */
 s32  coopCutsceneTick(void);    /* every tick: 1 while an intro or a scripted cinema runs */
-s32  coopCutsceneActive(void);  /* partners play our Bond's cinema animation */
-s32  coopCutscenePuppetPos(s32 player, coord3d *pos, f32 *yaw);   /* 1: stand the puppet here instead */
+s32  coopCutsceneActive(void);  /* intro or scripted cinema: partners hidden */
 void coopCutscenePuppetAnim(ChrRecord *chr);
-s32  coopCutsceneCameraNear(const coord3d *pos);  /* the swirl's camera is about to pass through pos */
 void coopCutsceneApply(const u8 *raw, s32 from);
 s32  coopIntroHostDone(void);   /* bondview2.c: end our intro, the host's is over */
 
@@ -105,7 +108,10 @@ enum
     COOPSET_VSLENGTH,       /* versus: Game Length, a multi_game_lengths index */
     COOPSET_VSWEAPONS,      /* versus: the weapon set (setMPWeaponSet) */
     COOPSET_HOSTLEAVES,     /* 0: the next player hosts and the mission goes on; 1: everyone back to the lobby */
-    COOPSET_MAX = 8
+    COOPSET_LIVES,          /* lives each player starts a mission with, a coopLivesName index (0 unlimited) */
+    COOPSET_BLEEDOUT,       /* revive only: time down before bleeding out, a coopBleedOutName index (0 60 s) */
+    COOPSET_RESPAWN,        /* the timer's wait, a coopRespawnName index (0 3-20 s, sooner when it is quiet) */
+    COOPSET_MAX = 16
 };
 s32  coopSetting(s32 which);
 void coopSetSetting(s32 which, s32 value);
@@ -123,6 +129,12 @@ void coopDifficultyTick(void);
 enum { COOPDOWN_BOTH, COOPDOWN_TIMER, COOPDOWN_REVIVE };
 s32  coopDownRule(void);
 void coopSetDownRule(s32 rule);
+s32  coopLivesCount(void);              /* COOPSET_LIVES's choices */
+const char *coopLivesName(s32 i);
+s32  coopBleedOutCount(void);           /* COOPSET_BLEEDOUT's */
+const char *coopBleedOutName(s32 i);
+s32  coopRespawnCount(void);            /* COOPSET_RESPAWN's */
+const char *coopRespawnName(s32 i);
 Gfx *coopHudRender(Gfx *gdl);
 u32  coopHudColour(s32 player);         /* each player's colour, as their tag and radar dot */
 
@@ -364,7 +376,7 @@ void coopLookReset(CoopLookPuppet *lp);
 void coopLookPuppetTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look, s32 dead, s32 self);
 void coopLookShotBegin(s32 hand, s32 weapon, coord3d *from, coord3d *dir); /* chrprop.c chraiDefaultWeaponFireHandler */
 void coopLookShotBg(coord3d *pos, coord3d *normal, s32 impact, s32 room, s32 texture, s32 spark);
-void coopLookShotChr(PropRecord *prop, coord3d *pos);           /* chr.c chrHandleBulletHit */
+void coopLookShotChr(PropRecord *prop, coord3d *pos, s32 hitpart);           /* chr.c chrHandleBulletHit */
 void coopLookShotObj(PropRecord *prop, coord3d *pos, s32 room, s32 texture, s32 glass); /* propobj.c objHit */
 void coopLookShotEnd(void);
 s32  coopPropIsPartner(PropRecord *prop);
