@@ -60,22 +60,16 @@ jobs:
 
       - name: Install Linux (i686) build and run dependencies
         if: steps.key.outputs.have == '1'
-        # The i386 mirror sometimes stalls for 40+ minutes. Each apt call gets
-        # 5 minutes and a stalled try starts over, so a slow mirror costs a
-        # few minutes instead of the whole run
-        timeout-minutes: 25
+        # the runners' apt mirror sometimes crawls: scripts/ci_apt_install.sh
+        # retries from another mirror instead of waiting it out
+        timeout-minutes: 35
         run: |
           sudo dpkg --add-architecture i386
-          APT="timeout 300 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30"
-          for try in 1 2 3; do
-            sudo $APT update && sudo $APT install -y cmake gcc-multilib g++-multilib \
+          ./scripts/ci_apt_install.sh cmake gcc-multilib g++-multilib \
             libx11-dev:i386 libxext-dev:i386 libxrandr-dev:i386 libxcursor-dev:i386 \
             libxfixes-dev:i386 libxi-dev:i386 libxss-dev:i386 libasound2-dev:i386 \
             libudev-dev:i386 libgl-dev:i386 \
-            xvfb xauth libgl1:i386 libgl1-mesa-dri:i386 libglx-mesa0:i386 && break
-            [ $try = 3 ] && exit 1
-            echo "apt-get try $try stalled or failed, retrying"; sudo dpkg --configure -a || true; sleep 10
-          done
+            xvfb xauth libgl1:i386 libgl1-mesa-dri:i386 libglx-mesa0:i386
 
       - name: Cache SDL2 (i686) build
         if: steps.key.outputs.have == '1'

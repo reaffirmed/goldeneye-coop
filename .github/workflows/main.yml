@@ -50,21 +50,15 @@ jobs:
         run: make convert_props convert_chrs convert_guns combine_images
 
       - name: Install Linux (i686) build dependencies
-        # The i386 mirror sometimes stalls for 40+ minutes. Each apt call gets
-        # 5 minutes and a stalled try starts over, so a slow mirror costs a
-        # few minutes instead of the whole run
-        timeout-minutes: 25
+        # the runners' apt mirror sometimes crawls: scripts/ci_apt_install.sh
+        # retries from another mirror instead of waiting it out
+        timeout-minutes: 35
         run: |
           sudo dpkg --add-architecture i386
-          APT="timeout 300 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30"
-          for try in 1 2 3; do
-            sudo $APT update && sudo $APT install -y cmake gcc-multilib g++-multilib \
+          ./scripts/ci_apt_install.sh cmake gcc-multilib g++-multilib \
             libx11-dev:i386 libxext-dev:i386 libxrandr-dev:i386 libxcursor-dev:i386 \
             libxfixes-dev:i386 libxi-dev:i386 libxss-dev:i386 libasound2-dev:i386 \
-            libudev-dev:i386 libgl-dev:i386 && break
-            [ $try = 3 ] && exit 1
-            echo "apt-get try $try stalled or failed, retrying"; sudo dpkg --configure -a || true; sleep 10
-          done
+            libudev-dev:i386 libgl-dev:i386
 
       - name: Cache SDL2 (i686) build
         id: cache-sdl2-linux
@@ -145,16 +139,11 @@ jobs:
         run: make convert_props convert_chrs convert_guns combine_images
 
       - name: Install Windows (i686) cross-build dependencies
-        # Same guard as the Linux install: a stalled apt mirror costs a few
-        # minutes, not the whole run
-        timeout-minutes: 25
+        # the runners' apt mirror sometimes crawls: scripts/ci_apt_install.sh
+        # retries from another mirror instead of waiting it out
+        timeout-minutes: 35
         run: |
-          APT="timeout 300 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30"
-          for try in 1 2 3; do
-            sudo $APT update && sudo $APT install -y cmake gcc-mingw-w64-i686 g++-mingw-w64-i686 binutils-mingw-w64-i686 && break
-            [ $try = 3 ] && exit 1
-            echo "apt-get try $try stalled or failed, retrying"; sudo dpkg --configure -a || true; sleep 10
-          done
+          ./scripts/ci_apt_install.sh cmake gcc-mingw-w64-i686 g++-mingw-w64-i686 binutils-mingw-w64-i686
 
       - name: Cache SDL2 mingw devel package
         id: cache-sdl2-windows
