@@ -13,7 +13,7 @@
  *    arrival minus send time seen (the least delayed packet), allowed to
  *    creep up slowly if the route gets longer for good.
  *  - The delay behind the newest sample (coopClockDelay) is one and a half
- *    send intervals plus twice the arrival jitter, 30..200 ms: enough that
+ *    send intervals plus twice the arrival jitter, 30..250 ms: enough that
  *    the next sample is nearly always in when it is needed.
  *  - Past the newest sample a track runs on at its last velocity for up to
  *    COOPINTERP_EXTRAP_MS, then holds. A jump of over COOPINTERP_SNAP units
@@ -35,7 +35,7 @@ extern void portConLogf(const char *fmt, ...);
 #define COOPINTERP_EXTRAP_MS 100
 #define COOPINTERP_SNAP      300.0f
 #define COOPINTERP_MINDELAY  30
-#define COOPINTERP_MAXDELAY  200
+#define COOPINTERP_MAXDELAY  250
 
 void coopClockReset(CoopClock *c)
 {

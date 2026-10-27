@@ -55,6 +55,7 @@ extern s32 portVideoShowFps(void);          /* video.c: [display] show_fps */   
 #define COOP_HUD_COL_DIM    0xB0B0B0C0
 #define COOP_HUD_COL_DONE   0x60FF60D0
 #define COOP_HUD_COL_FAIL   0xFF4040FF
+#define COOP_HUD_COL_WARN   0xF0C850FF  /* a fair line (coopNetLink) */
 #define COOP_HUD_COL_SHADOW 0x000000A0
 
 /* each player's colour (by player number) for their tag and radar dot, alpha 0xFF */
@@ -559,13 +560,30 @@ static Gfx *coopHudPartnerStatus(Gfx *gdl, CoopHudPartner *p, s32 row)
     coopHudText(name, sizeof(name), p->name);
     coopHudFit(name, 0x70);
     gdl = coopHudPrint(gdl, x, y, name, p->dead ? COOP_HUD_COL_DIM : COOP_HUD_COL_TEXT);
-    if (coopVoiceTalking(p->player) || coopVoiceMuted(p->player))
-    {   /* voice chat: talking now, or muted on our game */
+    {
         s32 th = 0, tw = 0;
+        CoopLink l;
 
         textMeasure(&th, &tw, name, ptrFontBankGothicChars, ptrFontBankGothic, 0);
-        gdl = coopHudSpeaker(gdl, x + tw + 4, y + 1, coopHudPlayerColour(p->player), coopVoiceTalking(p->player),
-                             coopVoiceMuted(p->player));
+        tw += 4;
+        if (coopVoiceTalking(p->player) || coopVoiceMuted(p->player))
+        {   /* voice chat: talking now, or muted on our game */
+            gdl = coopHudSpeaker(gdl, x + tw, y + 1, coopHudPlayerColour(p->player), coopVoiceTalking(p->player),
+                                 coopVoiceMuted(p->player));
+            tw += 14;
+        }
+        if (!coopHudPlayerLost(p->player) && coopNetLink(p->player, &l) && l.quality >= COOPLINK_FAIR)
+        {   /* a slow or lossy line (coopNetLink): its round trip after the name, gold or red */
+            if (l.loss >= COOP_LINK_FAIR_LOSS)
+            {
+                snprintf(text, sizeof(text), "%dMS %d%%\n", (int) l.rtt, (int) l.loss);
+            }
+            else
+            {
+                snprintf(text, sizeof(text), "%dMS\n", (int) l.rtt);
+            }
+            gdl = coopHudPrint(gdl, x + tw, y, text, l.quality == COOPLINK_POOR ? COOP_HUD_COL_FAIL : COOP_HUD_COL_WARN);
+        }
     }
     y += 0x0B;
     if (coopHudPlayerLost(p->player))

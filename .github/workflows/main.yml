@@ -94,6 +94,14 @@ jobs:
           cmake -B build_pc -DCMAKE_BUILD_TYPE=Debug -DGE_VIDEO=ON -DSDL2_LINUX_ROOT="$HOME/sdl2-linux-i686"
           cmake --build build_pc -j$(nproc)
 
+      - name: Co-op smoothing on a slow, jittery line (no cart needed)
+        # coop_interp.c against simulated lines up to 300 ms + 200 ms jitter:
+        # fails if partners would stutter (coop/ci/interp_test.c)
+        run: |
+          gcc -m32 -O1 -w -fms-extensions -I. -Iinclude -Iinclude/PR -Iinclude/ultra64 -Iport/include -Isrc -Isrc/game \
+            -DNONMATCHING -DAVOID_UB -D_LANGUAGE_C -o interp_test coop/ci/interp_test.c -lm
+          ./interp_test
+
       # upload-artifact drops file permissions, so the binary goes up inside a
       # tar that keeps its exec bit (G334). It still needs an i386 libSDL2 on
       # the machine that runs it: the RUNPATH points at the runner's own copy.
