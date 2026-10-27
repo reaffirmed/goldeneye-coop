@@ -3506,6 +3506,7 @@ void coopSendVersusPkt(void *pkt, s32 len)
 s32 coopRemoteInfo(s32 p, CoopRemoteInfo *out)
 {
     CoopRemote *r;
+    CoopSample at;
 
     if (!coopRemoteHere(p))
     {
@@ -3516,6 +3517,13 @@ s32 coopRemoteInfo(s32 p, CoopRemoteInfo *out)
     out->pos[1] = r->st.pos[1];
     out->pos[2] = r->st.pos[2];
     out->yaw = r->st.yaw;
+    if (!sNoInterp && coopTrackAt(&r->track, coopClockRenderMs(&sClock[p], coopNowMs()), &at) >= 0)
+    {   /* drawn between two of their samples, as a co-op puppet is (coopPuppetUpdate) */
+        out->pos[0] = at.pos[0];
+        out->pos[1] = at.pos[1];
+        out->pos[2] = at.pos[2];
+        out->yaw = at.yaw;
+    }
     out->dead = r->st.dead;
     out->health = r->st.health;
     out->armour = r->st.armour;

@@ -3781,7 +3781,7 @@ void chrHandleBulletHit(struct ShotData *shot, struct BulletHit *bhit)
     // Point the tracer effect towards the impact position.
     gunSetTracerTarget(&nearhitpos);
 #ifndef TARGET_N64
-    coopLookShotChr(bhit->prop, &nearhitpos);  /* co-op: the partners see the hit */
+    coopLookShotChr(bhit->prop, &nearhitpos, bhit->hitpart);  /* co-op: the partners see the hit */
 #endif
 
     // Make a fleshy impact sound.

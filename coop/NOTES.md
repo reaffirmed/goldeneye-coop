@@ -1315,3 +1315,28 @@ on the paper) and scroll as before.
   quits, comes back after GAP=40 s): before, 229 frees and the ghost lobby;
   after, "player 3 rejoined (new session)" and all three cards. The same in a
   mission: the third drops in again beside the host.
+
+## Tester fixes after v0.1.0 (2026-10-27)
+
+- Own character: solo_char_load (bondview2.c) built our own Bond (intro
+  swirl, cinemas) from the stage's cuff, so each player saw themselves as
+  the mission's Bond while the partners saw their pick. In a co-op session
+  it now wears coopCharacterBody's pick. Checked with GE_COOP_TESTCINEMA:
+  Natalya and the pick-5 character look the same on both screens.
+- Partner hits on chrs: coopLookPlayShot drew bullet spark type 2, which
+  g_BulletSparkColors makes red. The shooter's game draws chrCreateHitPuffs'
+  smoke (g_HitReactionTable's type and size for the hit part). CoopShot.impact
+  now carries the hit part for COOPSHOT_CHR (it was -1; an older game's shot
+  gets type 1, size 21). No wire size change.
+- Music after a revive: death runs set_missionstate(0) (all tracks stop) and
+  the death tune; nothing put the level music back until a later music event.
+  coopRespawnPlayerAt now restarts it (sub_GAME_7F0C12CC) when the state is
+  still 0, then the alarm or countdown state it had at the death.
+- Voice chat bar: the talking speaker beside a name tag sat 13 px left of the
+  tag, so a tag near the left edge put it at a negative x. gDPFillRectangle
+  keeps 10 bits per edge, so the rect wrapped and ran across the screen in
+  the partner's colour (the tester's yellow bar over the objective list). The
+  speaker skips negative edges and moves right of the tag at the left edge.
+- Versus bodies are drawn from coop_interp.c's track (coopRemoteInfo), as
+  co-op puppets are, instead of each STATE as it lands. Run with
+  GE_COOP_NETSIM=120:40:2 on both: hits, kills and respawns all agree.

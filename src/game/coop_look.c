@@ -256,7 +256,7 @@ void coopLookShotBg(coord3d *pos, coord3d *normal, s32 impact, s32 room, s32 tex
     }
 }
 
-void coopLookShotChr(PropRecord *prop, coord3d *pos)
+void coopLookShotChr(PropRecord *prop, coord3d *pos, s32 hitpart)
 {
     if (!sCurOpen || prop == NULL || prop->chr == NULL)
     {
@@ -264,7 +264,7 @@ void coopLookShotChr(PropRecord *prop, coord3d *pos)
     }
     coopLookShotAt(COOPSHOT_CHR, pos, (prop->stan != NULL) ? prop->stan->room : 0);
     sCur.arg = prop->chr->chrnum;
-    sCur.impact = -1;
+    sCur.impact = (s16) hitpart;
     sCur.flags = 0;
 }
 
@@ -638,9 +638,27 @@ static void coopLookPlayShot(ChrRecord *chr, const CoopShot *s, s32 self)
             ChrRecord *hit = (s->arg == self) ? NULL : chrFindByLiteralId(s->arg);
 
             if (hit != NULL && hit->prop != NULL)
-            {
+            {   /* the shooter's puff (chrCreateHitPuffs): spark type 2 is red */
+                struct ChrHitReaction *hr = &g_HitReactionTable[0];
+                s32 i;
+
+                for (i = 0; g_HitReactionTable[i].hitpart != -1; i++)
+                {
+                    if (g_HitReactionTable[i].hitpart == s->impact)
+                    {
+                        hr = &g_HitReactionTable[i];
+                        break;
+                    }
+                }
                 recall_joy2_hits_edit_detail_edit_flag(s->weapon, hit->prop, -1);
-                bullet_spark_create(&end, 2, 20.0f, s->room);
+                if (hr->impactPuffCount)
+                {
+                    bullet_spark_create(&end, hr->impactPuffCount, hr->impactPuffSize, s->room);
+                }
+                else
+                {
+                    bullet_spark_create(&end, 1, 21.0f, s->room);   /* an older game's shot: no hit part */
+                }
             }
             break;
         }
