@@ -3364,6 +3364,52 @@ bool objEmbed(PropRecord *prop, PropRecord *parent, Model *model, ModelNode *nod
 }
 
 
+#ifndef TARGET_N64
+/* Co-op: stick a partner's thrown item to parent where their game says it
+ * stuck, as objEmbed does, whether or not parent is on our screen. The
+ * matrix to the parent's node needs its drawn matrices, so it is worked out
+ * the first time the parent is drawn (objCoopEmbedFix). */
+bool objCoopEmbed(PropRecord *prop, PropRecord *parent)
+{
+    ObjectRecord *obj = prop->obj;
+    Model *model = parent->obj->model;
+
+    if (model == NULL || (obj->runtime_bitflags & RUNTIMEBITFLAG_EMBEDDED))
+    {
+        return FALSE;
+    }
+    obj->embedment = embedmentAllocate();
+    if (obj->embedment == NULL)
+    {
+        return FALSE;
+    }
+    obj->runtime_bitflags |= RUNTIMEBITFLAG_EMBEDDED;
+    chrpropDeregisterRooms(prop);
+    chrpropDelist(prop);
+    chrpropDisable(prop);
+    obj->model->attachedto = model;
+    obj->model->attachedto_objinst = model->obj->RootNode;
+    chrpropReparent(prop, parent);
+    matrix_4x4_set_identity(&obj->embedment->matrix);
+    return TRUE;
+}
+
+/* the embedment matrix from the parent node's drawn matrix (view space) and
+ * the item's world place, as objEmbed works it out */
+static void objCoopEmbedFix(ObjectRecord *obj, Mtxf *nodemtx)
+{
+    Mtxf mtx1;
+    Mtxf mtx2;
+    Mtxf mtx3;
+
+    matrix_4x4_copy(&obj->mtx, &mtx1);
+    matrix_4x4_set_position(&obj->runtime_pos, &mtx1);
+    matrix_4x4_multiply_homogeneous(currentPlayerGetViewToWorldMtxf(), nodemtx, &mtx2);
+    matrix_4x4_invert_affine((f32 (*)[4]) &mtx2.m, (f32 (*)[4]) &mtx3.m);
+    matrix_4x4_multiply_homogeneous((Mtxf *) &mtx3.m, &mtx1, &obj->embedment->matrix);
+}
+#endif
+
 /**
  * Named same as Perfect Dark.
 */
@@ -3730,6 +3776,12 @@ void sub_GAME_7F0442DC(PropRecord* prop)
     if ((model->attachedto_objinst != NULL) && (obj->runtime_bitflags & RUNTIMEBITFLAG_EMBEDDED))
     {
         mtx = modelFindNodeMtx(model->attachedto, model->attachedto_objinst, 0);
+#ifndef TARGET_N64
+        if (coopItemsEmbedPending(obj))
+        {   /* co-op: stuck there by a partner's game while the parent was off our screen */
+            objCoopEmbedFix(obj, mtx);
+        }
+#endif
         prop->flags |= PROPFLAG_ONSCREEN;
         model->render_pos = (RenderPosView*)dynAllocate(model->obj->numMatrices << 6);
 
@@ -12500,6 +12552,12 @@ KeyRecord *weaponFindThrown(s32 KeyID) //MATCH
 
     for (prop = chrpropGetActiveTail(); prop; prop = prop->prev)
     {
+#ifndef TARGET_N64
+        if (coopPropIsPartner(prop) || coopItemsUnsettled(prop))
+        {   /* co-op: a partner drawing the Surface 2 mine, or throwing it, is not the mine left lying in the level */
+            continue;
+        }
+#endif
         obj = check_if_entry_is_collectable(KeyID, prop);
         if (obj && (!(obj->runtime_bitflags & RUNTIMEBITFLAG_HASPROJECTILE)))
         {

@@ -6,6 +6,7 @@
 void coopStageStart(void);
 void coopTick(void);
 s32  coopPropIsGhost(PropRecord *prop);
+s32  coopChrNearPartner(ChrRecord *chr);     /* host: keep animating a guard a partner may see */
 
 extern PropRecord *g_CoopPropOverride;
 s32  coopChrTickBegin(ChrRecord *chr); /* 0: skip (client mirrors the host) */
@@ -458,7 +459,8 @@ enum
     COOPEV_THROW = 25,      /* to all: we threw something (coop_items.c), first half */
     COOPEV_THROWMORE = 26,  /* its second half */
     COOPEV_ITEMGONE = 27,   /* to all: a thrown or dropped item went off or was picked up */
-    COOPEV_DROP = 28        /* host -> all: a guard dropped its gun */
+    COOPEV_DROP = 28,       /* host -> all: a guard dropped its gun */
+    COOPEV_ITEMSTUCK = 29   /* to all: where our thrown item stuck or landed (coop_items.c) */
 };
 typedef struct
 {
@@ -472,6 +474,7 @@ typedef struct
     f32 health;
 } CoopExtView;
 void coopExtSend(s32 kind, s32 to, const void *payload, s32 len);
+s32  coopExtSetupOfs(void *rec);         /* a setup object's byte offset in the prop defs, -1 not one */
 s32  coopExtSelf(void);
 s32  coopExtIsHost(void);
 u32  coopExtMissionTicks(void);
@@ -482,9 +485,16 @@ void coopExtApply(s32 kind, const u8 *raw, s32 from);
 /* the features' own unreliable packets: u32 magic, u16 version, u16 type first, as coop.c's */
 #define COOPPKT_EXT_FIRST 10
 #define COOPPKT_EXT_LAST  11
-enum { COOPPKT_TEAMTIME = 10 };
+enum { COOPPKT_TEAMTIME = 10, COOPPKT_TANK = 11 };
 void coopExtSendPacket(void *pkt, s32 len, s32 to);    /* fills magic and version */
 void coopExtPacket(const void *pkt, s32 len, s32 from);
+
+/* the Runway tank (coop_tank.c): the driver's game sends where it is */
+void coopTankTick(s32 inmission);
+void coopTankPacket(const void *raw, s32 len, s32 from);
+s32  coopTankDriving(s32 player);           /* a partner is in a tank */
+s32  coopTankTaken(PropRecord *prop);       /* a partner is driving this tank */
+s32  coopTankTestTap(void);                 /* GE_COOP_TESTTANK's B press */
 
 /* team mission times (coop_teamtime.c): in co-op the mission's time is the
  * host's, for the best time, the target time cheats and the debrief */
@@ -521,11 +531,16 @@ void coopItemsExplodeEnd(void);
 s32  coopItemsExploding(void);
 s32  coopItemsExplodingOwner(void);
 s32  coopItemsIsPartners(ObjectRecord *obj);            /* a partner's remote mine: not our detonator's */
+s32  coopItemsEmbedPending(ObjectRecord *obj);          /* propobj.c: stuck by a partner's word, matrix still to work out */
+s32  coopItemsUnsettled(PropRecord *prop);             /* propobj.c weaponFindThrown: a partner's throw, still in the air for them */
 void coopItemsPickedUp(ObjectRecord *obj);
 s32  coopInMissionNow(void);
 void coopObjKnockChildren(s32 haschildren);             /* propobj.c objHit */
 void coopObjKnocked(ObjectRecord *obj, s32 bounce, coord3d *viewdir);
 void coopObjUsed(ObjectRecord *obj);                     /* propobj.c propobjInteract */
+void coopObjGadgetUsed(ObjectRecord *obj, s32 item);       /* gunfire.c: a gadget used on it */
+void coopGadgetCheck(ObjectRecord *obj, void *script);      /* chrai.c AI_IFBondUsedGadgetOnObject passed */
+s32  coopGadgetItem(void *script);                           /* chrai.c AI_IFBondHasItemEquipped: a partner's gadget, -1 ours */
 void coopAsciiName(char *out, s32 cap, const char *in, s32 upper);   /* a Steam name for the game's fonts */
 
 /* voice chat (coop_voice.c): Steam Voice in COOPPKT_VOICE packets, heard from

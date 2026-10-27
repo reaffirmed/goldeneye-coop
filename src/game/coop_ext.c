@@ -14,6 +14,7 @@ void coopExtTick(s32 inmission)
     coopTeamTimeTick(inmission);
     coopBrowseTick(inmission);
     coopVoiceTick(inmission);
+    coopTankTick(inmission);
     if (!inmission)
     {
         coopCampaignTick();
@@ -31,6 +32,9 @@ void coopExtPacket(const void *pkt, s32 len, s32 from)
             {
                 coopTeamTimeApply((const u8 *) pkt + 8, from);
             }
+            break;
+        case COOPPKT_TANK:
+            coopTankPacket(pkt, len, from);
             break;
     }
 }
@@ -56,6 +60,7 @@ void coopExtApply(s32 kind, const u8 *raw, s32 from)
         case COOPEV_ITEMGONE:
         case COOPEV_DROP:
         case COOPEV_DROPREST:
+        case COOPEV_ITEMSTUCK:
             coopItemsApply(kind, raw, from);
             break;
     }
