@@ -1547,3 +1547,26 @@ stays 12 (everything below talks to a v0.2.0 game).
 - Found on the way: the game builds with -w, so an undeclared fabsf
   compiled as an int function and the jitter read 12, 31, 51, 71, 91...;
   written out by hand now. Check new calls with -Wimplicit-function-declaration.
+
+## Versus scenarios checked, team games (2026-10-27)
+
+- Every scenario played through over the mock Steam with coop/docker/versus.sh:
+  Teams 2 v 2 (4 copies, first to 3: the team's end screen, the same on all
+  four), 2 v 1 (3 copies) and 3 v 1 (4 copies) with the host's bot killing a
+  team-mate (each kill takes a point off the team, so no limit is reached, on
+  every copy), Golden Gun and Flag Tag (GE_VS_GRAB: the item leaves the other
+  world), Licence to Kill (3 copies, one-hit kills both ways) and You Only
+  Live Twice (two deaths end it). Rare's sides come from session numbers
+  (2 v 2: players 1 and 4 against 2 and 3; 3 v 1: player 4 alone; 2 v 1:
+  player 3 alone), and portMpTeamsEnsure leaves them as they are.
+- Fixed: midas.ini's mp_friendly_fire and mp_ltk_health applied in online
+  versus, per PC. A hit is checked on the shooter's PC and again on the
+  victim's, so friendly fire only worked when both had it on, and LTK Health
+  made one player die in one hit by their own ini. Both are off in versus
+  now (video.c), so everyone plays Rare's rules: team-mates hurt, one-hit
+  kills only in Licence to Kill. No protocol change (COOP_VERSION stays).
+- Harness: versus.sh parks the menu crosshair off the lobby's rows
+  (GE_CURSOR=20,225). With three or four copies something presses accept
+  in the lobby (cause not found), and the crosshair, centred on Leave Lobby
+  since the MW2 lobby, kept dropping the host out, so 3+ copy runs never
+  started. Whether real input can do the same is not known.
