@@ -60,10 +60,12 @@ jobs:
 
       - name: Install Linux (i686) build and run dependencies
         if: steps.key.outputs.have == '1'
+        # the runners' apt mirror sometimes crawls: scripts/ci_apt_install.sh
+        # retries from another mirror instead of waiting it out
+        timeout-minutes: 35
         run: |
           sudo dpkg --add-architecture i386
-          sudo apt-get update
-          sudo apt-get install -y cmake gcc-multilib g++-multilib \
+          ./scripts/ci_apt_install.sh cmake gcc-multilib g++-multilib \
             libx11-dev:i386 libxext-dev:i386 libxrandr-dev:i386 libxcursor-dev:i386 \
             libxfixes-dev:i386 libxi-dev:i386 libxss-dev:i386 libasound2-dev:i386 \
             libudev-dev:i386 libgl-dev:i386 \

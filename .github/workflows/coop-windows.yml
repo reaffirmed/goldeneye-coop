@@ -45,9 +45,11 @@ jobs:
           fetch-depth: 0
 
       - name: Install Windows (i686) cross-build dependencies
+        # the runners' apt mirror sometimes crawls: scripts/ci_apt_install.sh
+        # retries from another mirror instead of waiting it out
+        timeout-minutes: 35
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake zip gcc-mingw-w64-i686 g++-mingw-w64-i686 binutils-mingw-w64-i686
+          ./scripts/ci_apt_install.sh cmake zip gcc-mingw-w64-i686 g++-mingw-w64-i686 binutils-mingw-w64-i686
 
       - name: Cache SDL2 mingw devel package
         id: cache-sdl2-windows
