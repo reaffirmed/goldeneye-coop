@@ -46,6 +46,9 @@
 #include "bondinv.h"
 #include "front.h"
 #include "file.h"
+#include "gun.h"
+
+extern s32 chrlvCurrentPlayerCall7F0B0E24(ChrRecord *self);
 
 void doorSetOpenState(DoorRecord *door, s32 newstate);
 bool doorIsClosed(DoorRecord *door);
@@ -383,6 +386,9 @@ typedef struct
     CoopTrack track;    /* its recent positions, by its clock: the puppet is drawn between them */
     coord3d aimPos;     /* host: where this player is about now, for the guards (lag compensation) */
     StandTile *aimStan; /* NULL: use the drawn spot */
+    f32 noise[2];       /* host: how loud each of their guns is now (gunTickNoise), for the guards' hearing */
+    u8 noiseSeq;        /* the shotseq coopPuppetNoise last saw */
+    u8 noiseSeqValid;
 } CoopRemote;
 /* each level script's last "either player" check passer (coopAltBondCredit) */
 #define COOP_SCRIPTPASS 32
@@ -432,6 +438,8 @@ static PropRecord *sAimSwapped;     /* the puppet moved to its aim position for 
 static coord3d sAimSavedPos;
 static StandTile *sAimSavedStan;
 PropRecord *g_CoopPropOverride;     /* read by getCurrentPlayerProp() */
+static ChrRecord *sAltChr;          /* the guard coopChrAltBegin is trying other players for */
+static s32 sAltFrom = -1;           /* the player it is on outside those tries */
 
 static s32 sEvForwarding;   /* host: passing a joiner's event on, keep its sender */
 
@@ -1473,6 +1481,77 @@ static void coopPuppetUpdateGhost(CoopRemote *r)
     }
 }
 
+/* host: a partner's gunfire is heard by the guards as our own is
+ * (bondview2.c, chrCheckGuardsHeardSound with gunTickNoise's loudness),
+ * with them as Bond, so the guards that hear it come after them. Only
+ * their shots used to wake a guard, and only the ones that hit it. */
+static void coopPuppetNoise(CoopRemote *r, s32 p)
+{
+    f32 loudest = 0.0f;
+    s32 fired = 0;
+    s32 newshot;
+    s32 h;
+
+    if (!coopNetIsHost() || coopVersus() || !coopRemoteAliveHere(p))
+    {
+        r->noise[0] = r->noise[1] = 0.0f;
+        r->noiseSeqValid = 0;
+        return;
+    }
+    newshot = r->noiseSeqValid && r->st.look.shotseq != r->noiseSeq;
+    r->noiseSeq = r->st.look.shotseq;
+    r->noiseSeqValid = 1;
+    for (h = GUNRIGHT; h <= GUNLEFT; h++)
+    {
+        s32 item = r->st.look.weapon[h];
+        WeaponStats *ws;
+        f32 down, downmax;
+
+        if (item < 0 || item >= ITEM_IDS_MAX)
+        {
+            item = ITEM_UNARMED;
+        }
+        ws = get_ptr_item_statistics(item);
+        if (ws == NULL)
+        {
+            continue;
+        }
+        if (item != ITEM_UNARMED && ((r->st.look.flash & (1 << h)) || (newshot && h == GUNRIGHT)))
+        {
+            r->noise[h] += ws->NoiseIncreasePerShot;
+            if (r->noise[h] > ws->LoudnessMax)
+            {
+                r->noise[h] = ws->LoudnessMax;
+            }
+            if (r->noise[h] > loudest)
+            {
+                loudest = r->noise[h];
+            }
+            fired = 1;
+        }
+        down = (ws->NoiseIncreasePerShot * g_GlobalTimerDelta) / (ws->NoiseDecayLinearTime * 60.0f);
+        downmax = ((r->noise[h] - ws->LoudnessMin) * g_GlobalTimerDelta) / (ws->NoiseDecayScaledTime * 60.0f);
+        r->noise[h] -= (down > downmax) ? down : downmax;
+        if (r->noise[h] < ws->LoudnessMin)
+        {
+            r->noise[h] = ws->LoudnessMin;
+        }
+    }
+    if (fired && g_CoopPropOverride == NULL)
+    {
+        static u32 logged;
+
+        if (sTick - logged >= 60)
+        {
+            logged = sTick;
+            portConLogf("ge: coop: guards hear player %d's gunfire (loudness %.1f)\n", p + 1, loudest);
+        }
+        g_CoopPropOverride = r->puppet;
+        chrCheckGuardsHeardSound(loudest);
+        g_CoopPropOverride = NULL;
+    }
+}
+
 static void coopPuppetRemove(CoopRemote *r)
 {
     if (r->puppet->chr != NULL)
@@ -1505,6 +1584,140 @@ s32 coopChrNearPartner(ChrRecord *chr)
             {
                 return 1;
             }
+        }
+    }
+    return 0;
+}
+
+/* ---- NPCs and players inside each other ----------------------------------
+ * Each game moves its own Bond and (on the host) the guards, but places the
+ * partners' bodies and (on a joiner) the guards where packets say, without
+ * a collision test. A guard heading for a partner's body, or a hostage or
+ * Boris following one, can end up inside it on one game or the other, and
+ * the stock movement test then blocks every step of both: a move out of a
+ * shape crosses its edge. So a player's body and an NPC that already overlap
+ * don't block each other's moves until they are apart, and a player who is
+ * down (bleeding out, or out until the mission ends) blocks nobody. */
+#define COOP_MOVERS 4
+static PropRecord *sMovers[COOP_MOVERS];   /* the props being moved or tested from now (chrSetMoving) */
+
+void coopCollideMover(PropRecord *prop, s32 on)
+{
+    s32 i, free = -1;
+
+    if (sEnabled <= 0 || prop == NULL)
+    {
+        return;
+    }
+    for (i = 0; i < COOP_MOVERS; i++)
+    {
+        if (sMovers[i] == prop)
+        {
+            if (!on)
+            {
+                sMovers[i] = NULL;
+            }
+            return;
+        }
+        if (sMovers[i] == NULL && free < 0)
+        {
+            free = i;
+        }
+    }
+    if (on && free >= 0)
+    {
+        sMovers[free] = prop;
+    }
+}
+
+/* our own Bond or a partner's body: its player number, else -1 */
+static s32 coopBodyPlayer(PropRecord *prop)
+{
+    if (g_CurrentPlayer != NULL && prop == g_CurrentPlayer->prop)
+    {
+        return coopSelf();
+    }
+    return coopPlayerOfProp(prop);
+}
+
+static s32 coopBodyDown(PropRecord *prop, s32 p)
+{
+    if (p == coopSelf())
+    {
+        return g_CurrentPlayer->bonddead;
+    }
+    return sR[p].st.dead != 0;
+}
+
+/* how far a prop's own collision reaches: a player's radius, a chr's width */
+static f32 coopBodyRadius(PropRecord *prop)
+{
+    if (prop->type == PROP_TYPE_VIEWER)
+    {
+        f32 r, h, pad;
+
+        bondviewGetCollisionRadius(prop, &r, &h, &pad);
+        return r;
+    }
+    return (prop->type == PROP_TYPE_CHR && prop->chr != NULL) ? prop->chr->chrwidth : 0.0f;
+}
+
+/* mover's round footprint already reaches into prop's shape (a chr's is a
+ * diamond, |dx| + |dz| < width; a player's a near circle), by more than the
+ * sliver a blocked move leaves */
+static s32 coopBodiesOverlap(PropRecord *mover, PropRecord *prop)
+{
+    f32 dx = mover->pos.f[0] - prop->pos.f[0];
+    f32 dy = mover->pos.f[1] - prop->pos.f[1];
+    f32 dz = mover->pos.f[2] - prop->pos.f[2];
+    f32 r = coopBodyRadius(mover);
+    f32 gap;
+
+    if (dy > 200.0f || dy < -200.0f)
+    {
+        return 0;
+    }
+    if (prop->type == PROP_TYPE_CHR)
+    {
+        gap = ((dx < 0.0f ? -dx : dx) + (dz < 0.0f ? -dz : dz) - coopBodyRadius(prop)) * 0.70710677f;
+    }
+    else
+    {
+        gap = sqrtf(dx * dx + dz * dz) - coopBodyRadius(prop);
+    }
+    return gap < r - 2.0f;
+}
+
+s32 coopCollideSkip(PropRecord *prop)
+{
+    s32 p, i;
+
+    if (sEnabled <= 0 || prop == NULL || coopVersus() || !coopPartnerHere())
+    {
+        return 0;
+    }
+    p = coopBodyPlayer(prop);
+    if (p >= 0 && coopBodyDown(prop, p))
+    {
+        return 1;
+    }
+    for (i = 0; i < COOP_MOVERS; i++)
+    {
+        PropRecord *m = sMovers[i];
+        PropRecord *npc;
+
+        if (m == NULL || m == prop || (coopBodyPlayer(m) >= 0) == (p >= 0))
+        {
+            continue;   /* two players (the start-pad ghost handles those) or two NPCs: stock */
+        }
+        npc = (p >= 0) ? m : prop;
+        if (npc->type != PROP_TYPE_CHR || npc->chr == NULL)
+        {
+            continue;
+        }
+        if (coopBodiesOverlap(m, prop))
+        {
+            return 1;
         }
     }
     return 0;
@@ -1603,6 +1816,7 @@ void coopTick(void)
 
 static void coopTickBody(void)
 {
+    memset(sMovers, 0, sizeof(sMovers));    /* nothing is mid-move between ticks */
     if (sEnabled < 0)
     {
         sEnabled = coopNetInitFirst();
@@ -1953,6 +2167,7 @@ static void coopRemotesTick(void)
             coopPuppetUpdate(r);
             coopPuppetUpdateGhost(r);
             coopRemoteAim(r, p);
+            coopPuppetNoise(r, p);
             coopMotionLog(p, &r->puppet->pos);
             if ((sTick % 60) == 0)
             {
@@ -2638,6 +2853,35 @@ static s32 coopIsMirroringClient(void)
     return sEnabled && !coopNetIsHost() && sLastSnapTick != 0 && coopRemoteHere(0) && !coopVersus();
 }
 
+/* inside a guard's tick: "Bond" is player t from here on, seen and shot at
+ * where they are now rather than where they are drawn (lag compensation).
+ * Player 0 (our own Bond), or chr NULL, ends any switch. */
+static void coopChrUseTarget(ChrRecord *chr, s32 t)
+{
+    if (sAimSwapped != NULL)
+    {
+        sAimSwapped->pos = sAimSavedPos;
+        sAimSwapped->stan = sAimSavedStan;
+        sAimSwapped = NULL;
+    }
+    sTickChr = NULL;
+    g_CoopPropOverride = NULL;
+    if (chr == NULL || t == COOPTGT_LOCAL || sR[t].puppet == NULL)
+    {
+        return;
+    }
+    sTickChr = chr;
+    g_CoopPropOverride = sR[t].puppet;
+    if (sR[t].aimStan != NULL)
+    {
+        sAimSwapped = sR[t].puppet;
+        sAimSavedPos = sAimSwapped->pos;
+        sAimSavedStan = sAimSwapped->stan;
+        sAimSwapped->pos = sR[t].aimPos;
+        sAimSwapped->stan = sR[t].aimStan;
+    }
+}
+
 s32 coopChrTickBegin(ChrRecord *chr)
 {
     s32 t;
@@ -2671,30 +2915,125 @@ s32 coopChrTickBegin(ChrRecord *chr)
             logged[k] = chr;
             portConLogf("ge: coop: guard %d now targets player %d\n", chr->chrnum, t + 1);
         }
-        sTickChr = chr;
-        g_CoopPropOverride = sR[t].puppet;
-        if (sR[t].aimStan != NULL && sR[t].puppet != NULL)
-        {   /* the guard sees and shoots at where they are now, not where they are drawn (lag compensation) */
-            sAimSwapped = sR[t].puppet;
-            sAimSavedPos = sAimSwapped->pos;
-            sAimSavedStan = sAimSwapped->stan;
-            sAimSwapped->pos = sR[t].aimPos;
-            sAimSwapped->stan = sR[t].aimStan;
-        }
+        coopChrUseTarget(chr, t);
     }
     return 1;
 }
 
 void coopChrTickEnd(void)
 {
-    if (sAimSwapped != NULL)
+    coopChrUseTarget(NULL, COOPTGT_LOCAL);
+    sAltChr = NULL;
+}
+
+/* host, a guard's script check about "Bond" failed for the player it is on:
+ * coopChrAltBegin(chr, k) makes the k-th other living player Bond (1), or
+ * says there is none left (0). After the check, coopChrAltKeep makes that
+ * player the guard's target (the rest of its script is about them), or
+ * coopChrAltEnd puts its own target back. A guard watching the host no
+ * longer ignores a joiner walking up to it, and the other way round. */
+s32 coopChrAltBegin(ChrRecord *chr, s32 k)
+{
+    s32 t;
+
+    if (sEnabled <= 0 || !coopNetIsHost() || chr == NULL || chr->prop == NULL || coopIsPlayerChr(chr)
+        || !coopPartnerHere() || coopVersus())
     {
-        sAimSwapped->pos = sAimSavedPos;
-        sAimSwapped->stan = sAimSavedStan;
-        sAimSwapped = NULL;
+        return 0;
     }
-    sTickChr = NULL;
-    g_CoopPropOverride = NULL;
+    if (k == 0)
+    {
+        sAltChr = chr;
+        sAltFrom = (g_CoopPropOverride != NULL) ? coopPlayerOfProp(g_CoopPropOverride) : COOPTGT_LOCAL;
+        if (sAltFrom < 0)
+        {   /* a level script's partner check (coopAltBondBegin) is running */
+            sAltChr = NULL;
+            return 0;
+        }
+    }
+    else if (sAltChr != chr)
+    {
+        return 0;
+    }
+    for (t = 0; t < COOPTGT_COUNT; t++)
+    {
+        if (t != sAltFrom && coopTargetable(t) && k-- == 0)
+        {
+            coopChrUseTarget(chr, t);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void coopChrAltEnd(ChrRecord *chr)
+{
+    if (sAltChr == chr && sAltFrom >= 0)
+    {
+        coopChrUseTarget(chr, sAltFrom);
+    }
+}
+
+void coopChrAltKeep(ChrRecord *chr, s32 stimulus)
+{
+    CoopChrTarget *st = coopChrState(chr);
+    s32 t = (g_CoopPropOverride != NULL) ? coopPlayerOfProp(g_CoopPropOverride) : COOPTGT_LOCAL;
+
+    if (st == NULL || t < 0)
+    {
+        return;
+    }
+    if (st->target != t)
+    {
+        portConLogf("ge: coop: chr %d turns to player %d (its script checked them)\n", chr->chrnum, t + 1);
+    }
+    st->target = t;
+    st->lastupdate60 = g_GlobalTimer;
+    if (stimulus)
+    {
+        st->laststimulus60 = g_GlobalTimer;
+    }
+    sAltFrom = t;
+}
+
+/* host: "Bond is aiming at me" (sub_GAME_7F0333F8) for whoever Bond is in
+ * this guard's tick. That test reads our own crosshair, so for a partner it
+ * is their facing against the chr's body, with the same line of sight. */
+s32 coopChrAimedAtByBond(ChrRecord *chr)
+{
+    s32 p = (g_CoopPropOverride != NULL) ? coopPlayerOfProp(g_CoopPropOverride) : COOPTGT_LOCAL;
+    PropRecord *from;
+    f32 dx, dz, d, want, diff, half;
+
+    if (p <= COOPTGT_LOCAL || !coopNetIsHost())
+    {
+        return sub_GAME_7F0333F8(chr);
+    }
+    if (chr->model == NULL || !coopRemoteAliveHere(p) || sR[p].st.look.weapon[GUNRIGHT] == ITEM_UNARMED
+        || !chrlvCurrentPlayerCall7F0B0E24(chr))
+    {
+        return 0;
+    }
+    from = g_CoopPropOverride;
+    dx = chr->prop->pos.f[0] - from->pos.f[0];
+    dz = chr->prop->pos.f[2] - from->pos.f[2];
+    d = sqrtf(dx * dx + dz * dz);
+    if (d < 1.0f)
+    {
+        return 1;
+    }
+    want = atan2f(dx, dz);
+    diff = fmodf(want - sR[p].st.yaw, 6.2831855f);
+    if (diff < 0.0f)
+    {
+        diff += 6.2831855f;
+    }
+    if (diff > 3.1415927f)
+    {
+        diff = 6.2831855f - diff;
+    }
+    half = atan2f(getinstsize(chr->model) * 0.8f, d);  /* the body's sphere, as the stock test */
+    return diff < half;
 }
 
 /* A real stimulus (seen, heard, shot by) commits the guard to whichever

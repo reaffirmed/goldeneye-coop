@@ -1693,6 +1693,54 @@ an older game ignores; see "Mixed versions" below).
   Facility), and one vote for Lobby decided by the clock. Shots:
   spectate-vote/ in the project files.
 
+## NPCs stuck in players, slow to react to a joiner (2026-10-28)
+
+Tester report (v0.3.0): an NPC and a player wedged inside each other so
+neither could move (Frigate hostages, Boris in Bunker 2), guards and Boris
+slow to react, and a Frigate hostage-taker that ignored a player standing in
+front of it.
+
+- Stuck: each game moves its own Bond and (host) the guards with collision,
+  but puts the partners' bodies and (joiner) the guards where the packets
+  say, without one. A host guard or hostage closing on a joiner's delayed
+  body lands inside the joiner on the joiner's game, and the stock movement
+  test then blocks every step (a move out of a shape crosses its edge). Now
+  chrSetMoving and bondviewUpdateGuardTankFlagsRelated note the prop being
+  moved (coopCollideMover), and chrUpdateCollisionBounds and
+  bondviewGetPropHeightRelatedValues give no shape (coopCollideSkip) to a
+  player's body and an NPC that already overlap, while one of them moves,
+  until they are apart. A player who is down blocks nobody (a puppet kept
+  ACT_BONDMULTI's collision while down, and getPlayerCount() == 1 kept a dead
+  host Bond's). Joiner side mostly: the host's own Bond and guards collide
+  in one world as in solo.
+- Slow or no reaction: a guard checks one player at a time (the target
+  machine above), and a guard in a non-passive action (Frigate's
+  hostage-takers aim at their hostage, ACT_ATTACK; Boris and others mid-run)
+  never rotates, so it kept checking whoever was nearest when the mission
+  started. Now its script's "see Bond", "Bond in line of sight", "Bond
+  nearly in sight", "Bond aiming at me" and "distance to Bond" checks try
+  every player (chrai.c, coopChrAltBegin/End/Keep): one that passes for
+  another player makes that player its target for the rest of the script
+  (and a sight is a stimulus); "farther than" needs every player that far,
+  and the nearer one becomes the target. For a partner, "aiming at me" is
+  their facing (STATE yaw) against the chr's body sphere with the stock line
+  of sight (coopChrAimedAtByBond).
+- Hearing: only the host's gunfire alerted guards (chrCheckGuardsHeardSound
+  from the host's own shots). The host now keeps each partner's gun loudness
+  as gunTickNoise does, from their flash bits and shot numbers, and runs the
+  same check with their body as Bond (coopPuppetNoise).
+- Frigate hostage-takers (ai_17) shoot Bond about 6 times in 10 once they
+  react and the hostage the rest of the time; that is the retail script.
+- Tests (two games over UDP, US ROM, old build = main at 3d9c80f):
+  - Bunker 2, joiner put on standing guard 19 (GE_COOP_TESTGOTO=19) and
+    holding forward: old, never moves again (282 3412 for 50 s); new, walks
+    out.
+  - Frigate, joiner put on hostage 44 next to hostage-taker 1, host at the
+    start: old, the guard never sees the joiner (50 s); new, it sees them,
+    turns and shoots, and the hostage dies.
+  - Dam, joiner fires an AK for 4 s at the start: old, guard 6 stays put;
+    new, "guards hear player 2's gunfire", guard 6 comes and attacks.
+
 ## Player Scaling and Friendly Fire levels (2026-10-28, COOP_VERSION 13)
 
 Owner's pick: co-op scaling with the player count and friendly fire, planned
