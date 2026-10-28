@@ -1032,6 +1032,17 @@ static void coopLossSample(s32 c, s32 lost)
     sLossN[c]++;
 }
 
+/* a host migration moves new peers onto the channels: what was measured
+ * there (the old host's last unanswered pings, above all) is not theirs */
+static void coopLinkStatsReset(void)
+{
+    memset(sRtt, 0, sizeof(sRtt));
+    memset(sRttDev, 0, sizeof(sRttDev));
+    memset(sLoss, 0, sizeof(sLoss));
+    memset(sLossN, 0, sizeof(sLossN));
+    memset(sPingOut, 0, sizeof(sPingOut));
+}
+
 static void coopSendTime(s32 c, s32 answer, u32 echo)
 {
     CoopTimePkt t;
@@ -7776,6 +7787,7 @@ static void coopMigrate(void)
         }
         sMissionSerial = sHostHello.mission;    /* the joiners have followed this one already */
         coopNetMigrate(1, ids, n - 1);
+        coopLinkStatsReset();
         coopRenumber(newof);
         if (coopInMission())
         {
@@ -7789,6 +7801,7 @@ static void coopMigrate(void)
     {
         ids[0] = sMigRoster[list[0]].id;
         coopNetMigrate(0, ids, 1);
+        coopLinkStatsReset();
         coopRenumber(newof);
         sHostWaiting = HOSTW_NEWHOST;
         sHostWaitMs = coopNowMs();
