@@ -2115,3 +2115,68 @@ and team times). All of it is in src/game/coop_ai.c; Classic runs none of it.
   within run-to-run noise). Shots: smart-ai/ in the project files.
 - Not seen in a run yet: the alarm run, the fall back, a guard finding a
   body. Each has its own GE_GUARDAIDBG line to look for.
+
+## Far-away players dropping in mid-mission (2026-10-28)
+
+Tester report: a player from Colombia dropped in to a running co-op mission;
+then desync, the joiner couldn't kill guards, and it disconnected. COOP_VERSION
+stays 13 (no packet changes).
+
+- Harness: coop/docker/far_drop_in.sh. The host starts Dam with a nearby
+  partner (NEARSIM 30:10:0); at LATE s a third copy on FARSIM (300:80:3)
+  drops in. GE_COOP_TESTHUNT=<s> on the far one: stands 3 m from the
+  nearest living guard and aims at it, GE_COOP_TESTFIRE fires a KF7; it logs
+  each guard the host reports down. GE_COOP_NETCUT=<s>:<len> (coop_net.c)
+  cuts a copy's line both ways for <len> s. The 10 s net log now has what we
+  send each peer ("net: to player N .. KB/s in .. packets/s (% by type)",
+  coopNetSentTake).
+- At 300 ms every shot the far joiner sent was applied on the host (64 of
+  64) and it killed what it could see. Shots carry the chrnum and are not
+  checked against positions or clocks, so a stale view doesn't reject them.
+  The failure was what follows.
+- The host's keep-alive hello (coopKeepAlive, and the mission card's) set
+  sTick to 0 around coopSendHello to force a send. coopLobbyPlayerHere then
+  aged every joiner's last hello by minus sTick, so each of those hellos told
+  the joiners nobody else was here. With 3-4 players, the joiners' player
+  count flipped every half second (Player Scaling's guard health for kill
+  prediction, skip votes, voice, stats resends), and the host-migration
+  roster (sHostHello) was often "nobody". coopSendHelloNow sends out of turn
+  without touching sTick.
+- The disconnect, reproduced with NETCUT 7 s on the far joiner (old build):
+  after 2 + 3.5 s of silence it took the host as gone and migrated to the
+  near joiner (still with the host, so it never took over), then to itself:
+  "YOU ARE THE HOST NOW", alone in its own world, its shots going nowhere;
+  the real host showed "disconnected" 30 s later. A host that really goes
+  says so (BYE from the crash report, or Steam sees it leave the lobby), so
+  the quiet case is mostly our own line. A joiner whose line was poor when
+  the silence began (round trip from 250 ms or jitter from 80 ms), or that
+  already had a silence this mission, now waits COOP_HOST_WAIT_FAR_MS (12 s)
+  before migrating, inside the host's 30 s before it drops a joiner. Same
+  test, new build: "the host is back", nothing lost.
+- Reliable events: every unacked event went out again every 4 ticks, with
+  every new event and with every ack, so on a 400 ms line each went 5-6
+  times, more in a firefight. Now a new event goes once, the unacked ones
+  again when the oldest has waited the round trip x 1.25 + 2 x jitter + 50
+  ms (80..1200), and the receiver keeps events that arrive ahead of a
+  missing one (CoopChan.in / inSeq) instead of dropping them for a resend.
+- What the host sends each joiner, Dam, 3 players (far_drop_in.sh): 45
+  KB/s and 145 packets/s, 44% STATE and 52% guard snapshots. Now:
+  - Guards: a finished body once a second, a guard more than 60 m from every
+    player 10 a second, the rest (and anyone firing or dying) 20 a second
+    (coopGuardDue). Joiners free a chr missing for 5 s (was 2).
+  - STATE (ours and the relayed ones) at 30 a second to each joiner when 3+
+    players are in the session or that joiner's line is poor (coopStateThin;
+    not versus). Each player added 10 KB/s to every other joiner's line and
+    the host's upload, so a third or fourth player raised everyone's ping on
+    a slow upload.
+  - Result, same run: 25 KB/s and 86 packets/s to each joiner.
+- Checked: far_drop_in.sh with HOSTENV GE_COOP_TESTEND=7000 and the far
+  copy's line cut for 6 s: dropped in, 11 guards down, 63 of 63 shots
+  applied, the host came back, the mission ended together.
+  mission_runs.sh: dam facility runway surface bunker1 silo; JOINAFTER=30
+  dam facility frigate; the same at NETSIM=300:120:4: 12 of 12 pass.
+- Found on the way: coop.c used atan2f and fmodf and coop_give.c fabsf
+  without a declaration (the game's include/math.h has none of them, and -w
+  hides it): they returned garbage, so "the partner aims at this guard"
+  (coopChrAimedAtByBond) and give-to-partner's height check were noise.
+  coop.c includes math_atan2f.h now; the other two are written out.

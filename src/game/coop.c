@@ -47,6 +47,7 @@
 #include "front.h"
 #include "file.h"
 #include "gun.h"
+#include "math_atan2f.h"   /* the game's math.h has no atan2f: undeclared, it returned garbage (-w hides it) */
 
 extern s32 chrlvCurrentPlayerCall7F0B0E24(ChrRecord *self);
 
@@ -351,6 +352,8 @@ static s32 sSelfPlayer;         /* our player number: 0 the host, a joiner's fro
 static u32 sMissionTicks;       /* ticks in this mission */
 static s32 sLateJoin;           /* joiner: followed the host into a mission under way */
 static u32 sDropInSince;        /* sLateJoin: sTick we started watching for a safe moment, 0 not yet */
+static s32 sHostWaitFar;        /* joiner: the host's silence began on a poor line of ours, or after an earlier one */
+static s32 sHostHiccups;        /* joiner: times the host went quiet and came back this mission */
 static void coopDropInTick(void);
 static s32 sOnLobbyScreen;      /* front.c: the lobby screen is up */
 static u32 sLastHurtTick;   /* local Bond lost health */
@@ -407,9 +410,12 @@ static CoopClock sClock[COOP_MAX_PLAYERS];  /* each player's clock against ours 
 typedef struct
 {
     CoopEvent out[COOP_EVENT_RING];
+    u32 outSentMs[COOP_EVENT_RING]; /* when each was last sent (coopNowMs) */
     u32 outNext;        /* seq the next queued event gets */
     u32 outAcked;       /* the peer has everything up to here */
     u32 inDone;         /* we have applied everything up to here */
+    CoopEvent in[COOP_EVENT_RING];  /* events that came ahead of a missing one, by seq */
+    u32 inSeq[COOP_EVENT_RING];     /* the seq each slot of in holds, 0 none */
     u32 outSentUpTo;
     u32 evLastSend;
     s32 ackDirty;
@@ -470,6 +476,7 @@ static void coopSendWorld(void);
 static void coopApplyPickup(CoopEvent *ev);
 static void coopApplyMissionEnd(CoopEvent *ev);
 static void coopSendHello(void);
+static void coopSendHelloNow(void);
 static void coopApplyExplosion(CoopEvent *ev);
 static void coopApplyAiCommand(CoopEvent *ev);
 static s32 sPendingCinemaList = -1;
@@ -646,6 +653,25 @@ static void coopRemotesTick(void);
 static void coopCinemaTick(void);
 static void coopQueueEventTo(CoopEvent *ev, s32 to);
 
+/* host: STATE to channel c (ours, and the others' it relays) at half rate,
+ * 30 a second: with three or four players, or on a poor line. Every player's
+ * STATE to every joiner at 60 a second was most of the host's upload (each
+ * player added 10 KB/s to every other joiner's line and to the host's), so a
+ * third or fourth player raised everyone's ping on a slow upload. Partners
+ * are drawn between samples (coop_interp.c), which allows for the longer
+ * gap; the newest shots ride in every STATE (COOP_SHOTS_KEPT). Not in versus,
+ * which has its own tuning. */
+static s32 coopStateThin(s32 c)
+{
+    CoopLink l;
+
+    if (coopVersus())
+    {
+        return 0;
+    }
+    return coopLobbyPlayerCount() >= 3 || (coopNetLink(coopPlayerOfChan(c), &l) && l.quality == COOPLINK_POOR);
+}
+
 static void coopSendState(void)
 {
     CoopStatePkt p;
@@ -675,7 +701,22 @@ static void coopSendState(void)
     p.calm = (u16) coopLocalCalm();
     p.out = (u8) sBledOut;
     p.ms = coopNowMs();
-    coopNetSend(&p, sizeof(p));
+    if (coopNetIsHost())
+    {
+        s32 c;
+
+        for (c = 0; c < COOP_NET_MAX_PEERS; c++)
+        {
+            if ((sTick & 1) == 0 || !coopStateThin(c))
+            {
+                coopNetSendTo(c, &p, sizeof(p));
+            }
+        }
+    }
+    else
+    {
+        coopNetSend(&p, sizeof(p));
+    }
 
     if ((sTick % 300) == 1)
     {
@@ -730,6 +771,7 @@ static void coopChanReset(CoopChan *ch)
     ch->inDone = 0;
     ch->ackDirty = 0;
     ch->evLastSend = 0;
+    memset(ch->inSeq, 0, sizeof(ch->inSeq));
 }
 
 /* A player that restarted (a crash, or rejoining from the lobby) starts its
@@ -770,16 +812,22 @@ static void coopRecvEvents(s32 c, CoopEventsPkt *e)
         ch->outAcked = e->ack;
     }
     for (k = 0; k < e->count; k++)
-    {
+    {   /* kept by seq: jitter reorders packets, and one lost must not cost the ones after it a resend */
         u32 seq = e->firstseq + k;
+
+        if ((s32) (seq - ch->inDone) > 0 && (s32) (seq - ch->inDone) <= COOP_EVENT_RING)
+        {
+            ch->in[seq % COOP_EVENT_RING] = e->ev[k];
+            ch->inSeq[seq % COOP_EVENT_RING] = seq;
+        }
+    }
+    while (ch->inSeq[(ch->inDone + 1) % COOP_EVENT_RING] == ch->inDone + 1)
+    {   /* in order, from the first not yet applied */
         CoopEvent ev;
 
-        if (seq != ch->inDone + 1)
-        {
-            continue;
-        }
-        ch->inDone = seq;
-        ev = e->ev[k];
+        ch->inDone++;
+        ch->inSeq[ch->inDone % COOP_EVENT_RING] = 0;
+        ev = ch->in[ch->inDone % COOP_EVENT_RING];
         if (coopNetIsHost())
         {
             ev.from = (u8) coopPlayerOfChan(c);   /* a joiner can only speak for itself */
@@ -814,10 +862,12 @@ static void coopRecvState(s32 c, CoopStatePkt *p)
 
     if (coopNetIsHost())
     {
+        static u8 relayed[COOP_NET_MAX_PEERS][COOP_NET_MAX_PEERS];
+
         p->player = (u8) coopPlayerOfChan(c);
         for (q = 0; q < COOP_NET_MAX_PEERS; q++)
-        {   /* every joiner sees every other one */
-            if (q != c)
+        {   /* every joiner sees every other one (every other STATE where coopStateThin) */
+            if (q != c && ((++relayed[q][c] & 1) != 0 || !coopStateThin(q)))
             {
                 coopNetSendTo(q, p, sizeof(*p));
             }
@@ -1123,6 +1173,27 @@ static void coopTimeTick(void)
         if (sGuardStale != 0)
         {
             portConLogf("ge: coop: net: %u guard snapshot entries came after newer ones (positions kept, the rest skipped)\n", sGuardStale);
+        }
+        for (p = 0; p < COOP_NET_MAX_PEERS; p++)
+        {   /* what we send each peer: the busiest packet types */
+            unsigned int by[32], pkts, total = coopNetSentTake(p, by, &pkts);
+            char line[160];
+            s32 k, n = 0;
+
+            if (total == 0 || !coopNetPeerConnected(p))
+            {
+                continue;
+            }
+            for (k = 0; k < 32 && n < (s32) sizeof(line) - 16; k++)
+            {
+                if (by[k] * 20 >= total)
+                {
+                    n += snprintf(line + n, sizeof(line) - n, " %d:%u", k, (by[k] * 100 + total / 2) / total);
+                }
+            }
+            line[n] = '\0';
+            portConLogf("ge: coop: net: to player %d %.1f KB/s in %u packets/s (%% by type:%s)\n", coopPlayerOfChan(p) + 1,
+                        total / 10240.0f, pkts / 10, line);   /* this log comes every 10 s */
         }
         for (p = 0; p < COOP_MAX_PLAYERS; p++)
         {
@@ -1768,6 +1839,7 @@ void coopStageStart(void)
     memset(sChrHostDying, 0, sizeof(sChrHostDying));
     coopPredictReset();
     sMissionTicks = 0;
+    sHostHiccups = 0;
     sNumPeerHeld = 0;
     memset(sScriptPass, 0, sizeof(sScriptPass));    /* a new mission's scripts */
     sNumTeamPicks = 0;
@@ -2561,6 +2633,99 @@ static void coopHarnessTick(void)
     {
         coopLookTestTick((s32) sMissionTicks);   /* GE_COOP_TESTFIRE, GE_COOP_TESTLOOK (coop_look.c) */
     }
+    if (coopIsMirroringClient() && coopInMission() && !sLateJoin && g_CurrentPlayer->bondhealth > 0.0f)
+    {   /* GE_COOP_TESTHUNT=<s>: from <s> s into the mission, stand 3 m in front of the nearest
+         * living guard and keep its chest in the sights (GE_COOP_TESTFIRE fires); the next one
+         * once the host says it is down, or after 8 s (harness only) */
+        static s32 testhunt = -2;
+        static s16 target = -1;
+        static u32 since, downs, tries;
+        PropRecord *bond = g_CurrentPlayer->prop;
+        ChrRecord *c = (target >= 0) ? chrFindByLiteralId(target) : NULL;
+        s32 slot = (c != NULL) ? (s32) (c - g_ChrSlots) : -1;
+
+        if (testhunt == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTHUNT");
+            testhunt = (e != NULL) ? atoi(e) * 60 : -1;
+        }
+        if (testhunt >= 0 && (s32) sMissionTicks >= testhunt && bond != NULL)
+        {
+            if (c != NULL && slot >= 0 && slot < COOP_MAX_CHRS && sChrHostDying[slot])
+            {
+                downs++;
+                portConLogf("ge: coop: testhunt: guard %d down on the host after %.1f s (%u of %u)\n",
+                            target, (sTick - since) / 60.0f, downs, tries);
+                c = NULL;
+            }
+            else if (c != NULL && sTick - since > 480)
+            {
+                portConLogf("ge: coop: testhunt: guard %d still up after 8 s (%u of %u)\n", target, downs, tries);
+                c = NULL;
+            }
+            if (c == NULL || c->prop == NULL)
+            {
+                f32 best = 0.0f;
+                s32 i;
+
+                for (i = 0, c = NULL; i < g_NumChrSlots && i < COOP_MAX_CHRS; i++)
+                {
+                    ChrRecord *g = &g_ChrSlots[i];
+                    f32 dx, dz;
+
+                    if (g->model == NULL || g->prop == NULL || g->prop->stan == NULL || coopIsPlayerChr(g)
+                        || sChrHostDying[i] || sChrLastSync[i] == 0 || (g->chrflags & CHRFLAG_HIDDEN)
+                        || g->actiontype == ACT_DIE || g->actiontype == ACT_DEAD || g->chrnum == target)
+                    {
+                        continue;
+                    }
+                    dx = g->prop->pos.f[0] - bond->pos.f[0];
+                    dz = g->prop->pos.f[2] - bond->pos.f[2];
+                    if (c == NULL || dx * dx + dz * dz < best)
+                    {
+                        c = g;
+                        best = dx * dx + dz * dz;
+                    }
+                }
+                target = (c != NULL) ? c->chrnum : -1;
+                since = sTick;
+                if (c != NULL)
+                {
+                    f32 a = getsubroty(c->model);
+                    coord3d to;
+                    StandTile *stan;
+
+                    tries++;
+                    to.f[0] = c->prop->pos.f[0] + 300.0f * sinf(a);
+                    to.f[1] = c->prop->pos.f[1];
+                    to.f[2] = c->prop->pos.f[2] + 300.0f * cosf(a);
+                    stan = coopFindStan(&to, c->prop->stan, &c->prop->pos);   /* walked from the guard's own floor */
+                    if (stan == NULL)
+                    {
+                        to = c->prop->pos;
+                        stan = c->prop->stan;
+                    }
+                    coopRespawnPlayerAt(&to, stan, 0.0f, sLastWeapon);
+                    portConLogf("ge: coop: testhunt: after guard %d at %.0f %.0f %.0f\n", target,
+                                c->prop->pos.f[0], c->prop->pos.f[1], c->prop->pos.f[2]);
+                }
+            }
+            if (c != NULL && c->prop != NULL)
+            {
+                f32 dx = c->prop->pos.f[0] - bond->pos.f[0];
+                f32 dy = c->prop->pos.f[1] - 20.0f - bond->pos.f[1];   /* low: auto-aim lifts it onto the body */
+                f32 dz = c->prop->pos.f[2] - bond->pos.f[2];
+                f32 d = sqrtf(dx * dx + dz * dz);
+
+                g_CurrentPlayer->vv_theta = atan2f(-dx, dz) * 57.29578f;
+                if (g_CurrentPlayer->vv_theta < 0.0f)
+                {
+                    g_CurrentPlayer->vv_theta += 360.0f;
+                }
+                g_CurrentPlayer->vv_verta = atan2f(dy, (d > 1.0f) ? d : 1.0f) * 57.29578f;
+            }
+        }
+    }
     if (coopHostAbortAsks())
     {   /* GE_COOP_TESTABORT=<s>:handover|endall: the host aborts from the watch that far into the mission, and answers (harness only) */
         static s32 testabort = -2;
@@ -3110,10 +3275,18 @@ s32 coopChrAimedAtByBond(ChrRecord *chr)
         return 1;
     }
     want = atan2f(dx, dz);
-    diff = fmodf(want - sR[p].st.yaw, 6.2831855f);
-    if (diff < 0.0f)
+    diff = want - sR[p].st.yaw;
+    if (!(diff > -20.0f && diff < 20.0f))
     {
+        return 0;   /* not a yaw (a bad packet): the wraps below would never end */
+    }
+    while (diff < 0.0f)
+    {   /* no fmodf in the game's math.h */
         diff += 6.2831855f;
+    }
+    while (diff >= 6.2831855f)
+    {
+        diff -= 6.2831855f;
     }
     if (diff > 3.1415927f)
     {
@@ -3398,12 +3571,56 @@ s32 coopTargetRecordDamage(f32 damage, f32 angle)
 
 /* ---- guard mirroring (host sends, client applies) ----------------------- */
 
+/* Not every guard in every snapshot: a body that has finished falling goes
+ * once a second, a guard more than COOP_GUARD_FAR from every player every
+ * other snapshot (10 a second, still drawn smoothly that far off); the rest,
+ * and anyone firing or dying, every time. Late in a mission most chrs are
+ * bodies, and the guards were most of what the host sent each joiner (about
+ * 23 KB/s of 45 on Dam), which a far-away player's line felt first. Joiners
+ * free a chr missing from the snapshots for COOP_GUARD_GONE ticks. */
+#define COOP_GUARD_FAR   6000.0f
+#define COOP_GUARD_GONE  300
+
+static s32 coopGuardDue(ChrRecord *chr, s32 i, s32 firing)
+{
+    f32 best = -1.0f;
+    s32 p;
+
+    if (firing || chr->actiontype == ACT_DIE)
+    {
+        return 1;
+    }
+    if (chr->actiontype == ACT_DEAD)
+    {
+        return ((sGuardSnap + i) % 20) == 0;
+    }
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {   /* the nearest player, us included (a spectating joiner watches one of us) */
+        const f32 *at = (p != coopSelf()) ? (sR[p].valid ? sR[p].st.pos : NULL)
+                        : (g_CurrentPlayer->prop != NULL) ? g_CurrentPlayer->prop->pos.f : NULL;
+        f32 dx, dz;
+
+        if (at == NULL)
+        {
+            continue;
+        }
+        dx = chr->prop->pos.f[0] - at[0];
+        dz = chr->prop->pos.f[2] - at[2];
+        if (best < 0.0f || dx * dx + dz * dz < best)
+        {
+            best = dx * dx + dz * dz;
+        }
+    }
+    return best < COOP_GUARD_FAR * COOP_GUARD_FAR || ((sGuardSnap + i) & 1) == 0;
+}
+
 static void coopSendGuards(void)
 {
     CoopGuardsPkt pkt;
     s32 i;
     s32 index = 0;
     s32 hdr = (s32) ((u8 *) &pkt.ent[0] - (u8 *) &pkt);
+    s32 sent = 0;
 
     sGuardSnap++;
     memset(&pkt, 0, hdr);
@@ -3419,9 +3636,32 @@ static void coopSendGuards(void)
         CoopGuardEnt *e;
         ModelAnimation *anim;
 
+        u8 fire = 0;
+
         if (chr->model == NULL || chr->prop == NULL || coopIsPlayerChr(chr))
         {
             continue;
+        }
+        if (i < COOP_MAX_CHRS)
+        {   /* firecount ticks on every fire tick, shot or not */
+            if (chr->firecount[GUNRIGHT] != sChrFireSeen[i][GUNRIGHT])
+            {
+                fire |= GSF_FIRE_R;
+            }
+            if (chr->firecount[GUNLEFT] != sChrFireSeen[i][GUNLEFT])
+            {
+                fire |= GSF_FIRE_L;
+            }
+            sChrFireSeen[i][GUNRIGHT] = chr->firecount[GUNRIGHT];
+            sChrFireSeen[i][GUNLEFT] = chr->firecount[GUNLEFT];
+        }
+        if (!coopGuardDue(chr, i, fire != 0 || (i < COOP_MAX_CHRS && sChrFiring[i] != 0)))
+        {
+            continue;
+        }
+        if (i < COOP_MAX_CHRS)
+        {
+            sChrFiring[i] = fire;   /* host: whether it fired since the last snapshot (a stop goes out too) */
         }
 
         if (pkt.count == 0)
@@ -3430,23 +3670,12 @@ static void coopSendGuards(void)
         }
         e = &pkt.ent[pkt.count++];
         index++;
+        sent++;
 
         /* pkt is on the stack: an unarmed chr would otherwise send junk as its gun */
         memset(e, 0, sizeof(*e));
         e->chrnum = chr->chrnum;
-        if (i < COOP_MAX_CHRS)
-        {   /* firecount ticks on every fire tick, shot or not */
-            if (chr->firecount[GUNRIGHT] != sChrFireSeen[i][GUNRIGHT])
-            {
-                e->flags |= GSF_FIRE_R;
-            }
-            if (chr->firecount[GUNLEFT] != sChrFireSeen[i][GUNLEFT])
-            {
-                e->flags |= GSF_FIRE_L;
-            }
-            sChrFireSeen[i][GUNRIGHT] = chr->firecount[GUNRIGHT];
-            sChrFireSeen[i][GUNLEFT] = chr->firecount[GUNLEFT];
-        }
+        e->flags = fire;
         e->body = (u8) chr->bodynum;
         e->head = (u8) chr->headnum;
         {
@@ -3794,7 +4023,7 @@ static void coopReapGuards(void)
         {
             sChrLastSync[i] = sTick; /* start the clock when we first see it */
         }
-        else if (sTick - sChrLastSync[i] > 120 && !(chr->hidden & CHRHIDDEN_REMOVE))
+        else if (sTick - sChrLastSync[i] > COOP_GUARD_GONE && !(chr->hidden & CHRHIDDEN_REMOVE))
         {
             portConLogf("ge: coop: chr %d gone on the host, removing\n", chr->chrnum);
             chr->hidden |= CHRHIDDEN_REMOVE;
@@ -4197,32 +4426,49 @@ static void coopQueueEvent(CoopEvent *ev)
     coopQueueEventTo(ev, COOP_ALL);
 }
 
-/* Send every unacked event at most every 4 ticks (at once when there is
- * something new or an ack owed). Repeats cover loss; seq numbers drop the
- * duplicates on the other side. More than a packet's worth goes as up to
- * COOP_EVENT_BURST packets at once: on a long line a busy moment (a firefight,
- * a late joiner's doors and pickups) would otherwise drain at one packet per
- * round trip and fill the ring. */
+/* New events go out at once, once. Unacked ones are sent again when the
+ * oldest has waited a round trip and a bit (coopEventResendMs): sending the
+ * whole unacked window every few ticks, and with every ack, sent each event
+ * five or six times on a 400 ms line and flooded it. The receiver keeps
+ * events that arrive ahead of a missing one, so a loss costs one resend.
+ * A busy moment goes as up to COOP_EVENT_BURST packets at once. */
 #define COOP_EVENT_BURST 4
+
+static u32 coopEventResendMs(s32 c)
+{
+    u32 ms = (u32) (sRtt[c] * 1.25f + sRttDev[c] * 2.0f) + 50;
+
+    if (sRtt[c] <= 0.0f)
+    {
+        ms = 250;   /* not measured yet */
+    }
+    return (ms < 80) ? 80 : (ms > 1200) ? 1200 : ms;
+}
 
 static void coopFlushChan(s32 c)
 {
     CoopChan *ch = &sChan[c];
     CoopEventsPkt pkt;
     s32 hdr = (s32) ((u8 *) &pkt.ev[0] - (u8 *) &pkt);
+    u32 now = coopNowMs();
     u32 seq;
     s32 burst;
     s32 pending = (s32) (ch->outNext - 1 - ch->outAcked);
     s32 fresh = (s32) (ch->outNext - 1 - ch->outSentUpTo) > 0;
-    s32 due = pending > 0 && (fresh || sTick - ch->evLastSend >= 4);
+    s32 resend = pending > 0 && (s32) (ch->outSentUpTo - ch->outAcked) > 0
+                 && now - ch->outSentMs[(ch->outAcked + 1) % COOP_EVENT_RING] >= coopEventResendMs(c);
 
-    if (!coopNetPeerConnected(c) || (!ch->ackDirty && !due))
+    if (!coopNetPeerConnected(c) || (!ch->ackDirty && !fresh && !resend))
     {
         return;
     }
 
-    seq = ch->outAcked + 1;
-    for (burst = 0; burst < (due ? COOP_EVENT_BURST : 1) && (burst == 0 || seq < ch->outNext); burst++)
+    if ((s32) (ch->outSentUpTo - ch->outAcked) < 0)
+    {
+        ch->outSentUpTo = ch->outAcked;     /* a reset channel */
+    }
+    seq = resend ? ch->outAcked + 1 : fresh ? ch->outSentUpTo + 1 : ch->outNext;
+    for (burst = 0; burst < COOP_EVENT_BURST && (burst == 0 || seq < ch->outNext); burst++)
     {
         memset(&pkt, 0, hdr);
         pkt.magic = COOP_MAGIC;
@@ -4234,6 +4480,7 @@ static void coopFlushChan(s32 c)
         for (; seq < ch->outNext && pkt.count < COOP_EVENTS_PER_PKT; seq++)
         {
             pkt.ev[pkt.count++] = ch->out[seq % COOP_EVENT_RING];
+            ch->outSentMs[seq % COOP_EVENT_RING] = now;
         }
         coopNetSendTo(c, &pkt, hdr + (s32) (pkt.count * sizeof(CoopEvent)));
     }
@@ -6478,6 +6725,7 @@ s32 coopSessionActive(void)
 
 #define COOP_SILENT_MS        2000    /* nothing from the host this long: say so */
 #define COOP_HOST_WAIT_MS     3500    /* and, mid-mission, wait this much longer for it to come back */
+#define COOP_HOST_WAIT_FAR_MS 12000   /* or this long on a long or shaky line of our own (coopHostWaitMs) */
 #define COOP_HOST_WAIT_LOAD_MS 12000  /* or this long while it may still be loading (a slower PC) */
 #define COOP_NEWHOST_WAIT_MS  8000    /* the player picked to host must answer within this */
 #define COOP_LOST_MS          3000    /* host: a joiner quiet this long has lost its connection */
@@ -6488,12 +6736,17 @@ s32 coopSessionActive(void)
 enum { HOSTW_NONE, HOSTW_SILENT, HOSTW_NEWHOST };
 
 /* how long a silent host gets: short once we both play the same mission
- * (it was there a moment ago: a crash or a lost connection, not a load) */
+ * (it was there a moment ago: a crash or a lost connection, not a load).
+ * On a long or shaky line the silence is more likely ours: a far-away
+ * player gave up on the host after 5.5 s and, the others still playing
+ * with it, went on alone as a host of its own. A host that really goes says
+ * so (BYE from its crash report, or Steam sees it leave), so only a pulled
+ * cable waits the longer time. */
 static u32 coopHostWaitMs(void)
 {
     if (coopInMission() && sMissionTicks > 600 && sHostHello.stage == bossGetStageNum())
     {
-        return COOP_HOST_WAIT_MS;
+        return sHostWaitFar ? COOP_HOST_WAIT_FAR_MS : COOP_HOST_WAIT_MS;
     }
     return COOP_HOST_WAIT_LOAD_MS;
 }
@@ -7401,6 +7654,7 @@ static void coopSessionTick(void)
             {
                 sHostWaiting = HOSTW_SILENT;
                 sHostWaitMs = now;
+                sHostWaitFar = sHostHiccups > 0 || sRtt[0] >= COOP_LINK_POOR_RTT || sRttDev[0] >= COOP_LINK_POOR_JITTER;
                 portConLogf("ge: coop: nothing from the host for %d s, waiting for it\n", (int) (quiet / 1000));
             }
             else if (coopInMission() && sHostHello.stage == LEVELID_TITLE && sMissionTicks > 300 && !sPendingEnd)
@@ -7426,6 +7680,7 @@ static void coopSessionTick(void)
             if (quiet < 1000)
             {
                 sHostWaiting = HOSTW_NONE;
+                sHostHiccups++;
                 portConLogf("ge: coop: the host is back\n");
                 coopBanner("THE HOST IS BACK", "");
             }
