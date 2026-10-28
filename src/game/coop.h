@@ -96,7 +96,8 @@ enum
 {
     COOPEV_CINEMA = 56,     /* host -> all: CoopCinemaMsg, the host's intro is over */
     COOPEV_VOTE = 57,       /* to the host: a vote; host -> all: the count (coop_vote.c) */
-    COOPEV_LIVES = 58       /* to the host: our lives this mission; host -> a returning joiner: what it had left (coop.c) */
+    COOPEV_LIVES = 58,      /* to the host: our lives this mission; host -> a returning joiner: what it had left (coop.c) */
+    COOPEV_SEEN = 59        /* to the host: guards our screen has drawn (CHRFLAG_HAS_BEEN_ON_SCREEN, coop.c) */
 };
 #define COOP_ALL_PLAYERS 0xFF   /* coopDesignSend's `to`: everyone */
 void coopDesignSend(s32 kind, s32 to, const void *payload, s32 len);

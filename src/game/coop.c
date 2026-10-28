@@ -379,6 +379,9 @@ static s32 sArriveOut;      /* joiner: back in a mission we were out of (COOPOUT
 static s32 coopLivesStart(void);
 static void coopLivesTick(void);
 static void coopLivesApply(const u8 *raw, s32 from);
+static void coopSeenApply(const u8 *raw, s32 from);
+static void coopSeenTick(void);
+static void coopSeenReset(void);
 static s32 sDefsBytes;  /* size of the stage's setup prop defs */
 static void *sDefsBase;
 static u32 sTick;
@@ -1842,6 +1845,7 @@ void coopStageStart(void)
 
     sPendingCinemaList = -1;
     sHostEndingHere = 0;
+    coopSeenReset();
     sWorldHostFlags = sWorldOwnFlags = 0;
 
     if (bossGetStageNum() != LEVELID_TITLE)
@@ -1984,6 +1988,7 @@ static void coopTickBody(void)
     coopTrackCombat();
     coopPingTick();
     coopLivesTick();
+    coopSeenTick();
     if ((sTick % 15) == 0)
     {
         coopTeamPicksTick();    /* shared pickups that had to wait */
@@ -4640,6 +4645,10 @@ static void coopApplyEvent(CoopEvent *ev)
             {
                 coopLivesApply(ev->u.raw, ev->from);
             }
+            else if (ev->kind == COOPEV_SEEN)
+            {
+                coopSeenApply(ev->u.raw, ev->from);
+            }
             else if (ev->kind >= COOPEV_DESIGN_FIRST && ev->kind <= COOPEV_DESIGN_LAST)
             {
                 coopDesignApply(ev->kind, ev->u.raw, ev->from);
@@ -5813,6 +5822,79 @@ static void coopLivesTick(void)
     }
     sLivesSent = now;
     coopDesignSend(COOPEV_LIVES, 0, &m, sizeof(m));
+}
+
+/* A guard drawn on a joiner's screen has been seen as much as one drawn on
+ * the host's: "if I've not been seen" and the clone-if-unseen spawns read
+ * CHRFLAG_HAS_BEEN_ON_SCREEN on the host, which only its own screen set. */
+#define COOP_SEEN_SLOTS 512
+typedef struct
+{
+    u16 stage;
+    u8 n;
+    u8 pad;
+    s16 chr[12];
+} CoopSeenMsg;
+static s16 sSeenSent[COOP_SEEN_SLOTS];   /* joiner: chrnum + 1 reported for each chr slot, 0 none */
+
+static void coopSeenReset(void)
+{
+    memset(sSeenSent, 0, sizeof(sSeenSent));
+}
+
+static void coopSeenTick(void)
+{
+    CoopSeenMsg m;
+    s32 i;
+
+    if (coopNetIsHost() || coopVersus() || !coopInMission() || (sTick % 30) != 0)
+    {
+        return;
+    }
+    memset(&m, 0, sizeof(m));
+    m.stage = (u16) bossGetStageNum();
+    for (i = 0; i < g_NumChrSlots && i < COOP_SEEN_SLOTS; i++)
+    {
+        ChrRecord *c = &g_ChrSlots[i];
+
+        if (c->model == NULL || c->prop == NULL || !(c->chrflags & CHRFLAG_HAS_BEEN_ON_SCREEN) || sSeenSent[i] == c->chrnum + 1)
+        {
+            continue;
+        }
+        sSeenSent[i] = (s16) (c->chrnum + 1);
+        m.chr[m.n++] = c->chrnum;
+        if (m.n == 12)
+        {
+            coopDesignSend(COOPEV_SEEN, 0, &m, sizeof(m));
+            m.n = 0;
+        }
+    }
+    if (m.n != 0)
+    {
+        coopDesignSend(COOPEV_SEEN, 0, &m, sizeof(m));
+    }
+}
+
+static void coopSeenApply(const u8 *raw, s32 from)
+{
+    CoopSeenMsg m;
+    s32 i;
+
+    memcpy(&m, raw, sizeof(m));
+    if (!coopNetIsHost() || !coopInMission() || m.stage != (u16) bossGetStageNum())
+    {
+        return;
+    }
+    for (i = 0; i < m.n && i < 12; i++)
+    {
+        ChrRecord *c = chrFindByLiteralId(m.chr[i]);
+
+        if (c != NULL && !(c->chrflags & CHRFLAG_HAS_BEEN_ON_SCREEN))
+        {
+            c->chrflags |= CHRFLAG_HAS_BEEN_ON_SCREEN;
+            portConLogf("ge: coop: chr %d seen by player %d\n", (int) m.chr[i], from + 1);
+        }
+    }
 }
 
 static void coopLivesApply(const u8 *raw, s32 from)
