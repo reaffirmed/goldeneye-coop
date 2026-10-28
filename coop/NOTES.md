@@ -1693,6 +1693,31 @@ an older game ignores; see "Mixed versions" below).
   Facility), and one vote for Lobby decided by the clock. Shots:
   spectate-vote/ in the project files.
 
+## Security cameras see every player (2026-10-28)
+
+- A camera (objTick's PROPDEF_CCTV branch) only tested the host's Bond, and
+  a joiner's own camera raised an alarm the next WORLD packet turned back off
+  ("alarm off (host)"), so a joiner could stand in front of one for good.
+- Now the host's camera runs its view test (range, 45 degree cone, line of
+  sight: cctvSeesBond, the vanilla math) for its own Bond and then for each
+  living partner as Bond (coopAltBondBegin), and the timer counts once a
+  tick if any of them is seen. A joiner's cameras don't count
+  (coopCctvWatches), so its alarm only follows the host's. Solo and versus
+  are as before. The host logs "camera saw player N, alarm on".
+- Drone guns (PROPDEF_AUTOGUN) already work for joiners: each game's copy
+  aims and fires at its own Bond and the damage is that game's. The host's
+  copy doesn't turn towards a joiner, so the two screens can show the gun
+  pointing different ways.
+- Guards' alarm switches are guard actions on the host, and a joiner's Use on
+  an alarm is relayed (COOPEV_USE), so neither needed a change. No packet
+  changes; COOP_VERSION stays 12.
+- Tests (two games, US ROM, joiner on a camera's look pad with
+  GE_COOP_TESTPAD, host at the start): Bunker 1 pad 88 and Bunker 2 pad 78,
+  the alarm goes on in both games a few seconds later; on the old build only the
+  joiner's flickered on and off. The host on Bunker 1 pad 88 still raises it.
+  Bunker 2, joiner beside the drone guns: the nearest one tracks and hits the
+  joiner (GE_SNDDBG agstat on the joiner).
+
 ## Text cut off on the CO-OP screen (2026-10-28)
 
 Owner's report: chat lines and other text on the MW2-style screen ended in
