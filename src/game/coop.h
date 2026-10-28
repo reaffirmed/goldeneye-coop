@@ -38,6 +38,7 @@ void coopMissionComplete(void);
 s32  coopFrontTick(void);
 s32  coopAltBondBegin(s32 k); /* 1: "Bond" is now the k-th living partner (from 0), call coopAltBondEnd */
 void coopAltBondEnd(void);
+PropRecord *coopAutogunTarget(PropRecord *gun, f32 aimdist, f32 rot, f32 arcmin, f32 arcmax); /* propobj.c: who a drone gun aims at */
 s32  coopOwnBondCounts(void);         /* 0: a level script's own-Bond check skips the host's body (down, a partner standing) */
 s32  coopLevelFallCheckOff(f32 y);   /* 1: a level script's fall check that co-op leaves to each player's own game */
 s32  coopBondHasItem(s32 item);          /* chrai.c: whoever is Bond now holds this item (a partner's from STATE) */

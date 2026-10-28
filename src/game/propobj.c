@@ -5842,7 +5842,11 @@ s32 objTick(struct PropRecord *prop)
 		else if ((obj->type == PROPDEF_AUTOGUN) && (!(obj->flags & PROPFLAG_IS_DRONE_GUN)))
 		{
 			poAGun = (struct AutogunRecord *) prop->obj;
+#ifndef TARGET_N64
+			playerProp2 = coopAutogunTarget(prop, poAGun->aimdist, poAGun->rot_related, poAGun->unk8C, poAGun->unk88);
+#else
 			playerProp2 = getCurrentPlayerProp();
+#endif
 			AutogunSeesPlayer = 0;
 			isTracking = 0;
 			hasLineOfSight = 0;
@@ -6036,6 +6040,9 @@ s32 objTick(struct PropRecord *prop)
 						if (hasLineOfSight != 0)
 						{
 							poAGun->unkB8 = (s32) g_GlobalTimer;
+#ifndef TARGET_N64
+							if (playerProp2 == getCurrentPlayerProp()) /* co-op: a partner's game hurts the partner */
+#endif
 							poAGun->unkBC = (s32) g_GlobalTimer;
 						}
 					}

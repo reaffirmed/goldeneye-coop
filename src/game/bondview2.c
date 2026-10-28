@@ -13851,6 +13851,12 @@ void bondviewUpdateGuardTankFlagsRelated(PropRecord *prop, s32 flag)
         sub_GAME_7F04F218(g_PlayerTankProp, flag);
     }
 
+#ifndef TARGET_N64
+    if (playerIndex < 0)
+    {
+        return;     /* a co-op partner's body (coopAutogunTarget) */
+    }
+#endif
     g_playerPointers[playerIndex]->field_AC = flag;
 }
 

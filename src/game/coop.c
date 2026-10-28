@@ -8229,6 +8229,65 @@ void coopAltBondEnd(void)
     g_CoopPropOverride = NULL;
 }
 
+/* A drone gun's target: the nearest living player inside its range and arc
+ * that it can see (the nearest in range if it sees nobody), our own Bond out
+ * of co-op. Every game picks the same player, so the gun points the same way
+ * on every screen, and only that player's own game deals its damage. */
+PropRecord *coopAutogunTarget(PropRecord *gun, f32 aimdist, f32 rot, f32 arcmin, f32 arcmax)
+{
+    PropRecord *cand[COOP_MAX_PLAYERS];
+    PropRecord *seen = NULL, *near = NULL;
+    f32 seendist = 0.0f, neardist = 0.0f;
+    s32 n = 0, p, i;
+
+    if (sEnabled <= 0 || !coopInMission() || (sSettings[COOPSET_VSMODE] & 1) || g_CoopPropOverride != NULL)
+    {
+        return getCurrentPlayerProp();
+    }
+    if (!g_CurrentPlayer->bonddead)
+    {
+        cand[n++] = getCurrentPlayerProp();
+    }
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        if (p != coopSelf() && coopRemoteAliveHere(p))
+        {
+            cand[n++] = sR[p].puppet;
+        }
+    }
+    for (i = 0; i < n; i++)
+    {
+        f32 dx = cand[i]->pos.f[0] - gun->pos.f[0];
+        f32 dz = cand[i]->pos.f[2] - gun->pos.f[2];
+        f32 d = sqrtf(dx * dx + dz * dz);
+        f32 yaw = atan2f(dx, dz) - rot;
+        StandTile *tile = gun->stan;
+        s32 clear;
+
+        yaw = (yaw < -M_PI_F) ? yaw + M_TAU_F : (yaw >= M_PI_F) ? yaw - M_TAU_F : yaw;
+        if (d > aimdist || yaw > arcmax || yaw < arcmin)
+        {
+            continue;
+        }
+        if (near == NULL || d < neardist)
+        {
+            near = cand[i];
+            neardist = d;
+        }
+        bondviewUpdateGuardTankFlagsRelated(cand[i], 0);
+        clear = stanTestLineUnobstructed(&tile, gun->pos.f[0], gun->pos.f[2], cand[i]->pos.f[0], cand[i]->pos.f[2], 0x1B,
+                                         gun->pos.f[1], gun->pos.f[1], cand[i]->pos.f[1], cand[i]->pos.f[1])
+                && tile == cand[i]->stan;
+        bondviewUpdateGuardTankFlagsRelated(cand[i], 1);
+        if (clear && (seen == NULL || d < seendist))
+        {
+            seen = cand[i];
+            seendist = d;
+        }
+    }
+    return (seen != NULL) ? seen : (near != NULL) ? near : getCurrentPlayerProp();
+}
+
 /* A level script's room, pad and height checks look at our own Bond first,
  * then the living partners. The host's Bond lies where it fell while the
  * host waits to be revived or watches with no lives left: that body counted
