@@ -1692,3 +1692,37 @@ an older game ignores; see "Mixed versions" below).
   Replay (both back in Dam), 1-1 tie Next / Lobby (the host's Next: both in
   Facility), and one vote for Lobby decided by the clock. Shots:
   spectate-vote/ in the project files.
+
+## Text cut off on the CO-OP screen (2026-10-28)
+
+Owner's report: chat lines and other text on the MW2-style screen ended in
+"..." (a long chat line, a joiner's name beside its ping, the description
+along the foot). UI only, no protocol change.
+
+- Chat (coopLobbyBuildRows): each line is word-wrapped to the column
+  (coopLobbyWrap; later rows indented COOP_LOBBY_WRAP_INDENT) and the newest
+  that fit the 11 rows are shown over Type a Message; the line being typed
+  ("Say: ...") wraps the same way. The builder's 48-byte copy cut a line at
+  47 characters before it was ever drawn; feed lines are now COOP_FEED_TEXT
+  (104) bytes, enough for a 23-character name and a whole message.
+  COOP_LOBBY_ROWS went 48 -> 64 for the wrapped rows.
+- The foot's description wraps onto a second line (a third is cut with
+  "..." on the second): COOP_MW_FOOT_Y 0x11E -> 0x118, COOP_MW_HELP_PITCH
+  0xE, the prompts at 0x13B; the next mission's block moved up 2 (0xBE).
+- Party seats: only the signal bars sit beside the name now; the round trip
+  (or the loss once there is some) moved to the second line's right, in
+  place of YOU, so a name has nearly the seat's width.
+- Names that still don't fit (seats, the Steam name top right) and the
+  label or value of the picked row scroll (coopMwScroll): held at the start
+  with "...", slid left a character at a time to the end, held, started
+  over. Rows not picked keep "...".
+- Rows: label and value are both whole when they fit; otherwise the value
+  is kept whole (up to 3/5 of the column) and the label is cut. "Next Player
+  Hosts" is now "New Host" and "Controller Layout" is "Button Layout" so
+  they fit beside their values.
+- Harness: GE_MOCK_NAMESUFFIX on the mock Steam lengthens every name;
+  coop/docker/chat_wrap.sh (two copies: long names, long chat lines from
+  both, the line being typed, then Game Setup, Invite and Controls). The run
+  image has xdotool now (menu_input.sh needed it too).
+- Checked host and joiner over the mock Steam, before (v0.3.0) and after,
+  in and out of a lobby: every tab. Shots: menu-text/ in the project files.

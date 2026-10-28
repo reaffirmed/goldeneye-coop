@@ -715,7 +715,8 @@ API const char *SteamAPI_ISteamFriends_GetFriendPersonaName(void *self, u64 user
     static int k;
     (void) self;
     k = (k + 1) & 7;
-    snprintf(name[k], sizeof(name[k]), "mock%llu", user % 1000);
+    /* GE_MOCK_NAMESUFFIX: longer names, to check the menus' room for them */
+    snprintf(name[k], sizeof(name[k]), "mock%llu%s", user % 1000, getenv("GE_MOCK_NAMESUFFIX") ? getenv("GE_MOCK_NAMESUFFIX") : "");
     return name[k];
 }
 
