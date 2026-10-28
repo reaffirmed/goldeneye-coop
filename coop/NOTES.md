@@ -1916,10 +1916,20 @@ Second pass (the stream's frames, a recount of the report):
   GE_COOP_TESTSPAWN=<chrnum>,late arms the spawned copy 2 s later; Dam,
   the joiner logs "mirrored host chr 5038 (body 37, gun 0)" then "drew gun
   8".
-- Free camera dead zone: 10 of the stick's 70 units. The stream's 1:02:00
-  and 1:23:00 "desyncs" are the host's spectator camera: a partner's own
-  model in view means the free camera (eyes mode hides it), drifting into
-  walls with no input, then jumping back to a partner (Fire).
+- Free camera dead zone: 10 of the stick's 70 units.
+- The stream's 1:02:00 and 1:23:00 "desyncs" are the host's spectator
+  camera in its partner-eyes mode (the frames say WATCHING), with the
+  partner's own body in view. The camera sat at their last STATE while the
+  level was drawn from their drawn body's room, and their body (hidden only
+  where the camera is) was drawn elsewhere: at 1:02 Sagar was at 1.7 s and
+  88% loss, so the view went into the rock and his body walked ahead of
+  it; at 1:23 Crshrry's body stood in a doorway inside a guard. The camera
+  now follows the drawn body (coopSpectateFollow), so view, room and the
+  hidden body agree. Checked at GE_COOP_NETSIM=200:100:50.
+- 1:32:35, Frigate's ending for a player out of lives: spectating carried
+  on into the ending with our room swapped for the partner's, so the
+  cutscene camera went through the boat's hull into the void. Spectating
+  stops for the ending and intro cameras (CAMERAMODE_POSEND, _INTRO).
 - Three players, player 3 revives player 2 (tester's 1:31:00):
   "revived by player 3 after 5.1 s (2.5 s from the first hold)".
 - Statue's INCOMPLETE ending is the helicopter countdown (ai_37, 180 s):

@@ -33,6 +33,7 @@
 #include "stan.h"
 #include <bondgame.h>
 #include "coop.h"
+#include "bondview.h"
 
 extern void portConLogf(const char *fmt, ...);
 extern f32 sinf(f32);
@@ -93,7 +94,10 @@ static s32 coopSpectateFollow(void)
     {
         return 0;
     }
-    sPos = v.pos;
+    /* where their body is drawn, not their last state: its room is the one
+     * the level is drawn from, and with packets lost the two parted (the
+     * view went into the rock, their body walked ahead of it) */
+    sPos = (v.prop != NULL) ? v.prop->pos : v.pos;
     sPos3 = sPos;
     sPos3.f[1] = bondviewYPositionRelated(v.stan, sPos.f[0], sPos.f[2]);   /* the floor under them */
     sYaw = v.yaw;
@@ -346,8 +350,10 @@ void coopSpectateDropIn(s32 on)
 /* the view is a partner's or the free camera's */
 static s32 coopSpectateOn(void)
 {
-    if (!sLive || sTarget < 0 || g_CurrentPlayer == NULL || (!g_CurrentPlayer->bonddead && !sDropIn))
-    {
+    if (!sLive || sTarget < 0 || g_CurrentPlayer == NULL || (!g_CurrentPlayer->bonddead && !sDropIn)
+        || g_CameraMode == CAMERAMODE_POSEND || g_CameraMode == CAMERAMODE_INTRO)
+    {   /* (an ending or intro has its own camera: our room swapped for the
+         * partner's sent it through the hull into the void, Frigate's boat) */
         sLive = 0;
         sTarget = -1;
         sFree = 0;
