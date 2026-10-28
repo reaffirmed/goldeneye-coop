@@ -23,6 +23,8 @@ void coopGuardTankFlags(s32 flag);
 f32  coopTargetDuckingHeight(void);
 s32  coopTargetDamageShowTime(void);
 s32  coopTargetIsDead(void);
+f32  coopTargetYaw(void);                        /* bondviewGetPlayerYawRadians for whoever is Bond in this tick */
+void coopPartnerShotNearMiss(ChrRecord *shooter, coord3d *from, coord3d *end); /* host: a partner's bullet passed close to a guard */
 s32  coopTargetRecordDamage(f32 damage, f32 angle);
 void coopDoorStateChanged(DoorRecord *door, s32 state);
 s32  coopObjDamage(ObjectRecord *obj, f32 damage, coord3d *pos, s32 item, s32 player); /* 1: skip */
