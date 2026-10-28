@@ -1016,6 +1016,7 @@ Gfx *coopHudRender(Gfx *gdl)
     coopCaptionHarness();
     gdl = coopCaptionsRender(gdl);   /* Sound Captions (coop_access.c) */
     gdl = coopFeedRender(gdl);   /* chat lines and toasts (coop_chat.c) */
+    gdl = coopChatGridRender(gdl);   /* a pad player typing on the on-screen keyboard */
     gdl = coopHudSkipVote(gdl);  /* an ending that waits for a press, outside a cinema */
     gdl = weapmenuRender(gdl);
     return gdl;

@@ -126,12 +126,17 @@ jobs:
         if: steps.key.outputs.have == '1' && github.event.inputs.stages == ''
         run: JOINAFTER=30 TESTEND=3000 PAR=3 coop/ci/mission_runs.sh build_pc mission-runs/late dam facility frigate
 
+      - name: Spot checks with the joiner acting
+        if: steps.key.outputs.have == '1' && github.event.inputs.stages == ''
+        run: coop/ci/joiner_spots.sh build_pc mission-runs/joiner
+
       - name: Summary
         if: always() && steps.key.outputs.have == '1'
         run: |
           [ -f mission-runs/summary.txt ] || exit 0
           { echo '### Co-op mission runs'; echo; echo '```'; cat mission-runs/summary.txt; echo '```'
             if [ -f mission-runs/late/summary.txt ]; then echo; echo 'Joining under way:'; echo '```'; cat mission-runs/late/summary.txt; echo '```'; fi
+            if [ -f mission-runs/joiner/summary.txt ]; then echo; echo 'Joiner acting:'; echo '```'; cat mission-runs/joiner/summary.txt; echo '```'; fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the logs

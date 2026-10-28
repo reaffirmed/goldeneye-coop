@@ -2342,3 +2342,77 @@ the joiner-does-the-objectives pass are in the thread's artifact. Fixed here
   (coop_teamtime.c sAdopt). Test: the same run with GE_COOP_TESTEND on the
   new host: "team time goes on from the old host's", the rejoiner's debrief
   gets 103.86 s against its own 32.6 s.
+
+## Known issues from v0.5.0 and the overlooked lists (2026-10-28, COOP_VERSION stays 14)
+
+New messages are design events (58 COOPEV_LIVES, 59 COOPEV_SEEN), which an
+older build drops in coopDesignApply, so no protocol bump.
+
+- Friendly Fire Off and the host's rockets: a launcher or grenade-launcher
+  round is a projectile, not a thrown item, so the host's EXPLODE went out
+  with owner 0 and a joiner took it at x1.0. coopItemsExplodeBegin now marks
+  a blast from our own round (projectile->ownerprop is our Bond) and the
+  host tags it as ours. Joiner log, host firing GE_COOP_TESTFIRE=25: old
+  "a blast nobody owns reaches us: x1.0", new "player 1's blast reaches
+  us: x0.0 (Friendly Fire Off)".
+- Lives across a rejoin: the joiner reports its lives each mission (and on
+  change) with an arrival id; the host keeps them by Steam ID and answers a
+  new arrival with what that player had left ("Back in: N lives left"). A
+  player who was out comes back out (spectating), without spending a life.
+- Found while testing that: a joiner who rejoined mid-mission kept its old
+  channel on the host until the host saw the new session, so the joiner
+  took the host's old ack for its own new events and dropped them. Shots,
+  pickups and Use from a rejoined player never arrived (GE_COOP_TESTSHOT:
+  0 hits on the old build, 1 on the new). coopSessionTick restarts the
+  channel when a new peer takes the slot.
+- Controller-only chat and lobby password: Steam's floating keyboard when
+  Steam offers one (Big Picture, Deck), else the front end's on-screen
+  keyboard drawn over the game or the lobby; the player's movement is held
+  while it is open. Harness: GE_COOP_TESTGRID=<s>:<presses> (A B S U D L R,
+  one every 12 ticks); the mock's floating keyboard answers only with
+  GE_MOCK_FLOATKB=1.
+- The host's lobby settings (difficulty, friendly fire, host leaves, lives,
+  bleed-out, respawn, scaling, the down rule and the versus rows) are kept
+  in Data/Saves/coop_lobby.txt. Versus mode itself and the guard AI (a Port
+  Option) are not. GE_NOINISAVE runs neither read nor write it.
+- False "slow connection" toasts after a host migration: the old host's
+  unanswered pings counted as loss on the channel the new host took over.
+  3 players, host killed: old, "18% loss" and "30% loss" toasts on both
+  survivors; new, 0%. coopLinkStatsReset after coopNetMigrate.
+- Drone guns: each game's copy aimed only at its own Bond. Every game now
+  aims at the nearest living player in range and arc that it can see
+  (coopAutogunTarget), so the gun points the same way everywhere, and only
+  the target's own game deals damage. Bunker 2, joiner in front of the gun
+  at -3740 3087 (GE_SPAWNXYZ=-3740,600,2750), GE_SNDDBG agstat on the host:
+  old, never sees anyone; new, sees=1 los=1 active=1 and fires.
+- "If I've not been seen" and the clone-when-unseen spawns read
+  CHRFLAG_HAS_BEEN_ON_SCREEN on the host, which only the host's screen set.
+  Joiners report the guards they have drawn (COOPEV_SEEN, every 0.5 s);
+  the host logs "chr N seen by player 2".
+- Checked, no change:
+  - Endings a host script starts: "equip unarmed" without "hide weapons"
+    only happens behind a fade to black (Cradle ai_31).
+  - Frigate hostage-taker 1 (joiner on hostage 44 aiming at him,
+    GE_COOP_TESTAIMCHR=1:8): he shoots the joiner; with the host aiming he
+    drops his gun and backs off. Not reproduced.
+  - Bunker 1 technician (chr 25, list 0x408), led by the joiner and by the
+    host with GE_COOP_TESTAIMCHR=25:8:0:95:1 (aim and follow): he takes the
+    same route both ways. Not reproduced.
+  - Statue's Natalya (list 0x416; the ROM's flags are the setup file's with
+    the bytes reversed, so the heli trigger is GE_COOP_TESTFLAG=8000): she
+    gets up for the joiner alone and with both players by her, objective D
+    completes, and the joiner sees it too. Reaching the helicopter cuts the
+    countdown to 15 s; when it runs out the blast kills her if she is still
+    beside it and D fails, the same with the host as the one who reached
+    her. Her waiting for a death in the stream is not reproduced.
+- The host leaving during its ending (Dam bungee, host on GE_COOP_TESTPAD=330
+  and killed 4, 10 and 16 s in): a joiner following the host's ending, or one
+  that had only seen its "disable damage" step, became host and nobody ended
+  the mission (first person with A done, or a black screen). The new host now
+  ends it ("the host left during its ending: ending the mission") and
+  debriefs. A joiner leaving during the ending was already fine.
+- Harness: GE_COOP_TESTAIMCHR=<chr>:<s>[:<deg>[:<len>[:<follow>]]].
+- coop/ci/joiner_spots.sh: two-player checks where the joiner acts (bungee,
+  drone gun, hostage taker, Natalya).
+- Deferred: a per-user data folder for read-only installs (moves where saves
+  live; its own change).

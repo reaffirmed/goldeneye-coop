@@ -783,13 +783,18 @@ static void coopLookTestParse(void)
 
 extern void coopGiveTestDraw(s32 weapon);
 
-/* GE_COOP_TESTAIMCHR=<chrnum>:<s>[:<deg>]: from <s> seconds into the mission,
- * for 8 s, face that chr's body turned <deg> degrees to the right (a shot
- * that goes past it rather than into it) */
+extern void coopTeleportPlayerTo(coord3d *pos, StandTile *stan, f32 yaw);
+
+/* GE_COOP_TESTAIMCHR=<chrnum>:<s>[:<deg>[:<len>[:<follow>]]]: from <s> seconds
+ * into the mission, for <len> s (8), face that chr's body turned <deg> degrees
+ * to the right (a shot that goes past it rather than into it); follow 1 also
+ * steps each second to where the chr stood a second before */
 static void coopLookTestAimChr(s32 missionticks, PropRecord *bond)
 {
-    static s32 chrnum = -2, at;
+    static s32 chrnum = -2, at, len = 8, follow;
     static f32 deg;
+    static coord3d trail;
+    static StandTile *trailstan;
     ChrRecord *chr;
     coord3d centre;
     f32 dx, dy, dz;
@@ -800,13 +805,13 @@ static void coopLookTestAimChr(s32 missionticks, PropRecord *bond)
 
         chrnum = -1;
         deg = 0.0f;
-        if (e == NULL || sscanf(e, "%d:%d:%f", &chrnum, &at, &deg) < 2)
+        if (e == NULL || sscanf(e, "%d:%d:%f:%d:%d", &chrnum, &at, &deg, &len, &follow) < 2)
         {
             chrnum = -1;
         }
         at *= 60;
     }
-    if (chrnum < 0 || bond == NULL || missionticks < at || missionticks >= at + 480)
+    if (chrnum < 0 || bond == NULL || missionticks < at || missionticks >= at + len * 60)
     {
         return;
     }
@@ -814,6 +819,17 @@ static void coopLookTestAimChr(s32 missionticks, PropRecord *bond)
     if (chr == NULL || chr->model == NULL)
     {
         return;
+    }
+    if (follow && (missionticks - at) % 60 == 0 && chr->prop != NULL)
+    {
+        f32 tx = chr->prop->pos.f[0] - bond->pos.f[0], tz = chr->prop->pos.f[2] - bond->pos.f[2];
+
+        if (trailstan != NULL && tx * tx + tz * tz > 250.0f * 250.0f)
+        {
+            coopTeleportPlayerTo(&trail, trailstan, 0.0f);
+        }
+        trail = chr->prop->pos;
+        trailstan = chr->prop->stan;
     }
     getsuboffset(chr->model, &centre);
     dx = centre.f[0] - bond->pos.f[0];

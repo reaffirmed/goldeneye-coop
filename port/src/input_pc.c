@@ -1933,6 +1933,19 @@ static void inputGlyphFromInstance(SDL_JoystickID id)
     }
 }
 
+/** The game window's size in pixels (co-op chat places Steam's keyboard beside its line); 0 when unknown. */
+void portInputWindowSize(int *w, int *h)
+{
+    extern SDL_Window *gfx_sdl_get_window(void);
+    SDL_Window *win = gfx_sdl_get_window();
+
+    *w = *h = 0;
+    if (win != NULL)
+    {
+        SDL_GetWindowSize(win, w, h);
+    }
+}
+
 /**
  * Which button prompts the menus show: 0 keyboard and mouse, 1 Xbox, 2
  * PlayStation, 3 Nintendo, 4 N64. GE_GLYPHS=<n> pins one (harness).
