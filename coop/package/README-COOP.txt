@@ -74,7 +74,7 @@ Playing
    - Friendly Fire: Off (default: your shots, grenades, mines and rockets
      pass your partners by), Reduced (half damage) or Full. A partner who
      is already down can't be hurt. The stats page counts friendly hits.
-   - Host Leaves: Next Player Hosts (default) or Back to Lobby. See "When
+   - Host Leaves: New Host (default) or Back to Lobby. See "When
      someone leaves" below.
 5. When every friend shows as Ready, the host picks "Select Mission" (or
    Continue), then the mission and difficulty as usual. The friends' games
