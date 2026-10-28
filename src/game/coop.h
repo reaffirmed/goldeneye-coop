@@ -33,6 +33,8 @@ void coopMissionComplete(void);
 s32  coopFrontTick(void);
 s32  coopAltBondBegin(s32 k); /* 1: "Bond" is now the k-th living partner (from 0), call coopAltBondEnd */
 void coopAltBondEnd(void);
+s32  coopCctvWatches(void);              /* propobj.c: 0 on a joiner, the host's cameras raise the alarm */
+void coopCctvAlarm(PropRecord *seen);    /* log: the Bond a camera raised the alarm on */
 void coopAltBondCredit(void *script, s32 k);   /* a script's "either player" check passed: k 0 for our Bond, else partner k-1 */
 void coopScriptSetsFlags(void *script);        /* that script sets stage flags: it was whoever passed its last check */
 void coopAiCommand(u8 *list, s32 offset, ChrRecord *self);
@@ -132,7 +134,7 @@ s32  coopReviveHud(CoopHudPartner *out, s32 *hold);
 enum
 {
     COOPSET_DIFFICULTY,     /* co-op difficulty: 0 normal (coop_difficulty.c) */
-    COOPSET_FRIENDLYFIRE,   /* 0 off: shots pass partners by; 1 on: they hurt */
+    COOPSET_FRIENDLYFIRE,   /* 0 off: shots and blasts pass partners by; 1 full; 2 reduced (half) */
     COOPSET_VSMODE,         /* bit 0: versus (coop_versus.c) instead of co-op; bits 4-7: who played the last match */
     COOPSET_VSARENA,        /* versus: the arena, a multi_stage_setups index (0 random) */
     COOPSET_VSSCENARIO,     /* versus: the scenario (SCENARIO_*) */
@@ -142,6 +144,7 @@ enum
     COOPSET_LIVES,          /* lives each player starts a mission with, a coopLivesName index (0 unlimited) */
     COOPSET_BLEEDOUT,       /* revive only: time down before bleeding out, a coopBleedOutName index (0 60 s) */
     COOPSET_RESPAWN,        /* the timer's wait, a coopRespawnName index (0 3-20 s, sooner when it is quiet) */
+    COOPSET_SCALING,        /* guards by player count: COOPSCALE_* (0 auto) */
     COOPSET_MAX = 16
 };
 s32  coopSetting(s32 which);
@@ -155,6 +158,16 @@ f32  coopDifficultyHealthMul(void);
 s32  coopDifficultyExtraSlots(void);
 void coopDifficultyStageStart(void);
 void coopDifficultyTick(void);
+f32  coopDifficultyGuardHealthMul(void);  /* the host's guard health multiplier, on any game */
+enum { COOPSCALE_AUTO, COOPSCALE_OFF, COOPSCALE_AS3, COOPSCALE_AS4, COOPSCALE_COUNT };
+const char *coopScalingName(s32 mode);
+s32  coopScalingNext(s32 mode, s32 dir);  /* the lobby row's order: Off, Auto, 3 Players, 4 Players */
+
+/* friendly fire (coop.c): COOPSET_FRIENDLYFIRE's levels */
+enum { COOPFF_OFF, COOPFF_FULL, COOPFF_REDUCED };
+f32  coopFriendlyFireScale(void);         /* 0 off, 0.5 reduced, 1 full; always 0 in versus */
+const char *coopFriendlyFireName(s32 level);
+s32  coopFriendlyFireNext(s32 level, s32 dir);   /* the lobby row's order: Off, Reduced, Full */
 
 /* what happens when a player goes down (the host picks in the lobby) */
 enum { COOPDOWN_BOTH, COOPDOWN_TIMER, COOPDOWN_REVIVE };
@@ -277,7 +290,7 @@ s32  coopHostLeavesCount(void);         /* COOPSET_HOSTLEAVES's rules */
 const char *coopHostLeavesName(s32 rule);
 
 /* end-of-mission stats and the campaign record (coop_stats.c) */
-enum { COOPSTAT_KILLS, COOPSTAT_SHOTS, COOPSTAT_HITS, COOPSTAT_HEAD, COOPSTAT_DEATHS, COOPSTAT_REVIVED, COOPSTAT_RESPAWNS, COOPSTAT_REVIVES, COOPSTAT_OBJECTIVES, COOPSTAT_DAMAGE, COOPSTAT_COUNT };
+enum { COOPSTAT_KILLS, COOPSTAT_SHOTS, COOPSTAT_HITS, COOPSTAT_HEAD, COOPSTAT_DEATHS, COOPSTAT_REVIVED, COOPSTAT_RESPAWNS, COOPSTAT_REVIVES, COOPSTAT_OBJECTIVES, COOPSTAT_DAMAGE, COOPSTAT_FRIENDLY, COOPSTAT_COUNT };
 void coopStatsMissionStart(void);
 void coopStatsMissionTick(s32 partnerhere);
 void coopStatsFrontTick(void);
@@ -561,7 +574,8 @@ void coopChatApply(const u8 *raw, s32 from);
 void coopFeedToast(const char *text, s32 player);   /* bottom left, the lead in the player's colour (-1 white); '|' starts the rest */
 void coopFeedClock(void);   /* the feed's clock while co-op is off */
 Gfx *coopFeedRender(Gfx *gdl);                       /* in play (coop_hud.c) */
-s32  coopFeedLines(s32 maxlines, char lines[][80], s32 *players);  /* the newest chat lines as typed, for the lobby */
+#define COOP_FEED_TEXT 104     /* a chat line: a name, ": " and the most a message holds */
+s32  coopFeedLines(s32 maxlines, char lines[][COOP_FEED_TEXT], s32 *players);  /* the newest chat lines as typed, for the lobby */
 void coopChatTypedLine(char *out, s32 cap);         /* the line being typed */
 
 /* thrown and dropped items in every world (coop_items.c) */

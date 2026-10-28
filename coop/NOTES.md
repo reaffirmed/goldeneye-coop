@@ -1740,3 +1740,120 @@ front of it.
     turns and shoots, and the hostage dies.
   - Dam, joiner fires an AK for 4 s at the start: old, guard 6 stays put;
     new, "guards hear player 2's gunfire", guard 6 comes and attacks.
+
+## Player Scaling and Friendly Fire levels (2026-10-28, COOP_VERSION 13)
+
+Owner's pick: co-op scaling with the player count and friendly fire, planned
+in the thread first (defaults as proposed). Both existed in a first form
+(Guards modes, a fixed +25% health / +10% aim per player past two, Friendly
+Fire On/Off for bullets only).
+
+- Player Scaling (COOPSET_SCALING 11, Game Setup under Guards, host only,
+  joiners see text): Auto (0, default), Off, 3 Players, 4 Players. On top of
+  the Guards mode, per crowd (players past two; coop_difficulty.c sCrowds):
+  3 players health x1.25, aim x1.1, damage x1.05, reaction x0.9 (the 007
+  slider's g_AiReactionSpeed: a guard on the move stops to fire sooner),
+  1 extra guard per 6 armed soldiers up to 4; 4 players x1.5, x1.2, x1.1,
+  x0.8, 1 per 4 up to 8. Health and aim at 3 and 4 match v0.3.0's.
+  Extra guards add to the mode's; both games allocate chr slots for the most
+  the setting could reach (Auto: 4 players), so a drop-in has room.
+- Count changes mid-mission: a new count must hold COOPDIFF_SETTLE (300)
+  ticks, then the host multiplies every living guard's maxdamage and damage
+  by new/old (keeps the share lost; puppets, chrnum 30000+, never). More
+  players also raise the extra guards wanted; fewer never removes any. Aim,
+  damage and reaction follow the count every tick. Joiners keep the same
+  bookkeeping so a migrated host starts from the right multiplier.
+- Fixed: a joiner's kill prediction (before the first AI sync) left out the
+  3-4 player health bonus; coopDifficultyGuardHealthMul has it now.
+- Friendly Fire (COOPSET_FRIENDLYFIRE): 0 Off, 1 Full (v0.3.0's On), 2
+  Reduced (half). The lobby steps Off, Reduced, Full. The shooter sends a
+  partner's bullet hit unscaled with HIT.friendly set (the old pad byte);
+  the victim's game scales it by its copy of the host's setting and drops
+  it at Off, so the host decides even across the lobby-to-mission handoff.
+- Blasts: every explosion made records its owner (coop.c
+  coopExplosionNoteOwner): a thrown or planted item its owner on every game
+  (coop_items.c), a joiner's launcher round the sender on the host, and the
+  host passes the owner on in EXPLODE.owner (new byte) to the others. When a
+  blast reaches our Bond, explosion.c scales a partner's by Friendly Fire
+  (coopExplosionDamageScale). Guards', barrels' and unknown blasts hurt in
+  full; the host's own non-item blasts (its launcher rounds) are unknown to
+  the joiners and still hurt them in full (not plumbed; noted, rare).
+- Lives and revive: a friendly kill is a death like any other (costs a life,
+  timer or bleed-out). A partner who is down can't be shot (coopShotPuppet
+  needs them alive), so friendly fire never finishes anyone off.
+- Stats: COOPSTAT_FRIENDLY (appended; the message is 26 of 28 bytes), counted
+  by the shooter: each bullet hit sent, and once per own blast reaching a
+  living partner. The team page shows a Friendly hits row when the lobby's
+  Friendly Fire is not Off (rows a little closer together to fit).
+- Protocol: 13 (settings slot 11, HIT.friendly, EXPLODE.owner, the stats
+  count); older games get the version panel and the updater.
+- Harness: GE_COOP_SCALING=<0..3>, GE_COOP_FRIENDLYFIRE=<0..2>,
+  GE_COOP_TESTBLAST=<mission ticks> (once, our own blast at the first
+  partner's feet). Note: two_player.sh has no HOSTENV; put host-only
+  switches in BOTHENV and override them in JOINENV.
+- Tested over the mock Steam and UDP with the US cart: 4 players on Brutal +
+  Auto (health x3, 18 extra guards placed before the room ran out); 3
+  players on Hard, player 3 killed and back 90 s later (46 guards' health
+  x0.80, then x1.25); Friendly Fire Off / Reduced / Full with bullets (0,
+  0.062, 0.125 a chest hit) and a blast (x0, x0.5, x1); 1 life with Full:
+  8 hits down the host, out and spectating, the 2 shots after go nowhere.
+  Shots: scaling-ff/ in the project files.
+
+## Security cameras see every player (2026-10-28)
+
+- A camera (objTick's PROPDEF_CCTV branch) only tested the host's Bond, and
+  a joiner's own camera raised an alarm the next WORLD packet turned back off
+  ("alarm off (host)"), so a joiner could stand in front of one for good.
+- Now the host's camera runs its view test (range, 45 degree cone, line of
+  sight: cctvSeesBond, the vanilla math) for its own Bond and then for each
+  living partner as Bond (coopAltBondBegin), and the timer counts once a
+  tick if any of them is seen. A joiner's cameras don't count
+  (coopCctvWatches), so its alarm only follows the host's. Solo and versus
+  are as before. The host logs "camera saw player N, alarm on".
+- Drone guns (PROPDEF_AUTOGUN) already work for joiners: each game's copy
+  aims and fires at its own Bond and the damage is that game's. The host's
+  copy doesn't turn towards a joiner, so the two screens can show the gun
+  pointing different ways.
+- Guards' alarm switches are guard actions on the host, and a joiner's Use on
+  an alarm is relayed (COOPEV_USE), so neither needed a change. No packet
+  changes; COOP_VERSION stays 12.
+- Tests (two games, US ROM, joiner on a camera's look pad with
+  GE_COOP_TESTPAD, host at the start): Bunker 1 pad 88 and Bunker 2 pad 78,
+  the alarm goes on in both games a few seconds later; on the old build only the
+  joiner's flickered on and off. The host on Bunker 1 pad 88 still raises it.
+  Bunker 2, joiner beside the drone guns: the nearest one tracks and hits the
+  joiner (GE_SNDDBG agstat on the joiner).
+
+## Text cut off on the CO-OP screen (2026-10-28)
+
+Owner's report: chat lines and other text on the MW2-style screen ended in
+"..." (a long chat line, a joiner's name beside its ping, the description
+along the foot). UI only, no protocol change.
+
+- Chat (coopLobbyBuildRows): each line is word-wrapped to the column
+  (coopLobbyWrap; later rows indented COOP_LOBBY_WRAP_INDENT) and the newest
+  that fit the 11 rows are shown over Type a Message; the line being typed
+  ("Say: ...") wraps the same way. The builder's 48-byte copy cut a line at
+  47 characters before it was ever drawn; feed lines are now COOP_FEED_TEXT
+  (104) bytes, enough for a 23-character name and a whole message.
+  COOP_LOBBY_ROWS went 48 -> 64 for the wrapped rows.
+- The foot's description wraps onto a second line (a third is cut with
+  "..." on the second): COOP_MW_FOOT_Y 0x11E -> 0x118, COOP_MW_HELP_PITCH
+  0xE, the prompts at 0x13B; the next mission's block moved up 2 (0xBE).
+- Party seats: only the signal bars sit beside the name now; the round trip
+  (or the loss once there is some) moved to the second line's right, in
+  place of YOU, so a name has nearly the seat's width.
+- Names that still don't fit (seats, the Steam name top right) and the
+  label or value of the picked row scroll (coopMwScroll): held at the start
+  with "...", slid left a character at a time to the end, held, started
+  over. Rows not picked keep "...".
+- Rows: label and value are both whole when they fit; otherwise the value
+  is kept whole (up to 3/5 of the column) and the label is cut. "Next Player
+  Hosts" is now "New Host" and "Controller Layout" is "Button Layout" so
+  they fit beside their values.
+- Harness: GE_MOCK_NAMESUFFIX on the mock Steam lengthens every name;
+  coop/docker/chat_wrap.sh (two copies: long names, long chat lines from
+  both, the line being typed, then Game Setup, Invite and Controls). The run
+  image has xdotool now (menu_input.sh needed it too).
+- Checked host and joiner over the mock Steam, before (v0.3.0) and after,
+  in and out of a lobby: every tab. Shots: menu-text/ in the project files.

@@ -67,7 +67,13 @@ Playing
      Every time you go down costs one; when you go down on your last life
      you are out until the mission ends.
    - Guards: Normal, Hard (tougher, more of them) or Brutal.
-   - Friendly Fire: Off (default, your shots pass your partners by) or On.
+   - Player Scaling: Auto (default) makes guards tougher, sharper and more
+     numerous with 3 or 4 players, and follows players who leave or drop
+     in. Off keeps the two-player fight; 3 Players or 4 Players fixes the
+     level whoever is playing.
+   - Friendly Fire: Off (default: your shots, grenades, mines and rockets
+     pass your partners by), Reduced (half damage) or Full. A partner who
+     is already down can't be hurt. The stats page counts friendly hits.
    - Host Leaves: Next Player Hosts (default) or Back to Lobby. See "When
      someone leaves" below.
 5. When every friend shows as Ready, the host picks "Select Mission" (or
