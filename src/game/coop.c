@@ -5205,7 +5205,8 @@ s32 coopSkipExplosionDamage(ChrRecord *chr)
  * packet, a joiner's own script commands for the countdown and the blast are
  * stepped over (coopAiSkip), and the host's blast is relayed with the other
  * presentation commands, so it goes off around every player at once. */
-/* sClockSet (declared above): host, a level script has set or started the countdown this mission */
+/* sClockSet (declared above): a level script has set or started the countdown this mission (a
+ * joiner notes the host's, so a new host after a migration keeps sending it) */
 
 static void coopApplyClock(CoopWorldPkt *p)
 {
@@ -5217,6 +5218,7 @@ static void coopApplyClock(CoopWorldPkt *p)
     {
         return;
     }
+    sClockSet = 1;  /* the team has a countdown: if we take over as host, ours goes on in WORLD */
     if (running != (countdownTimerIsRunning() != 0) || shown != !(clock_drawn_flag & 1))
     {
         portConLogf("ge: coop: countdown %s and %s, %.1f s left (host)\n", running ? "running" : "stopped",
