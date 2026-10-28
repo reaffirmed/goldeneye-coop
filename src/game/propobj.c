@@ -4661,6 +4661,99 @@ static s32 portVehiclePlayerBrush(PropRecord *prop, struct coord3d *from, f32 ro
 
     return clear;
 }
+
+/* A security camera's view test for one Bond (the vanilla range, 45 degree
+ * cone and line of sight). getCurrentPlayerProp() is a partner's puppet
+ * while coopAltBondBegin has one. */
+static s32 cctvSeesBond(ObjectRecord *obj, PropRecord *prop, struct CCTVRecord *cctv)
+{
+	PropRecord *bond = getCurrentPlayerProp();
+	StandTile *stan = prop->stan;
+	f32 xdiff = bond->pos.f[0] - obj->runtime_pos.f[0];
+	f32 ydiff = bond->pos.f[1] - obj->runtime_pos.f[1];
+	f32 zdiff = bond->pos.f[2] - obj->runtime_pos.f[2];
+	f32 yaw, look, delta;
+	s32 clear;
+
+	if ((cctv->unkE8 > 0.0f) && ((cctv->unkE8 * cctv->unkE8) < ((xdiff * xdiff) + (ydiff * ydiff) + (zdiff * zdiff))))
+	{
+		return 0;
+	}
+
+	yaw = atan2f(xdiff, zdiff);
+	look = cctv->unkC8;
+
+	if (look < 0.0f)
+	{
+		look += M_TAU_F;
+	}
+	else if (look >= M_TAU_F)
+	{
+		look -= M_TAU_F;
+	}
+
+	look += cctv->unkC4;
+
+	if (look >= M_TAU_F)
+	{
+		look -= M_TAU_F;
+	}
+
+	delta = yaw - look;
+
+	if (yaw < look)
+	{
+		delta += M_TAU_F;
+	}
+
+	delta -= M_PI_F;
+
+	if (delta < 0.0f)
+	{
+		delta += M_TAU_F;
+	}
+
+	if (delta > M_PI_F)
+	{
+		delta -= M_TAU_F;
+	}
+
+	if ((delta > DegToRad(45)) || (delta < DegToRad(-45)))
+	{
+		return 0;
+	}
+
+	coopGuardTankFlags(0);
+	clear = stanTestLineUnobstructed(&stan, prop->pos.f[0], prop->pos.f[2], bond->pos.f[0], bond->pos.f[2], 0x1B, 100.0f, 100.0f, 0.0f, 1.0f) != 0;
+	coopGuardTankFlags(1);
+
+	return clear;
+}
+
+/* co-op: the Bond a camera sees, ours or a partner's (NULL none) */
+static PropRecord *cctvSeesAnyPlayer(ObjectRecord *obj, PropRecord *prop, struct CCTVRecord *cctv)
+{
+	PropRecord *seen = NULL;
+	s32 k;
+
+	if (obj->flags & PROPFLAG_INMOTION)
+	{
+		return NULL;
+	}
+	if (cctvSeesBond(obj, prop, cctv))
+	{
+		return getCurrentPlayerProp();
+	}
+	for (k = 0; seen == NULL && coopAltBondBegin(k); k++)
+	{
+		if (cctvSeesBond(obj, prop, cctv))
+		{
+			seen = getCurrentPlayerProp();
+		}
+		coopAltBondEnd();
+	}
+	return seen;
+}
 #endif
 
 s32 objTick(struct PropRecord *prop)
@@ -5586,6 +5679,20 @@ s32 objTick(struct PropRecord *prop)
 				m_RocketGravity = bottom_pad->unkD0;
 			}
 
+#ifndef TARGET_N64
+			/* co-op: the host's camera watches every player, and a joiner's
+			 * camera leaves the alarm to the host's (cctvSeesAnyPlayer) */
+			if (coopCctvWatches() && (playerProp = cctvSeesAnyPlayer(obj, prop, bottom_pad)) != NULL)
+			{
+				bottom_pad->timer += g_ClockTimer;
+				if (bottom_pad->timer >= ((s32) (CCTV_ALARM_FRAMES * F_80030B14)))
+				{
+					alarmActivate();
+					coopCctvAlarm(playerProp);
+					bottom_pad->timer = 0;
+				}
+			}
+#else
 			playerProp = getCurrentPlayerProp();
 			xdiff = playerProp->pos.f[0] - obj->runtime_pos.f[0];
 			temp_f0_13 = bottom_pad->unkE8;
@@ -5665,6 +5772,7 @@ s32 objTick(struct PropRecord *prop)
 
 				bondviewUpdateGuardTankFlagsRelated(playerProp, 1);
 			}
+#endif
 
 			if (bottom_pad->unkC8 < m_RocketGravity)
 			{

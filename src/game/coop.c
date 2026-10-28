@@ -6904,7 +6904,7 @@ s32 coopHostLeavesCount(void)
 
 const char *coopHostLeavesName(s32 rule)
 {
-    return (rule == 1) ? "Back to Lobby\n" : "Next Player Hosts\n";
+    return (rule == 1) ? "Back to Lobby\n" : "New Host\n";
 }
 
 
@@ -6936,6 +6936,25 @@ s32 coopAltBondBegin(s32 k)
 void coopAltBondEnd(void)
 {
     g_CoopPropOverride = NULL;
+}
+
+/* Security cameras (propobj.c) look for every player on the host. A joiner's
+ * cameras don't count: its alarm follows the host's, which turned an alarm
+ * raised here back off. */
+s32 coopCctvWatches(void)
+{
+    return !coopIsMirroringClient();
+}
+
+/* a camera raised the alarm on seeing this Bond */
+void coopCctvAlarm(PropRecord *seen)
+{
+    if (sEnabled > 0)
+    {
+        s32 p = coopPlayerOfProp(seen);
+
+        portConLogf("ge: coop: camera saw player %d, alarm on\n", (p >= 0) ? p + 1 : coopSelf() + 1);
+    }
 }
 
 /* A level script's "either player" check (chrai.c) passed: k 0 for our own

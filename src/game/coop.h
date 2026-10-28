@@ -27,6 +27,8 @@ void coopMissionComplete(void);
 s32  coopFrontTick(void);
 s32  coopAltBondBegin(s32 k); /* 1: "Bond" is now the k-th living partner (from 0), call coopAltBondEnd */
 void coopAltBondEnd(void);
+s32  coopCctvWatches(void);              /* propobj.c: 0 on a joiner, the host's cameras raise the alarm */
+void coopCctvAlarm(PropRecord *seen);    /* log: the Bond a camera raised the alarm on */
 void coopAltBondCredit(void *script, s32 k);   /* a script's "either player" check passed: k 0 for our Bond, else partner k-1 */
 void coopScriptSetsFlags(void *script);        /* that script sets stage flags: it was whoever passed its last check */
 void coopAiCommand(u8 *list, s32 offset, ChrRecord *self);
@@ -566,7 +568,8 @@ void coopChatApply(const u8 *raw, s32 from);
 void coopFeedToast(const char *text, s32 player);   /* bottom left, the lead in the player's colour (-1 white); '|' starts the rest */
 void coopFeedClock(void);   /* the feed's clock while co-op is off */
 Gfx *coopFeedRender(Gfx *gdl);                       /* in play (coop_hud.c) */
-s32  coopFeedLines(s32 maxlines, char lines[][80], s32 *players);  /* the newest chat lines as typed, for the lobby */
+#define COOP_FEED_TEXT 104     /* a chat line: a name, ": " and the most a message holds */
+s32  coopFeedLines(s32 maxlines, char lines[][COOP_FEED_TEXT], s32 *players);  /* the newest chat lines as typed, for the lobby */
 void coopChatTypedLine(char *out, s32 cap);         /* the line being typed */
 
 /* thrown and dropped items in every world (coop_items.c) */

@@ -5031,7 +5031,7 @@ static s32 portSheetSlotInert(s32 slot)
 /** text as is when it fits in maxw, else cut at a character with "..." on (a static copy) */
 static const char *portSheetFitText(const char *text, s32 maxw)
 {
-    static char out[64];
+    static char out[128];
     s32 h = 0, w = 0;
     s32 n;
 
@@ -8859,7 +8859,7 @@ enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLRO
        CLROW_HOSTLEAVES, CLROW_VSMODE, CLROW_VSARENA, CLROW_VSSCENARIO, CLROW_VSLENGTH, CLROW_VSWEAPONS, CLROW_VSSTART,
        CLROW_DISCORDYES, CLROW_DISCORDNO, CLROW_PROFILE, CLROW_VOICEMUTE, CLROW_LIVES, CLROW_BLEEDOUT, CLROW_RESPAWN,
        CLROW_UPDATE, CLROW_UPDATECHECK, CLROW_UPDATERESTART };
-#define COOP_LOBBY_ROWS     48
+#define COOP_LOBBY_ROWS     64      /* every tab's rows, chat lines wrapped included */
 /* The screen is laid out like Modern Warfare 2's lobbies (coopMw*): the
  * title top left, the tabs under it, the tab's rows down the left with
  * their values at the column's right edge, the party and the next mission
@@ -8870,6 +8870,8 @@ enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLRO
 #define COOP_LOBBY_X        0x1C    /* the list's left edge */
 #define COOP_LOBBY_R        0x10A   /* its right edge: the values end here */
 #define COOP_LOBBY_VALUE_W  0x78    /* a value's widest */
+#define COOP_LOBBY_WRAP_INDENT 0x0C /* a wrapped line's second and later rows */
+#define COOP_LOBBY_CHAT_W   (COOP_LOBBY_R - COOP_LOBBY_X - COOP_LOBBY_WRAP_INDENT)
 #define COOP_LOBBY_Y0       0x52
 #define COOP_LOBBY_PITCH    0x12
 #define COOP_LOBBY_COL_OK   0x006000FF  /* Ready (the builder's ink; drawn light green, coopMwInk) */
@@ -8887,8 +8889,9 @@ static s32 coop_lobby_tabx[CLTAB_COUNT][2];     /* each tab's left and right on 
 static s32 coop_lobby_backx[2];                 /* the BACK prompt, for a click */
 static s32 coop_lobby_hottab = -1;              /* the tab under the crosshair */
 static s32 coop_lobby_arrowx[COOP_LOBBY_VISIBLE][2];   /* each row on show: its value's left and right arrows (0: none) */
-#define COOP_MW_FOOT_Y      0x11E   /* the line over the foot: the row's description, then the prompts */
-#define COOP_MW_HINT_Y      0x136
+#define COOP_MW_FOOT_Y      0x118   /* the line over the foot: the row's description (two lines), then the prompts */
+#define COOP_MW_HELP_PITCH  0x0E
+#define COOP_MW_HINT_Y      0x13B
 static s32 coop_lobby_hot = -1;
 static s32 coop_lobby_ok;           /* Steam (or GE_COOP) is usable */
 static s32 coop_lobby_nfriends;
@@ -8923,6 +8926,55 @@ static void coopLobbyCopyName(char *out, s32 cap, const char *name)
     n = (s32) strlen(out);
     out[n++] = '\n';
     out[n] = '\0';
+}
+
+/* text (one line) in the menu font cut into lines no wider than maxw, each
+ * ending in '\n': after the last space that fits, or mid-word when a word
+ * alone is too wide. How many lines (up to maxlines; the rest is left off). */
+static s32 coopLobbyWrap(const char *text, s32 maxw, char lines[][80], s32 maxlines)
+{
+    s32 n = 0, p = 0;
+
+    while (n < maxlines)
+    {
+        s32 len = 0, fit = 0, brk = -1;
+
+        while (text[p] == ' ')
+        {
+            p++;
+        }
+        while (text[p + len] != '\0' && text[p + len] != '\n')
+        {
+            len++;
+        }
+        if (len == 0)
+        {
+            break;
+        }
+        for (fit = 1; fit <= len && fit < 78; fit++)
+        {   /* the longest start of what is left that fits */
+            s32 th = 0, tw = 0;
+
+            snprintf(lines[n], 80, "%.*s\n", (int) fit, &text[p]);
+            textMeasure(&th, &tw, lines[n], ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+            if (tw > maxw)
+            {
+                break;
+            }
+            if (fit < len && text[p + fit] == ' ')
+            {
+                brk = fit;
+            }
+        }
+        fit = (fit > 1) ? fit - 1 : 1;
+        if (fit < len && brk > 0)
+        {
+            fit = brk;
+        }
+        snprintf(lines[n++], 80, "%.*s\n", (int) fit, &text[p]);
+        p += fit;
+    }
+    return n;
 }
 
 static struct CoopLobbyRow *coopLobbyAdd(s32 kind, s32 arg, const char *label, const char *value)
@@ -9268,11 +9320,11 @@ static void coopLobbyAddControls(void)
         const char *shown = portInputLayoutShown(1);
 
         snprintf(value, sizeof(value), "%.20s\n", (shown != NULL && shown[0] != '\0') ? shown : "Default");
-        coopLobbyAdd(CLROW_LAYOUT, 0, "Controller Layout\n", value);
+        coopLobbyAdd(CLROW_LAYOUT, 0, "Button Layout\n", value);
     }
     else
     {
-        r = coopLobbyAdd(CLROW_TEXT, 0, "Controller Layout\n", "No Controller\n");
+        r = coopLobbyAdd(CLROW_TEXT, 0, "Button Layout\n", "No Controller\n");
         if (r != NULL)
         {
             r->colour = PORT_SHEET_COL_DIM;
@@ -9655,35 +9707,71 @@ static void coopLobbyBuildRows(void)
     /* chat: the newest lines, and a row (or the chat key) to type one (coop_chat.c) */
     if (coopLobbyHasPartner())
     {
-        char lines[COOP_LOBBY_CHAT_LINES + 1][80];
+        char lines[COOP_LOBBY_CHAT_LINES + 1][COOP_FEED_TEXT];
         s32 who[COOP_LOBBY_CHAT_LINES + 1];
         s32 n = coopFeedLines(COOP_LOBBY_CHAT_LINES, lines, who);
+        char text[COOP_FEED_TEXT + 8], typed[COOP_FEED_TEXT];
+        char wrapped[COOP_LOBBY_VISIBLE][80];
+        s32 nw[COOP_LOBBY_CHAT_LINES + 1];
+        s32 rows = 1, first = 0, j;   /* rows: the Type a Message row, or the line being typed */
+
+        /* each line wrapped to the column (the lines after its first indented), the
+         * newest that fit on show with the row to type under them */
+        if (coopChatTyping())
+        {
+            coopChatTypedLine(typed, sizeof(typed));
+            snprintf(text, sizeof(text), "Say: %s_\n", typed);
+            rows = coopLobbyWrap(text, COOP_LOBBY_CHAT_W, wrapped, COOP_LOBBY_VISIBLE - 1);
+        }
+        for (i = n - 1; i >= 0; i--)
+        {
+            nw[i] = 0;
+            if (who[i] != -2)   /* the line being typed is the Chat row's */
+            {
+                coopLobbyCopyName(text, sizeof(text), lines[i]);
+                nw[i] = coopLobbyWrap(text, COOP_LOBBY_CHAT_W, wrapped, COOP_LOBBY_VISIBLE);
+            }
+            if (rows + nw[i] > COOP_LOBBY_VISIBLE)
+            {
+                first = i + 1;
+                break;
+            }
+            rows += nw[i];
+        }
 
         coop_lobby_build_tab = CLTAB_CHAT;
-        for (i = 0; i < n; i++)
+        for (i = first; i < n; i++)
         {
             if (who[i] == -2)
             {
-                continue;   /* the line being typed is the Chat row's */
+                continue;
             }
-            coopLobbyCopyName(name, sizeof(name), lines[i]);
-            r = coopLobbyAdd(CLROW_TEXT, 0, name, "");
-            if (r != NULL)
+            coopLobbyCopyName(text, sizeof(text), lines[i]);
+            nw[i] = coopLobbyWrap(text, COOP_LOBBY_CHAT_W, wrapped, COOP_LOBBY_VISIBLE);
+            for (j = 0; j < nw[i]; j++)
             {
-                r->wide = TRUE;
-                r->colour = coopLobbyChatColour(who[i]);
+                r = coopLobbyAdd(CLROW_TEXT, 0, wrapped[j], "");
+                if (r != NULL)
+                {
+                    r->wide = TRUE;
+                    r->indent = (j > 0) ? COOP_LOBBY_WRAP_INDENT : 0;
+                    r->colour = coopLobbyChatColour(who[i]);
+                }
             }
         }
         if (coopChatTyping())
         {
-            char typed[80];
-
             coopChatTypedLine(typed, sizeof(typed));
-            snprintf(name, sizeof(name), "Say: %s_\n", typed);
-            r = coopLobbyAdd(CLROW_TEXT, 0, name, "");
-            if (r != NULL)
+            snprintf(text, sizeof(text), "Say: %s_\n", typed);
+            nw[0] = coopLobbyWrap(text, COOP_LOBBY_CHAT_W, wrapped, COOP_LOBBY_VISIBLE - 1);
+            for (j = 0; j < nw[0]; j++)
             {
-                r->wide = TRUE;
+                r = coopLobbyAdd(CLROW_TEXT, 0, wrapped[j], "");
+                if (r != NULL)
+                {
+                    r->wide = TRUE;
+                    r->indent = (j > 0) ? COOP_LOBBY_WRAP_INDENT : 0;
+                }
             }
         }
         else
@@ -10804,7 +10892,7 @@ static s32 coopLobbyMissionInfo(struct sImageTableEntry **img, char *name, s32 n
 #define MW_SEAT_Y       (COOP_LOBBY_Y0 - 3)
 #define MW_SEAT_H       0x19
 #define MW_SEAT_PITCH   0x1B
-#define MW_PLACE_Y      0xC0        /* the next mission / arena */
+#define MW_PLACE_Y      0xBE        /* the next mission / arena */
 #define MW_PLACE_PHOTO_H 0x30
 
 /* the builder's paper inks, for the dark screen */
@@ -10852,6 +10940,51 @@ static Gfx *coopMwText(Gfx *DL, s32 x, s32 y, s32 w, const char *in, u32 colour,
         x -= coopMwTextW(t, FALSE);
     }
     return frontPrintText(DL, &x, &y, (char *) t, ptrFontZurichBoldChars, ptrFontZurichBold, colour, viGetX(), viGetY(), 0, 0);
+}
+
+/* Zurich text that does not fit w, scrolled: it holds at its start (cut with "..."), slides left
+ * a character at a time until its end shows, holds there and starts over (as
+ * MW2 does with a long name); text that fits comes back as it is */
+static u32 coop_mw_frames;  /* coopMwRender's, for the scrolling */
+static const char *coopMwScroll(const char *in, s32 w)
+{
+    static char out[8][96];
+    static s32 k;
+    s32 len = 0, end, off, phase;
+
+    if (coopMwTextW(in, FALSE) <= w)
+    {
+        return in;
+    }
+    while (in[len] != '\0' && in[len] != '\n')
+    {
+        len++;
+    }
+    for (end = 1; end < len; end++)
+    {   /* the first start from which the rest fits */
+        snprintf(out[k], sizeof(out[k]), "%s", &in[end]);
+        if (coopMwTextW(out[k], FALSE) <= w)
+        {
+            break;
+        }
+    }
+    phase = (s32) (coop_mw_frames % (u32) (90 + end * 8 + 90));
+    off = (phase < 90) ? 0 : (phase - 90) / 8;
+    off = (off > end) ? end : off;
+    if (off == 0)
+    {   /* holding at the start: "..." says there is more */
+        return portSheetFitText(in, w);
+    }
+    k = (k + 1) & 7;
+    for (len -= off; len > 0; len--)
+    {   /* from there, as much as fits */
+        snprintf(out[k], sizeof(out[k]), "%.*s\n", (int) len, &in[off]);
+        if (coopMwTextW(out[k], FALSE) <= w)
+        {
+            break;
+        }
+    }
+    return out[k];
 }
 
 /* the small font (capitals only) from x, or ending at x */
@@ -11038,15 +11171,17 @@ static Gfx *coopMwRows(Gfx *DL)
         }
         lw = COOP_LOBBY_R - lx;
         if (r->value[0] != '\0')
-        {   /* the label as long as it is (up to 3/5 of the column), the value in what is left */
+        {   /* both whole when they fit; else the value whole (to 3/5 of the column) and the label in what is left */
             const s32 room = COOP_LOBBY_R - lx - (steps ? 0x14 : 8);
             char upper[32];
+            s32 keep;
 
             lw = coopMwTextW(label, FALSE);
-
-            lw = (lw > room * 3 / 5) ? room * 3 / 5 : lw;
             coopMwUpper(upper, sizeof(upper), r->value);
-            snprintf(value, sizeof(value), "%s", portSheetFitText(upper, room - lw - 6));
+            keep = room - 6 - coopMwTextW(upper, FALSE);
+            keep = (keep < room * 2 / 5) ? room * 2 / 5 : keep;
+            lw = (lw > keep) ? keep : lw;
+            snprintf(value, sizeof(value), "%s", hot ? coopMwScroll(upper, room - lw - 6) : portSheetFitText(upper, room - lw - 6));
             vw = coopMwTextW(value, FALSE);
             if (steps)
             {   /* < VALUE > */
@@ -11060,7 +11195,7 @@ static Gfx *coopMwRows(Gfx *DL)
             DL = coopMwText(DL, vx, y, room, value,
                             hot ? MW_ACCENT : (r->dim ? MW_FAINT : (r->colour == 0xFF ? MW_TEXT : ink)), TRUE);
         }
-        DL = coopMwText(DL, lx + (hot ? 3 : 0), y, lw + 1, label, hot ? 0xFFFFFFFF : ink, FALSE);
+        DL = coopMwText(DL, lx + (hot ? 3 : 0), y, lw + 1, hot ? coopMwScroll(label, lw + 1) : label, hot ? 0xFFFFFFFF : ink, FALSE);
     }
 
     if (coop_lobby_nview > COOP_LOBBY_VISIBLE)
@@ -11077,14 +11212,16 @@ static Gfx *coopMwRows(Gfx *DL)
     return DL;
 }
 
-/* Player p's line to the host (coopNetLink), ending at xr: four signal bars
- * and the round trip, green, gold or red by quality. *left is where it
- * starts, xr when nothing is measured yet; *link gets the numbers. */
+static const u32 coop_mw_linkcol[] = { MW_FAINT, MW_GREEN, MW_GOLD, MW_RED };
+
+/* Player p's line to the host (coopNetLink), ending at xr: four signal bars,
+ * green, gold or red by quality. *left is where they start, xr when nothing
+ * is measured yet; *link gets the numbers (the round trip is the seat's to
+ * show, on its second line). */
 static Gfx *coopMwLink(Gfx *DL, s32 xr, s32 y, s32 p, s32 *left, CoopLink *link)
 {
-    static const u32 colour[] = { MW_FAINT, MW_GREEN, MW_GOLD, MW_RED };
+    const u32 *colour = coop_mw_linkcol;
     CoopLink l;
-    char text[24];
     s32 i, lit, x0 = xr - 11;
 
     *left = xr;
@@ -11101,9 +11238,7 @@ static Gfx *coopMwLink(Gfx *DL, s32 xr, s32 y, s32 p, s32 *left, CoopLink *link)
                                                      i < lit ? colour[l.quality] : MW_FAINT);
     }
     DL = microcode_constructor(DL);
-    snprintf(text, sizeof(text), "%dMS", (int) l.rtt);
-    DL = coopMwSmall(DL, x0 - 3, y, text, colour[l.quality], TRUE);
-    *left = x0 - 3 - coopMwTextW(text, TRUE) - 5;
+    *left = x0 - 5;
     return DL;
 }
 
@@ -11123,17 +11258,30 @@ static Gfx *coopMwSeat(Gfx *DL, s32 y, s32 slot, s32 pick, const char *name, con
     DL = microcode_constructor(DL);
     memset(&l, 0, sizeof(l));
     if (link >= 0)
-    {   /* the round trip top right, beside the name; the loss, once there is some, on the line under it */
+    {   /* the signal bars top right, beside the name; the round trip (or the loss, once
+         * there is some) on the line under it, so the name keeps the room */
         DL = coopMwLink(DL, MW_PANEL_R - 4, y + 4, link, &nameR, &l);
     }
-    DL = coopMwText(DL, x + 0x20, y + 2, nameR - x - 0x20, name, self ? MW_ACCENT : MW_TEXT, FALSE);
+    DL = coopMwText(DL, x + 0x20, y + 2, nameR - x - 0x20, coopMwScroll(name, nameR - x - 0x20), self ? MW_ACCENT : MW_TEXT, FALSE);
     DL = coopMwSmall(DL, x + 0x20, y + 0x10, status, statuscol, FALSE);
-    if (l.quality != COOPLINK_UNKNOWN && l.loss >= COOP_LINK_FAIR_LOSS)
+    if (l.quality != COOPLINK_UNKNOWN)
     {
-        char loss[16];
+        char text[16];
+        u32 col = coop_mw_linkcol[l.quality];
 
-        snprintf(loss, sizeof(loss), "%d%% LOSS", (int) l.loss);
-        DL = coopMwSmall(DL, right, y + 0x10, loss, l.loss >= COOP_LINK_POOR_LOSS ? MW_RED : MW_GOLD, TRUE);
+        if (l.loss >= COOP_LINK_FAIR_LOSS)
+        {
+            snprintf(text, sizeof(text), "%d%% LOSS", (int) l.loss);
+            col = (l.loss >= COOP_LINK_POOR_LOSS) ? MW_RED : MW_GOLD;
+        }
+        else
+        {
+            snprintf(text, sizeof(text), "%dMS", (int) l.rtt);
+        }
+        if (x + 0x20 + coopMwTextW(status, TRUE) + 6 + coopMwTextW(text, TRUE) <= right)
+        {   /* beside the state when both fit */
+            DL = coopMwSmall(DL, right, y + 0x10, text, col, TRUE);
+        }
         tag = FALSE;    /* no room for YOU as well; the lime name says it */
     }
     if (self && tag)
@@ -11363,6 +11511,7 @@ static Gfx *coopMwRender(Gfx *DL)
     const char *help = NULL;
     char title[32];
 
+    coop_mw_frames++;
     DL = coopMwBackground(DL, coop_charsel_open ? 0x130 : COOP_MW_FOOT_Y);  /* the select reaches lower */
     DL = microcode_constructor(DL);
     if (state == COOPLOBBY_HOSTING || state == COOPLOBBY_JOINED)
@@ -11381,7 +11530,7 @@ static Gfx *coopMwRender(Gfx *DL)
 
         coopLobbyCopyName(name, sizeof(name), coopLobbySelfName());
         DL = coopMwSmall(DL, MW_PANEL_R, 0x08, "STEAM", MW_DIM, TRUE);
-        DL = coopMwText(DL, MW_PANEL_R - coopMwTextW(portSheetFitText(name, 0x90), FALSE), 0x13, 0x90, name, MW_TEXT, FALSE);
+        DL = coopMwText(DL, MW_PANEL_R - coopMwTextW(portSheetFitText(name, 0x90), FALSE), 0x13, 0x90, coopMwScroll(name, 0x90), MW_TEXT, FALSE);
     }
     if (coop_charsel_open)
     {
@@ -11407,7 +11556,21 @@ static Gfx *coopMwRender(Gfx *DL)
     }
     if (help != NULL)
     {
-        DL = coopMwText(DL, COOP_LOBBY_X, COOP_MW_FOOT_Y + 5, MW_PANEL_R - COOP_LOBBY_X, help, MW_DIM, FALSE);
+        char lines[3][80];
+        s32 i, n = coopLobbyWrap(help, MW_PANEL_R - COOP_LOBBY_X, lines, 3);
+
+        if (n == 3)
+        {   /* two lines at most: the second runs on and is cut with "..." */
+            char rest[160];
+
+            snprintf(rest, sizeof(rest), "%.*s %s", (int) strlen(lines[1]) - 1, lines[1], lines[2]);
+            snprintf(lines[1], sizeof(lines[1]), "%s", portSheetFitText(rest, MW_PANEL_R - COOP_LOBBY_X));
+            n = 2;
+        }
+        for (i = 0; i < n; i++)
+        {
+            DL = coopMwText(DL, COOP_LOBBY_X, COOP_MW_FOOT_Y + 3 + i * COOP_MW_HELP_PITCH, MW_PANEL_R - COOP_LOBBY_X, lines[i], MW_DIM, FALSE);
+        }
     }
     return DL;
 }
