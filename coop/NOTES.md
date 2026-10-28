@@ -1857,3 +1857,38 @@ along the foot). UI only, no protocol change.
   image has xdotool now (menu_input.sh needed it too).
 - Checked host and joiner over the mock Steam, before (v0.3.0) and after,
   in and out of a lobby: every tab. Shots: menu-text/ in the project files.
+
+## Host-only checks audit (2026-10-28)
+
+Owner's question after the Valentin report: what else only works for the
+host's Bond? Every place that reads "Bond" (the level-script and chr AI
+commands, chraction.c's Bond helpers, propobj.c's objects, doors and
+interaction, objectives, pickups, explosions, countdowns, endings) was
+classified; the full list is in the thread's report. Most were already
+handled (either-player pad, room and height checks; team inventory; the
+guard target machine; Use, gadget and door relays; OR'd criteria). The
+Valentin thread fixed "Bond holds X", "Bond's health" and the escorts'
+screen checks. Fixed here (no packet changes, COOP_VERSION stays 13):
+
+- Near misses: only our own bullets reach chrTestHit, which flags a guard
+  they pass as CHRFLAG_NEAR_MISS, and the standard guard list's "Bond missed
+  me" then startles it and sends it to attack. A partner's misses did
+  nothing on the host, so a joiner could miss a guard with the silenced PP7
+  all day. The host now runs the same bounds test along each partner's
+  tracer (coopPartnerShotNearMiss, from coopLookPlayShot: their gun to where
+  the bullet stopped) and commits the guard to that player (a stimulus).
+- Bond's facing: chrGetAngleFromBond and sub_GAME_7F033AAC ("a pad beside or
+  behind Bond", Streets' and Jungle's civilians) read our yaw even while
+  Bond was a partner's puppet. coopTargetYaw gives the partner's STATE yaw.
+- Endings: AI_BondDisableDamageAndPickups (only endings use it) is relayed
+  with the other presentation commands, so a joiner can't be shot or pick
+  things up during an ending the host's script started.
+- Harness: GE_COOP_TESTAIMCHR=<chrnum>:<s>[:<deg>] faces that chr's body
+  turned <deg> degrees for 8 s from <s> seconds in.
+- Tests (two games over UDP, US ROM, old build = main at 1f3e068): Dam,
+  joiner 15 m from guard 6 fires the silenced PP7 4 degrees to its side
+  (GE_COOP_TESTAIMCHR=6:20:4 GE_COOP_TESTFIRE=5:22:4), no hit: old, guard 6
+  stays where it is (act 1 then 3, same spot); new, "player 2's shot went
+  past chr 6 (near miss)" and it runs at the joiner (act 9, 4 m closer).
+  Dam bungee started by the host (GE_COOP_TESTPAD=330:10): new, the joiner
+  logs "host script command 236" (damage and pickups off); old, it doesn't.

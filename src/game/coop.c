@@ -3122,6 +3122,108 @@ s32 coopTargetIsDead(void)
     return 1;
 }
 
+/* bondviewGetPlayerYawRadians for whoever is Bond in this guard's tick: a
+ * partner's is the facing their STATE says (the same convention), not ours.
+ * "Bond's facing" picks a pad beside or behind Bond (Streets' and Jungle's
+ * civilians) and the angle a chr is at from Bond's view. */
+f32 coopTargetYaw(void)
+{
+    if (g_CoopPropOverride != NULL)
+    {
+        s32 p = coopPlayerOfProp(g_CoopPropOverride);
+
+        if (p >= 0)
+        {
+            return sR[p].st.yaw;
+        }
+    }
+    return bondviewGetPlayerYawRadians();
+}
+
+/* host: one of a partner's bullets, from their gun to where it stopped (the
+ * tracer coop_look.c draws). Our own shots flag every guard whose bounds they
+ * cross as a near miss (chrTestHit), which the standard guard script answers
+ * with "Bond missed me": it startles and attacks. A partner's misses never
+ * reach chrTestHit here, so a guard they shot past stood still. The same
+ * bounds test along their tracer, and the guard turns to that player. */
+void coopPartnerShotNearMiss(ChrRecord *shooter, coord3d *from, coord3d *end)
+{
+    PropRecord *savedoverride;
+    coord3d dir;
+    f32 len;
+    s32 p, i, h;
+
+    if (sEnabled <= 0 || !coopNetIsHost() || coopVersus() || shooter == NULL || shooter->prop == NULL
+        || g_ChrSlots == NULL)
+    {
+        return;
+    }
+    p = coopPlayerOfProp(shooter->prop);
+    if (p < 0 || !coopRemoteAliveHere(p))
+    {
+        return;
+    }
+    dir.f[0] = end->f[0] - from->f[0];
+    dir.f[1] = end->f[1] - from->f[1];
+    dir.f[2] = end->f[2] - from->f[2];
+    len = sqrtf(dir.f[0] * dir.f[0] + dir.f[1] * dir.f[1] + dir.f[2] * dir.f[2]);
+    if (!(len >= 1.0f))
+    {
+        return;
+    }
+    dir.f[0] /= len;
+    dir.f[1] /= len;
+    dir.f[2] /= len;
+    for (i = 0; i < g_NumChrSlots; i++)
+    {
+        ChrRecord *chr = &g_ChrSlots[i];
+        coord3d centre, off;
+        f32 t, size, held, d2;
+
+        if (chr->model == NULL || chr->prop == NULL || chr->actiontype == ACT_DEAD || coopIsPlayerChr(chr)
+            || (chr->chrflags & CHRFLAG_HIDDEN))
+        {
+            continue;
+        }
+        getsuboffset(chr->model, &centre);
+        off.f[0] = centre.f[0] - from->f[0];
+        off.f[1] = centre.f[1] - from->f[1];
+        off.f[2] = centre.f[2] - from->f[2];
+        t = off.f[0] * dir.f[0] + off.f[1] * dir.f[1] + off.f[2] * dir.f[2];
+        if (t < 0.0f || t > len)
+        {   /* behind the gun, or past where the bullet stopped (a wall) */
+            continue;
+        }
+        held = 0.0f;
+        for (h = 0; h < 2; h++)
+        {   /* as chrTestHit: the bounds grow by the biggest gun held */
+            if (chr->weapons_held[h] != NULL && chr->weapons_held[h]->weapon != NULL
+                && chr->weapons_held[h]->weapon->model != NULL)
+            {
+                f32 gun = chr->model->scale * getinstsize(chr->weapons_held[h]->weapon->model);
+
+                if (gun > held)
+                {
+                    held = gun;
+                }
+            }
+        }
+        size = getinstsize(chr->model) + held;
+        d2 = off.f[0] * off.f[0] + off.f[1] * off.f[1] + off.f[2] * off.f[2] - t * t;
+        if (d2 >= size * size)
+        {
+            continue;
+        }
+        chr->chrflags |= CHRFLAG_NEAR_MISS;
+        chr->numclosearghs++;
+        savedoverride = g_CoopPropOverride;
+        g_CoopPropOverride = shooter->prop;   /* the stimulus is that player's */
+        coopChrStimulus(chr);
+        g_CoopPropOverride = savedoverride;
+        portConLogf("ge: coop: player %d's shot went past chr %d (near miss)\n", p + 1, chr->chrnum);
+    }
+}
+
 /* Damage a guard dealt to "Bond". Returns 1 when it belonged to the peer. */
 s32 coopTargetRecordDamage(f32 damage, f32 angle)
 {
@@ -7598,6 +7700,7 @@ static s32 coopIsPresentationCmd(u8 cmd)
         case AI_BondEquipItemCinema:
         case AI_BondHideWeapons:
         case AI_BondSetLockedVelocity:
+        case AI_BondDisableDamageAndPickups:   /* only endings use it: no one is shot or picks up during the host's */
         case AI_TextPrintBottom:
         case AI_TextPrintTop:
         case AI_MusicPlaySlot:
