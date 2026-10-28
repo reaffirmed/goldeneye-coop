@@ -36,6 +36,10 @@
 
 #ifndef TARGET_N64
 static s32 coopk;  /* the partner a level script check is asking about (coopAltBondBegin) */
+/* the end of one coopChrAltBegin try: keep that player as the guard's target
+ * when it settled the check, else back to its own */
+#define COOP_ALT_DONE(settled, stimulus) \
+    do { if (settled) { coopChrAltKeep(ChrEntityp, (stimulus)); } else { coopChrAltEnd(ChrEntityp); } } while (0)
 #endif
 
 // hack? used to match as called with 2 args, but decompiled code takes 1
@@ -1236,8 +1240,16 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 case AI_IFISeeBond:
                 {
                     AiIFISeeBondRecord *ai = AiListp + Offset;
+                    s32 seen = chrCheckTargetInSight(ChrEntityp);
+#ifndef TARGET_N64
+                    for (coopk = 0; !seen && coopChrAltBegin(ChrEntityp, coopk); coopk++) /* co-op: any player it can see */
+                    {
+                        seen = chrCheckTargetInSight(ChrEntityp);
+                        COOP_ALT_DONE(seen, 1);
+                    }
+#endif
 
-                    if (chrCheckTargetInSight(ChrEntityp))
+                    if (seen)
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -1816,7 +1828,15 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 case AI_IFICouldSeeBond:
                 {
                     AiIFICouldSeeBondRecord *ai = AiListp + Offset;
-                    if (chrCanSeeBond(ChrEntityp))
+                    s32 seen = chrCanSeeBond(ChrEntityp);
+#ifndef TARGET_N64
+                    for (coopk = 0; !seen && coopChrAltBegin(ChrEntityp, coopk); coopk++) /* co-op: any player in its line of sight */
+                    {
+                        seen = chrCanSeeBond(ChrEntityp);
+                        COOP_ALT_DONE(seen, 1);
+                    }
+#endif
+                    if (seen)
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -1829,7 +1849,15 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 case AI_IFICouldSeeBondsStan:
                 {
                     AiIFICouldSeeBondsStanRecord *ai = AiListp + Offset;
-                    if (chrIsTargetNearlyInSight(ChrEntityp))
+                    s32 seen = chrIsTargetNearlyInSight(ChrEntityp);
+#ifndef TARGET_N64
+                    for (coopk = 0; !seen && coopChrAltBegin(ChrEntityp, coopk); coopk++) /* co-op: any player */
+                    {
+                        seen = chrIsTargetNearlyInSight(ChrEntityp);
+                        COOP_ALT_DONE(seen, 1);
+                    }
+#endif
+                    if (seen)
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -1936,7 +1964,17 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 case AI_IFImTargetedByBond:
                 {
                     AiIFImTargetedByBondRecord *ai = AiListp + Offset;
-                    if (sub_GAME_7F0333F8(ChrEntityp))
+#ifndef TARGET_N64
+                    s32 aimed = coopChrAimedAtByBond(ChrEntityp);
+                    for (coopk = 0; !aimed && coopChrAltBegin(ChrEntityp, coopk); coopk++) /* co-op: any player aiming at it */
+                    {
+                        aimed = coopChrAimedAtByBond(ChrEntityp);
+                        COOP_ALT_DONE(aimed, 1);
+                    }
+#else
+                    s32 aimed = sub_GAME_7F0333F8(ChrEntityp);
+#endif
+                    if (aimed)
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -2021,7 +2059,15 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 {
                     AiIFMyDistanceToBondLessThanDecimeterRecord *ai       = AiListp + Offset;
                     f32                                          distance = ntohs(ai->DISTANCE) * 10.0f;
-                    if (distance > chrGetDistanceToBond(ChrEntityp))
+                    s32                                          near     = distance > chrGetDistanceToBond(ChrEntityp);
+#ifndef TARGET_N64
+                    for (coopk = 0; !near && coopChrAltBegin(ChrEntityp, coopk); coopk++) /* co-op: any player that close */
+                    {
+                        near = distance > chrGetDistanceToBond(ChrEntityp);
+                        COOP_ALT_DONE(near, 0);
+                    }
+#endif
+                    if (near)
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -2035,7 +2081,15 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 {
                     AiIFMyDistanceToBondGreaterThanDecimeterRecord *ai       = AiListp + Offset;
                     f32                                             distance = ntohs(ai->DISTANCE) * 10.0f;
-                    if (distance < chrGetDistanceToBond(ChrEntityp))
+                    s32                                             far      = distance < chrGetDistanceToBond(ChrEntityp);
+#ifndef TARGET_N64
+                    for (coopk = 0; far && coopChrAltBegin(ChrEntityp, coopk); coopk++) /* co-op: every player that far; a nearer one is Bond */
+                    {
+                        far = distance < chrGetDistanceToBond(ChrEntityp);
+                        COOP_ALT_DONE(!far, 0);
+                    }
+#endif
+                    if (far)
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }

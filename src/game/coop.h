@@ -12,6 +12,12 @@ extern PropRecord *g_CoopPropOverride;
 s32  coopChrTickBegin(ChrRecord *chr); /* 0: skip (client mirrors the host) */
 void coopChrTickEnd(void);
 void coopChrStimulus(ChrRecord *chr);
+s32  coopChrAltBegin(ChrRecord *chr, s32 k);     /* host: a failed "Bond" check, try the k-th other player (1: they are Bond now) */
+void coopChrAltEnd(ChrRecord *chr);              /* that try failed too: the guard's own target again */
+void coopChrAltKeep(ChrRecord *chr, s32 stimulus);  /* it passed: that player is the guard's target */
+s32  coopChrAimedAtByBond(ChrRecord *chr);       /* sub_GAME_7F0333F8 for whoever is Bond in this tick */
+void coopCollideMover(PropRecord *prop, s32 on); /* chrSetMoving: prop is being moved or tested from */
+s32  coopCollideSkip(PropRecord *prop);          /* 1: prop blocks nothing right now (down, or inside the mover) */
 s32  coopTargetIsRemote(void);
 void coopGuardTankFlags(s32 flag);
 f32  coopTargetDuckingHeight(void);

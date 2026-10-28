@@ -1276,6 +1276,9 @@ f32 chrUnusedYPositionRelated(PropRecord *arg0)
 
 void chrSetMoving(ChrRecord *self, bool unset)
 {
+#ifndef TARGET_N64
+    coopCollideMover(self->prop, !unset);
+#endif
     if (unset)
     {
         self->hidden &= ~CHRHIDDEN_MOVING;
@@ -4057,6 +4060,14 @@ void chrUpdateCollisionBounds(PropRecord *prop, rect4f **polygon, s32 *edges, f3
     ChrRecord *chr;
 
     chr = prop->chr;
+
+#ifndef TARGET_N64
+    if (coopCollideSkip(prop))
+    {   /* co-op: a player who is down, or a body already inside the one moving */
+        *edges = 0;
+        return;
+    }
+#endif
 
     if (
         (chr->actiontype != ACT_DIE) &&

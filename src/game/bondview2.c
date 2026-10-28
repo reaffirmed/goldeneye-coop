@@ -13801,6 +13801,9 @@ void bondviewUpdateGuardTankFlagsRelated(PropRecord *prop, s32 flag)
     {
         chrSetMoving(prop->chr, flag);
     }
+#ifndef TARGET_N64
+    coopCollideMover(prop, !flag);
+#endif
 
     if (g_PlayerTankProp != NULL)
     {
@@ -13823,6 +13826,13 @@ void bondviewGetPropHeightRelatedValues(PropRecord *arg0, struct rect4f **field_
     s32 temp_v0;
 
     temp_v0 = getPlayerPointerIndex(arg0);
+#ifndef TARGET_N64
+    if (coopCollideSkip(arg0))
+    {   /* co-op: down, or a guard is already inside us */
+        *arg2 = 0;
+        return;
+    }
+#endif
     if (g_playerPointers[temp_v0]->field_AC != 0)
     {
         // What is this doing and why is it 1 player only?
