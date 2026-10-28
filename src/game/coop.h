@@ -36,7 +36,8 @@ void coopAltBondEnd(void);
 s32  coopCctvWatches(void);              /* propobj.c: 0 on a joiner, the host's cameras raise the alarm */
 void coopCctvAlarm(PropRecord *seen);    /* log: the Bond a camera raised the alarm on */
 void coopAltBondCredit(void *script, s32 k);   /* a script's "either player" check passed: k 0 for our Bond, else partner k-1 */
-void coopScriptSetsFlags(void *script);        /* that script sets stage flags: it was whoever passed its last check */
+void coopObjActivatedPass(void *script, void *obj);   /* that script found obj activated: its flags are the presser's */
+void coopScriptSetsFlags(void *script, void *chr);     /* that script (a chr's, or chr NULL) sets stage flags: it was whoever passed its last check */
 void coopAiCommand(u8 *list, s32 offset, ChrRecord *self);
 s32  coopAiSkip(u8 *list, s32 offset, ChrRecord *self);   /* joiner: step over our late copy of the host's ending commands */
 s32  coopDeadTick(void); /* 1: co-op owns this death (waiting or respawned) */
@@ -358,10 +359,11 @@ Gfx *coopPhotoRender(Gfx *gdl);
 /* watching a partner while we are down (coop_spectate.c) */
 void coopSpectateTick(void);
 void coopSpectateStop(void);
+void coopRestoreMusic(void);   /* bondview2.c: the level music after a death */
 void coopSpectateDropIn(s32 on);
 s32  coopSpectateTarget(void);     /* whose eyes we look out of, -1 none (or the free camera) */
 s32  coopSpectateHud(s32 *who);    /* 1 watching *who, 2 the free camera, 0 neither */
-void coopSpectateLook(f32 lookdx, f32 lookdy, s32 direct, f32 yawdeg, f32 pitchdeg);
+void coopSpectateMouse(f32 *dx, f32 *dy, s32 *direct, f32 *yawdeg, f32 *pitchdeg);   /* bondview2.c */
 s32  coopSpectateCamera(struct coord3d *pos, struct coord3d *look, struct coord3d *up);
 s32  coopSpectateRoom(u8 *room);
 struct coord3d *coopSpectatePos(s32 three);
@@ -569,12 +571,13 @@ void coopChatPress(void);
 s32  coopChatTyping(void);
 s32  coopChatEatEscape(void);   /* 1: this Escape was the chat's, not the pause's */
 void coopChatTick(s32 inmission);
+void coopChatTickStill(void);   /* the open line while the stage clock is stopped */
 void coopChatApply(const u8 *raw, s32 from);
 #define COOPTOAST_ALERT (-2)    /* a toast's "player" for session news (host left, ...): red */
 void coopFeedToast(const char *text, s32 player);   /* bottom left, the lead in the player's colour (-1 white); '|' starts the rest */
 void coopFeedClock(void);   /* the feed's clock while co-op is off */
 Gfx *coopFeedRender(Gfx *gdl);                       /* in play (coop_hud.c) */
-#define COOP_FEED_TEXT 104     /* a chat line: a name, ": " and the most a message holds */
+#define COOP_FEED_TEXT 144     /* a chat line: a name, ": " and the most a message holds */
 s32  coopFeedLines(s32 maxlines, char lines[][COOP_FEED_TEXT], s32 *players);  /* the newest chat lines as typed, for the lobby */
 void coopChatTypedLine(char *out, s32 cap);         /* the line being typed */
 
@@ -622,6 +625,7 @@ s32  coopVoiceMuteRowMask(void);
  * objective and every game shows a toast for a partner's */
 void coopObjNoteActor(s32 player, s32 damage);  /* host: something player did just changed the world */
 void coopObjNoteSelf(void);     /* this game's own Bond did it: a photo, a room, a pickup, ... */
+void coopObjNoteUse(s32 player);    /* host: player used or planted something; credit for a few seconds */
 void coopObjStatusChanged(s32 index, s32 letter, s32 status);  /* objective_status.c */
 void coopObjTick(s32 inmission);
 void coopObjApply(s32 kind, const u8 *raw, s32 from);

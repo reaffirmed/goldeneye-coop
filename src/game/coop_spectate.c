@@ -20,7 +20,7 @@
  *   - bondviewRenderDebugBondView: coopSpectateCamera
  *   - bondviewGetCurrentPlayersRoom / Position / Position3: coopSpectateRoom,
  *     coopSpectatePos
- * and hands over the look each tick (coopSpectateLook, beside coopPhotoTick).
+ * The free camera reads the mouse itself each tick (bondview2.c coopSpectateMouse).
  */
 #include <ultra64.h>
 #include <string.h>
@@ -64,7 +64,7 @@ static s32 sFree;
 static coord3d sFPos, sFPos3;
 static StandTile *sFTile;
 static f32 sFYaw, sFPitch;
-static f32 sLookDx, sLookDy, sLookYaw, sLookPitch;     /* this tick's look (coopSpectateLook) */
+static f32 sLookDx, sLookDy, sLookYaw, sLookPitch;     /* this tick's look (bondview2.c coopSpectateMouse) */
 static s32 sLookDirect;
 
 static s32 coopSpectatePick(s32 from, s32 step)
@@ -101,16 +101,6 @@ static s32 coopSpectateFollow(void)
     return 1;
 }
 
-/* bondview2.c, player 1's look sample each tick (as coopPhotoTick gets it) */
-void coopSpectateLook(f32 lookdx, f32 lookdy, s32 direct, f32 yawdeg, f32 pitchdeg)
-{
-    sLookDx = lookdx;
-    sLookDy = lookdy;
-    sLookDirect = direct;
-    sLookYaw = yawdeg;
-    sLookPitch = pitchdeg;
-}
-
 static void coopSpectateFreeStart(void)
 {
     CoopExtView v;
@@ -138,9 +128,11 @@ static void coopSpectateFreeMove(f32 fwd, f32 side)
     StandTile *tile = sFTile;
     f32 floor;
 
-    want.f[0] += (sy * cp * fwd + cy * side) * FREE_SPEED;
+    /* the view's right is (-cos, sin) of the yaw: the world's x runs to the
+     * left of a camera looking along +z */
+    want.f[0] += (sy * cp * fwd - cy * side) * FREE_SPEED;
     want.f[1] += sp * fwd * FREE_SPEED;
-    want.f[2] += (cy * cp * fwd - sy * side) * FREE_SPEED;
+    want.f[2] += (cy * cp * fwd + sy * side) * FREE_SPEED;
     if (tile != NULL && walkTilesBetweenPoints_NoCallback(&tile, sFPos.f[0], sFPos.f[2], want.f[0], want.f[2]) && tile != NULL)
     {
         sFTile = tile;
@@ -164,7 +156,7 @@ static void coopSpectateFreeMove(f32 fwd, f32 side)
 /* GE_COOP_TESTFREECAM=<s>: <s> seconds into watching, free the camera, back
  * off for 1.5 s, then turn a little; GE_COOP_TESTSPECNEXT=<s>: Fire at <s>
  * seconds, Aim 4 s later (harness only) */
-static void coopSpectateTest(s32 *use, s32 *step, f32 *turn, f32 *fwd)
+static void coopSpectateTest(s32 *use, s32 *step, f32 *turn, f32 *fwd, f32 *side)
 {
     static s32 at = -2, nextat;
     static s32 n;
@@ -202,12 +194,17 @@ static void coopSpectateTest(s32 *use, s32 *step, f32 *turn, f32 *fwd)
     {
         *turn = 0.75f;      /* degrees a tick */
     }
+    else if (n > at + 240 && n <= at + 300)
+    {
+        *side = 1.0f;       /* strafe right */
+    }
 }
 
-static void coopSpectateFreeTick(f32 tturn, f32 tfwd)
+static void coopSpectateFreeTick(f32 tturn, f32 tfwd, f32 tside)
 {
     f32 fwd, side;
 
+    coopSpectateMouse(&sLookDx, &sLookDy, &sLookDirect, &sLookYaw, &sLookPitch);
     if (sLookDirect)
     {
         sFYaw -= sLookYaw * DEG;
@@ -237,6 +234,7 @@ static void coopSpectateFreeTick(f32 tturn, f32 tfwd)
     if (joyGetButtons(0, L_CBUTTONS)) side = -1.0f;
     if (joyGetButtons(0, R_CBUTTONS)) side = 1.0f;
     fwd += tfwd;
+    side += tside;
     fwd = (fwd > 1.0f) ? 1.0f : (fwd < -1.0f) ? -1.0f : fwd;
     side = (side > 1.0f) ? 1.0f : (side < -1.0f) ? -1.0f : side;
     if (fwd > 0.05f || fwd < -0.05f || side > 0.05f || side < -0.05f)
@@ -249,7 +247,7 @@ static void coopSpectateFreeTick(f32 tturn, f32 tfwd)
 void coopSpectateTick(void)
 {
     s32 next, step = 0, use = 0;
-    f32 tturn = 0.0f, tfwd = 0.0f;
+    f32 tturn = 0.0f, tfwd = 0.0f, tside = 0.0f;
 
     if (getPlayerCount() != 1)
     {
@@ -269,6 +267,7 @@ void coopSpectateTick(void)
             currentPlayerAdjustFade(COOPSPEC_FADE, 150, 0, 0, 0.18f);   /* a red wash: we are watching */
         }
         portConLogf("ge: coop: spectating player %d\n", sTarget + 1);
+        coopRestoreMusic();     /* the death stopped the level's music; we are still in the mission */
     }
     if (joyGetButtonsPressedThisFrame(0, Z_TRIG))
     {
@@ -279,7 +278,7 @@ void coopSpectateTick(void)
         step = -1;
     }
     use = portJoyPortUseMenuPressed(0) || joyGetButtonsPressedThisFrame(0, B_BUTTON);
-    coopSpectateTest(&use, &step, &tturn, &tfwd);
+    coopSpectateTest(&use, &step, &tturn, &tfwd, &tside);
     if (use)
     {
         if (sFree)
@@ -313,7 +312,7 @@ void coopSpectateTick(void)
     }
     if (sFree)
     {
-        coopSpectateFreeTick(tturn, tfwd);
+        coopSpectateFreeTick(tturn, tfwd, tside);
     }
 }
 

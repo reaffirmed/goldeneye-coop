@@ -12,10 +12,14 @@
  * (coop.c coopScriptSetsFlags: the elevator, a room). When an objective
  * turns complete on the host, the credit goes to
  *   - whoever changed the world in the last COOPOBJ_NOW ticks (a room, a
- *     pickup, a photo: the objective turns in the same tick), else
+ *     pickup, a photo: the objective turns in the same tick; a chr's script
+ *     setting the flag credits the player it was dealing with), else
+ *   - whoever last used, planted or stuck something in the last COOPOBJ_USE
+ *     ticks (Dam's mainframe, Frigate's tracker: the level script that
+ *     watches the object turns it a little later), else
  *   - whoever last did damage in the last COOPOBJ_DAMAGE ticks (a guard's
  *     death or a blast finishes a little after the shot), else
- *   - the host.
+ *   - the host, or while it is down the first partner standing.
  * The host sends COOPEV_OBJDONE with the objective and the player to
  * everyone; each game shows a toast, "<NAME> COMPLETED A" in that player's
  * colour and the objective's text after it, unless the credit is its own (the game's own "Objective A:
@@ -36,6 +40,7 @@ extern void portConLogf(const char *fmt, ...);
 extern u8 *get_text_for_objective(int objectiveIndex);
 
 #define COOPOBJ_NOW     3       /* ticks */
+#define COOPOBJ_USE     300     /* 5 s: a script finishes a press's objective a little later */
 #define COOPOBJ_DAMAGE  300     /* 5 s */
 
 typedef struct
@@ -51,6 +56,8 @@ static s32 sActor = -1;
 static u32 sActorTick;
 static s32 sDmgActor = -1;
 static u32 sDmgTick;
+static s32 sUseActor = -1;
+static u32 sUseTick;
 static u8 sShown[OBJECTIVES_MAX];
 static u8 sWasOpen[OBJECTIVES_MAX];    /* seen not complete in this mission: a change to complete is news */
 
@@ -70,6 +77,41 @@ void coopObjNoteActor(s32 player, s32 damage)
         sActor = player;
         sActorTick = sNow;
     }
+}
+
+/* a Use on an object, a gadget on one, a thrown item stuck where it lands:
+ * the objective it finishes may turn complete a few seconds later (the
+ * level script that watches the object runs on its own clock) */
+void coopObjNoteUse(s32 player)
+{
+    if (player < 0 || player >= COOP_MAX_PLAYERS)
+    {
+        return;
+    }
+    sUseActor = player;
+    sUseTick = sNow;
+    coopObjNoteActor(player, 0);
+}
+
+/* nobody to credit: the host, unless it is down (it can't have done it);
+ * then the first partner standing */
+static s32 coopObjFallback(void)
+{
+    CoopHudPartner p;
+    s32 i;
+
+    if (g_CurrentPlayer == NULL || !g_CurrentPlayer->bonddead)
+    {
+        return coopExtSelf();
+    }
+    for (i = 0; coopHudPartnerAt(i, &p); i++)
+    {
+        if (!p.dead)
+        {
+            return p.player;
+        }
+    }
+    return coopExtSelf();
 }
 
 void coopObjNoteSelf(void)
@@ -126,14 +168,21 @@ void coopObjStatusChanged(s32 index, s32 letter, s32 status)
     {
         return;
     }
-    credit = 0;
     if (sActor >= 0 && sNow - sActorTick <= COOPOBJ_NOW)
     {
         credit = sActor;
     }
+    else if (sUseActor >= 0 && sNow - sUseTick <= COOPOBJ_USE)
+    {
+        credit = sUseActor;
+    }
     else if (sDmgActor >= 0 && sNow - sDmgTick <= COOPOBJ_DAMAGE)
     {
         credit = sDmgActor;
+    }
+    else
+    {
+        credit = coopObjFallback();
     }
     portConLogf("ge: coop: objective %d (%c) complete, credit player %d\n", index, 'A' + letter, credit + 1);
     memset(&d, 0, sizeof(d));
@@ -223,7 +272,7 @@ void coopObjTick(s32 inmission)
         if (coopExtMissionTicks() <= 1)
         {
             memset(sShown, 0, sizeof(sShown));
-            sActor = sDmgActor = -1;
+            sActor = sDmgActor = sUseActor = -1;
             memset(sWasOpen, 0, sizeof(sWasOpen));
         }
     }

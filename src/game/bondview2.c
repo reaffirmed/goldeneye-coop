@@ -6250,13 +6250,48 @@ s32 portPlayerControlsLive(s32 p)
  * reuses the stick's predicate plus one extra term - a stage must actually be
  * running, since g_CurrentPlayer is stale in the frontend.
  */
+/* co-op, down: the spectator's free camera samples the mouse itself, since
+ * a dead Bond's tick never reaches bondviewProcessInput. The pitch has the
+ * sign photo mode's look gets above. */
+void coopSpectateMouse(f32 *dx, f32 *dy, s32 *direct, f32 *yawdeg, f32 *pitchdeg)
+{
+    *dx = *dy = *yawdeg = *pitchdeg = 0.0f;
+    *direct = 0;
+#ifdef GE_VIDEO
+    {
+        extern void portInputMouseLookDelta(f32 *dx, f32 *dy);
+        extern void portInputMouseLookDeltaDeg(f32 *dxdeg, f32 *dydeg);
+        extern s32 portInputMouseDirectMode(void);
+        const s32 upright = get_cur_player_look_vertical_inverted() == 0;
+
+        portInputMouseLookDelta(dx, dy);
+        *direct = portInputMouseDirectMode();
+        if (*direct)
+        {
+            portInputMouseLookDeltaDeg(yawdeg, pitchdeg);
+        }
+        if (!upright)
+        {
+            *dy = -*dy;
+            *pitchdeg = -*pitchdeg;
+        }
+    }
+#endif
+}
+
 s32 portGameplayHasPointer(void)
 {
     extern s32 portStageRunning(void); /* front.c: current_menu == MENU_RUN_STAGE */
+    s32 who;
 
     if (!portStageRunning())
     {
         return 0;
+    }
+    if (coopPhotoActive() || coopSpectateHud(&who) == 2)
+    {   /* co-op: photo mode and the spectator's free camera look with the
+         * mouse while Bond's own controls are locked or he is down */
+        return checkGamePaused() == 0;
     }
     return portP1ControlsLive();   /* the pointer is player 1's, whoever ticked last */
 }
@@ -6575,7 +6610,6 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
             f32 pdeg = moveData.invertPitch ? g_portMousePitchDeg : -g_portMousePitchDeg;
 
             coopPhotoTick(moveData.freeLookDx, pdy, g_portMouseDirect, g_portMouseYawDeg, pdeg);
-            coopSpectateLook(moveData.freeLookDx, pdy, g_portMouseDirect, g_portMouseYawDeg, pdeg);   /* the free camera while down */
         }
         /* Permission (see portMouseLookPermitted): drain the delta every tick
          * but discard it unless the stick could move Bond, so motion never
@@ -12333,10 +12367,10 @@ s32 portMpSpawnWithWeapon(void)
 #endif
 
 #ifndef TARGET_N64
-/* Co-op: the stage music after a revive or respawn. Death stops it
- * (MISSION_STATE_0) and plays the death tune; nothing but a later music event
- * started it again. */
-static void coopRestoreMusic(void)
+/* Co-op: the stage music after a revive or respawn, and once we watch a
+ * partner (coop_spectate.c). Death stops it (MISSION_STATE_0) and plays the
+ * death tune; nothing but a later music event started it again. */
+void coopRestoreMusic(void)
 {
     if (get_mission_state() != MISSION_STATE_0)
     {

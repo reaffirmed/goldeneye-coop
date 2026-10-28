@@ -1857,3 +1857,51 @@ along the foot). UI only, no protocol change.
   image has xdotool now (menu_input.sh needed it too).
 - Checked host and joiner over the mock Steam, before (v0.3.0) and after,
   in and out of a lobby: every tab. Shots: menu-text/ in the project files.
+
+## Tester report after v0.4.0 (2026-10-28)
+
+A tester's report from a stream on the build before v0.4.0. Items already
+fixed (cameras, NPCs stuck and slow, desync, objectives) are left out. No
+packet changes; COOP_VERSION stays 13.
+
+- Spectating: the level music stopped at death and never came back;
+  coopRestoreMusic now runs when spectating starts ("music back after the
+  death"). A dead Bond never runs bondviewProcessInput, so the free camera
+  never saw the mouse; coopSpectateMouse samples it directly (honouring
+  Look Inverted), and smart mouse lock keeps the pointer captured in photo
+  mode and the free camera. Strafe was reversed in both (world x runs to the
+  left of a camera looking along +z). While spectating, sounds are heard
+  from the camera (sub_GAME_7F053894), so a partner's gunshots no longer
+  fade out with the distance to our corpse.
+- Chat: a line can be 5 parts (111 characters typed, COOP_FEED_TEXT 144);
+  a v0.4.0 game drops lines over 3 parts, the wire struct is unchanged.
+  In-mission lines and the SAY: line wrap at 3/5 of the screen
+  (coopFeedWrap), COOPFEED_ROWS 5. Typing is polled while the stage clock
+  is stopped (coopChatTickStill), so the box no longer freezes after a
+  cutscene with controls locked.
+- Objective credit: a partner's Use (COOPEV_USE, the host's own press, an
+  embed) is remembered for 300 ticks (coopObjNoteUse) and the stage script
+  that reads AI_IFObjectWasActivated / UsedGadgetOnObject names who pressed
+  (coopObjActivatedPass), so Dam's PC, Frigate's tracker and Statue's
+  objectives toast the right player. With nobody to credit it falls back to
+  the host, or the first standing partner when the host is dead.
+  coopScriptSetsFlags falls back to a chr script's target.
+- Pickups while the host is down: a partner's pickup used to wait until the
+  host stood up again (the black box "needs several walks over"); the host
+  now applies it while dead (bonddead cleared around propPickupByPlayer).
+- Hostages on high co-op difficulty: guards' shots on chrs no longer take
+  coopDifficultyHealthMul, so a hostage dies to the hostage-taker's shot.
+- Revive: the hold is counted on the downed game; measured both ways (host
+  reviving a joiner and the reverse, GE_COOP_TESTREVIVE / TESTDIE,
+  GE_COOP_RESPAWN=7): 2.5 s each. The downed game now logs "revived by
+  player N after X s (Y s from the first hold)" so a tester's log shows a
+  hold that kept restarting.
+- Harness: GE_COOP_TESTFLAG=<hex>:<s> sets the host's stage flags; the
+  spectate test has a strafe phase.
+- Tests: two games, US ROM. Dam objective C by the joiner (GE_DIFF=2,
+  TESTFLAG=100:5, joiner TESTUSE=-1:6:10): "credit player 2". Joiner
+  pickup with the host down: "player 2 picked up obj ...: ours too".
+  Spectate: music log, mouse pitch, strafe dot product +6 (was -6). Chat
+  wrap over the mock Steam (screenshot). Not run: the hostage shot (could
+  not trigger on Frigate in the harness), partner sounds, chat after a
+  cutscene.

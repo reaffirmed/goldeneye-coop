@@ -359,6 +359,7 @@ static f32 sLastHealth;
 static s32 sLastWeapon = ITEM_UNARMED;
 static u32 sDeadSince;      /* sTick our Bond's death fade finished, 0 alive */
 static s32 sReviveHold;     /* while down: ticks a partner has held Use over us */
+static u32 sReviveFirst;    /* while down: the tick a partner first held Use over us, 0 none */
 static s32 sBledOut;        /* out until the mission ends: COOPOUT_BLEDOUT (revive only, down too long) or COOPOUT_LIVES */
 static s32 sLivesLeft = -1; /* this mission's lives left (COOPSET_LIVES), -1 unlimited */
 static s32 coopLivesStart(void);
@@ -1827,6 +1828,7 @@ static void coopTickBody(void)
     }
     if (g_ClockTimer <= 0)
     {
+        coopChatTickStill();    /* a line opened just before still takes its keys (coop_chat.c) */
         if (sHold)
         {
             coopHoldTick(); /* the mission card: everyone loads in first */
@@ -2283,6 +2285,26 @@ static void coopHarnessTick(void)
             alarmActivate();
             objectiveregisters1 |= 0x40000000;
             portConLogf("ge: coop: testworld: alarm + flag 0x40000000\n");
+        }
+    }
+    {   /* GE_COOP_TESTFLAG=<hex>:<s>: host sets those stage flags <s> seconds into the mission
+         * (harness only: an objective's earlier steps, e.g. Dam's modem 100) */
+        static s32 testflag = -2;
+        static unsigned int flagbits;
+        if (testflag == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTFLAG");
+            testflag = -1;
+            if (e != NULL && sscanf(e, "%x:%d", &flagbits, &testflag) != 2)
+            {
+                testflag = -1;
+            }
+        }
+        if (testflag >= 0 && coopNetIsHost() && coopInMission() && sMissionTicks >= (u32) testflag * 60)
+        {
+            testflag = -1;
+            objectiveregisters1 |= flagbits;
+            portConLogf("ge: coop: testflag: stage flags |= %x\n", flagbits);
         }
     }
     if (coopNetIsHost() && coopInMission() && coopRemoteHere(1) && sR[1].puppet != NULL)
@@ -4515,6 +4537,7 @@ s32 coopGadgetItem(void *script)
 }
 
 static void coopSendObjUse(ObjectRecord *obj, s32 gadget);
+static void coopNoteActivated(void *obj, s32 player);
 
 void coopObjUsed(ObjectRecord *obj)
 {
@@ -4534,6 +4557,11 @@ static void coopSendObjUse(ObjectRecord *obj, s32 gadget)
     CoopEvent ev;
     s32 ofs;
 
+    if (sEnabled > 0 && !sApplyingUse && !coopVersus() && coopNetIsHost() && coopPartnerHere())
+    {   /* the host's own press: an objective it finishes is ours */
+        coopNoteActivated(obj, coopSelf());
+        coopObjNoteUse(coopSelf());
+    }
     if (sEnabled <= 0 || sApplyingUse || coopVersus() || coopNetIsHost() || !coopNetHasPeer() || !coopPartnerHere())
     {
         return;
@@ -4570,7 +4598,8 @@ static void coopApplyObjUse(CoopEvent *ev)
         obj->state |= PROPSTATE_ACTIVATED;
         sGadgetObj = obj;
         sGadgetItem = ev->u.use.gadget;
-        coopObjNoteActor(ev->from, 0);
+        coopNoteActivated(obj, ev->from);
+        coopObjNoteUse(ev->from);
         portConLogf("ge: coop: player %d used item %d on obj %d\n", ev->from + 1, ev->u.use.gadget, ev->u.use.objofs);
         return;
     }
@@ -4589,7 +4618,8 @@ static void coopApplyObjUse(CoopEvent *ev)
     obj->runtime_bitflags |= RUNTIMEBITFLAG_ACTIVATED;
     /* no door-switch link here (sub_GAME_7F03E6A0): the joiner's press already ran it and its
      * DOOR events carry the doors; running it again toggled the gate back shut on the joiner */
-    coopObjNoteActor(ev->from, 0);  /* an objective the press completes is theirs (coop_objective.c) */
+    coopNoteActivated(obj, ev->from);
+    coopObjNoteUse(ev->from);   /* an objective the press completes, now or a little later, is theirs (coop_objective.c) */
     sApplyingUse = 0;
     portConLogf("ge: coop: player %d used obj %d (type %d)\n", ev->from + 1, ev->u.use.objofs, obj->type);
 }
@@ -4849,15 +4879,23 @@ static s32 coopTeamPickTry(s32 i)
         portConLogf("ge: coop: player %d took body armour %d: removed here\n", sTeamPickFrom[i] + 1, sTeamPick[i]);
         return 1;
     }
-    if (!coopInMission() || g_CurrentPlayer->bonddead || g_ClockTimer <= 0)
-    {
-        return 0; /* later */
+    if (!coopInMission() || g_ClockTimer <= 0 || (g_CurrentPlayer->bonddead && !coopNetIsHost()))
+    {   /* later; the host takes it even while down: its inventory is what the
+         * collect objectives check (Statue's flight recorder, a partner's
+         * pickup while the host waits to respawn) */
+        return 0;
     }
     sApplyingRemotePick = 1;
-    op = propPickupByPlayer(prop, TRUE);
-    if (op != TICKOP_NONE)
-    {
-        propExecuteTickOperation(prop, op);
+    {   /* the stock pickup refuses a dead Bond: the host down, stood up for it, quietly */
+        const s32 down = g_CurrentPlayer->bonddead;
+
+        g_CurrentPlayer->bonddead = 0;
+        op = propPickupByPlayer(prop, !down);
+        if (op != TICKOP_NONE)
+        {
+            propExecuteTickOperation(prop, op);
+        }
+        g_CurrentPlayer->bonddead = down;
     }
     sApplyingRemotePick = 0;
     if (op == TICKOP_NONE)
@@ -5251,6 +5289,7 @@ s32 coopDeadTick(void)
 
         sDeadSince = sTick;
         sReviveHold = 0;
+        sReviveFirst = 0;
         sBledOut = 0;
         sDeathStan = (bond != NULL) ? bond->stan : NULL;
         if (bond != NULL)
@@ -5307,9 +5346,15 @@ s32 coopDeadTick(void)
         }
         if (over >= 0)
         {
+            if (sReviveHold == 0 && sReviveFirst == 0)
+            {
+                sReviveFirst = sTick;   /* the first hold over us since we fell */
+            }
             if (++sReviveHold >= COOP_REVIVE_HOLD)
             {
-                portConLogf("ge: coop: revived by player %d after %.1f s\n", over + 1, dead / 60.0f);
+                portConLogf("ge: coop: revived by player %d after %.1f s (%.1f s from the first hold)\n", over + 1, dead / 60.0f,
+                            (sTick - sReviveFirst) / 60.0f);
+                sReviveFirst = 0;
                 sR[over].puppetGhost = 1;
                 coopRespawnPlayerAt(&sDeathPos, sDeathStan, sDeathYaw, sLastWeapon);
                 g_CurrentPlayer->bondhealth = 0.5f;     /* back on your feet, not fresh */
@@ -7302,6 +7347,71 @@ void coopCctvAlarm(PropRecord *seen)
  * room) the credit goes to the player its check was about, not to whoever a
  * different script's check (run every tick) last saw. */
 
+/* Who last pressed Use (or a gadget) on an object, for the script that later
+ * finds it activated (chrai.c if_object_was_activated): Dam's mainframe
+ * finishes its objective after a download, long after the press. */
+#define COOP_ACTIVATED 16
+static struct
+{
+    void *obj;
+    s8 player;
+} sActivated[COOP_ACTIVATED];
+static s32 sActivatedNext;
+
+static void coopNoteActivated(void *obj, s32 player)
+{
+    s32 i;
+
+    for (i = 0; i < COOP_ACTIVATED && sActivated[i].obj != obj; i++)
+    {
+    }
+    if (i == COOP_ACTIVATED)
+    {
+        i = sActivatedNext;
+        sActivatedNext = (sActivatedNext + 1) % COOP_ACTIVATED;
+    }
+    sActivated[i].obj = obj;
+    sActivated[i].player = (s8) player;
+}
+
+static void coopScriptPassBy(void *script, s32 who)
+{
+    s32 i;
+
+    for (i = 0; i < COOP_SCRIPTPASS && sScriptPass[i].script != script; i++)
+    {
+    }
+    if (i == COOP_SCRIPTPASS)
+    {
+        i = sScriptPassNext;
+        sScriptPassNext = (sScriptPassNext + 1) % COOP_SCRIPTPASS;
+    }
+    sScriptPass[i].script = script;
+    sScriptPass[i].player = (s8) who;
+}
+
+/* chrai.c: script found obj activated (or a gadget used on it); its next
+ * stage flags are the presser's */
+void coopObjActivatedPass(void *script, void *obj)
+{
+    s32 i;
+
+    if (sEnabled <= 0 || !coopNetIsHost())
+    {
+        return;
+    }
+    for (i = 0; i < COOP_ACTIVATED; i++)
+    {
+        if (sActivated[i].obj == obj && obj != NULL)
+        {
+            portConLogf("ge: coop: a script found player %d's press\n", sActivated[i].player + 1);
+            coopScriptPassBy(script, sActivated[i].player);
+            return;
+        }
+    }
+    coopScriptPassBy(script, coopSelf());   /* nobody pressed it from afar: the host did */
+}
+
 void coopAltBondCredit(void *script, s32 k)
 {
     s32 who = coopSelf();
@@ -7321,19 +7431,10 @@ void coopAltBondCredit(void *script, s32 k)
     {
         return;
     }
-    for (i = 0; i < COOP_SCRIPTPASS && sScriptPass[i].script != script; i++)
-    {
-    }
-    if (i == COOP_SCRIPTPASS)
-    {
-        i = sScriptPassNext;
-        sScriptPassNext = (sScriptPassNext + 1) % COOP_SCRIPTPASS;
-    }
-    sScriptPass[i].script = script;
-    sScriptPass[i].player = (s8) who;
+    coopScriptPassBy(script, who);
 }
 
-void coopScriptSetsFlags(void *script)
+void coopScriptSetsFlags(void *script, void *chr)
 {
     s32 i;
 
@@ -7344,6 +7445,13 @@ void coopScriptSetsFlags(void *script)
             coopObjNoteActor(sScriptPass[i].player, 0);
             return;
         }
+    }
+    if (chr != NULL && sEnabled > 0 && coopNetIsHost())
+    {   /* a chr's own script (Valentin, Janus, a scientist): the player it is
+         * dealing with, the one its "Bond" is right now */
+        s32 p = (sTickChr == chr && g_CoopPropOverride != NULL) ? coopPlayerOfProp(g_CoopPropOverride) : -1;
+
+        coopObjNoteActor((p >= 0) ? p : coopSelf(), 0);
     }
 }
 
