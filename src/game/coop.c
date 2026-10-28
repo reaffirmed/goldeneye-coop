@@ -82,7 +82,7 @@ u32 randomGetNext(void);
 extern void portConLogf(const char *fmt, ...);
 
 #define COOP_MAGIC   0x50434547u /* "GECP" */
-#define COOP_VERSION 13 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
+#define COOP_VERSION 14 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
                           6: host migration (AI sync, bye, addresses in the roster);
                           7: pings, chat, objective credit, team times, cross-save (COOPEV 16, 20..31, COOPPKT 10);
                           8: versus (COOPEV 32..36, COOPPKT 16);
@@ -93,7 +93,8 @@ extern void portConLogf(const char *fmt, ...);
                           12: lives, bleed-out and respawn times (COOPSET 8..10, 16 settings in HELLO, STATE out);
                               gadgets in USE, where a throw stuck (COOPEV 29), the tank (COOPPKT 11);
                           13: Player Scaling (COOPSET 11), Friendly Fire Reduced and blasts, the victim scales a
-                              partner's hit (HIT friendly), a blast's owner (EXPLODE), Friendly hits stat */
+                              partner's hit (HIT friendly), a blast's owner (EXPLODE), Friendly hits stat;
+                          14: the host's mission countdown in WORLD, its blast relayed (COOPEV_AICMD) */
 
 enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7, COOPPKT_AISYNC = 8, COOPPKT_BYE = 9 };
 /* 10 and 11 (COOPPKT_EXT_FIRST..LAST in coop.h) are coop_ext.c's features' own packets;
@@ -182,7 +183,14 @@ typedef struct
     u8 keycopied;
     u8 alarm;
     u16 calm;           /* ticks since the sender was last in a fight (capped) */
+    f32 clock;          /* the host's mission countdown (ticks left) */
+    u8 clockflags;      /* COOP_CLOCK_* */
+    u8 pad[3];
 } CoopWorldPkt;
+
+#define COOP_CLOCK_RUNNING 1
+#define COOP_CLOCK_SHOWN   2
+#define COOP_CLOCK_SET     4    /* the host's level script has used the countdown */
 
 /* Reliable, in-order events (hits, shots, doors, ...). Every EVENTS packet
  * carries all unacked events plus an ack of what we have received. */
@@ -477,6 +485,8 @@ static void coopPendingCinemaTick(void);
 static s32 coopLocalCalm(void);
 static void coopTrackCombat(void);
 static void coopApplyWorld(CoopWorldPkt *p);
+static void coopCradleFallTick(void);
+static s32 sClockSet;
 static s32 coopSetupOfs(void *rec);
 static StandTile *coopFindStan(coord3d *pos, StandTile *from, coord3d *frompos);
 static s32 coopIsMirroringClient(void);
@@ -1770,6 +1780,7 @@ void coopStageStart(void)
     sNumPeerHeld = 0;
     memset(sScriptPass, 0, sizeof(sScriptPass));    /* a new mission's scripts */
     sNumTeamPicks = 0;
+    sClockSet = 0;
     sLastHurtTick = sLastFightTick = sDeadSince = 0;
     sBledOut = 0;
     sLivesLeft = coopLivesStart();
@@ -1923,6 +1934,7 @@ static void coopTickBody(void)
         }
     }
 
+    coopCradleFallTick();
     coopHarnessTick();
 
     coopRemotesTick();
@@ -2285,6 +2297,22 @@ static void coopHarnessTick(void)
             portConLogf("ge: coop: testworld: alarm + flag 0x40000000\n");
         }
     }
+    {   /* GE_COOP_TESTCLOCK=1: log the mission countdown every 5 s (harness only) */
+        static s32 testclock = -1;
+        static u32 clocklast;
+        if (testclock == -1)
+        {
+            testclock = getenv("GE_COOP_TESTCLOCK") != NULL;
+        }
+        if (testclock && coopInMission() && (sMissionTicks < clocklast || sMissionTicks >= clocklast + 300))
+        {
+            clocklast = sMissionTicks;
+            portConLogf("ge: coop: testclock: %s, %s, %.1f s left, mission %u s\n",
+                        countdownTimerIsRunning() ? "running" : "stopped",
+                        (clock_drawn_flag & 1) ? "hidden" : "shown",
+                        countdownTimerGetValue() / 60.0f, sMissionTicks / 60);
+        }
+    }
     if (coopNetIsHost() && coopInMission() && coopRemoteHere(1) && sR[1].puppet != NULL)
     {   /* GE_COOP_TESTHIT=<s>: <s> seconds in, a small hit on player 2 from the nearest guard that
          * can see their puppet and one from the farthest guard (harness only: lag compensation) */
@@ -2471,6 +2499,23 @@ static void coopHarnessTick(void)
             coopRespawnPlayerAt(&pos, pad->stan, 0.0f, sLastWeapon);
             portConLogf("ge: coop: testpad -> pad %d at %.0f %.0f %.0f\n", testpad, pos.f[0], pos.f[1], pos.f[2]);
             testpad = -1;
+        }
+    }
+    if (coopNetIsHost() && coopPartnerHere() && coopInMission())
+    {   /* GE_COOP_TESTFLAG=<hex>:<s>: <s> seconds into the mission, the host sets those
+         * stage flags, as a script would (harness only) */
+        static s32 testflag = -2;
+        static u32 flagbits, flagat;
+        if (testflag == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTFLAG");
+            testflag = (e != NULL && sscanf(e, "%x:%u", &flagbits, &flagat) == 2) ? 1 : -1;
+        }
+        if (testflag == 1 && sMissionTicks >= flagat * 60)
+        {
+            chrSetStageFlags(NULL, flagbits);
+            portConLogf("ge: coop: testflag %08x\n", flagbits);
+            testflag = -1;
         }
     }
     if (coopInMission())
@@ -4717,6 +4762,41 @@ s32 coopSkipExplosionDamage(ChrRecord *chr)
  * criteria either player can meet (entering a room, a deposit, a photo,
  * copying the key) are OR'd together, so the team shares one objective list. */
 
+/* ---- the mission countdown -------------------------------------------------
+ * Statue's helicopter, Silo's and Bunker 2's self-destructs, and the other
+ * level timers (Dam, Streets, Surface 2, Train, Aztec, Cradle). Every game ran its own copy of the level
+ * script's countdown: a player who dropped in got a fresh full timer (or none,
+ * where it starts after the intro swirl), and the blast at zero
+ * (AI_TriggerExplosionsAroundBond) went off only in the game whose own timer
+ * ran out. Now the host's timer is the team's: its value rides the WORLD
+ * packet, a joiner's own script commands for the countdown and the blast are
+ * stepped over (coopAiSkip), and the host's blast is relayed with the other
+ * presentation commands, so it goes off around every player at once. */
+/* sClockSet (declared above): host, a level script has set or started the countdown this mission */
+
+static void coopApplyClock(CoopWorldPkt *p)
+{
+    s32 running = (p->clockflags & COOP_CLOCK_RUNNING) != 0;
+    s32 shown = (p->clockflags & COOP_CLOCK_SHOWN) != 0;
+    f32 off = countdownTimerGetValue() - p->clock;
+
+    if (!(p->clockflags & COOP_CLOCK_SET))
+    {
+        return;
+    }
+    if (running != (countdownTimerIsRunning() != 0) || shown != !(clock_drawn_flag & 1))
+    {
+        portConLogf("ge: coop: countdown %s and %s, %.1f s left (host)\n", running ? "running" : "stopped",
+                    shown ? "shown" : "hidden", p->clock / 60.0f);
+    }
+    if (off > 30.0f || off < -30.0f || running != (countdownTimerIsRunning() != 0))
+    {   /* half a second out, or started or stopped: the host's */
+        countdownTimerSetValue(p->clock);
+    }
+    countdownTimerSetRunning(running);
+    countdownTimerSetVisible(1, shown);
+}
+
 static void coopSendWorld(void)
 {
     CoopWorldPkt p;
@@ -4754,6 +4834,12 @@ static void coopSendWorld(void)
     p.keycopied = g_CurrentPlayer->copiedgoldeneye != 0;
     p.alarm = alarmIsActive() != 0;
     p.calm = (u16) coopLocalCalm();
+    if (coopNetIsHost() && sClockSet)
+    {
+        p.clock = countdownTimerGetValue();
+        p.clockflags = COOP_CLOCK_SET | (countdownTimerIsRunning() ? COOP_CLOCK_RUNNING : 0)
+                     | ((clock_drawn_flag & 1) ? 0 : COOP_CLOCK_SHOWN);
+    }
     coopNetSend(&p, sizeof(p));
 }
 
@@ -4805,6 +4891,7 @@ static void coopApplyWorld(CoopWorldPkt *p)
             portConLogf("ge: coop: alarm off (host)\n");
             alarmDeactivate();
         }
+        coopApplyClock(p);
     }
     for (r = ptr_last_enter_room_subobject_entry_type20, i = 0; r != NULL && i < 32; r = r->next, i++)
     {
@@ -7428,6 +7515,35 @@ s32 coopOwnBondCounts(void)
     return 1;
 }
 
+/* Cradle: falling off the dish into its shaft (pad 147's room, below y -2550
+ * then -4070) runs the level script's "Bond fell" ending, and with partners
+ * that list (0x041c) ended the mission for everybody when any one of them
+ * fell. In co-op those two checks never pass (chrai.c) and each game kills
+ * its own Bond at the bottom of the shaft instead: an ordinary death, with
+ * the lives, bleed-out and team-out rules any other death has. */
+#define COOP_CRADLE_FALL_PAD 147
+#define COOP_CRADLE_FALL_Y   -4070.0f
+
+s32 coopLevelFallCheckOff(f32 y)
+{
+    return sEnabled > 0 && !coopVersus() && bossGetStageNum() == LEVELID_CRADLE
+        && (y == -2550.0f || y == COOP_CRADLE_FALL_Y);
+}
+
+static void coopCradleFallTick(void)
+{
+    if (!coopLevelFallCheckOff(COOP_CRADLE_FALL_Y) || !coopInMission()
+        || g_CurrentPlayer->bonddead || g_PlayerInvincible || g_CoopPropOverride != NULL)
+    {
+        return;
+    }
+    if (getCurrentPlayerProp()->pos.y < COOP_CRADLE_FALL_Y && check_if_actor_is_at_preset(NULL, COOP_CRADLE_FALL_PAD))
+    {
+        portConLogf("ge: coop: fell into the Cradle shaft: a death of our own\n");
+        bondviewCallRecordDamageKills(10.0f, 0.0f, -1, 1);
+    }
+}
+
 /* What "Bond" holds and how hurt they are, for whoever is Bond right now (a
  * guard's target, a coopAltBondBegin / coopChrAltBegin try): a partner's from
  * their STATE, else our own. The game's checks read our own player struct,
@@ -7801,6 +7917,7 @@ static s32 coopIsPresentationCmd(u8 cmd)
         case AI_ShowAllChrs:
         case AI_MoveObject:     /* the Runway plane to its take-off pad */
         case AI_TriggerFadeAndExitLevelOnButtonPress:   /* an ending anyone may vote to skip (coop_vote.c) */
+        case AI_TriggerExplosionsAroundBond:   /* a self-destruct's blast at zero: around every player */
             return 1;
         default:
             return 0;
@@ -7809,11 +7926,35 @@ static s32 coopIsPresentationCmd(u8 cmd)
 
 static s32 sApplyingRemoteAi;
 
+/* a joiner's own copy of the level scripts leaves these to the host: the
+ * countdown (WORLD's clock) and the blast when it runs out (relayed) */
+static s32 coopHostOwnsCmd(u8 cmd)
+{
+    switch (cmd)
+    {
+        case AI_HudCountdownShow:
+        case AI_HudCountdownHide:
+        case AI_HudCountdownSet:
+        case AI_HudCountdownStop:
+        case AI_HudCountdownStart:
+        case AI_TriggerExplosionsAroundBond:
+            return sEnabled > 0 && !coopVersus() && coopInMission();
+        default:
+            return 0;
+    }
+}
+
 void coopAiCommand(u8 *list, s32 offset, ChrRecord *self)
 {
     CoopEvent ev;
     s32 len;
     u8 cmd = list[offset];
+
+    if ((cmd == AI_HudCountdownSet || cmd == AI_HudCountdownStart || cmd == AI_HudCountdownShow)
+        && sEnabled > 0 && coopNetIsHost())
+    {
+        sClockSet = 1;   /* from now on WORLD carries it (coopSendWorld) */
+    }
 
     if (cmd == AI_SetChrAiList && list[offset + 1] == (u8) CHR_BOND_CINEMA)
     {
@@ -7891,6 +8032,10 @@ static void coopPendingCinemaTick(void)
  * steps over them) */
 s32 coopAiSkip(u8 *list, s32 offset, ChrRecord *self)
 {
+    if (sEnabled > 0 && !coopNetIsHost() && !sApplyingRemoteAi && coopHostOwnsCmd(list[offset]))
+    {
+        return 1;   /* the host's countdown and blast (coopApplyClock, coopApplyAiCommand) */
+    }
     return sEnabled > 0 && !coopNetIsHost() && sHostEndingHere && !sApplyingRemoteAi
         && g_CameraMode == CAMERAMODE_POSEND && coopIsPresentationCmd(list[offset])
         && (self == NULL || g_CurrentPlayer->prop == NULL || self != g_CurrentPlayer->prop->chr);

@@ -36,6 +36,7 @@
 
 #ifndef TARGET_N64
 static s32 coopk;  /* the partner a level script check is asking about (coopAltBondBegin) */
+s32 coopLevelFallCheckOff(f32 y);  /* coop.h comes in later: undeclared, the f32 would go as a double */
 /* the end of one coopChrAltBegin try: keep that player as the guard's target
  * when it settled the check, else back to its own */
 #define COOP_ALT_DONE(settled, stimulus) \
@@ -4277,6 +4278,10 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     {
                         below = getCurrentPlayerProp()->pos.y < bondpos;
                         coopAltBondEnd();
+                    }
+                    if (coopLevelFallCheckOff(bondpos))
+                    {   /* co-op: a fall is that player's own death (coop.c, coopCradleFallTick) */
+                        below = 0;
                     }
                     if (below)
                     {

@@ -1937,13 +1937,51 @@ ROM. Fixed here (no packet changes, COOP_VERSION stays 13):
 
 Found, not fixed here:
 
-- Cradle (confirmed): ai_39 is the "Bond fell off the platform" check (in
-  pad 0x93's room and below y -4070: KIA and the fall ending). Any one
-  player dropping into that shaft ends the mission for the team
-  (all_objectives_complete=0), host or joiner (GE_COOP_TESTPAD=147:10 on
-  either). By reading, the room and height checks can also pass for two
-  different players (one in the shaft room, another lower down).
-  Wants a per-player rule: the faller dies, the others play on.
 - Facility (seen, cosmetic): the joiner gets "objective B failed" for about a
   second when it reaches Doak's lab first; its own copy of the flags has
   0x10000 until the host's WORLD packet clears it.
+
+Second round (same day), also fixed here (this round does change the
+WORLD packet: COOP_VERSION 14):
+
+- Cradle fall: ai_39 is the "Bond fell off the platform" check (in pad
+  147's room, below y -2550 then -4070: list 0x041c, KIA and the fall
+  ending). Any one player dropping into that shaft ended the mission for
+  the team (all_objectives_complete=0), host or joiner, and the host's
+  partner loop also ran it when a joiner's puppet came up out of the shaft
+  on respawn. In co-op those two height checks never pass
+  (coopLevelFallCheckOff in AI_IFBondYPosLessThan) and each game kills its
+  own Bond at the bottom of the shaft (coopCradleFallTick): an ordinary
+  death, so lives, bleed-out and the team-out rule decide. chrai.c sees
+  coop.h only further down, so it declares coopLevelFallCheckOff itself:
+  undeclared, its f32 went as a double and the check read garbage. Tests
+  (GE_COOP_TESTPAD=147:10, GE_AIDBG=1 to watch for list 1052): joiner falls (three runs) ->
+  joiner down and spectating, respawned by the host 20 s later where the
+  host was calm, no 1052 and no mission end; host falls -> the same the
+  other way round; joiner falls on its last life (GE_COOP_LIVES=1) ->
+  joiner out, host plays on; both fall -> both down, back to the lobby
+  with the mission failed. Before this, three of five joiner falls ended
+  the mission through 1052 just after the joiner's respawn.
+- Countdowns (Silo, Statue, Bunker 2, Train, and every other
+  hud_countdown_* user): each game ran its own copy of the timer from its
+  own copy of the script, so a player who dropped in late had a clock that
+  started when they arrived, and the blast (AI_TriggerExplosionsAroundBond)
+  went off in each game on its own clock. Confirmed on Silo, GE_DIFF=1,
+  joiner 30 s late: host 449 s at its start, joiner 444 s at its own start
+  some 25 s later, so its blast and fail came 25 s after the host's. Now the
+  host owns the clock: a joiner skips its own HudCountdownSet/Start/Stop/
+  Show/Hide and the blast (coopAiSkip, coopHostOwnsCmd), the host relays
+  the blast like other presentation commands, and the WORLD packet carries
+  the clock (value, running, shown; a joiner snaps to it when more than
+  half a second off). COOP_VERSION 14: a joiner now leaves its countdown
+  to the host, so both sides must be this build. Retest: the late Silo joiner shows "countdown running and shown,
+  427.3 s left (host)" on arrival and stays in step; Bunker 2 with both
+  joining together, and with the host out of lives (GE_COOP_LIVES=1
+  GE_COOP_TESTDIE=600), stops on the host's zero and the blast reaches the
+  living joiner. Statue and Bunker 2 with players joining together were
+  already within a second before the fix; Train's timer needs chrs 0x46
+  and 0x48 gone and wasn't reached in the harness.
+- Harness: GE_COOP_TESTFLAG=<hex>:<s> sets stage flags on the host that far
+  in (the hex as the game holds it: if_objective_bitfield_is_set_on's
+  argument in a setup file is byte-reversed, 0x00800000 there is 8000
+  here); GE_COOP_TESTCLOCK=1 logs the countdown every 5 s.
