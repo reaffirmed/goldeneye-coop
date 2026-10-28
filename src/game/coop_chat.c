@@ -39,6 +39,7 @@
 #include "options.h"
 #include "lv.h"
 #include "coop.h"
+#include "joy.h"
 
 extern void portConLogf(const char *fmt, ...);
 extern Gfx *portHudScaleBegin(Gfx *gdl, f32 x, f32 y);
@@ -60,6 +61,17 @@ extern s32 portTextInputActive(void);
 #define PORTTEXT_BACKSPACE 1
 #define PORTTEXT_ACCEPT    2
 #define PORTTEXT_CANCEL    3
+#endif
+
+#ifdef GE_VIDEO
+extern s32 portInputGlyphStyle(void);   /* input_pc.c: 0 the keyboard and mouse were pressed last, else a pad */
+extern void portInputWindowSize(int *w, int *h);
+extern void portOskTextBegin(const char *title, s32 maxlen);   /* front.c's on-screen keyboard */
+extern s32 portOskTextStep(char *out, s32 cap);
+extern void portOskTextEnd(void);
+extern Gfx *portOskTextRender(Gfx *DL);
+extern int coopSteamFloatingKeyboard(int x, int y, int w, int h);
+extern void coopSteamFloatingKeyboardClose(void);
 #endif
 
 #define COOPCHAT_PART     24    /* characters in one event */
@@ -93,6 +105,8 @@ typedef struct
 } CoopFeedLine;
 
 static s32 sTyping;
+static s32 sKeys;           /* COOPKEYS_*: the keyboard this line was opened with */
+static s32 sKeysSkip;       /* the press that opened the grid must not type in it */
 static char sLine[COOPCHAT_MAX + 1];
 static s32 sLineLen;
 static s32 sEatEscape;      /* ticks the pause must ignore Escape for */
@@ -263,13 +277,58 @@ void coopChatApply(const u8 *raw, s32 from)
 
 /* ---- typing ---------------------------------------------------------------- */
 
+/* A keyboard for a player on a pad: Steam's floating one where Steam shows it
+ * (it then types as key presses do), else the on-screen grid. COOPKEYS_NONE
+ * for the keyboard and mouse, which type as before. */
+s32 coopPadKeysOpen(const char *title, s32 maxlen)
+{
+#ifdef GE_VIDEO
+    int w, h;
+
+    if (portInputGlyphStyle() == 0)
+    {
+        return COOPKEYS_NONE;
+    }
+    portInputWindowSize(&w, &h);
+    if (coopSteamFloatingKeyboard(0, h * 3 / 4, w * 3 / 5, h / 8))
+    {   /* beside the chat line at the bottom left, not over it */
+        portConLogf("ge: coop: %s on Steam's keyboard\n", title);
+        return COOPKEYS_STEAM;
+    }
+    portOskTextBegin(title, maxlen);
+    portConLogf("ge: coop: %s on the on-screen keyboard\n", title);
+    return COOPKEYS_GRID;
+#else
+    return COOPKEYS_NONE;
+#endif
+}
+
+void coopPadKeysClose(s32 keys)
+{
+#ifdef GE_VIDEO
+    if (keys == COOPKEYS_STEAM)
+    {
+        coopSteamFloatingKeyboardClose();
+    }
+    else if (keys == COOPKEYS_GRID)
+    {
+        portOskTextEnd();
+    }
+#endif
+}
+
 static void coopChatClose(void)
 {
     if (sTyping)
     {
-        portTextInputStop();
+        if (sKeys != COOPKEYS_GRID)
+        {
+            portTextInputStop();
+        }
+        coopPadKeysClose(sKeys);
     }
     sTyping = 0;
+    sKeys = COOPKEYS_NONE;
     sLineLen = 0;
     sLine[0] = '\0';
 }
@@ -284,7 +343,30 @@ void coopChatPress(void)
     sLineLen = 0;
     sLine[0] = '\0';
     sTypingInMission = 0;
-    portTextInputStart();
+    sKeys = coopPadKeysOpen("CHAT", COOPCHAT_MAX);
+    sKeysSkip = 1;
+    if (sKeys != COOPKEYS_GRID)
+    {
+        portTextInputStart();
+    }
+}
+
+/* the on-screen keyboard is up for the chat line: it has the pad (bondview2.c
+ * MoveBond keeps it from Bond) and is drawn (coopFeedRender, the lobby) */
+s32 coopChatOnGrid(void)
+{
+    return sTyping && sKeys == COOPKEYS_GRID;
+}
+
+Gfx *coopChatGridRender(Gfx *gdl)
+{
+#ifdef GE_VIDEO
+    if (coopChatOnGrid())
+    {
+        gdl = portOskTextRender(gdl);
+    }
+#endif
+    return gdl;
 }
 
 s32 coopChatTyping(void)
@@ -381,12 +463,71 @@ static void coopToastTestTick(s32 inmission)
     }
 }
 
+/* GE_COOP_TESTGRID=<s>:<presses>: <s> seconds into the mission (or after a
+ * partner shows up in the lobby), open the chat line and press, one every
+ * 12 ticks, A B S(tart) U D L R on the pad: the on-screen keyboard with
+ * GE_GLYPHS=1 (harness only) */
+static void coopChatTestGrid(s32 inmission)
+{
+#ifdef GE_VIDEO
+    static s32 at = -2;
+    static char keys[48];
+    static u32 base;
+    const u32 now = inmission ? coopExtMissionTicks() : sNow;
+    s32 k;
+
+    if (at == -2)
+    {
+        const char *e = getenv("GE_COOP_TESTGRID");
+        const char *colon = (e != NULL) ? strchr(e, ':') : NULL;
+
+        at = (colon != NULL) ? atoi(e) * 60 : -1;
+        snprintf(keys, sizeof(keys), "%s", (colon != NULL) ? colon + 1 : "");
+    }
+    if (at < 0 || !coopLobbyHasPartner() || (!inmission && !coopLobbyPartnerOnScreen()))
+    {
+        return;
+    }
+    if (base == 0)
+    {
+        base = now + 1;
+    }
+    if (now - (base - 1) == (u32) at)
+    {
+        coopChatPress();
+        return;
+    }
+    k = ((s32) (now - (base - 1)) - at) / 12 - 1;
+    if (((s32) (now - (base - 1)) - at) % 12 != 0 || k < 0)
+    {
+        return;
+    }
+    if (k >= (s32) strlen(keys))
+    {
+        at = -1;
+        return;
+    }
+    switch (keys[k])
+    {
+        case 'A': portJoyInjectPressed(0, A_BUTTON); break;
+        case 'B': portJoyInjectPressed(0, B_BUTTON); break;
+        case 'S': portJoyInjectPressed(0, START_BUTTON); break;
+        case 'U': portJoyInjectPressed(0, U_JPAD); break;
+        case 'D': portJoyInjectPressed(0, D_JPAD); break;
+        case 'L': portJoyInjectPressed(0, L_JPAD); break;
+        case 'R': portJoyInjectPressed(0, R_JPAD); break;
+    }
+    portConLogf("ge: coop: testgrid: press %c, line \"%s\"\n", keys[k], sLine);
+#endif
+}
+
 static void coopChatTestTick(s32 inmission)
 {
     static CoopChatTest mission = { "GE_COOP_TESTCHAT", -2 };
     static CoopChatTest lobby = { "GE_COOP_TESTLOBBYCHAT", -2 };
 
     coopToastTestTick(inmission);
+    coopChatTestGrid(inmission);
 
     coopChatTestOne(&mission, inmission && coopLobbyHasPartner(), coopExtMissionTicks());
     coopChatTestOne(&lobby, !inmission && coopLobbyHasPartner() && coopLobbyPartnerOnScreen(), sNow);
@@ -429,10 +570,49 @@ void coopChatTickStill(void)
     }
 }
 
+static void coopChatSendTyped(void)
+{
+    s32 start = 0;
+
+    while (sLine[start] == ' ')
+    {
+        start++;
+    }
+    if (sLine[start] != '\0')
+    {
+        coopChatSend(sLine + start);
+    }
+}
+
 static void coopChatInput(void)
 {
     s32 guard;
 
+#ifdef GE_VIDEO
+    if (sKeys == COOPKEYS_GRID)
+    {
+        s32 r;
+
+        if (sKeysSkip)
+        {
+            sKeysSkip = 0;
+            return;
+        }
+        r = portOskTextStep(sLine, sizeof(sLine));
+        sLineLen = (s32) strlen(sLine);
+        if (r > 0)
+        {
+            coopChatSendTyped();
+        }
+        if (r != 0)
+        {
+            sKeys = COOPKEYS_NONE;  /* the grid has closed itself */
+            coopChatClose();
+            sEatEscape = 2;
+        }
+        return;
+    }
+#endif
     for (guard = 0; guard < 64 && sTyping; guard++)
     {
         char c = 0;
@@ -460,16 +640,7 @@ static void coopChatInput(void)
         }
         else if (key == PORTTEXT_ACCEPT)
         {
-            s32 start = 0;
-
-            while (sLine[start] == ' ')
-            {
-                start++;
-            }
-            if (sLine[start] != '\0')
-            {
-                coopChatSend(sLine + start);
-            }
+            coopChatSendTyped();
             coopChatClose();
             sEatEscape = 2;
         }

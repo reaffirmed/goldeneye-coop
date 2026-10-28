@@ -38,6 +38,7 @@ void coopMissionComplete(void);
 s32  coopFrontTick(void);
 s32  coopAltBondBegin(s32 k); /* 1: "Bond" is now the k-th living partner (from 0), call coopAltBondEnd */
 void coopAltBondEnd(void);
+PropRecord *coopAutogunTarget(PropRecord *gun, f32 aimdist, f32 rot, f32 arcmin, f32 arcmax); /* propobj.c: who a drone gun aims at */
 s32  coopOwnBondCounts(void);         /* 0: a level script's own-Bond check skips the host's body (down, a partner standing) */
 s32  coopLevelFallCheckOff(f32 y);   /* 1: a level script's fall check that co-op leaves to each player's own game */
 s32  coopBondHasItem(s32 item);          /* chrai.c: whoever is Bond now holds this item (a partner's from STATE) */
@@ -94,7 +95,9 @@ enum { COOPOUT_NONE, COOPOUT_BLEDOUT, COOPOUT_LIVES };
 enum
 {
     COOPEV_CINEMA = 56,     /* host -> all: CoopCinemaMsg, the host's intro is over */
-    COOPEV_VOTE = 57        /* to the host: a vote; host -> all: the count (coop_vote.c) */
+    COOPEV_VOTE = 57,       /* to the host: a vote; host -> all: the count (coop_vote.c) */
+    COOPEV_LIVES = 58,      /* to the host: our lives this mission; host -> a returning joiner: what it had left (coop.c) */
+    COOPEV_SEEN = 59        /* to the host: guards our screen has drawn (CHRFLAG_HAS_BEEN_ON_SCREEN, coop.c) */
 };
 #define COOP_ALL_PLAYERS 0xFF   /* coopDesignSend's `to`: everyone */
 void coopDesignSend(s32 kind, s32 to, const void *payload, s32 len);
@@ -592,6 +595,12 @@ void coopTeamTimeUsed(s32 folder, s32 stage, s32 difficulty, s32 timer); /* file
 /* chat (coop_chat.c): the chat key opens a line, Return sends it to everyone,
  * Escape drops it; lines and toasts fade out over the HUD and the lobby */
 void coopChatPress(void);
+enum { COOPKEYS_NONE, COOPKEYS_STEAM, COOPKEYS_GRID };
+s32  coopPadKeysOpen(const char *title, s32 maxlen);   /* a pad player's keyboard for a text box (coop_chat.c) */
+void coopPadKeysClose(s32 keys);
+s32  coopChatOnGrid(void);
+s32  coopBrowseOnGrid(void);    /* the password box is on the on-screen keyboard */      /* the chat line is on the on-screen keyboard, which has the pad */
+Gfx *coopChatGridRender(Gfx *gdl);
 s32  coopChatTyping(void);
 s32  coopChatEatEscape(void);   /* 1: this Escape was the chat's, not the pause's */
 void coopChatTick(s32 inmission);
@@ -616,6 +625,7 @@ void coopItemsExplodeBegin(PropRecord *prop);           /* propobj.c propExplode
 void coopItemsExplodeEnd(void);
 s32  coopItemsExploding(void);
 s32  coopItemsExplodingOwner(void);
+s32  coopItemsExplodingOurRound(void);               /* a rocket or grenade round we fired is going off */
 s32  coopItemsIsPartners(ObjectRecord *obj);            /* a partner's remote mine: not our detonator's */
 s32  coopItemsEmbedPending(ObjectRecord *obj);          /* propobj.c: stuck by a partner's word, matrix still to work out */
 s32  coopItemsUnsettled(PropRecord *prop);             /* propobj.c weaponFindThrown: a partner's throw, still in the air for them */

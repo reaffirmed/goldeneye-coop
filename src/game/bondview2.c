@@ -9667,6 +9667,11 @@ void MoveBond(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
     buttons = weapmenuFilterButtons(buttons, oldbuttons);   /* fire picks from an open weapon menu */
     buttons = coopLookTestButtons(buttons);                 /* harness: GE_COOP_TESTFIRE holds fire */
     coopVersusTestInput(&stick_x, &stick_y, &buttons);      /* harness: GE_VS_WANDER walks about */
+    if (coopChatOnGrid())
+    {   /* the pad is typing a chat line on the on-screen keyboard (coop_chat.c) */
+        stick_x = stick_y = 0;
+        buttons = oldbuttons = 0;
+    }
 #endif
     bondviewProcessInput(stick_x, stick_y, buttons, oldbuttons);
 
@@ -13846,6 +13851,12 @@ void bondviewUpdateGuardTankFlagsRelated(PropRecord *prop, s32 flag)
         sub_GAME_7F04F218(g_PlayerTankProp, flag);
     }
 
+#ifndef TARGET_N64
+    if (playerIndex < 0)
+    {
+        return;     /* a co-op partner's body (coopAutogunTarget) */
+    }
+#endif
     g_playerPointers[playerIndex]->field_AC = flag;
 }
 

@@ -101,6 +101,9 @@ static sbool (*pMDGetAPICallResult)(int pipe, u64s call, void *buf, int size, in
 static void *(*pSteamUser)(void);
 static void *(*pSteamMatchmaking)(void);
 static void *(*pSteamFriends)(void);
+static void *(*pSteamUtils)(void);  /* optional: Steam's own on-screen keyboard (Deck, Big Picture) */
+static sbool (*pShowFloatingKeyboard)(void *, int, int, int, int, int);
+static sbool (*pDismissFloatingKeyboard)(void *);
 static void *(*pSteamNetMsgs)(void);
 static u64s (*pUserGetSteamID)(void *self);
 static u64s (*pCreateLobby)(void *self, int type, int maxmembers);
@@ -291,6 +294,9 @@ static int loadAll(void)
         portConLogf("ge: steam: no Steam Voice exports in %s; voice chat is off\n", STEAM_LIB);
         pStartVoice = NULL;
     }
+    pSteamUtils = (void *(*)(void)) LIB_SYM(sLib, "SteamAPI_SteamUtils_v010");
+    *(void **) &pShowFloatingKeyboard = LIB_SYM(sLib, "SteamAPI_ISteamUtils_ShowFloatingGamepadTextInput");
+    *(void **) &pDismissFloatingKeyboard = LIB_SYM(sLib, "SteamAPI_ISteamUtils_DismissFloatingGamepadTextInput");
     pSteamFriends = (void *(*)(void)) LIB_SYM(sLib, "SteamAPI_SteamFriends_v018");
     if (pSteamFriends == NULL)
     {
@@ -1518,6 +1524,30 @@ int coopSteamJoinRefused(void)
  * compressed bytes in its own packets and asks Steam here to decode them. */
 
 static int sRecording;
+
+/* Steam's floating keyboard over the text box at x, y, w, h (window pixels):
+ * 1 when Steam shows it (a Steam Deck, Big Picture), which then types into the
+ * game as key presses; 0 elsewhere, and the game shows its own */
+int coopSteamFloatingKeyboard(int x, int y, int w, int h)
+{
+    void *utils = (sReady && pSteamUtils != NULL && pShowFloatingKeyboard != NULL) ? pSteamUtils() : NULL;
+
+    if (utils == NULL)
+    {
+        return 0;
+    }
+    return pShowFloatingKeyboard(utils, 0 /* k_EFloatingGamepadTextInputModeModeSingleLine */, x, y, w, h) ? 1 : 0;
+}
+
+void coopSteamFloatingKeyboardClose(void)
+{
+    void *utils = (sReady && pSteamUtils != NULL && pDismissFloatingKeyboard != NULL) ? pSteamUtils() : NULL;
+
+    if (utils != NULL)
+    {
+        pDismissFloatingKeyboard(utils);
+    }
+}
 
 /* 1 when Steam is up and has the voice calls */
 int coopSteamVoiceAvailable(void)

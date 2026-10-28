@@ -61,6 +61,14 @@ static s32 sUsedStage;
 static s32 sUsedLevel;
 static s32 sUsedDiff;
 static s32 sUsedTimer;
+static s32 sAdopt;              /* a joiner that took over as host: the old host's time minus ours */
+static s32 sFollowed;           /* joiner: we have the host's time for this mission */
+
+/* our own mission timer, on the old host's clock after a migration */
+static s32 coopTeamTimeOwn(void)
+{
+    return getMissiontimer() + sAdopt;
+}
 
 static s32 coopTeamTimeLive(void)
 {
@@ -68,7 +76,7 @@ static s32 coopTeamTimeLive(void)
 
     if (!coopLobbyHasPartner() || coopExtIsHost())
     {
-        return getMissiontimer();
+        return coopTeamTimeOwn();
     }
     if (sExact >= 0 && sExactStage == stage)
     {
@@ -104,7 +112,7 @@ void coopTeamTimeSend(void)
         return;
     }
     m.stage = bossGetStageNum();
-    m.timer = getMissiontimer();
+    m.timer = coopTeamTimeOwn();
     m.final = 1;
     coopExtSend(COOPEV_TEAMTIME, 0xFF /* COOP_ALL */, &m, sizeof(m));
     portConLogf("ge: coop: team time %d.%02d s sent\n", m.timer / 60, (m.timer % 60) * 100 / 60);
@@ -193,6 +201,20 @@ void coopTeamTimeTick(s32 inmission)
         sExact = -1;
         sHostTimer = -1;
         sUsedFolder = -1;
+        sAdopt = 0;
+        sFollowed = 0;
+    }
+    if (!coopExtIsHost())
+    {
+        sFollowed = sHostTimer >= 0 && sHostStage == bossGetStageNum();
+    }
+    else if (sFollowed)
+    {   /* the host left and we took over: the mission's time goes on from the old host's,
+         * not from when we got in (a late joiner's own timer started later) */
+        sAdopt = sHostTimer - sMineAt;
+        sFollowed = 0;
+        portConLogf("ge: coop: team time goes on from the old host's, %d s (ours %d s)\n",
+                    coopTeamTimeOwn() / 60, getMissiontimer() / 60);
     }
     if (coopExtIsHost() && coopLobbyHasPartner() && (coopExtMissionTicks() % 60) == 30)
     {
@@ -201,7 +223,7 @@ void coopTeamTimeTick(s32 inmission)
         memset(&p, 0, sizeof(p));
         p.type = COOPPKT_TEAMTIME;
         p.msg.stage = bossGetStageNum();
-        p.msg.timer = getMissiontimer();
+        p.msg.timer = coopTeamTimeOwn();
         coopExtSendPacket(&p, sizeof(p), 0xFF /* COOP_ALL */);
     }
 }
