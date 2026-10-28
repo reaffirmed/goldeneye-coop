@@ -44,6 +44,8 @@ static s32 sPublic;
 static char sPassword[COOPBROWSE_PW + 1];
 static s32 sDirty = 1;          /* the options have to go to Steam */
 static s32 sTyping;             /* COOPBROWSE_TYPE_* */
+static s32 sKeys;               /* COOPKEYS_*: a pad player's keyboard (coop_chat.c) */
+static s32 sKeysSkip;           /* the press that opened the grid must not type in it */
 static s32 sTypingFor;          /* the public game a join password is for */
 static char sLine[COOPBROWSE_PW + 1];
 static s32 sLineLen;
@@ -200,16 +202,44 @@ void coopBrowseTypeStart(s32 kind, s32 forgame)
     sTypingFor = forgame;
     sLineLen = 0;
     sLine[0] = '\0';
-    portTextInputStart();
+    sKeys = coopPadKeysOpen("PASSWORD", COOPBROWSE_PW);
+    sKeysSkip = 1;
+    if (sKeys != COOPKEYS_GRID)
+    {
+        portTextInputStart();
+    }
 }
 
 static void coopBrowseTypeStop(void)
 {
     if (sTyping)
     {
-        portTextInputStop();
+        if (sKeys != COOPKEYS_GRID)
+        {
+            portTextInputStop();
+        }
+        coopPadKeysClose(sKeys);
     }
     sTyping = 0;
+    sKeys = COOPKEYS_NONE;
+}
+
+/* the password is on the on-screen keyboard (front.c draws it over the lobby) */
+s32 coopBrowseOnGrid(void)
+{
+    return sTyping && sKeys == COOPKEYS_GRID;
+}
+
+static void coopBrowseTyped(s32 kind)
+{
+    if (kind == COOPBROWSE_TYPE_HOST)
+    {
+        coopBrowseSetPassword(sLine);   /* empty clears it */
+    }
+    else if (sLineLen > 0)
+    {
+        coopBrowseJoinWith(sTypingFor, sLine);
+    }
 }
 
 s32 coopBrowseTyping(void)
@@ -238,6 +268,31 @@ static void coopBrowseTypeTick(void)
 {
     s32 guard;
 
+#ifdef GE_VIDEO
+    if (sTyping && sKeys == COOPKEYS_GRID)
+    {
+        extern s32 portOskTextStep(char *out, s32 cap);
+        s32 r, kind = sTyping;
+
+        if (sKeysSkip)
+        {
+            sKeysSkip = 0;
+            return;
+        }
+        r = portOskTextStep(sLine, sizeof(sLine));
+        sLineLen = (s32) strlen(sLine);
+        if (r != 0)
+        {
+            sKeys = COOPKEYS_NONE;  /* the grid has closed itself */
+            coopBrowseTypeStop();
+            if (r > 0)
+            {
+                coopBrowseTyped(kind);
+            }
+        }
+        return;
+    }
+#endif
     for (guard = 0; guard < 64 && sTyping; guard++)
     {
         char c = 0;
@@ -268,14 +323,7 @@ static void coopBrowseTypeTick(void)
             s32 kind = sTyping;
 
             coopBrowseTypeStop();
-            if (kind == COOPBROWSE_TYPE_HOST)
-            {
-                coopBrowseSetPassword(sLine);   /* empty clears it */
-            }
-            else if (sLineLen > 0)
-            {
-                coopBrowseJoinWith(sTypingFor, sLine);
-            }
+            coopBrowseTyped(kind);
         }
         else if (key == PORTTEXT_CANCEL)
         {

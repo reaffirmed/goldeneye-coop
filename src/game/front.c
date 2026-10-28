@@ -6405,6 +6405,7 @@ static const char *portSheetLabel(s32 row)
  * field shows (about twelve of the widest glyph), so the field scrolls and
  * marks the overflow instead. */
 #define PORT_OSK_MAXLEN   22
+#define PORT_OSK_TEXTCAP  128    /* the longest text any caller asks for (co-op chat), and its terminator */
 /* What the field shows when the head of the name has scrolled off. The
  * keyboard cannot type '<' - its charset is 0-9 A-Z space ? ! . - so this can
  * never be mistaken for part of the name, which a leading "..." could be. */
@@ -6568,7 +6569,8 @@ static s32 port_osk_typing;          /* a real keyboard owns it */
 static f32 port_osk_cursor_h;        /* the cursor at the last tick: hover picks only on MOTION */
 static f32 port_osk_cursor_v;
 static s32 port_osk_done;            /* 1 = OK, -1 = cancelled, 0 = still going */
-static char port_osk_text[PORT_OSK_MAXLEN];
+static char port_osk_text[PORT_OSK_TEXTCAP];
+static s32 port_osk_max = PORT_OSK_MAXLEN;  /* this opening's cap, terminator included */
 static char port_osk_title[32];
 
 #ifdef GE_VIDEO
@@ -6619,6 +6621,7 @@ static void portOskOpen(const char *title, const char *start)
         (void) portMouseClickPressed();
     }
 #endif
+    port_osk_max = PORT_OSK_MAXLEN;
     snprintf(port_osk_title, sizeof(port_osk_title), "%s", (title != NULL) ? title : "NAME");
     snprintf(port_osk_text, sizeof(port_osk_text), "%s", (start != NULL) ? start : "");
 }
@@ -6642,7 +6645,7 @@ static void portOskAppend(char c)
 {
     const s32 n = (s32) strlen(port_osk_text);
 
-    if (n < PORT_OSK_MAXLEN - 1)
+    if (n < port_osk_max - 1)
     {
         port_osk_text[n] = c;
         port_osk_text[n + 1] = '\0';
@@ -6958,7 +6961,7 @@ static Gfx *portOskDraw(Gfx *DL)
     y = PORT_OSK_Y0 - PORT_OSK_HEAD + 3;
     DL = frontPrintText(DL, &x, &y, port_osk_title, PORT_OSK_CHARS, PORT_OSK_FONT, 0xFF, viGetX(), viGetY(), 0, 0);
     {
-        char field[PORT_OSK_MAXLEN + 8];   /* the name, the caret, the marker, the newline */
+        char field[PORT_OSK_TEXTCAP + 8];   /* the name, the caret, the marker, the newline */
         const s32 fy = PORT_OSK_Y0 - (PORT_OSK_HEAD / 2) + 1;
 
         /* Always the frontend font, so the name reads back with its real
@@ -6967,7 +6970,7 @@ static Gfx *portOskDraw(Gfx *DL)
          * before trimming so it never pushes the caret out. */
         {
             const s32 room = PORT_OSK_COLS * PORT_OSK_CELL_W - 8;
-            char raw[PORT_OSK_MAXLEN + 3];
+            char raw[PORT_OSK_TEXTCAP + 3];
             char *shown = raw;
             s32 fh, fw;
 
@@ -7078,6 +7081,43 @@ static Gfx *portOskDraw(Gfx *DL)
     }
     DL = microcode_constructor(DL);
     return DL;
+}
+
+/* Co-op's chat line and the lobby's password box (coop_chat.c, coop_browse.c)
+ * open the same keyboard for a player on a pad. Each tick of theirs steps it
+ * and copies the text out: 1 OK, -1 cancelled (it has closed), 0 still open. */
+void portOskTextBegin(const char *title, s32 maxlen)
+{
+    portOskOpen(title, NULL);
+    port_osk_max = (maxlen + 1 < PORT_OSK_TEXTCAP) ? maxlen + 1 : PORT_OSK_TEXTCAP;
+}
+
+s32 portOskTextStep(char *out, s32 cap)
+{
+    s32 closed;
+
+    if (!port_osk_open)
+    {
+        return -1;
+    }
+    closed = portOskTick();
+    snprintf(out, cap, "%s", port_osk_text);
+    return closed ? port_osk_done : 0;
+}
+
+void portOskTextEnd(void)
+{
+    portOskClose();
+}
+
+s32 portOskTextOpen(void)
+{
+    return port_osk_open;
+}
+
+Gfx *portOskTextRender(Gfx *DL)
+{
+    return port_osk_open ? portOskDraw(DL) : DL;
 }
 
 /* ---- the list ---- */
@@ -11580,6 +11620,10 @@ static Gfx *coopMwRender(Gfx *DL)
         {
             DL = coopMwText(DL, COOP_LOBBY_X, COOP_MW_FOOT_Y + 3 + i * COOP_MW_HELP_PITCH, MW_PANEL_R - COOP_LOBBY_X, lines[i], MW_DIM, FALSE);
         }
+    }
+    if (coopChatOnGrid() || coopBrowseOnGrid())
+    {   /* a pad player typing the chat line or a password */
+        DL = portOskTextRender(DL);
     }
     return DL;
 }

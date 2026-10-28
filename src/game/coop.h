@@ -593,6 +593,12 @@ void coopTeamTimeUsed(s32 folder, s32 stage, s32 difficulty, s32 timer); /* file
 /* chat (coop_chat.c): the chat key opens a line, Return sends it to everyone,
  * Escape drops it; lines and toasts fade out over the HUD and the lobby */
 void coopChatPress(void);
+enum { COOPKEYS_NONE, COOPKEYS_STEAM, COOPKEYS_GRID };
+s32  coopPadKeysOpen(const char *title, s32 maxlen);   /* a pad player's keyboard for a text box (coop_chat.c) */
+void coopPadKeysClose(s32 keys);
+s32  coopChatOnGrid(void);
+s32  coopBrowseOnGrid(void);    /* the password box is on the on-screen keyboard */      /* the chat line is on the on-screen keyboard, which has the pad */
+Gfx *coopChatGridRender(Gfx *gdl);
 s32  coopChatTyping(void);
 s32  coopChatEatEscape(void);   /* 1: this Escape was the chat's, not the pause's */
 void coopChatTick(s32 inmission);

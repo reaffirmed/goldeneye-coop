@@ -87,6 +87,10 @@ int  coopSteamPresenceOpen(void);       /* Steam up for presence and invites, no
 void coopSteamPresenceTick(void);       /* callbacks, when no session is pumping them */
 void coopSteamSetPresence(const char *status, int phase, unsigned long long group, int groupsize, int joinable);  /* phase: COOP_PRESENCE_* */
 
+/* Steam's floating gamepad keyboard (coop_steam.c), for src/game/coop_chat.c and coop_browse.c */
+int  coopSteamFloatingKeyboard(int x, int y, int w, int h);  /* 1 Steam shows it and types for us, 0 not here */
+void coopSteamFloatingKeyboardClose(void);
+
 /* Steam Voice (coop_steam.c), for src/game/coop_voice.c */
 int  coopSteamVoiceAvailable(void);     /* Steam is up and has the voice calls */
 void coopSteamVoiceRecord(int on);      /* the microphone on or off */

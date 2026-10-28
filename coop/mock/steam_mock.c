@@ -972,3 +972,24 @@ API int SteamAPI_ISteamUser_DecompressVoice(void *self, const void *in, unsigned
     *written = m * 2;
     return 0;
 }
+
+/* Steam's floating gamepad keyboard: shown only with GE_MOCK_FLOATKB=1 (a Steam
+ * Deck), and logged, so the game's own on-screen keyboard is used otherwise */
+API void *SteamAPI_SteamUtils_v010(void) { return &sIface; }
+API unsigned char SteamAPI_ISteamUtils_ShowFloatingGamepadTextInput(void *self, int mode, int x, int y, int w, int h)
+{
+    const char *e = getenv("GE_MOCK_FLOATKB");
+    char line[96];
+
+    (void) self;
+    snprintf(line, sizeof(line), "floating keyboard asked for (mode %d at %d,%d %dx%d): %s", mode, x, y, w, h,
+             (e != NULL && e[0] == '1') ? "shown" : "not on a Deck");
+    log_(line);
+    return e != NULL && e[0] == '1';
+}
+API unsigned char SteamAPI_ISteamUtils_DismissFloatingGamepadTextInput(void *self)
+{
+    (void) self;
+    log_("floating keyboard dismissed");
+    return 1;
+}
