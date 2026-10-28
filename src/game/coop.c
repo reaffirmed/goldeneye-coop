@@ -2597,23 +2597,6 @@ static void coopHarnessTick(void)
             testpad = -1;
         }
     }
-    if (coopNetIsHost() && coopPartnerHere() && coopInMission())
-    {   /* GE_COOP_TESTFLAG=<hex>:<s>: <s> seconds into the mission, the host sets those
-         * stage flags, as a script would (harness only) */
-        static s32 testflag = -2;
-        static u32 flagbits, flagat;
-        if (testflag == -2)
-        {
-            const char *e = getenv("GE_COOP_TESTFLAG");
-            testflag = (e != NULL && sscanf(e, "%x:%u", &flagbits, &flagat) == 2) ? 1 : -1;
-        }
-        if (testflag == 1 && sMissionTicks >= flagat * 60)
-        {
-            chrSetStageFlags(NULL, flagbits);
-            portConLogf("ge: coop: testflag %08x\n", flagbits);
-            testflag = -1;
-        }
-    }
     if (coopInMission())
     {   /* GE_COOP_TESTHOLD=<item>:<s>: <s> seconds into the mission, switch to that
          * item (1 the fists, holstered; harness only) */
