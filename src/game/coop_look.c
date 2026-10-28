@@ -708,9 +708,7 @@ static void coopLookShots(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *lo
     }
 }
 
-/* every tick, for each puppet; self is the chrnum our own Bond goes by on
- * the other games, so their shots at us draw no puff on our screen */
-void coopLookPuppetTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look, s32 dead, s32 self)
+static void coopLookTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look, s32 dead, s32 self, s32 animate)
 {
     s32 h;
 
@@ -720,10 +718,13 @@ void coopLookPuppetTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look
     }
     chr->hidden &= ~CHRHIDDEN_FIRE_TRACER;  /* the sound's repeat gate (sub_GAME_7F02BFE4), per tick */
     coopLookGuns(lp, chr, look, dead);
-    coopLookAnimate(lp, chr, look, dead);
-    for (h = GUNRIGHT; h <= GUNLEFT; h++)
+    if (animate)
     {
-        chrSetFiring(chr, h, !dead && (look->flash & (1 << h)) != 0);
+        coopLookAnimate(lp, chr, look, dead);
+        for (h = GUNRIGHT; h <= GUNLEFT; h++)
+        {
+            chrSetFiring(chr, h, !dead && (look->flash & (1 << h)) != 0);
+        }
     }
     if (!dead)
     {
@@ -734,6 +735,20 @@ void coopLookPuppetTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look
         lp->shotseq = look->shotseq;
     }
     coopAudioPuppetCue(lp, chr, look);  /* their draw and reload sounds, from where they stand (coop_audio.c) */
+}
+
+/* every tick, for each puppet; self is the chrnum our own Bond goes by on
+ * the other games, so their shots at us draw no puff on our screen */
+void coopLookPuppetTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look, s32 dead, s32 self)
+{
+    coopLookTick(lp, chr, look, dead, self, 1);
+}
+
+/* a versus body: guns, shots and sounds; Rare's own multiplayer code poses
+ * it and lights its muzzle flash from its player struct (coop_versus.c) */
+void coopLookBodyTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look, s32 dead, s32 self)
+{
+    coopLookTick(lp, chr, look, dead, self, 0);
 }
 
 /* ---- test harness (coop.c coopHarnessTick, bondview2.c MoveBond) ---------

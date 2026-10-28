@@ -95,7 +95,8 @@ extern void portConLogf(const char *fmt, ...);
                               gadgets in USE, where a throw stuck (COOPEV 29), the tank (COOPPKT 11);
                           13: Player Scaling (COOPSET 11), Friendly Fire Reduced and blasts, the victim scales a
                               partner's hit (HIT friendly), a blast's owner (EXPLODE), Friendly hits stat;
-                          14: the host's mission countdown in WORLD, its blast relayed (COOPEV_AICMD) */
+                          14: the host's mission countdown in WORLD, its blast relayed (COOPEV_AICMD); versus shares
+                              the arena's pickups (COOPEV 37), thrown items, dropped guns, object damage and knocks */
 
 enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7, COOPPKT_AISYNC = 8, COOPPKT_BYE = 9 };
 /* 10 and 11 (COOPPKT_EXT_FIRST..LAST in coop.h) are coop_ext.c's features' own packets;
@@ -1949,6 +1950,7 @@ static void coopTickBody(void)
     {   /* the multiplayer game's own rules; the others' bodies, not puppets (coop_versus.c) */
         coopSendState();
         coopVersusTick();
+        coopItemsTick((s32) sMissionTicks);     /* thrown things and dropped guns settle as the thrower's did */
         return;
     }
     coopStatsMissionTick(coopPartnerHere());
@@ -4898,13 +4900,31 @@ s32 coopObjDamage(ObjectRecord *obj, f32 damage, coord3d *pos, s32 item, s32 pla
     CoopEvent ev;
     s32 ofs;
 
-    if (sEnabled <= 0 || sApplyingRemoteObj || !coopNetHasPeer() || !coopPartnerHere() || coopVersus())
+    if (sEnabled <= 0 || sApplyingRemoteObj || !coopNetHasPeer() || !coopPartnerHere())
     {
         return 0;
     }
     ofs = coopSetupOfs(obj);
     if (ofs < 0)
     {
+        return 0;
+    }
+    if (coopVersus())
+    {   /* no world owner: our own shots and punches land here and in every other
+         * arena; blasts already go off in each (coop_versus.c, coop_items.c) */
+        if (player == 0 && item != 0x1D)    /* 0x1D: explosion */
+        {
+            memset(&ev, 0, sizeof(ev));
+            ev.kind = COOPEV_OBJDMG;
+            ev.u.obj.objofs = ofs;
+            ev.u.obj.damage = damage;
+            ev.u.obj.pos[0] = pos->f[0];
+            ev.u.obj.pos[1] = pos->f[1];
+            ev.u.obj.pos[2] = pos->f[2];
+            ev.u.obj.item = (s16) item;
+            ev.u.obj.player = 0;
+            coopQueueEventTo(&ev, COOP_ALL);
+        }
         return 0;
     }
     if (!coopNetIsHost())
@@ -4944,7 +4964,19 @@ static void coopApplyObjDamage(CoopEvent *ev)
     pos.f[0] = ev->u.obj.pos[0];
     pos.f[1] = ev->u.obj.pos[1];
     pos.f[2] = ev->u.obj.pos[2];
-    if (coopNetIsHost())
+    if (coopVersus())
+    {   /* their shot, as theirs here: a barrel it sets off is their kill */
+        s32 li = coopVsLocalOfNet(ev->from);
+
+        if (li <= 0)
+        {
+            return;
+        }
+        sApplyingRemoteObj = 1;
+        objApplyDamage(obj, ev->u.obj.damage, &pos, ev->u.obj.item, li);
+        sApplyingRemoteObj = 0;
+    }
+    else if (coopNetIsHost())
     {
         /* the joiner's shot: apply as ours; the hook sends the result back */
         coopObjNoteActor(ev->from, 1);
@@ -4977,7 +5009,7 @@ void coopObjKnocked(ObjectRecord *obj, s32 bounce, coord3d *viewdir)
     coord3d dir;
     s32 ofs;
 
-    if (sEnabled <= 0 || sApplyingKnock || coopVersus() || !coopNetHasPeer() || !coopPartnerHere() || (!bounce && !sKnockChildren))
+    if (sEnabled <= 0 || sApplyingKnock || !coopNetHasPeer() || !coopPartnerHere() || (!bounce && !sKnockChildren))
     {
         return;
     }
@@ -5406,11 +5438,8 @@ void coopPickedUp(ObjectRecord *obj, s32 kept)
     s32 ofs;
 
     if (coopVersus())
-    {   /* each arena keeps its own guns; only the scenario's item is shared */
-        if (obj->type == PROPDEF_COLLECTABLE)
-        {
-            coopVersusPickedUp(((WeaponObjRecord *) obj)->weaponnum);
-        }
+    {   /* it leaves every arena (coop_versus.c) */
+        coopVersusPickedUp(obj);
         return;
     }
     if (sEnabled <= 0 || sApplyingRemotePick)

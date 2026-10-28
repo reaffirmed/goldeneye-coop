@@ -6,10 +6,12 @@
  * Every game loads the same N-player match (front.c coopVsStartMatch) with
  * itself as the first player, local index 0, so the keyboard, mouse and first
  * pad stay where they always are. The other players' structs exist as they
- * do in split screen, but they are never ticked and get no view (lv.c): their
- * bodies are moved from each player's STATE with the co-op puppet code
- * (coop_look.c), and the game's own multiplayer rules run over all of them:
- * scores, scenarios, limits, the radar, respawns and the end screens.
+ * do in split screen, but they are never moved here (boss.c skips their
+ * lvlViewMoveTick) and get no view (lv.c): each one is filled from that
+ * player's STATE, and Rare's own split-screen body code (bondview2.c
+ * playerTick) poses and turns their body from it. The game's own multiplayer
+ * rules run over all of them: scores, scenarios, limits, the radar, respawns
+ * and the end screens.
  *
  * Who decides what:
  *   - a bullet: the shooter's game. A hit on another player's body goes to
@@ -22,6 +24,12 @@
  *   - Flag Tag's flag and the Golden Gun: whoever picks one up says so
  *     (VSITEM) and it leaves the other worlds; a holder's death drops it
  *     where they fell on every game.
+ *   - the arena's guns, ammo boxes and armour: whoever picks one up says so
+ *     (VSPICK) and it leaves the other worlds, to come back on Rare's timer.
+ *   - guns a dead player drops, grenades and mines: coop_items.c, as in
+ *     co-op (the dropper's or thrower's game says where they came to rest).
+ *   - shots on glass, crates and other setup objects: the shooter's game
+ *     sends each hit (OBJDMG) and every game applies it.
  *   - the end: any game whose limits end the match ends it for all (VSEND).
  *
  * Player numbers on the wire are the session's (0 the host); g_playerPointers
@@ -51,6 +59,7 @@
 #include "coop.h"
 #include "coop_net.h"
 #include "math_atan2f.h"
+#include "initanitable.h"
 
 extern void portConLogf(const char *fmt, ...);
 extern float sinf(float);
@@ -73,9 +82,17 @@ extern s32 walkTilesBetweenPoints_NoCallback(StandTile **tile, f32 x1, f32 z1, f
 extern void bondinvRemoveItemByID(ITEM_IDS item);
 extern int bondinvHasInvItem(ITEM_IDS item);
 extern PropRecord *g_ActivePropsHead;
+extern void objFree(ObjectRecord *obj, s32 freeprop, s32 canregen);
+extern s32 sizepropdef(PropDefHeaderRecord *pdef);
+extern void portJoyInjectHeld(s8 contpadnum, u16 mask);
 
 #define VS_DEAD_SETTLE  120     /* ticks a remote death plays before the game counts it as finished */
 #define VS_PKT_EVERY    12      /* ticks between our VERSUS packets (5 a second) */
+#ifdef VERSION_EU
+#define CHROBJ_REGEN_TICKS 1000 /* chrprop.c propExecuteTickOperation: a taken pickup's wait */
+#else
+#define CHROBJ_REGEN_TICKS 1200
+#endif
 
 /* a VERSUS packet: what the STATE does not carry, both ways five times a second */
 typedef struct
@@ -276,6 +293,42 @@ static void coopVsMoveBody(s32 li, const CoopRemoteInfo *info)
     pl->field_488.current_tile_ptr = stan;
 }
 
+/* Rare's split-screen code (bondview2.c playerTick, run as the props tick
+ * after coopTick) animates and turns each other player's body from that
+ * player's struct, which nothing here ticks: so the struct gets what their
+ * STATE says, and the body moves as it would on a split screen. Left stale,
+ * it turned every body back to where it first spawned and put it back in
+ * the idle pose each frame, over the running and strafing we set. */
+static void coopVsFeedPlayer(struct player *pl, const CoopRemoteInfo *info)
+{
+    f32 theta = 360.0f - info->yaw * (180.0f / M_PI_F);
+    s32 h;
+
+    while (theta >= 360.0f)
+    {
+        theta -= 360.0f;
+    }
+    while (theta < 0.0f)
+    {
+        theta += 360.0f;
+    }
+    pl->vv_theta = theta;
+    pl->vv_costheta = cosf(theta * (M_PI_F / 180.0f));
+    pl->vv_sintheta = sinf(theta * (M_PI_F / 180.0f));
+    pl->speedforwards = info->look.speedforwards;
+    pl->speedsideways = info->look.speedsideways;
+    pl->speedtheta = info->look.speedtheta;
+    pl->field_2A08 = info->look.aimpitch;      /* the body's aim up and down */
+    pl->field_2A0C = info->look.aimyaw;        /* and across */
+    pl->headanim = info->look.headanim;
+    pl->crouchpos = info->look.crouch;
+    pl->autocrouchpos = info->look.crouch;
+    for (h = GUNRIGHT; h <= GUNLEFT; h++)
+    {
+        pl->hands[h].field_87D = !info->dead && (info->look.flash & (1 << h)) != 0;   /* the muzzle flash */
+    }
+}
+
 static void coopVsRemoteTick(s32 li)
 {
     struct player *pl = g_playerPointers[li];
@@ -322,7 +375,8 @@ static void coopVsRemoteTick(s32 li)
         pl->colourfadetimemax60 = -1.0f;
         coopLookReset(&sVsLook[li]);
     }
-    coopLookPuppetTick(&sVsLook[li], pl->prop->chr, &info.look, info.dead, COOP_PUPPET_CHRNUM + sVsNet[0]);
+    coopVsFeedPlayer(pl, &info);
+    coopLookBodyTick(&sVsLook[li], pl->prop->chr, &info.look, info.dead, COOP_PUPPET_CHRNUM + sVsNet[0]);
 }
 
 /* ---- events -------------------------------------------------------------------- */
@@ -331,6 +385,7 @@ typedef struct { f32 damage; f32 vx; f32 vz; u8 armour; u8 pad[3]; } VsHit;
 typedef struct { u8 victim; u8 killer; u8 gg; u8 held; f32 pos[3]; } VsKill;
 typedef struct { u8 what; u8 item; u8 pad[2]; } VsItem;
 typedef struct { f32 pos[3]; s16 type; u8 rooms[8]; u8 pad[2]; } VsBoom;
+typedef struct { s32 objofs; s16 type; s16 item; } VsPick;
 
 enum { VSITEM_PICKED = 1 };
 
@@ -509,8 +564,8 @@ void coopVersusExplosion(PropRecord *source, coord3d *pos, s32 type, u8 *rooms)
     VsBoom b;
     s32 i;
 
-    if (!coopVersus() || sVsApplying || source != NULL || type == EXPLOSION_DEF_PLAYER)
-    {
+    if (!coopVersus() || sVsApplying || source != NULL || type == EXPLOSION_DEF_PLAYER || coopItemsExploding())
+    {   /* (a thrown grenade or mine: each arena sets off its own copy, coop_items.c) */
         return;
     }
     memset(&b, 0, sizeof(b));
@@ -545,20 +600,95 @@ static void coopVsApplyBoom(const VsBoom *b, s32 from)
     explosionCreate(NULL, &pos, stan, b->type, 0, owner, rooms, 0);
 }
 
-/* propobj.c (coopPickedUp): something was picked up here */
-void coopVersusPickedUp(s32 item)
+/* coop.c coopPickedUp: something was picked up here. The scenario's item
+ * says so with VSITEM; a gun, ammo box or armour the arena placed leaves the
+ * other arenas too (VSPICK) and comes back there on the same timer; a gun a
+ * player dropped or something thrown is coop_items.c's. */
+void coopVersusPickedUp(ObjectRecord *obj)
 {
     VsItem it;
+    VsPick pk;
+    s32 item = (obj->type == PROPDEF_COLLECTABLE) ? ((WeaponObjRecord *) obj)->weaponnum : -1;
 
-    if (!coopVersus() || item != coopVsScenarioItem())
+    if (!coopVersus() || sVsApplying)
     {
         return;
     }
-    memset(&it, 0, sizeof(it));
-    it.what = VSITEM_PICKED;
-    it.item = (u8) item;
-    coopVsSend(COOPEV_VSITEM, COOP_ALL, &it, sizeof(it));
-    portConLogf("ge: versus: we picked up item %d\n", item);
+    if (item >= 0 && item == coopVsScenarioItem())
+    {
+        memset(&it, 0, sizeof(it));
+        it.what = VSITEM_PICKED;
+        it.item = (u8) item;
+        coopVsSend(COOPEV_VSITEM, COOP_ALL, &it, sizeof(it));
+        portConLogf("ge: versus: we picked up item %d\n", item);
+        return;
+    }
+    memset(&pk, 0, sizeof(pk));
+    pk.objofs = coopExtSetupOfs(obj);
+    if (pk.objofs < 0)
+    {
+        coopItemsPickedUp(obj);
+        return;
+    }
+    pk.type = (s16) obj->type;
+    pk.item = (s16) item;
+    coopVsSend(COOPEV_VSPICK, COOP_ALL, &pk, sizeof(pk));
+    portConLogf("ge: versus: we picked up obj %d (type %d, item %d)\n", pk.objofs, pk.type, item);
+}
+
+/* the setup object at that offset, if it is the kind they say */
+static ObjectRecord *coopVsSetupObj(s32 ofs, s32 type)
+{
+    ObjectRecord *obj;
+
+    if (g_CurrentSetup.propDefs == NULL || ofs < 0)
+    {
+        return NULL;
+    }
+    obj = (ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + ofs);
+    if (coopExtSetupOfs(obj) != ofs || obj->type != type)
+    {
+        return NULL;
+    }
+    return obj;
+}
+
+/* it lies in this arena now (not taken, not waiting to come back) */
+static s32 coopVsPickupHere(ObjectRecord *obj)
+{
+    PropRecord *prop = obj->prop;
+
+    return prop != NULL && prop->obj == obj && (prop->flags & PROPFLAG_ENABLED) && prop->timetoregen == 0 && prop->parent == NULL;
+}
+
+/* someone else took a setup pickup: the same two steps as a pickup here
+ * (propPickupByPlayer's objFree, then propsTick's TICKOP_FREE), without
+ * the gun, so it waits to come back on Rare's timer as theirs does */
+static void coopVsApplyPick(const VsPick *pk, s32 from)
+{
+    ObjectRecord *obj = coopVsSetupObj(pk->objofs, pk->type);
+    PropRecord *prop;
+
+    if (obj == NULL || (prop = obj->prop) == NULL)
+    {
+        return;
+    }
+    if (!coopVsPickupHere(obj))
+    {
+        if (prop->timetoregen > 0 && (((PropDefHeaderRecord *) obj)->state & PROPSTATE_RESPAWN))
+        {   /* it came back there before here and they took it again: start our wait again too */
+            prop->timetoregen = CHROBJ_REGEN_TICKS;
+            portConLogf("ge: versus: player %d picked up obj %d, still coming back here: wait again\n", from + 1, pk->objofs);
+        }
+        else
+        {
+            portConLogf("ge: versus: player %d picked up obj %d, already gone here\n", from + 1, pk->objofs);
+        }
+        return;
+    }
+    objFree(obj, 0, ((PropDefHeaderRecord *) obj)->state & RUNTIMEBITFLAG_REMOVE);
+    propExecuteTickOperation(prop, TICKOP_FREE);
+    portConLogf("ge: versus: player %d picked up obj %d: gone here too\n", from + 1, pk->objofs);
 }
 
 static void coopVsApplyItem(const VsItem *it, s32 from)
@@ -620,6 +750,9 @@ void coopVersusApplyEvent(s32 kind, s32 from, const void *raw)
             break;
         case COOPEV_VSBOOM:
             coopVsApplyBoom((const VsBoom *) raw, from);
+            break;
+        case COOPEV_VSPICK:
+            coopVsApplyPick((const VsPick *) raw, from);
             break;
     }
     sVsApplying = 0;
@@ -814,6 +947,249 @@ void coopVersusHarnessInput(void)
     }
 }
 
+/* GE_VS_WANDER=<s>: from <s> seconds walk about, 3 s each of running with a
+ * turn, strafing, walking back and standing still (so the others see every
+ * body animation). GE_VS_AUDIT=1: every 2 s, for each other player, how
+ * their body is drawn here against what their STATE says. */
+static s32 sVsWanderAt = -2;
+static s32 sVsAudit;
+
+static s8 sVsWanderX, sVsWanderY;
+static u16 sVsWanderButtons;
+
+static void coopVsWander(void)
+{
+    s32 phase;
+
+    if (sVsWanderAt == -2)
+    {
+        const char *w = getenv("GE_VS_WANDER");
+
+        sVsWanderAt = (w != NULL) ? atoi(w) * 60 : -1;
+        sVsAudit = getenv("GE_VS_AUDIT") != NULL;
+    }
+    sVsWanderX = sVsWanderY = 0;
+    sVsWanderButtons = 0;
+    if (sVsWanderAt < 0 || (s32) sVsTick < sVsWanderAt || g_playerPointers[0]->bonddead)
+    {
+        return;
+    }
+    phase = (((s32) sVsTick - sVsWanderAt) / 180) % 5;
+    switch (phase)
+    {
+        case 0: sVsWanderX = 30; sVsWanderY = 80; sVsWanderButtons = ((sVsTick % 30) < 4) ? B_BUTTON : 0; break;  /* run, pressing Use on doors */
+        case 1: sVsWanderButtons = R_CBUTTONS; break;       /* strafe */
+        case 2: sVsWanderY = -70; break;                    /* back */
+        default: break;                                     /* stand (turning on the spot in 3) */
+    }
+    if (phase == 0 || phase == 3)
+    {   /* turn as a mouse does (the stick's x strafes in the PC layouts) */
+        struct player *pl = g_playerPointers[0];
+
+        pl->vv_theta += 1.5f;
+        if (pl->vv_theta >= 360.0f)
+        {
+            pl->vv_theta -= 360.0f;
+        }
+    }
+}
+
+void coopVersusTestInput(s8 *stick_x, s8 *stick_y, u16 *buttons)
+{
+    if (!coopVersus() || sVsWanderAt < 0 || (s32) sVsTick < sVsWanderAt)
+    {
+        return;
+    }
+    *stick_x = sVsWanderX;
+    *stick_y = sVsWanderY;
+    *buttons |= sVsWanderButtons;
+}
+
+/* the arena's pickups: guns, ammo boxes and armour placed by the setup */
+static s32 coopVsIsPickup(PropDefHeaderRecord *def)
+{
+    return def->type == PROPDEF_COLLECTABLE || def->type == PROPDEF_AMMO || def->type == PROPDEF_ARMOUR
+        || def->type == PROPDEF_MAGAZINE;
+}
+
+/* GE_VS_AUDIT: which of them lie in this arena now, as a hash to set beside
+ * the other games' lines, and the guns and thrown things made since */
+static void coopVsItemsAudit(void)
+{
+    PropDefHeaderRecord *def = (PropDefHeaderRecord *) g_CurrentSetup.propDefs;
+    PropRecord *prop;
+    u32 hash = 0, broke = 0, doors = 0;
+    s32 n = 0, here = 0, regen = 0, loose = 0, damaged = 0, open = 0;
+
+    if (def == NULL)
+    {
+        return;
+    }
+    for (; def->type != PROPDEF_END; def = (PropDefHeaderRecord *) ((u32 *) def + sizepropdef(def)))
+    {
+        if (def->type == PROPDEF_DOOR && ((DoorRecord *) def)->openPosition > 0.0f)
+        {
+            open++;
+            doors = doors * 31u + (u32) ((u8 *) def - (u8 *) g_CurrentSetup.propDefs);
+        }
+        if (!coopVsIsPickup(def))
+        {   /* glass, crates, barrels: shot or blown up */
+            ObjectRecord *obj = (ObjectRecord *) def;
+
+            if ((def->type == PROPDEF_PROP || def->type == PROPDEF_GLASS || def->type == PROPDEF_TINTED_GLASS
+                 || def->type == PROPDEF_MONITOR || def->type == PROPDEF_MULTI_MONITOR || def->type == PROPDEF_RACK
+                 || def->type == PROPDEF_ALARM || def->type == PROPDEF_CCTV || def->type == PROPDEF_SWITCH) && obj->prop != NULL
+                && obj->prop->obj == obj && (obj->damage > 0.0f || (obj->state & PROPSTATE_DESTROYED)))
+            {
+                damaged++;
+                broke = broke * 31u + (u32) ((u8 *) def - (u8 *) g_CurrentSetup.propDefs) + (u32) (obj->damage * 8.0f);
+            }
+            continue;
+        }
+        n++;
+        if (coopVsPickupHere((ObjectRecord *) def))
+        {
+            here++;
+            hash = hash * 31u + (u32) ((u8 *) def - (u8 *) g_CurrentSetup.propDefs);
+        }
+        else if (((ObjectRecord *) def)->prop != NULL && ((ObjectRecord *) def)->prop->timetoregen > 0)
+        {
+            regen++;
+        }
+    }
+    for (prop = g_ActivePropsHead; prop != NULL; prop = prop->next)
+    {
+        if (prop->type == PROP_TYPE_WEAPON && prop->weapon != NULL && prop->parent == NULL && coopExtSetupOfs(prop->obj) < 0)
+        {
+            loose++;
+        }
+    }
+    portConLogf("ge: vsitems: t %u: %d of %d pickups here (hash %08x), %d coming back, %d dropped or thrown; %d objects damaged (hash %08x); %d doors open (hash %08x)\n",
+                sVsTick / 60, here, n, hash, regen, loose, damaged, broke, open, doors);
+}
+
+/* GE_VS_PICKUPS=<s>: from <s> seconds, every 4 s step onto the nearest
+ * pickup lying here that we have not stood on lately */
+static s32 sVsPickAt = -2;
+static s32 sVsPicked[4];
+
+static void coopVsPickupsHarness(void)
+{
+    PropDefHeaderRecord *def = (PropDefHeaderRecord *) g_CurrentSetup.propDefs;
+    PropRecord *bond = g_playerPointers[0]->prop;
+    ObjectRecord *best = NULL;
+    f32 bestd = 0.0f;
+    StandTile *stan;
+    coord3d to;
+    s32 k;
+
+    if (sVsPickAt == -2)
+    {
+        const char *e = getenv("GE_VS_PICKUPS");
+
+        sVsPickAt = (e != NULL) ? atoi(e) * 60 : -1;
+        memset(sVsPicked, -1, sizeof(sVsPicked));
+    }
+    if (sVsPickAt < 0 || (s32) sVsTick < sVsPickAt || ((s32) sVsTick - sVsPickAt) % 240 != 0 || def == NULL
+        || bond == NULL || g_playerPointers[0]->bonddead)
+    {
+        return;
+    }
+    for (; def->type != PROPDEF_END; def = (PropDefHeaderRecord *) ((u32 *) def + sizepropdef(def)))
+    {
+        ObjectRecord *obj = (ObjectRecord *) def;
+        s32 ofs = (s32) ((u8 *) def - (u8 *) g_CurrentSetup.propDefs);
+        f32 dx, dz, d;
+
+        if (!coopVsIsPickup(def) || !coopVsPickupHere(obj)
+            || (def->type == PROPDEF_COLLECTABLE && ((WeaponObjRecord *) obj)->weaponnum == coopVsScenarioItem()))
+        {
+            continue;
+        }
+        for (k = 0; k < 4 && sVsPicked[k] != ofs; k++)
+        {
+        }
+        if (k < 4)
+        {
+            continue;
+        }
+        dx = obj->prop->pos.f[0] - bond->pos.f[0];
+        dz = obj->prop->pos.f[2] - bond->pos.f[2];
+        d = dx * dx + dz * dz;
+        if (best == NULL || d < bestd)
+        {
+            best = obj;
+            bestd = d;
+        }
+    }
+    if (best == NULL)
+    {
+        return;
+    }
+    to = best->prop->pos;
+    to.f[1] += 30.0f;
+    stan = stanFindTileBelowPos(&to, NULL, NULL);
+    if (stan == NULL)
+    {
+        return;
+    }
+    memmove(&sVsPicked[1], &sVsPicked[0], sizeof(sVsPicked[0]) * 3);
+    sVsPicked[0] = (s32) ((u8 *) best - (u8 *) g_CurrentSetup.propDefs);
+    coopRespawnPlayerAt(&to, stan, 0.0f, getCurrentPlayerWeaponId(GUNRIGHT));
+    portConLogf("ge: versus: harness: onto obj %d (type %d)\n", sVsPicked[0], best->type);
+}
+
+static s32 coopVsFiring(ChrRecord *chr, s32 hand)
+{
+    PropRecord *gun = chrGetEquippedWeaponProp(chr, hand);
+
+    return gun != NULL && weaponIsGunfireVisible(gun);
+}
+
+static void coopVsAudit(void)
+{
+    s32 li;
+
+    if (!sVsAudit || (sVsTick % 120) != 0)
+    {
+        return;
+    }
+    if ((sVsTick % 300) == 0)
+    {
+        coopVsItemsAudit();
+    }
+    for (li = 1; li < sVsCount; li++)
+    {
+        struct player *pl = g_playerPointers[li];
+        CoopRemoteInfo info;
+        Model *model;
+        f32 drawn, diff;
+
+        if (pl == NULL || pl->prop == NULL || pl->prop->chr == NULL || (model = pl->prop->chr->model) == NULL
+            || !coopRemoteInfo(sVsNet[li], &info))
+        {
+            continue;
+        }
+        drawn = getsubroty(model);
+        diff = (drawn - info.yaw) * (180.0f / M_PI_F) - pl->field_1280;    /* (Rare's lean into a sidestep) */
+        while (diff > 180.0f)
+        {
+            diff -= 360.0f;
+        }
+        while (diff < -180.0f)
+        {
+            diff += 360.0f;
+        }
+        portConLogf("ge: vsaudit: player %d facing %.0f, off by %.0f deg, anim %d rate %.2f (moving %.2f fwd %.2f side, crouch %d), "
+                    "aim %.1f/%.1f drawn %.1f/%.1f, flash %d drawn %d%d, dead %d\n",
+                    sVsNet[li] + 1, info.yaw * (180.0f / M_PI_F), diff, (s32) model->anim - (s32) ptr_animation_table, modelGetAnimSpeed(model),
+                    info.look.speedforwards, info.look.speedsideways, info.look.crouch,
+                    info.look.aimpitch, info.look.aimyaw, pl->prop->chr->aimendback, pl->prop->chr->aimendsideback,
+                    info.look.flash, coopVsFiring(pl->prop->chr, GUNRIGHT), coopVsFiring(pl->prop->chr, GUNLEFT),
+                    info.dead);
+    }
+}
+
 /* ---- every tick (coop.c coopTick) ------------------------------------------------- */
 
 void coopVersusTick(void)
@@ -825,6 +1201,9 @@ void coopVersusTick(void)
         return;
     }
     sVsTick++;
+    coopVsAudit();
+    coopVsWander();
+    coopVsPickupsHarness();
     for (li = 1; li < sVsCount; li++)
     {
         coopVsRemoteTick(li);

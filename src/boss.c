@@ -15,6 +15,9 @@
 #include "joy.h"
 #include "game/lv.h"
 #include "game/front.h"
+#ifndef TARGET_N64
+extern s32 coopVsRemote(s32 li);
+#endif
 #include "mema.h"
 #include "memp.h"
 #include "music.h"
@@ -732,6 +735,13 @@ void bossMainloop(void)
                             {
                                 for (i = 0; i < getPlayerCount(); i++)
                                 {
+#ifndef TARGET_N64
+                                    if (coopVsRemote(get_nth_player_from_shuffled(i)))
+                                    {   /* online versus: another PC's player; their STATE moves them
+                                         * (coop_versus.c), not this PC's pads */
+                                        continue;
+                                    }
+#endif
                                     set_cur_player(get_nth_player_from_shuffled(i));
 
                                     localPlayer = g_CurrentPlayer;
