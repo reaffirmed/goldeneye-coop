@@ -16241,6 +16241,12 @@ void drop_inventory(void)
             {
                 propobjSetDropped(prop, DROPTYPE_DEFAULT);
                 objDrop(prop);
+#ifndef TARGET_N64
+                if (item != ITEM_TOKEN && item != ITEM_GOLDENGUN)
+                {   /* online versus: it falls in the other arenas too (the scenario's item goes by VSKILL) */
+                    coopItemsPlayerDropped(prop);
+                }
+#endif
             }
         }
     }

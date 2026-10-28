@@ -482,9 +482,11 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; (cutsce
   runs once as the stage starts, so it only queues MENU_COOP_LOBBY; the
   lobby's init ends the match).
 - The name at the bottom right is the Steam name.
-- Not shared: ordinary weapon and armour pickups (each world has its own),
-  guns a victim drops (only the scenario item), the per-PC Multiplayer
-  Options in midas.ini. A player who drops out leaves a still body.
+- Shared since COOP_VERSION 14 (see "Versus gameplay" below): the arena's
+  weapon, ammo and armour pickups and their respawn timers, guns a victim
+  drops, thrown grenades and mines, object damage. Not shared: the per-PC
+  Multiplayer Options in midas.ini. A player who drops out leaves a still
+  body.
 - Harness: GE_COOP_VERSUS=<arena>:<scenario>:<length>:<weapons> (host's
   rows), GE_VS_HUNT=<s> (step 4 m from the next player with a clear walk,
   face them; tries another side every 5 s without a hit; tops up the
@@ -1857,3 +1859,52 @@ along the foot). UI only, no protocol change.
   image has xdotool now (menu_input.sh needed it too).
 - Checked host and joiner over the mock Steam, before (v0.3.0) and after,
   in and out of a lobby: every tab. Shots: menu-text/ in the project files.
+
+## Versus gameplay: bodies, pickups, drops, throws, objects (2026-10-28, COOP_VERSION 14)
+
+Owner's report: online versus "doesn't play properly": animations are
+weird, items aren't synced, players don't look where they're going.
+
+- Root cause of the bodies: lvlViewMoveTick (boss.c) ran MoveBond for every
+  player, the other PCs' players included. With no pads for them it zeroed
+  their speeds every frame and kept vv_theta from the spawn, and
+  playerTick's remote-body block then posed them from that: the idle anim
+  (532, rate 0.05, "slow motion") facing the spawn direction while the
+  real player ran about (audit before: facing off by up to 179 degrees).
+  Found with a hardware watchpoint on the remote player's speedforwards.
+  Now boss.c skips coopVsRemote players, and coopVsFeedPlayer
+  (coop_versus.c) fills their player struct from STATE each tick: vv_theta
+  from the yaw, speedforwards/sideways/theta, aim (field_2A08/2A0C),
+  headanim, crouch, the gun flash per hand. Rare's own playerTick then
+  picks the run, strafe, back and crouch anims and turns the body, as in
+  split screen. coopLookBodyTick (coop_look.c) is the puppet tick without
+  the animation part: guns, shots and sounds only.
+- Pickups: taking an arena object sends COOPEV_VSPICK (37: setup offset,
+  type, item). The other games free it the same way (objFree +
+  TICKOP_FREE), or if it is still on its way back reset its timetoregen to
+  CHROBJ_REGEN_TICKS, so everyone's respawn timer starts together. The
+  scenario item still goes as VSITEM.
+- Drops and throws: coop_items is on in versus. drop_inventory sends each
+  gun a dying player drops (COOPEV_DROP, chrnum COOP_PUPPET_CHRNUM + net
+  index); thrown grenades and mines replay owned by the thrower's body
+  (RUNTIMEBITFLAG_OWNER is the local index of that player, so the kill is
+  theirs); the thrower's game says where they came to rest. Picking one up
+  only removes it elsewhere. Guard-drop code stays co-op only.
+- Objects: object damage from a player goes to everyone (OBJDMG, applied as
+  that player's local index) and knocks are shared; doors already were.
+  coopVersusExplosion skips blasts coop_items is replaying.
+- Harness: GE_VS_WANDER=<s> (walk about: run and turn with a B pulse for
+  doors, strafe, back, idle, 3 s each, through coopVersusTestInput in
+  MoveBond), GE_VS_AUDIT=1 (every 2 s per other player: facing error less
+  the sidestep lean, anim and rate, speeds, aim sent and drawn, flash;
+  every 10 s "vsitems": pickups here and coming back with a hash, dropped
+  or thrown items, damaged objects and open doors with hashes),
+  GE_VS_PICKUPS=<s> (step onto the nearest pickup every 4 s).
+- Checked over the mock Steam with GE_NETSIM 120-150 ms: 2, 3 and 4 players
+  on Temple and Facility. Facing within 5 degrees in every sample; anims
+  follow the movement; the pickup and respawn hashes match on every game
+  at quiet moments; death drops, grenades (thrown, landed, went off
+  together) and object damage reach the others; 4 players at
+  120 ms: the kill table was the same on all four and the end reached
+  everyone. Story co-op runs (dam, facility, frigate) still pass.
+- Shots: versus-gameplay/ in the project files.

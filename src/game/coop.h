@@ -420,6 +420,7 @@ typedef struct
 void coopLookFill(CoopLook *out);
 void coopLookReset(CoopLookPuppet *lp);
 void coopLookPuppetTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look, s32 dead, s32 self);
+void coopLookBodyTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look, s32 dead, s32 self);   /* versus: Rare's code poses it */
 void coopLookShotBegin(s32 hand, s32 weapon, coord3d *from, coord3d *dir); /* chrprop.c chraiDefaultWeaponFireHandler */
 void coopLookShotBg(coord3d *pos, coord3d *normal, s32 impact, s32 room, s32 texture, s32 spark);
 void coopLookShotChr(PropRecord *prop, coord3d *pos, s32 hitpart);           /* chr.c chrHandleBulletHit */
@@ -465,7 +466,7 @@ Gfx *coopFigureDraw(Gfx *DL, s32 pick, s32 x, s32 y, s32 w, s32 h, f32 yaw, s32 
 #define COOPPKT_VERSUS 16
 #define COOP_ALL 0xFF               /* as coop.c: an event for everyone */
 #define COOP_PUPPET_CHRNUM 30000    /* as coop.c: + player number, a player's body's chrnum on the others' games */
-enum { COOPEV_VSHIT = 32, COOPEV_VSKILL, COOPEV_VSEND, COOPEV_VSITEM, COOPEV_VSBOOM };
+enum { COOPEV_VSHIT = 32, COOPEV_VSKILL, COOPEV_VSEND, COOPEV_VSITEM, COOPEV_VSBOOM, COOPEV_VSPICK };
 typedef struct
 {
     f32 pos[3];
@@ -490,12 +491,13 @@ void coopVersusClear(void);
 void coopVersusRenumber(const s32 *newof);          /* host migration: old session numbers to new (-1 gone) */
 u32  coopVersusSerial(void);
 void coopVersusStageStart(void);
+void coopVersusTestInput(s8 *stick_x, s8 *stick_y, u16 *buttons);   /* bondview2.c MoveBond: GE_VS_WANDER */
 s32  coopVersusStartPad(s32 li, s32 count);
 s32  coopVersusDamage(f32 damage, f32 vx, f32 vz, s32 attacker, s32 armour);   /* 1: not ours to deal */
 void coopVersusBlast(s32 on);
 void coopVersusKilled(s32 victim, s32 killer, s32 gg);
 void coopVersusExplosion(PropRecord *source, coord3d *pos, s32 type, u8 *rooms);
-void coopVersusPickedUp(s32 item);
+void coopVersusPickedUp(ObjectRecord *obj);   /* coop.c coopPickedUp: we took something in a versus arena */
 void coopVersusApplyEvent(s32 kind, s32 from, const void *raw);
 void coopVersusMatchOver(void);
 s32  coopVersusPktSize(void);
@@ -593,6 +595,7 @@ s32  coopItemsIsPartners(ObjectRecord *obj);            /* a partner's remote mi
 s32  coopItemsEmbedPending(ObjectRecord *obj);          /* propobj.c: stuck by a partner's word, matrix still to work out */
 s32  coopItemsUnsettled(PropRecord *prop);             /* propobj.c weaponFindThrown: a partner's throw, still in the air for them */
 void coopItemsPickedUp(ObjectRecord *obj);
+void coopItemsPlayerDropped(PropRecord *prop);   /* propobj.c drop_inventory: versus, what our death dropped */
 s32  coopInMissionNow(void);
 void coopObjKnockChildren(s32 haschildren);             /* propobj.c objHit */
 void coopObjKnocked(ObjectRecord *obj, s32 bounce, coord3d *viewdir);

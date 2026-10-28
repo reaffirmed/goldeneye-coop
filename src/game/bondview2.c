@@ -9632,6 +9632,7 @@ void MoveBond(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
 #ifndef TARGET_N64
     buttons = weapmenuFilterButtons(buttons, oldbuttons);   /* fire picks from an open weapon menu */
     buttons = coopLookTestButtons(buttons);                 /* harness: GE_COOP_TESTFIRE holds fire */
+    coopVersusTestInput(&stick_x, &stick_y, &buttons);      /* harness: GE_VS_WANDER walks about */
 #endif
     bondviewProcessInput(stick_x, stick_y, buttons, oldbuttons);
 
