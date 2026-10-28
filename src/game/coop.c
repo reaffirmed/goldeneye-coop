@@ -3069,6 +3069,20 @@ void coopChrAltKeep(ChrRecord *chr, s32 stimulus)
     sAltFrom = t;
 }
 
+/* host, in a guard's tick: the player that is "Bond" for it, 0 our own
+ * (coop_ai.c counts the guards on each player) */
+s32 coopChrCurrentTarget(void)
+{
+    s32 t = (g_CoopPropOverride != NULL) ? coopPlayerOfProp(g_CoopPropOverride) : COOPTGT_LOCAL;
+
+    return (t < 0) ? COOPTGT_LOCAL : t;
+}
+
+s32 coopTargetablePlayer(s32 t)
+{
+    return sEnabled > 0 && t >= 0 && t < COOPTGT_COUNT && coopTargetable(t);
+}
+
 /* host: "Bond is aiming at me" (sub_GAME_7F0333F8) for whoever Bond is in
  * this guard's tick. That test reads our own crosshair, so for a partner it
  * is their facing against the chr's body, with the same line of sight. */
@@ -5902,6 +5916,10 @@ static void coopSendHello(void)
     p.inlobby = (u8) sOnLobbyScreen;
     p.downrule = (u8) sDownRule;
     p.character = (u8) coopCharacter();
+    if (coopNetIsHost())
+    {   /* Guard AI is the host's Port Option; the slot only shows it to the joiner */
+        sSettings[COOPSET_GUARDAI] = (u8) coopAiSmarterOption();
+    }
     memcpy(p.settings, sSettings, sizeof(p.settings));
     p.missionticks = coopInMission() ? sMissionTicks : 0;
     p.hold = (u8) ((sHold ? 1 : 0) | (sHoldArrived << 4));

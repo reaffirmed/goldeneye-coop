@@ -153,10 +153,21 @@ enum
     COOPSET_BLEEDOUT,       /* revive only: time down before bleeding out, a coopBleedOutName index (0 60 s) */
     COOPSET_RESPAWN,        /* the timer's wait, a coopRespawnName index (0 3-20 s, sooner when it is quiet) */
     COOPSET_SCALING,        /* guards by player count: COOPSCALE_* (0 auto) */
+    COOPSET_GUARDAI,        /* the guards' AI: COOPAI_CLASSIC (0) or COOPAI_SMARTER (coop_ai.c) */
     COOPSET_MAX = 16
 };
 s32  coopSetting(s32 which);
 void coopSetSetting(s32 which, s32 value);
+
+/* smarter guards (coop_ai.c): COOPSET_GUARDAI in co-op, the guard_ai Port Option in solo */
+enum { COOPAI_CLASSIC = 0, COOPAI_SMARTER = 1 };
+s32  coopAiSmarter(void); s32 coopAiSmarterOption(void); void coopAiSetSmarterOption(s32 mode);                   /* this mission's guards are the smarter ones */
+s32  coopAiTick(ChrRecord *chr);            /* chrai.c ai(): 1 when the smarter AI ran the chr's tick */
+f32  coopAiHearScale(ChrRecord *chr, f32 dist, f32 range);  /* chr.c: hearing through walls */
+s32  coopGuardAiCount(void);
+const char *coopGuardAiName(s32 mode);
+s32  coopChrCurrentTarget(void);            /* host, in a guard's tick: the player that is Bond, 0 ours */
+s32  coopTargetablePlayer(s32 t);           /* host: player t is in the mission and alive */
 
 /* co-op difficulty (coop_difficulty.c): COOPSET_DIFFICULTY's modes */
 s32  coopLobbyPlayerCount(void);          /* players in the session, us included */

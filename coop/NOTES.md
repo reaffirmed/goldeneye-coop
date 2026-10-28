@@ -2056,3 +2056,62 @@ harness host hand over and re-host).
   corrected, no unresolved desync); versus ignores the co-op Friendly Fire
   and Scaling rows (hidden in versus; blasts check coopVersus, bullets go
   through coopVersusDamage, not puppets).
+
+## Smarter guards (2026-10-28, COOP_VERSION stays 13)
+
+Owner's pick: an optional guard AI, planned in the thread first (two
+settings, a Port Option, Classic untouched, Smarter runs count for cheats
+and team times). All of it is in src/game/coop_ai.c; Classic runs none of it.
+
+- The setting: Port Option "Guard AI" ([display] guard_ai, Classic 0 by
+  default, Smarter 1). In co-op only the host runs guards, so the host's
+  option decides; the host's Game Setup row (under Player Scaling) edits the
+  same option, and COOPSET_GUARDAI (slot 12) only carries it to the joiners'
+  lobby text. Read once a mission (coopAiSmarter latches per stage), so a
+  change mid-mission waits for the next. Versus always plays Classic.
+- The hook: ai() in chrai.c asks coopAiTick first; nonzero skips the
+  script for that tick. A guard is the brain's only while it is a generic
+  armed guard (not hidden or invincible, no puppet) on one of the stock
+  guard lists (standard, simple, clone, persistently chase) or on Attack /
+  Run to / Startle / Idle called from one. Level scripts, scripted
+  characters and every other list run as before, and the brain lets go the
+  moment a script moves the guard elsewhere.
+- Hearing: chrCheckGuardsHeardSound scales the range by coopAiHearScale:
+  in the outer half of the range, a door or wall between the guard and the
+  shot halves it (one line test, doors only). Partners' shots already wake
+  guards in Classic too (coopPuppetNoise, PR #42) - the plan said Smarter
+  only, but that change came first as a tester fix and is left as it is.
+- Looking (a guard that heard or saw something but not Bond): LOOK (turn
+  and look round), INVESTIGATE (walk to the heard spot, run when answering a
+  call), SEARCH (two nearby waypoints), RETURN to post. A body seen within
+  15 m sends a guard to look into it. Seeing a target from any of these
+  starts the fight.
+- Fighting: on first sight the guard calls up to 3 calm guards within 20 m
+  (they investigate the spot, so they come in looking, not knowing), points,
+  and 1 in 4 run for a working alarm within 30 m (one at a time, 60 s apart,
+  never when it is already ringing). Then bursts (the script's Attack Bond,
+  handed back after each); after 2-3 bursts or a hit, COVER (a pad 1.5-9 m
+  away with no line to the target), DUCK (kneel 1-2 s), PEEK (back out to
+  fire). At 65% damage it falls back once. Losing sight: hold 1 s, then 1 in
+  3 flank to a side pad, else advance to the last seen spot; 30 s with
+  nothing ends in a search and the walk home. With two or more players a
+  guard every 4 s turns to the player the fewest guards are on, if it can
+  see them.
+- Netcode: none. Only the host runs guards and its brain state is not sent;
+  joiners see the result in the usual guard snapshots, so the protocol
+  stays 13 and Classic and Smarter hosts both work with any 13 joiner.
+- Cost: sight and cover searches are capped (40 line tests a search, 2
+  searches a tick); one small brain per chr slot (256).
+- Harness: GE_GUARDAI=0|1 (the option without midas.ini), GE_GUARDAIDBG=1
+  (state changes, calls, splits, muffled shots), GE_GUARDAI_TESTNOISE=<s>[,<loudness>]
+  (one gunshot from Bond at <s> seconds).
+- Tested with the US cart: Dam (solo, a test shot: look, investigate,
+  search, return; Classic in the same run walks straight to Bond; a fight
+  from 18892,1,17060: cover, duck, peek in cycles), Archives (solo and two
+  players: call for help, advance, flank, guards splitting between players),
+  six two-player missions over the mock Steam with Smarter on the host
+  (dam, facility, archives, frigate, surface, depot: all pass, no desyncs),
+  and Classic against the build before it in the same Dam run (differences
+  within run-to-run noise). Shots: smart-ai/ in the project files.
+- Not seen in a run yet: the alarm run, the fall back, a guard finding a
+  body. Each has its own GE_GUARDAIDBG line to look for.

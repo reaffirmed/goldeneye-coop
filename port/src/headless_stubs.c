@@ -70,6 +70,11 @@ s32 portTrueEnemyRocketsEnabled(void)
     return 1;
 }
 
+s32 portGuardAiSmarter(void)
+{
+    return 0;
+}
+
 s32 portAdzyMode(void)
 {
     return 0;

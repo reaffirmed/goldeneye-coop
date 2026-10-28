@@ -130,6 +130,7 @@ static const struct PortWatchRowDef sPortOpts[] = {
     { PWROW_OPT,       "fix_shootthrough",   NULL, 0, 0 },
     { PWROW_OPT,       "distance_fading",    NULL, 0, 0 },
     { PWROW_OPT,       "true_enemy_rockets", NULL, 0, 0 },
+    { PWROW_OPT,       "guard_ai",           NULL, 0, 0 },   /* Classic or Smarter guards in solo */
     { PWROW_OPT,       "unlimited_explosions", NULL, 0, 0 }, /* was folder-only */
     { PWROW_OPT,       "watch_static",       NULL, 0, 0 },   /* watch static */
     { PWROW_OPT,       "fast_pause",         NULL, 0, 0 },   /* the watch at Rare's top speed */
