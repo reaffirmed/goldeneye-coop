@@ -6805,6 +6805,7 @@ static void coopRenumber(const s32 *newof)
     }
     coopStatsRemap(newof);
     coopVoiceRenumber(newof);
+    coopVoteRenumber(newof);
 }
 
 /* The host is gone: pick the next one and go over to it. */
