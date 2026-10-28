@@ -1894,14 +1894,18 @@ weird, items aren't synced, players don't look where they're going.
   that player's local index) and knocks are shared; doors already were.
   coopVersusExplosion skips blasts coop_items is replaying.
 - Harness: GE_VS_WANDER=<s> (walk about: run and turn with a B pulse for
-  doors, strafe, back, idle, 3 s each, through coopVersusTestInput in
-  MoveBond), GE_VS_AUDIT=1 (every 2 s per other player: facing error less
+  doors, strafe, back, stand turning on the spot, stand, 3 s each, through
+  coopVersusTestInput in MoveBond; the turning adds to vv_theta as the
+  mouse does, since the stick's x strafes in the PC layouts),
+  GE_VS_AUDIT=1 (every 2 s per other player: their yaw, facing error less
   the sidestep lean, anim and rate, speeds, aim sent and drawn, flash;
   every 10 s "vsitems": pickups here and coming back with a hash, dropped
   or thrown items, damaged objects and open doors with hashes),
   GE_VS_PICKUPS=<s> (step onto the nearest pickup every 4 s).
 - Checked over the mock Steam with GE_NETSIM 120-150 ms: 2, 3 and 4 players
-  on Temple and Facility. Facing within 5 degrees in every sample; anims
+  on Temple and Facility. Facing within 5 degrees in every sample, a
+  player standing still and turning on the spot included (the tester
+  stream's opponent who never turned toward the shooter); anims
   follow the movement; the pickup and respawn hashes match on every game
   at quiet moments; death drops, grenades (thrown, landed, went off
   together) and object damage reach the others; 4 players at

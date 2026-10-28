@@ -974,13 +974,23 @@ static void coopVsWander(void)
     {
         return;
     }
-    phase = (((s32) sVsTick - sVsWanderAt) / 180) % 4;
+    phase = (((s32) sVsTick - sVsWanderAt) / 180) % 5;
     switch (phase)
     {
-        case 0: sVsWanderX = 30; sVsWanderY = 80; sVsWanderButtons = ((sVsTick % 30) < 4) ? B_BUTTON : 0; break;  /* run, turning right, pressing Use on doors */
+        case 0: sVsWanderX = 30; sVsWanderY = 80; sVsWanderButtons = ((sVsTick % 30) < 4) ? B_BUTTON : 0; break;  /* run, pressing Use on doors */
         case 1: sVsWanderButtons = R_CBUTTONS; break;       /* strafe */
         case 2: sVsWanderY = -70; break;                    /* back */
-        default: break;
+        default: break;                                     /* stand (turning on the spot in 3) */
+    }
+    if (phase == 0 || phase == 3)
+    {   /* turn as a mouse does (the stick's x strafes in the PC layouts) */
+        struct player *pl = g_playerPointers[0];
+
+        pl->vv_theta += 1.5f;
+        if (pl->vv_theta >= 360.0f)
+        {
+            pl->vv_theta -= 360.0f;
+        }
     }
 }
 
@@ -1170,9 +1180,9 @@ static void coopVsAudit(void)
         {
             diff += 360.0f;
         }
-        portConLogf("ge: vsaudit: player %d facing off by %.0f deg, anim %d rate %.2f (moving %.2f fwd %.2f side, crouch %d), "
+        portConLogf("ge: vsaudit: player %d facing %.0f, off by %.0f deg, anim %d rate %.2f (moving %.2f fwd %.2f side, crouch %d), "
                     "aim %.1f/%.1f drawn %.1f/%.1f, flash %d drawn %d%d, dead %d\n",
-                    sVsNet[li] + 1, diff, (s32) model->anim - (s32) ptr_animation_table, modelGetAnimSpeed(model),
+                    sVsNet[li] + 1, info.yaw * (180.0f / M_PI_F), diff, (s32) model->anim - (s32) ptr_animation_table, modelGetAnimSpeed(model),
                     info.look.speedforwards, info.look.speedsideways, info.look.crouch,
                     info.look.aimpitch, info.look.aimyaw, pl->prop->chr->aimendback, pl->prop->chr->aimendsideback,
                     info.look.flash, coopVsFiring(pl->prop->chr, GUNRIGHT), coopVsFiring(pl->prop->chr, GUNLEFT),
