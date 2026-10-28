@@ -1693,6 +1693,64 @@ an older game ignores; see "Mixed versions" below).
   Facility), and one vote for Lobby decided by the clock. Shots:
   spectate-vote/ in the project files.
 
+## Player Scaling and Friendly Fire levels (2026-10-28, COOP_VERSION 13)
+
+Owner's pick: co-op scaling with the player count and friendly fire, planned
+in the thread first (defaults as proposed). Both existed in a first form
+(Guards modes, a fixed +25% health / +10% aim per player past two, Friendly
+Fire On/Off for bullets only).
+
+- Player Scaling (COOPSET_SCALING 11, Game Setup under Guards, host only,
+  joiners see text): Auto (0, default), Off, 3 Players, 4 Players. On top of
+  the Guards mode, per crowd (players past two; coop_difficulty.c sCrowds):
+  3 players health x1.25, aim x1.1, damage x1.05, reaction x0.9 (the 007
+  slider's g_AiReactionSpeed: a guard on the move stops to fire sooner),
+  1 extra guard per 6 armed soldiers up to 4; 4 players x1.5, x1.2, x1.1,
+  x0.8, 1 per 4 up to 8. Health and aim at 3 and 4 match v0.3.0's.
+  Extra guards add to the mode's; both games allocate chr slots for the most
+  the setting could reach (Auto: 4 players), so a drop-in has room.
+- Count changes mid-mission: a new count must hold COOPDIFF_SETTLE (300)
+  ticks, then the host multiplies every living guard's maxdamage and damage
+  by new/old (keeps the share lost; puppets, chrnum 30000+, never). More
+  players also raise the extra guards wanted; fewer never removes any. Aim,
+  damage and reaction follow the count every tick. Joiners keep the same
+  bookkeeping so a migrated host starts from the right multiplier.
+- Fixed: a joiner's kill prediction (before the first AI sync) left out the
+  3-4 player health bonus; coopDifficultyGuardHealthMul has it now.
+- Friendly Fire (COOPSET_FRIENDLYFIRE): 0 Off, 1 Full (v0.3.0's On), 2
+  Reduced (half). The lobby steps Off, Reduced, Full. The shooter sends a
+  partner's bullet hit unscaled with HIT.friendly set (the old pad byte);
+  the victim's game scales it by its copy of the host's setting and drops
+  it at Off, so the host decides even across the lobby-to-mission handoff.
+- Blasts: every explosion made records its owner (coop.c
+  coopExplosionNoteOwner): a thrown or planted item its owner on every game
+  (coop_items.c), a joiner's launcher round the sender on the host, and the
+  host passes the owner on in EXPLODE.owner (new byte) to the others. When a
+  blast reaches our Bond, explosion.c scales a partner's by Friendly Fire
+  (coopExplosionDamageScale). Guards', barrels' and unknown blasts hurt in
+  full; the host's own non-item blasts (its launcher rounds) are unknown to
+  the joiners and still hurt them in full (not plumbed; noted, rare).
+- Lives and revive: a friendly kill is a death like any other (costs a life,
+  timer or bleed-out). A partner who is down can't be shot (coopShotPuppet
+  needs them alive), so friendly fire never finishes anyone off.
+- Stats: COOPSTAT_FRIENDLY (appended; the message is 26 of 28 bytes), counted
+  by the shooter: each bullet hit sent, and once per own blast reaching a
+  living partner. The team page shows a Friendly hits row when the lobby's
+  Friendly Fire is not Off (rows a little closer together to fit).
+- Protocol: 13 (settings slot 11, HIT.friendly, EXPLODE.owner, the stats
+  count); older games get the version panel and the updater.
+- Harness: GE_COOP_SCALING=<0..3>, GE_COOP_FRIENDLYFIRE=<0..2>,
+  GE_COOP_TESTBLAST=<mission ticks> (once, our own blast at the first
+  partner's feet). Note: two_player.sh has no HOSTENV; put host-only
+  switches in BOTHENV and override them in JOINENV.
+- Tested over the mock Steam and UDP with the US cart: 4 players on Brutal +
+  Auto (health x3, 18 extra guards placed before the room ran out); 3
+  players on Hard, player 3 killed and back 90 s later (46 guards' health
+  x0.80, then x1.25); Friendly Fire Off / Reduced / Full with bullets (0,
+  0.062, 0.125 a chest hit) and a blast (x0, x0.5, x1); 1 life with Full:
+  8 hits down the host, out and spectating, the 2 shots after go nowhere.
+  Shots: scaling-ff/ in the project files.
+
 ## Security cameras see every player (2026-10-28)
 
 - A camera (objTick's PROPDEF_CCTV branch) only tested the host's Bond, and
