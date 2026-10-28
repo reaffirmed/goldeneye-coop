@@ -2316,3 +2316,29 @@ weird, items aren't synced, players don't look where they're going.
   120 ms: the kill table was the same on all four and the end reached
   everyone. Story co-op runs (dam, facility, frigate) still pass.
 - Shots: versus-gameplay/ in the project files.
+
+## Joiner review: the mission clock and time after a host change (2026-10-28)
+
+Owner's question: reading everything from the joiner's side, what could a
+joiner hit? The full review (per system, graded) and a tester checklist for
+the joiner-does-the-objectives pass are in the thread's artifact. Fixed here
+(no packet changes, COOP_VERSION stays 14):
+
+- Countdowns after a host change: the WORLD packet carries the clock only
+  once the host's own script has used it (sClockSet), and a joiner skips its
+  countdown commands, so a joiner that took over as host never sent the
+  clock. Anyone who dropped in or rejoined afterwards ran a fresh timer of
+  their own, and the others never heard the new host stop or hide it. A
+  joiner now notes the host's clock (coopApplyClock), so it keeps sending it
+  as the new host. Test: Silo Secret, two players over the mock, host killed
+  at 60 s and back at 75 s as a joiner (coop/docker/host_drop.sh, KILL=1
+  REJOIN=75, GE_COOP_TESTCLOCK=1). Old: the rejoiner started at 443.6 s
+  while the new host was at 372 s. New: "countdown running and shown, 392.5 s
+  left (host)" on arrival, then 0.2 s from the new host's.
+- The team's time after a host change: the new host sent and debriefed on
+  its own mission timer, which started when it got in, so a late joiner
+  that took over cut the team's time short (and could beat a target time
+  the team didn't). It now goes on from the old host's
+  (coop_teamtime.c sAdopt). Test: the same run with GE_COOP_TESTEND on the
+  new host: "team time goes on from the old host's", the rejoiner's debrief
+  gets 103.86 s against its own 32.6 s.
