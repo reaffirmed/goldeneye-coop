@@ -49,6 +49,7 @@ extern int atoi(const char *);
 #define FREE_UP         400.0f  /* the most above the floor */
 #define FREE_DOWN       15.0f   /* the least */
 #define FREE_PITCH      1.48f   /* about 85 degrees up or down */
+#define FREE_DEADZONE   10      /* stick units of 70 that don't move it */
 #define DEG             0.017453292f
 
 static s32 sTarget = -1;        /* the partner we watch, -1: none */
@@ -200,6 +201,17 @@ static void coopSpectateTest(s32 *use, s32 *step, f32 *turn, f32 *fwd, f32 *side
     }
 }
 
+/* a stick axis, with a dead zone: a pad that rests a little off centre
+ * flew the camera off on its own into walls (the tester's 1:02:00) */
+static f32 coopSpectateStick(s32 raw)
+{
+    if (raw > -FREE_DEADZONE && raw < FREE_DEADZONE)
+    {
+        return 0.0f;
+    }
+    return (raw > 0 ? raw - FREE_DEADZONE : raw + FREE_DEADZONE) / (70.0f - FREE_DEADZONE);
+}
+
 static void coopSpectateFreeTick(f32 tturn, f32 tfwd, f32 tside)
 {
     f32 fwd, side;
@@ -227,8 +239,8 @@ static void coopSpectateFreeTick(f32 tturn, f32 tfwd, f32 tside)
     }
 
     /* movement: the stick, or the keys on the C buttons (WASD by default) */
-    fwd = joyGetStickY(0) / 70.0f;
-    side = joyGetStickX(0) / 70.0f;
+    fwd = coopSpectateStick(joyGetStickY(0));
+    side = coopSpectateStick(joyGetStickX(0));
     if (joyGetButtons(0, U_CBUTTONS)) fwd = 1.0f;
     if (joyGetButtons(0, D_CBUTTONS)) fwd = -1.0f;
     if (joyGetButtons(0, L_CBUTTONS)) side = -1.0f;

@@ -1905,3 +1905,25 @@ packet changes; COOP_VERSION stays 13.
   wrap over the mock Steam (screenshot). Not run: the hostage shot (could
   not trigger on Frigate in the harness), partner sounds, chat after a
   cutscene.
+
+Second pass (the stream's frames, a recount of the report):
+
+- Guards' guns on a joiner: a joiner's chrs don't run their lists, so a gun
+  a guard gets from its own list (guard_try_spawning_item: Statue's ai_5
+  and ai_6 guards, Trevelyan's ambush) never reached our copy, which fired
+  with nothing in its hand. coopApplyGuard now gives our copy the host's
+  right-hand gun when it has none ("host chr N drew gun M"). Harness:
+  GE_COOP_TESTSPAWN=<chrnum>,late arms the spawned copy 2 s later; Dam,
+  the joiner logs "mirrored host chr 5038 (body 37, gun 0)" then "drew gun
+  8".
+- Free camera dead zone: 10 of the stick's 70 units. The stream's 1:02:00
+  and 1:23:00 "desyncs" are the host's spectator camera: a partner's own
+  model in view means the free camera (eyes mode hides it), drifting into
+  walls with no input, then jumping back to a partner (Fire).
+- Three players, player 3 revives player 2 (tester's 1:31:00):
+  "revived by player 3 after 5.1 s (2.5 s from the first hold)".
+- Statue's INCOMPLETE ending is the helicopter countdown (ai_37, 180 s):
+  it runs out, flag 0x40, ai_44 blows up the heli and Natalya with it.
+  Natalya gets up when Bond is within 3 m (ai_21's
+  if_guard_distance_to_bond_less_than, already any player's on the host);
+  why she waited for a death in the stream needs the joiner's view.

@@ -2547,14 +2547,27 @@ static void coopHarnessTick(void)
     }
     if (coopNetIsHost() && coopPartnerHere())
     {   /* GE_COOP_TESTSPAWN=<chrnum>: once, at 15 s, spawn a copy of that chr next to Bond;
-         * <chrnum>,unarmed leaves it without a gun, like Trevelyan's Statue ambush (harness only) */
+         * <chrnum>,unarmed leaves it without a gun, like Trevelyan's Statue ambush; <chrnum>,late
+         * gives it the gun 2 s later, as a guard's own guard_try_spawning_item does (harness only) */
         static s32 testspawn = -2;
         static s32 testspawnarmed = 1;
+        static s32 testspawnlate = -1;
         if (testspawn == -2)
         {
             const char *e = getenv("GE_COOP_TESTSPAWN");
             testspawn = (e != NULL) ? atoi(e) : -1;
-            testspawnarmed = (e == NULL || strstr(e, "unarmed") == NULL);
+            testspawnarmed = (e == NULL || (strstr(e, "unarmed") == NULL && strstr(e, "late") == NULL));
+            testspawnlate = (e != NULL && strstr(e, "late") != NULL) ? 0 : -1;
+        }
+        if (testspawnlate > 0 && sTick >= 1020)
+        {
+            ChrRecord *late = chrFindByLiteralId(testspawnlate);
+            if (late != NULL && late->prop != NULL)
+            {
+                chrGiveWeapon(late, PROP_CHRKALASH, ITEM_AK47, 0);
+                portConLogf("ge: coop: testspawn: chr %d armed late\n", testspawnlate);
+            }
+            testspawnlate = -1;
         }
         if (testspawn >= 0 && sTick >= 900 && coopInMission())
         {
@@ -2571,6 +2584,10 @@ static void coopHarnessTick(void)
                 if (np != NULL && testspawnarmed)
                 {
                     chrGiveWeapon(np->chr, PROP_CHRKALASH, ITEM_AK47, 0);
+                }
+                if (np != NULL && testspawnlate == 0)
+                {
+                    testspawnlate = np->chr->chrnum;
                 }
                 portConLogf("ge: coop: testspawn -> chr %d (free %d)\n", np ? np->chr->chrnum : -1, chrGetNumFree());
             }
@@ -3388,6 +3405,14 @@ static void coopApplyGuard(CoopGuardEnt *e)
     else
     {
         chr->chrflags &= ~CHRFLAG_HIDDEN;
+    }
+    if (e->gunitem > 0 && e->gunitem < ITEM_IDS_MAX && e->gunmodel >= 0 && e->gunmodel < PROP_MAX
+        && !(e->flags & GSF_DYING) && chrGetEquippedWeaponProp(chr, GUNRIGHT) == NULL)
+    {   /* a gun the host's guard got after we first saw it (its own list's
+         * guard_try_spawning_item, as Statue's ambush and Alec's men do):
+         * our copy never runs that, so it fired with nothing in its hand */
+        chrGiveWeapon(chr, e->gunmodel, e->gunitem, 0);
+        portConLogf("ge: coop: host chr %d drew gun %d\n", e->chrnum, e->gunitem);
     }
 
     pos.f[0] = e->pos[0];
