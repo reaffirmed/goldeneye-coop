@@ -1890,10 +1890,11 @@ fails is Janus by Lenin's statue, who only talks once "Bond" has holstered.
   Jungle, Control, Train), Boris, the Silo and Frigate scientists and
   hostages, the Surface safe, Baron Samedi and Trevelyan use only those.
   Surface 1 and 2 reinforcement odds look at Bond's gun (fewer with a weak
-  one); they now count any player's. Still host-only: a partner's near miss
-  (if_guard_shot_from_bond_missed), since a joiner's bullets are only drawn
-  on the host; Valentin and Janus don't end the meeting when a joiner fires
-  near them.
+  one); they now count any player's. A partner's near miss
+  (if_guard_shot_from_bond_missed: Janus and Valentin end the meeting when
+  shot at) is left to the host-only audit (PR #44, coopPartnerShotNearMiss).
+- Two-player CI runs (mission_runs.sh) pass on Statue, Bunker 2, Control,
+  Train, Jungle, Cradle, Facility, Aztec, Silo and Frigate.
 - No packet changes; COOP_VERSION stays 13.
 - Harness: GE_COOP_TESTGOTO takes an ai list id (1024 and up) for the chr
   running it (Statue's Valentin 1042); GE_COOP_TESTHOLD=<item>:<s> switches
