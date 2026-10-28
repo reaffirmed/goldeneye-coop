@@ -149,6 +149,7 @@ static s32 sPendingFrom = -1;
 static s32 sApplying;               /* a partner's throw, drop or pickup is being played here */
 static ObjectRecord *sExploding;    /* propExplode is setting this item off */
 static s32 sExplodingOwner;         /* 1 + the player whose item it is, 0 ours */
+static s32 sExplodingOurRound;      /* propExplode is setting off a launcher round our Bond fired */
 
 
 static s32 coopItemsOn(void)
@@ -548,9 +549,15 @@ void coopItemsExplodeBegin(PropRecord *prop)
 
     sExploding = NULL;
     sExplodingOwner = 0;
+    sExplodingOurRound = 0;
     if (prop == NULL || prop->obj == NULL || !coopItemsOn())
     {
         return;
+    }
+    if ((prop->obj->runtime_bitflags & RUNTIMEBITFLAG_HASPROJECTILE) && prop->obj->projectile != NULL
+        && g_CurrentPlayer != NULL && prop->obj->projectile->ownerprop == g_CurrentPlayer->prop)
+    {
+        sExplodingOurRound = 1;     /* a rocket or grenade round: not a thrown item, but ours for friendly fire */
     }
     it = coopItemByObj(prop->obj);
     if (it == NULL)
@@ -571,6 +578,13 @@ void coopItemsExplodeEnd(void)
 {
     sExploding = NULL;
     sExplodingOwner = 0;
+    sExplodingOurRound = 0;
+}
+
+/* coop.c: the blast being made is a launcher round our own Bond fired */
+s32 coopItemsExplodingOurRound(void)
+{
+    return sExplodingOurRound;
 }
 
 /* coop.c coopExplosionCreated: the blast is one of these items' (each world sets off its own copy) */

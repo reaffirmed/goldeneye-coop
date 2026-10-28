@@ -94,7 +94,8 @@ enum { COOPOUT_NONE, COOPOUT_BLEDOUT, COOPOUT_LIVES };
 enum
 {
     COOPEV_CINEMA = 56,     /* host -> all: CoopCinemaMsg, the host's intro is over */
-    COOPEV_VOTE = 57        /* to the host: a vote; host -> all: the count (coop_vote.c) */
+    COOPEV_VOTE = 57,       /* to the host: a vote; host -> all: the count (coop_vote.c) */
+    COOPEV_LIVES = 58       /* to the host: our lives this mission; host -> a returning joiner: what it had left (coop.c) */
 };
 #define COOP_ALL_PLAYERS 0xFF   /* coopDesignSend's `to`: everyone */
 void coopDesignSend(s32 kind, s32 to, const void *payload, s32 len);
@@ -616,6 +617,7 @@ void coopItemsExplodeBegin(PropRecord *prop);           /* propobj.c propExplode
 void coopItemsExplodeEnd(void);
 s32  coopItemsExploding(void);
 s32  coopItemsExplodingOwner(void);
+s32  coopItemsExplodingOurRound(void);               /* a rocket or grenade round we fired is going off */
 s32  coopItemsIsPartners(ObjectRecord *obj);            /* a partner's remote mine: not our detonator's */
 s32  coopItemsEmbedPending(ObjectRecord *obj);          /* propobj.c: stuck by a partner's word, matrix still to work out */
 s32  coopItemsUnsettled(PropRecord *prop);             /* propobj.c weaponFindThrown: a partner's throw, still in the air for them */
