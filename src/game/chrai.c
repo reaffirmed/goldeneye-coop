@@ -2184,6 +2184,7 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     f32                                           value = ntohs(ai->DISTANCE) * 10.0f;
                     s32                                           near  = value > chrGetDistanceFromBondToPad(ChrEntityp, pad);
 #ifndef TARGET_N64
+                    near = near && coopOwnBondCounts(); /* co-op: not a down host's body */
                     for (coopk = 0; !near && coopAltBondBegin(coopk); coopk++) /* co-op: either player counts */
                     {
                         near = value > chrGetDistanceFromBondToPad(ChrEntityp, pad);
@@ -2211,6 +2212,7 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     f32                                              value = ntohs(ai->DISTANCE) * 10.0f;
                     s32                                              far   = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
 #ifndef TARGET_N64
+                    far = far || !coopOwnBondCounts(); /* co-op: not a down host's body */
                     for (coopk = 0; far && coopAltBondBegin(coopk); coopk++) /* co-op: both players must be away */
                     {
                         far = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
@@ -2247,6 +2249,7 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     u16                          pad_id = ntohs(ai->PAD);
                     s32                          inroom = check_if_actor_is_at_preset(ChrEntityp, pad_id);
 #ifndef TARGET_N64
+                    inroom = inroom && coopOwnBondCounts(); /* co-op: not a down host's body */
                     for (coopk = 0; !inroom && coopAltBondBegin(coopk); coopk++) /* co-op: either player counts */
                     {
                         inroom = check_if_actor_is_at_preset(ChrEntityp, pad_id);
@@ -2549,8 +2552,14 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     ObjectRecord              *obj = objFindByTagId(ai->OBJECT_TAG);
                     if (obj && obj->prop)
                     {
+#ifndef TARGET_N64
+                        s32 coopdown = coopScriptGiveBegin(); /* co-op: a down host still takes it, for the team */
+#endif
                         TICKOP op = propPickupByPlayer(obj->prop, FALSE);
                         propExecuteTickOperation(obj->prop, op);
+#ifndef TARGET_N64
+                        coopScriptGiveEnd(coopdown);
+#endif
                     }
                     Offset += sizeof(AiBondCollectObjectRecord);
                     break;
@@ -4263,6 +4272,7 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     f32                         bondpos = (s16)ntohs(ai->Y_POS);
                     s32                         below   = getCurrentPlayerProp()->pos.y < bondpos;
 #ifndef TARGET_N64
+                    below = below && coopOwnBondCounts(); /* co-op: not a down host's body */
                     for (coopk = 0; !below && coopAltBondBegin(coopk); coopk++) /* co-op: either player counts */
                     {
                         below = getCurrentPlayerProp()->pos.y < bondpos;

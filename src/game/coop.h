@@ -29,11 +29,14 @@ void coopDoorStateChanged(DoorRecord *door, s32 state);
 s32  coopObjDamage(ObjectRecord *obj, f32 damage, coord3d *pos, s32 item, s32 player); /* 1: skip */
 s32  coopSkipExplosionDamage(ChrRecord *chr);
 void coopPickedUp(ObjectRecord *obj, s32 kept);
+s32  coopScriptGiveBegin(void);        /* chrai.c AI_BondCollectObject: stand a down host up for it; pass the result to ...End */
+void coopScriptGiveEnd(s32 down);
 s32  coopPeerHolds(ObjectRecord *obj);
 void coopMissionComplete(void);
 s32  coopFrontTick(void);
 s32  coopAltBondBegin(s32 k); /* 1: "Bond" is now the k-th living partner (from 0), call coopAltBondEnd */
 void coopAltBondEnd(void);
+s32  coopOwnBondCounts(void);         /* 0: a level script's own-Bond check skips the host's body (down, a partner standing) */
 s32  coopBondHasItem(s32 item);          /* chrai.c: whoever is Bond now holds this item (a partner's from STATE) */
 f32  coopBondHealth(void);               /* and their health, 0..1 */
 void coopBondItemLog(s32 item);          /* log: that check passed for a partner */

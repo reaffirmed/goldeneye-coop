@@ -2416,7 +2416,9 @@ static void coopHarnessTick(void)
     }
 
     if (coopPartnerHere() && coopInMission())
-    {   /* GE_COOP_TESTGOTO=<chrnum>: once, 5 s into the mission, stand where that chr stands (harness only) */
+    {   /* GE_COOP_TESTGOTO=<chrnum>: once, 5 s into the mission, stand where that chr stands;
+         * a chr not there yet (spawned later: Facility's Doak) is looked for every second
+         * until 90 s (harness only) */
         static s32 testgoto = -2;
         static s32 inmission;
         if (testgoto == -2)
@@ -2424,7 +2426,7 @@ static void coopHarnessTick(void)
             const char *e = getenv("GE_COOP_TESTGOTO");
             testgoto = (e != NULL) ? atoi(e) : -1;
         }
-        if (testgoto >= 0 && ++inmission == 300)
+        if (testgoto >= 0 && ++inmission >= 300 && inmission % 60 == 0 && inmission <= 5400)
         {   /* 1024 and up: the chr running that ai list (Statue's Valentin is 1042) */
             ChrRecord *c = (testgoto < 0x400) ? chrFindByLiteralId(testgoto) : NULL;
             s32 i;
@@ -2436,7 +2438,7 @@ static void coopHarnessTick(void)
                     c = &g_ChrSlots[i];
                 }
             }
-            if (c == NULL)
+            if (c == NULL && (inmission == 300 || inmission == 5400))
             {
                 portConLogf("ge: coop: testgoto: no chr %d\n", testgoto);
             }
@@ -2445,6 +2447,7 @@ static void coopHarnessTick(void)
                 coopRespawnPlayerAt(&c->prop->pos, c->prop->stan, 0.0f, sLastWeapon);
                 portConLogf("ge: coop: testgoto -> chr %d at %.0f %.0f %.0f\n", testgoto,
                             c->prop->pos.f[0], c->prop->pos.f[1], c->prop->pos.f[2]);
+                testgoto = -1;
             }
         }
     }
@@ -4979,6 +4982,32 @@ static void coopTeamPicksTick(void)
     }
 }
 
+/* A level script handing "Bond" an item (Facility's Dr. Doak and his door
+ * decoder, AI_BondCollectObject) gives it to the host's Bond, and the stock
+ * pickup refuses a dead one: with the host down or out of lives while a
+ * partner talked to Doak, the decoder went nowhere. Stand the host up for it,
+ * as for a partner's pickup; coopPickedUp then shares it with the team. */
+s32 coopScriptGiveBegin(void)
+{
+    const s32 down = g_CurrentPlayer->bonddead;
+
+    if (!down || sEnabled <= 0 || !coopNetIsHost() || !coopInMission())
+    {
+        return -1;
+    }
+    g_CurrentPlayer->bonddead = 0;
+    portConLogf("ge: coop: a script gives Bond an item while the host is down: taken for the team\n");
+    return down;
+}
+
+void coopScriptGiveEnd(s32 down)
+{
+    if (down >= 0)
+    {
+        g_CurrentPlayer->bonddead = down;
+    }
+}
+
 /* host: a player arrived in the mission; everything the team has picked up so far */
 static void coopResyncPicks(s32 player)
 {
@@ -7373,6 +7402,30 @@ s32 coopAltBondBegin(s32 k)
 void coopAltBondEnd(void)
 {
     g_CoopPropOverride = NULL;
+}
+
+/* A level script's room, pad and height checks look at our own Bond first,
+ * then the living partners. The host's Bond lies where it fell while the
+ * host waits to be revived or watches with no lives left: that body counted
+ * as Bond standing there (in Cradle's fall shaft, at a pad Trevelyan runs
+ * from, in an objective room). While a partner stands, a down host's body
+ * is nobody. */
+s32 coopOwnBondCounts(void)
+{
+    s32 p;
+
+    if (sEnabled <= 0 || !coopNetIsHost() || g_CoopPropOverride != NULL || !g_CurrentPlayer->bonddead)
+    {
+        return 1;
+    }
+    for (p = 1; p < COOP_MAX_PLAYERS; p++)
+    {
+        if (coopRemoteAliveHere(p))
+        {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 /* What "Bond" holds and how hurt they are, for whoever is Bond right now (a

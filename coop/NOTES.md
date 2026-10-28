@@ -1905,3 +1905,45 @@ fails is Janus by Lenin's statue, who only talks once "Bond" has holstered.
   pad 59, holstered. Old: Janus "If he won't drop the gun kill him!", B
   failed. New: "No gun, 007?", the whole conversation, B complete on both
   games. Shots: npc-talk/ in the project files.
+## Mission-by-mission risk review (2026-10-28)
+
+Owner's question: what else could break in co-op, mission by mission? Every
+mission's level and NPC scripts were read for checks on "Bond" that the
+earlier audits don't cover; the full per-mission table is in the thread's
+artifact. Tested on main plus #44 to #50, two games over the mock Steam, US
+ROM. Fixed here (no packet changes, COOP_VERSION stays 13):
+
+- Facility, Dr. Doak: the script hands "Bond" the door decoder
+  (AI_BondCollectObject). That gives it to the host's Bond, and the stock
+  pickup refuses a dead one, so with the host down (bleeding out or out of
+  lives) while a partner met Doak the decoder went nowhere: objective B
+  completed, nobody could open the bottling room door. The host is stood up
+  for that pickup (coopScriptGiveBegin/End, as for a partner's pickup while
+  the host is down) and coopPickedUp shares it. Test: GE_DIFF=2, host
+  GE_COOP_LIVES=1 GE_COOP_TESTDIE=240, joiner GE_COOP_TESTPAD=11:6
+  GE_COOP_TESTGOTO=79. Old: B complete, no pickup on either game. New:
+  "a script gives Bond an item while the host is down: taken for the
+  team", host "we picked up obj 41432", joiner "player 1 picked up obj
+  41432: ours too".
+- A down host's body counted as "Bond" for a level script's room, pad
+  distance and height checks (coopAltBondBegin adds the living partners,
+  but the first check is always our own Bond, dead or not): a host bleeding
+  out or spectating inside an objective room, Cradle's fall shaft or by a pad
+  Trevelyan runs from kept those checks true (and "every player far" false).
+  While a partner stands, the down host's body is nobody
+  (coopOwnBondCounts). Checked by reading; the two-player CI runs pass.
+- Harness: GE_COOP_TESTGOTO looks for a chr that isn't there yet every
+  second until 90 s (Doak is spawned when someone enters his lab).
+
+Found, not fixed here:
+
+- Cradle (confirmed): ai_39 is the "Bond fell off the platform" check (in
+  pad 0x93's room and below y -4070: KIA and the fall ending). Any one
+  player dropping into that shaft ends the mission for the team
+  (all_objectives_complete=0), host or joiner (GE_COOP_TESTPAD=147:10 on
+  either). By reading, the room and height checks can also pass for two
+  different players (one in the shaft room, another lower down).
+  Wants a per-player rule: the faller dies, the others play on.
+- Facility (seen, cosmetic): the joiner gets "objective B failed" for about a
+  second when it reaches Doak's lab first; its own copy of the flags has
+  0x10000 until the host's WORLD packet clears it.
