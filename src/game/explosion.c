@@ -361,7 +361,9 @@ explosionCreate(PropRecord *arg0, struct coord3d *target_pos, StandTile *target_
 #ifndef TARGET_N64
             {   /* co-op stats: remember the blasts set off for the partner */
                 extern void coopStatsExplosionMade(void *explosion);
+                extern void coopExplosionNoteOwner(void *explosion);
                 coopStatsExplosionMade(sp40);
+                coopExplosionNoteOwner(sp40);   /* whose, for friendly fire */
             }
 #endif
 
@@ -669,6 +671,10 @@ void explosionInflictDamage(PropRecord *arg0, f32 horiz_range, f32 vert_range)
                             extern void coopStatsBlameEnd(void);
                             extern s32 coopStatsExplosionIsPartner(void *explosion);
                             coopStatsBlameBegin(coopStatsExplosionIsPartner(temp_s2));
+                            {
+                                extern void coopExplosionHitChr(void *explosion, ChrRecord *chr);
+                                coopExplosionHitChr(temp_s2, temp_s0->chr);   /* ours on a partner: a friendly hit */
+                            }
 #endif
                             chrlvExplosionDamage(temp_s0->chr, &arg0->pos, minfrac, 1);
 #ifndef TARGET_N64
@@ -700,6 +706,10 @@ void explosionInflictDamage(PropRecord *arg0, f32 horiz_range, f32 vert_range)
                             }
 
 #ifndef TARGET_N64
+                            {   /* co-op: a partner's blast hurts as Friendly Fire says */
+                                extern f32 coopExplosionDamageScale(void *explosion);
+                                minfrac *= coopExplosionDamageScale(temp_s2);
+                            }
                             extern void coopVersusBlast(s32 on);
                             coopVersusBlast(1);  /* online versus: each PC hurts its own player with its copy of the blast */
 #endif

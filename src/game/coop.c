@@ -79,7 +79,7 @@ u32 randomGetNext(void);
 extern void portConLogf(const char *fmt, ...);
 
 #define COOP_MAGIC   0x50434547u /* "GECP" */
-#define COOP_VERSION 12 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
+#define COOP_VERSION 13 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
                           6: host migration (AI sync, bye, addresses in the roster);
                           7: pings, chat, objective credit, team times, cross-save (COOPEV 16, 20..31, COOPPKT 10);
                           8: versus (COOPEV 32..36, COOPPKT 16);
@@ -88,7 +88,9 @@ extern void portConLogf(const char *fmt, ...);
                               revive, cutscenes and the results);
                           11: sender clocks in STATE and GUARDS (smooth movement), round trip (COOPPKT_TIME);
                           12: lives, bleed-out and respawn times (COOPSET 8..10, 16 settings in HELLO, STATE out);
-                              gadgets in USE, where a throw stuck (COOPEV 29), the tank (COOPPKT 11) */
+                              gadgets in USE, where a throw stuck (COOPEV 29), the tank (COOPPKT 11);
+                          13: Player Scaling (COOPSET 11), Friendly Fire Reduced and blasts, the victim scales a
+                              partner's hit (HIT friendly), a blast's owner (EXPLODE), Friendly hits stat */
 
 enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7, COOPPKT_AISYNC = 8, COOPPKT_BYE = 9 };
 /* 10 and 11 (COOPPKT_EXT_FIRST..LAST in coop.h) are coop_ext.c's features' own packets;
@@ -196,7 +198,7 @@ typedef struct
     u8 pad;
     union
     {
-        struct { f32 damage; f32 angle; s16 chrnum; u8 pad[2]; } hit;           /* host -> client; chrnum: the guard that fired, -1 not a guard */
+        struct { f32 damage; f32 angle; s16 chrnum; u8 friendly; u8 pad; } hit;  /* host -> client; chrnum: the guard that fired, -1 not a guard; friendly: a partner's shot, unscaled */
         struct { s16 chrnum; s16 hitpart; s32 weaponid; f32 vector[3]; u8 predicted; u8 predidx; u8 pad[2]; } shot;  /* client -> host; predicted: COOPPRED_* the shooter's game played, predidx which one */
         struct { s32 doorofs; s32 state; } door;                                /* both ways */
         struct { s32 objofs; f32 damage; f32 pos[3]; s16 item; s16 player; } obj; /* both ways */
@@ -204,7 +206,7 @@ typedef struct
         struct { s32 objofs; s32 kept; s32 stage; } pick;                       /* to all */
         struct { s32 objofs; s32 stage; s16 gadget; s16 pad; } use;             /* joiner to host; gadget: the item used on it (bomb defuser...), 0 a Use press */
         struct { s32 stage; u32 stageflags; } end;                              /* both ways */
-        struct { f32 pos[3]; s16 type; u8 rooms[8]; } boom;                     /* client -> host */
+        struct { f32 pos[3]; s16 type; u8 rooms[8]; u8 owner; } boom;           /* client -> host, and the host's to all; owner: 1 + the player who set it off, 0 not a player's */
         struct { s16 chrnum; u8 len; u8 cmd[25]; } ai;                          /* host -> client */
         /* COOPEV_STATS: a CoopStatsMsg (coop_stats.c) in raw, both ways */
         CoopGive give;                                                          /* both ways (coop_give.c) */
@@ -2174,6 +2176,31 @@ static void coopHarnessTick(void)
     }
 
     if (coopPartnerHere() && coopInMission())
+    {   /* GE_COOP_TESTBLAST=<mission ticks>: then, once, our own blast (a launcher round's) at the first partner's feet (harness only) */
+        static s32 testblast = -2;
+        if (testblast == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTBLAST");
+            testblast = (e != NULL) ? atoi(e) : -1;
+        }
+        if (testblast >= 0 && sMissionTicks >= testblast)
+        {
+            s32 p;
+            testblast = -1;
+            for (p = 0; p < COOP_MAX_PLAYERS; p++)
+            {
+                if (p != coopSelf() && coopRemoteAliveHere(p))
+                {
+                    PropRecord *pp = sR[p].puppet;
+                    portConLogf("ge: coop: testblast: at player %d\n", p + 1);
+                    explosionCreate(NULL, &pp->pos, pp->stan, 2, 0, 0, pp->rooms, 0);
+                    break;
+                }
+            }
+        }
+    }
+
+    if (coopPartnerHere() && coopInMission())
     {   /* GE_COOP_TESTGOTO=<chrnum>: once, 5 s into the mission, stand where that chr stands (harness only) */
         static s32 testgoto = -2;
         static s32 inmission;
@@ -3447,7 +3474,9 @@ s32 coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weap
 /* A shot on a partner's puppet never touches the puppet: it is that player's
  * Bond, and a local death frees its model under the puppet code (the crash
  * in setsuboffset). With friendly fire on, the hit goes to that player's own
- * game, scaled as a guard's hit on Bond. Returns 1 for any puppet. */
+ * game, scaled as a guard's hit on Bond; that game applies the host's Friendly
+ * Fire level to it (coopApplyEvent), so the host's setting decides even when
+ * the two copies disagree for a moment. Returns 1 for any puppet. */
 s32 coopShotPuppet(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, s32 isPlayer)
 {
     CoopEvent ev;
@@ -3458,7 +3487,7 @@ s32 coopShotPuppet(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, s
     {
         return 0;
     }
-    if (!isPlayer || !coopSetting(COOPSET_FRIENDLYFIRE) || !coopRemoteAliveHere(p) || !coopInMission())
+    if (!isPlayer || coopFriendlyFireScale() <= 0.0f || !coopRemoteAliveHere(p) || !coopInMission())
     {
         return 1;
     }
@@ -3480,8 +3509,10 @@ s32 coopShotPuppet(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, s
     ev.u.hit.damage = damage;
     ev.u.hit.angle = 0.0f;
     ev.u.hit.chrnum = -1;   /* a partner's shot: theirs to aim */
+    ev.u.hit.friendly = 1;  /* their game scales it by the host's Friendly Fire, or drops it */
     coopQueueEventTo(&ev, p);
-    portConLogf("ge: coop: friendly fire on player %d (part %d, weapon %d): %.3f\n", p + 1, hitpart, weaponid, damage);
+    coopStatsNote(COOPSTAT_FRIENDLY);
+    portConLogf("ge: coop: friendly fire on player %d (part %d, weapon %d): %.3f before the level's scale\n", p + 1, hitpart, weaponid, damage);
     (void) vector;
     return 1;
 }
@@ -3631,8 +3662,24 @@ static void coopApplyEvent(CoopEvent *ev)
         case COOPEV_HIT:
             if (coopInMission() && !g_CurrentPlayer->bonddead && !coopHitBehindCover(ev))
             {
-                portConLogf("ge: coop: hit from player %d: %.3f\n", ev->from + 1, ev->u.hit.damage);
-                bondviewCallRecordDamageKills(ev->u.hit.damage, ev->u.hit.angle, -1, 1);
+                f32 damage = ev->u.hit.damage;
+
+                if (ev->u.hit.friendly)
+                {   /* a partner's shot: the host's Friendly Fire decides, here on the victim's game */
+                    damage *= coopFriendlyFireScale();
+                    if (damage <= 0.0f)
+                    {
+                        portConLogf("ge: coop: friendly fire from player %d dropped (Friendly Fire Off)\n", ev->from + 1);
+                        break;
+                    }
+                    portConLogf("ge: coop: friendly fire from player %d: %.3f (%s)\n", ev->from + 1, damage,
+                                coopFriendlyFireName(coopSetting(COOPSET_FRIENDLYFIRE)));
+                }
+                else
+                {
+                    portConLogf("ge: coop: hit from player %d: %.3f\n", ev->from + 1, damage);
+                }
+                bondviewCallRecordDamageKills(damage, ev->u.hit.angle, -1, 1);
             }
             break;
         case COOPEV_SHOTCHR:
@@ -4765,6 +4812,38 @@ void coopSetSetting(s32 which, s32 value)
     }
 }
 
+/* Friendly Fire, the host's lobby row: 0 off, 1 full, 2 reduced (append only) */
+static const char *const sFriendlyFireNames[] = { "Off", "Full", "Reduced" };
+
+const char *coopFriendlyFireName(s32 level)
+{
+    return (level >= 0 && level <= COOPFF_REDUCED) ? sFriendlyFireNames[level] : "?";
+}
+
+/* the lobby row steps Off, Reduced, Full */
+s32 coopFriendlyFireNext(s32 level, s32 dir)
+{
+    static const s8 order[] = { COOPFF_OFF, COOPFF_REDUCED, COOPFF_FULL };
+    s32 i;
+
+    for (i = 0; i < 3 && order[i] != level; i++)
+    {
+    }
+    i = (i == 3) ? 0 : i;
+    return order[(i + dir + 3) % 3];
+}
+
+/* what a partner's shot or blast does here, as a share of a guard's */
+f32 coopFriendlyFireScale(void)
+{
+    switch (coopSetting(COOPSET_FRIENDLYFIRE))
+    {
+        case COOPFF_FULL: return 1.0f;
+        case COOPFF_REDUCED: return 0.5f;
+        default: return 0.0f;
+    }
+}
+
 s32 coopDownRule(void)
 {
     return sDownRule;
@@ -5264,7 +5343,12 @@ s32 coopFrontTick(void)
             const char *l = getenv("GE_COOP_LIVES");
             const char *b = getenv("GE_COOP_BLEEDOUT");
             const char *r = getenv("GE_COOP_RESPAWN");
+            const char *s = getenv("GE_COOP_SCALING");
             testdiff = 0;
+            if (s != NULL)
+            {   /* GE_COOP_SCALING=<COOPSCALE_*>: 0 auto, 1 off, 2 as 3, 3 as 4 */
+                sSettings[COOPSET_SCALING] = (u8) atoi(s);
+            }
             if (l != NULL)
             {   /* GE_COOP_LIVES, _BLEEDOUT, _RESPAWN=<index>: the lobby's choices */
                 sSettings[COOPSET_LIVES] = (u8) atoi(l);
@@ -6916,6 +7000,7 @@ void coopScriptSetsFlags(void *script)
 
 static s32 sApplyingRemoteBoom;
 static s32 sApplyingHostBoom;    /* joiner: playing the host's explosion */
+static s32 sApplyingBoomOwner;   /* joiner: whose the host says it is, 1 + player, 0 not a player's */
 
 void coopExplosionCreated(PropRecord *source, coord3d *pos, s32 type, u8 *rooms)
 {
@@ -6950,6 +7035,7 @@ void coopExplosionCreated(PropRecord *source, coord3d *pos, s32 type, u8 *rooms)
     {
         if (!sApplyingRemoteBoom)
         {
+            ev.u.boom.owner = (u8) (coopSelf() + 1);
             coopQueueEventTo(&ev, 0);
             portConLogf("ge: coop: our explosion (type %d), sent to host\n", type);
         }
@@ -6959,6 +7045,8 @@ void coopExplosionCreated(PropRecord *source, coord3d *pos, s32 type, u8 *rooms)
     {   /* the host's (its guards' grenades, a launcher round, a joiner's passed on): seen and felt everywhere */
         s32 p;
 
+        ev.u.boom.owner = (u8) (sApplyingRemoteBoom ? sApplyingRemoteBoom + 1 : 0);
+
         for (p = 1; p < COOP_MAX_PLAYERS; p++)
         {
             if (p != sApplyingRemoteBoom && coopRemoteHere(p))
@@ -6967,6 +7055,107 @@ void coopExplosionCreated(PropRecord *source, coord3d *pos, s32 type, u8 *rooms)
             }
         }
     }
+}
+
+/* Friendly fire from blasts. Each explosion made here remembers whose it is:
+ * a thrown grenade or mine its thrower's (every game sets off its own copy,
+ * coop_items.c), a partner's launcher round the sender's (the host plays it,
+ * and passes the owner on with it to the others), our own ours. Guards',
+ * barrels' and anything else's are nobody's and hurt in full. When a blast
+ * reaches our Bond, explosion.c scales a partner's by Friendly Fire. */
+#define COOP_BOOM_OWNERS 16
+static void *sBoomOwnerOf[COOP_BOOM_OWNERS];
+static s8 sBoomOwner[COOP_BOOM_OWNERS];     /* the player, -1 nobody's */
+static u8 sBoomCounted[COOP_BOOM_OWNERS];   /* our blast already counted as a friendly hit */
+static s32 sBoomNext;
+
+static s32 coopExplosionOwnerNow(void)
+{
+    if (coopItemsExploding())
+    {
+        return coopItemsExplodingOwner() ? coopItemsExplodingOwner() - 1 : coopSelf();
+    }
+    if (sApplyingRemoteBoom)
+    {
+        return sApplyingRemoteBoom;
+    }
+    if (sApplyingHostBoom)
+    {
+        return sApplyingBoomOwner - 1;
+    }
+    return coopIsMirroringClient() ? coopSelf() : -1;   /* the joiner runs no guards: its own; the host's: not known */
+}
+
+/* explosion.c explosionCreate */
+void coopExplosionNoteOwner(void *explosion)
+{
+    s32 i;
+
+    for (i = 0; i < COOP_BOOM_OWNERS; i++)
+    {
+        if (sBoomOwnerOf[i] == explosion)
+        {
+            sBoomOwnerOf[i] = NULL;     /* the slot is reused */
+        }
+    }
+    if (sEnabled <= 0 || !coopInMission() || coopVersus())
+    {
+        return;
+    }
+    i = sBoomNext;
+    sBoomNext = (sBoomNext + 1) % COOP_BOOM_OWNERS;
+    sBoomOwnerOf[i] = explosion;
+    sBoomOwner[i] = (s8) coopExplosionOwnerNow();
+    sBoomCounted[i] = 0;
+}
+
+static s32 coopExplosionSlot(void *explosion)
+{
+    s32 i;
+
+    for (i = 0; explosion != NULL && i < COOP_BOOM_OWNERS; i++)
+    {
+        if (sBoomOwnerOf[i] == explosion)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* explosion.c: the share of this blast's damage our Bond takes */
+f32 coopExplosionDamageScale(void *explosion)
+{
+    const s32 i = coopExplosionSlot(explosion);
+    f32 scale;
+
+    if (i < 0 || sBoomOwner[i] < 0 || sBoomOwner[i] == coopSelf() || !coopInMission() || coopVersus())
+    {
+        return 1.0f;    /* nobody's, or our own */
+    }
+    scale = coopFriendlyFireScale();
+    if (sBoomCounted[i] != 2)
+    {
+        sBoomCounted[i] = 2;
+        portConLogf("ge: coop: player %d's blast reaches us: x%.1f (Friendly Fire %s)\n", sBoomOwner[i] + 1, scale,
+                    coopFriendlyFireName(coopSetting(COOPSET_FRIENDLYFIRE)));
+    }
+    return scale;
+}
+
+/* explosion.c: a blast reached a chr; our own reaching a partner's Bond is a friendly hit (counted once) */
+void coopExplosionHitChr(void *explosion, ChrRecord *chr)
+{
+    const s32 i = coopExplosionSlot(explosion);
+
+    if (i < 0 || sBoomCounted[i] || sBoomOwner[i] != coopSelf() || chr == NULL || chr->prop == NULL
+        || coopPlayerOfProp(chr->prop) < 0 || coopFriendlyFireScale() <= 0.0f || !coopRemoteAliveHere(coopPlayerOfProp(chr->prop)))
+    {
+        return;
+    }
+    sBoomCounted[i] = 1;
+    coopStatsNote(COOPSTAT_FRIENDLY);
+    portConLogf("ge: coop: our blast reaches player %d\n", coopPlayerOfProp(chr->prop) + 1);
 }
 
 /* coop_stats.c: the explosion being made is the partner's */
@@ -7013,8 +7202,10 @@ static void coopApplyExplosion(CoopEvent *ev)
     if (!coopNetIsHost())
     {   /* the host's: our copy shows it and hurts our Bond; guards and objects are the host's business */
         sApplyingHostBoom = 1;
+        sApplyingBoomOwner = ev->u.boom.owner;
         explosionCreate(NULL, &pos, stan, ev->u.boom.type, 0, 0, ev->u.boom.rooms, 0);
         sApplyingHostBoom = 0;
+        sApplyingBoomOwner = 0;
         portConLogf("ge: coop: host explosion (type %d) at %.0f %.0f %.0f\n", ev->u.boom.type, pos.f[0], pos.f[1], pos.f[2]);
         return;
     }

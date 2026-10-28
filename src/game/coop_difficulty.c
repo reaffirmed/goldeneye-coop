@@ -19,12 +19,21 @@
  * 1.7x (Brutal) the damage a guard deals per second, roughly what the second
  * target takes away from each player.
  *
- * Three or four players scale it again, in every mode (Normal too, which is
- * tuned for two): per player past the second, guard health +25% and aim
- * +10%. Three players on Normal: health x1.25, aim x1.1; four on Brutal:
- * health x3, aim x1.56. More guards never come from the player count, only
- * from the mode. The count is taken as the mission starts (health is set as
- * guards are allocated) and the aim follows it live, as players drop out.
+ * Three or four players scale it again (COOPSET_SCALING, the lobby's Player
+ * Scaling row), in every mode (Normal too, which is tuned for two):
+ *
+ *                 health   aim     damage   reaction     extra guards
+ *     3 players   x1.25    x1.1    x1.05    10% sooner   1 per 6 armed soldiers, up to 4
+ *     4 players   x1.5     x1.2    x1.1     20% sooner   1 per 4 armed soldiers, up to 8
+ *
+ * on top of the mode (four on Brutal: health x3, aim x1.56). Auto goes by the
+ * players in the session; Off keeps the mode's two-player tuning; 3 and
+ * 4 Players fix the level whoever is in. Reaction is g_AiReactionSpeed,
+ * the 007 slider's: how soon a guard on the move stops to fire. The player
+ * count's extra guards add to the mode's. When the count changes mid-mission
+ * (a drop-in, a leave) and stays changed for COOPDIFF_SETTLE ticks, the host
+ * rescales every living guard's health, keeping the share it has lost; aim,
+ * damage and reaction follow it each tick, and extra guards are only added.
  *
  * All of it runs on the host, whose game owns the guards: damage to the
  * partner is computed there and sent as a hit, and the extra guards reach the
@@ -75,6 +84,8 @@ static const CoopDiffMode sModes[] =
 #define COOPDIFF_RESERVE    6       /* chr slots left for the level's own spawns */
 #define COOPDIFF_CHRNUM     20000
 #define COOPDIFF_DELAY      120     /* ticks with both players in before spawning */
+#define COOPDIFF_SETTLE     300     /* ticks a new player count must hold before guard health follows it */
+#define COOPDIFF_PUPPETNUM  30000   /* partners' puppets: never scaled */
 
 static s16 sPlan[COOPDIFF_MAXCANDS];    /* host: soldiers to copy, the evenly spread ones first */
 static s32 sPlanCount;
@@ -86,6 +97,10 @@ static s32 sSpawned;
 static s32 sBothInTicks;
 static s32 sMisses;     /* copies in a row with no room */
 static s32 sLogged;
+static f32 sHealthCrowd;    /* host: the player count's health multiplier guards were given, 0 none yet */
+static s32 sCrowdSeen;      /* the count's crowd last tick, and for how long */
+static s32 sCrowdTicks;
+static s32 sCrowdMost;      /* the most players this mission: the extra guards it wants */
 
 s32 coopDifficultyCount(void)
 {
@@ -109,16 +124,65 @@ static s32 coopDifficultyMode(void)
     return (mode < COOPDIFF_COUNT) ? mode : COOPDIFF_COUNT - 1;
 }
 
-/* players past the second: 0 for two or fewer */
-static s32 coopDifficultyCrowd(void)
+/* the player count's own scaling, per player past the second (COOPSET_SCALING) */
+typedef struct
 {
-    s32 n = coopSessionActive() ? coopLobbyPlayerCount() : 1;
+    f32 health;
+    f32 aim;
+    f32 damage;
+    f32 reaction;   /* g_AiReactionSpeed: lower is sooner */
+    s32 every;      /* one extra guard per this many armed soldiers, 0 none */
+    s32 maxextra;
+} CoopCrowd;
 
-    return (n > 2) ? n - 2 : 0;
+static const CoopCrowd sCrowds[] =
+{
+    { 1.0f,  1.0f, 1.0f,  1.0f, 0, 0 },     /* one or two players */
+    { 1.25f, 1.1f, 1.05f, 0.9f, 6, 4 },     /* three */
+    { 1.5f,  1.2f, 1.1f,  0.8f, 4, 8 },     /* four */
+};
+#define COOPDIFF_CROWDS ((s32) (sizeof(sCrowds) / sizeof(sCrowds[0])))
+
+static const char *const sScalingNames[COOPSCALE_COUNT] = { "Auto", "Off", "3 Players", "4 Players" };
+
+const char *coopScalingName(s32 mode)
+{
+    return (mode >= 0 && mode < COOPSCALE_COUNT) ? sScalingNames[mode] : "?";
 }
 
-#define COOPDIFF_CROWD_HEALTH   0.25f   /* per player past two */
-#define COOPDIFF_CROWD_AIM      0.10f
+/* the lobby row steps Off, Auto, 3 Players, 4 Players */
+s32 coopScalingNext(s32 mode, s32 dir)
+{
+    static const s8 order[COOPSCALE_COUNT] = { COOPSCALE_OFF, COOPSCALE_AUTO, COOPSCALE_AS3, COOPSCALE_AS4 };
+    s32 i;
+
+    for (i = 0; i < COOPSCALE_COUNT && order[i] != mode; i++)
+    {
+    }
+    i = (i == COOPSCALE_COUNT) ? 1 : i;
+    return order[(i + dir + COOPSCALE_COUNT) % COOPSCALE_COUNT];
+}
+
+/* players past the second, as Player Scaling counts them: 0 to 2 */
+static s32 coopDifficultyCrowd(void)
+{
+    s32 n;
+
+    if (!coopSessionActive())
+    {
+        return 0;
+    }
+    switch (coopSetting(COOPSET_SCALING))
+    {
+        case COOPSCALE_OFF: return 0;
+        case COOPSCALE_AS3: return 1;
+        case COOPSCALE_AS4: return 2;
+        default: break;
+    }
+    n = coopLobbyPlayerCount();
+    n = (n > 2) ? n - 2 : 0;
+    return (n < COOPDIFF_CROWDS) ? n : COOPDIFF_CROWDS - 1;
+}
 
 /* get_007_health_mod: guard health, on the host */
 f32 coopDifficultyHealthMul(void)
@@ -127,19 +191,30 @@ f32 coopDifficultyHealthMul(void)
     {
         return 1.0f;
     }
-    return sModes[coopDifficultyMode()].health * (1.0f + COOPDIFF_CROWD_HEALTH * coopDifficultyCrowd());
+    if (sHealthCrowd == 0.0f)
+    {
+        sHealthCrowd = sCrowds[coopDifficultyCrowd()].health;
+    }
+    return sModes[coopDifficultyMode()].health * sHealthCrowd;
 }
 
 /* the host's guard health multiplier, on any game (a joiner predicting its shots, coop.c) */
 f32 coopDifficultyGuardHealthMul(void)
 {
-    return sModes[coopDifficultyMode()].health;
+    return sModes[coopDifficultyMode()].health * sCrowds[coopDifficultyCrowd()].health;
 }
 
 /* alloc_init_GUARDdata_entries: room for the extra guards, on both games */
 s32 coopDifficultyExtraSlots(void)
-{
-    return sModes[coopDifficultyMode()].maxextra;
+{   /* the player count's own, for the most it could reach this mission (a drop-in) */
+    const s32 scaling = coopSetting(COOPSET_SCALING);
+    s32 crowd = (scaling == COOPSCALE_OFF || !coopSessionActive()) ? 0 : COOPDIFF_CROWDS - 1;
+
+    if (scaling == COOPSCALE_AS3 && coopSessionActive())
+    {
+        crowd = 1;
+    }
+    return sModes[coopDifficultyMode()].maxextra + sCrowds[crowd].maxextra;
 }
 
 void coopDifficultyStageStart(void)
@@ -147,6 +222,10 @@ void coopDifficultyStageStart(void)
     sPlanCount = sPlanNext = sPlanned = sWanted = sPlaced = sSpawned = sMisses = 0;
     sBothInTicks = 0;
     sLogged = 0;
+    sHealthCrowd = 0.0f;
+    sCrowdSeen = -1;
+    sCrowdTicks = 0;
+    sCrowdMost = 0;
 }
 
 /* a generic armed soldier, up and about */
@@ -185,16 +264,36 @@ static s32 coopDifficultyCanCopy(ChrRecord *chr)
     return chrGetEquippedWeaponProp(chr, GUNRIGHT) != NULL;
 }
 
+/* extra guards for n armed soldiers: the mode's and the player count's */
+static s32 coopDifficultyWanted(const CoopDiffMode *m, const CoopCrowd *c, s32 n)
+{
+    s32 a = (m->every > 0) ? n / m->every : 0;
+    s32 b = (c->every > 0) ? n / c->every : 0;
+
+    return ((a < m->maxextra) ? a : m->maxextra) + ((b < c->maxextra) ? b : c->maxextra);
+}
+
+static s32 sSoldiers;   /* armed soldiers the plan counted */
+
 static void coopDifficultyPlan(const CoopDiffMode *m)
 {
     s32 i;
     s32 pass;
     s32 n = 0;
+    s32 every;
     f32 health = 0.0f;
 
     sPlanned = 1;
+    for (i = 0; i < g_NumChrSlots; i++)
+    {
+        n += coopDifficultyCanCopy(&g_ChrSlots[i]);
+    }
+    sSoldiers = n;
+    every = coopDifficultyWanted(m, &sCrowds[COOPDIFF_CROWDS - 1], n);
+    every = (every > 0) ? n / every : 1;
+    every = (every > 0) ? every : 1;
     for (pass = 0; pass < 2; pass++)
-    {   /* every m->every'th soldier, then the rest as stand-ins */
+    {   /* an evenly spread set first, then the rest as stand-ins */
         n = 0;
         for (i = 0; i < g_NumChrSlots && sPlanCount < COOPDIFF_MAXCANDS; i++)
         {
@@ -205,19 +304,14 @@ static void coopDifficultyPlan(const CoopDiffMode *m)
                 continue;
             }
             health = chr->maxdamage;
-            if (((++n % m->every) == 0) == (pass == 0))
+            if (((++n % every) == 0) == (pass == 0))
             {
                 sPlan[sPlanCount++] = chr->chrnum;
             }
         }
     }
-    sWanted = n / m->every;
-    if (sWanted > m->maxextra)
-    {
-        sWanted = m->maxextra;
-    }
-    portConLogf("ge: coop: difficulty %s: %d armed soldiers (health %.1f), %d extra guards wanted (free slots %d)\n",
-                m->name, n, health, sWanted, chrGetNumFree());
+    portConLogf("ge: coop: difficulty %s: %d armed soldiers (health %.1f), %d extra guards wanted at %d players (free slots %d)\n",
+                m->name, sSoldiers, health, coopDifficultyWanted(m, &sCrowds[sCrowdMost], sSoldiers), sCrowdMost + 2, chrGetNumFree());
 }
 
 static s32 coopDifficultySpawn(s16 srcnum)
@@ -261,6 +355,30 @@ static s32 coopDifficultySpawn(s16 srcnum)
     return 1;
 }
 
+/* host: the player count changed for good mid-mission; every living guard's
+ * health follows it, keeping the share it has lost */
+static void coopDifficultyRescale(f32 to)
+{
+    const f32 k = to / sHealthCrowd;
+    s32 i, n = 0;
+
+    for (i = 0; i < g_NumChrSlots; i++)
+    {
+        ChrRecord *chr = &g_ChrSlots[i];
+
+        if (chr->model == NULL || chr->prop == NULL || chr->chrnum >= COOPDIFF_PUPPETNUM
+            || chr->actiontype == ACT_DIE || chr->actiontype == ACT_DEAD)
+        {
+            continue;
+        }
+        chr->maxdamage *= k;
+        chr->damage *= k;
+        n++;
+    }
+    portConLogf("ge: coop: difficulty: player count changed, %d guards' health x%.2f (now x%.2f for the count)\n", n, k, to);
+    sHealthCrowd = to;
+}
+
 /* lvlTick, after lvlSetMultipliersForDifficulty */
 void coopDifficultyTick(void)
 {
@@ -269,28 +387,61 @@ void coopDifficultyTick(void)
     CoopHudPartner partner;
     s32 i;
     const s32 crowd = coopDifficultyCrowd();
-    const f32 aim = m->aim * (1.0f + COOPDIFF_CROWD_AIM * crowd);
+    const CoopCrowd *c = &sCrowds[crowd];
+    const f32 aim = m->aim * c->aim;
 
-    if (mode == 0 && crowd == 0)
+    if (crowd != sCrowdSeen)
+    {
+        sCrowdSeen = crowd;
+        sCrowdTicks = 0;
+    }
+    else if (sCrowdTicks < COOPDIFF_SETTLE)
+    {
+        sCrowdTicks++;
+    }
+    if (mode == 0 && crowd == 0 && sHealthCrowd <= 1.0f && sSpawned == 0)
     {
         return;
     }
     if (sLogged != crowd + 1)
     {
         sLogged = crowd + 1;
-        portConLogf("ge: coop: difficulty %s, %d players (%s): guard health x%.2f, damage x%.2f, aim x%.2f, extra 1 per %d up to %d\n",
-                    m->name, crowd + 2, coopNetIsHost() ? "applied here" : "the host applies it",
-                    m->health * (1.0f + COOPDIFF_CROWD_HEALTH * crowd), m->damage, aim, m->every, m->maxextra);
+        portConLogf("ge: coop: difficulty %s, scaling %s as %d players (%s): guard health x%.2f, damage x%.2f, aim x%.2f, reaction x%.2f\n",
+                    m->name, coopScalingName(coopSetting(COOPSET_SCALING)), crowd + 2, coopNetIsHost() ? "applied here" : "the host applies it",
+                    m->health * c->health, m->damage * c->damage, aim, c->reaction);
     }
     if (!coopNetIsHost())
-    {
+    {   /* keep the host's bookkeeping, for a migration */
+        if (sHealthCrowd == 0.0f || sCrowdTicks == COOPDIFF_SETTLE)
+        {
+            sHealthCrowd = c->health;
+        }
         return;
     }
-    g_AiDamageModifier *= m->damage;
+    g_AiDamageModifier *= m->damage * c->damage;
     g_AiAccuracyModifier *= aim;
-    if (m->every == 0)
+    g_AiReactionSpeed *= c->reaction;
+    if (sHealthCrowd == 0.0f)
     {
-        return;     /* Normal: no extra guards */
+        sHealthCrowd = c->health;   /* no guard allocated yet */
+    }
+    else if (sCrowdTicks == COOPDIFF_SETTLE && sHealthCrowd != c->health)
+    {
+        coopDifficultyRescale(c->health);
+    }
+    if (crowd > sCrowdMost && sCrowdTicks == COOPDIFF_SETTLE)
+    {
+        sCrowdMost = crowd;     /* more players for good: more extra guards (never fewer) */
+        if (sPlanned)
+        {
+            sWanted = coopDifficultyWanted(m, c, sSoldiers);
+            sMisses = 0;
+            portConLogf("ge: coop: difficulty: %d players now, %d extra guards wanted\n", crowd + 2, sWanted);
+        }
+    }
+    if (m->every == 0 && sCrowds[sCrowdMost].every == 0)
+    {
+        return;     /* no extra guards */
     }
 
     if (!coopHudPartner(&partner))
@@ -304,7 +455,9 @@ void coopDifficultyTick(void)
     }
     if (!sPlanned)
     {
+        sCrowdMost = (crowd > sCrowdMost) ? crowd : sCrowdMost;   /* the count as everyone is in */
         coopDifficultyPlan(m);
+        sWanted = coopDifficultyWanted(m, &sCrowds[sCrowdMost], sSoldiers);
     }
     for (i = 0; i < 2 && sPlaced < sWanted; i++)
     {   /* two a tick: the joiner mirrors up to four */
@@ -323,7 +476,7 @@ void coopDifficultyTick(void)
     }
     if (sPlaced >= sWanted)
     {
-        portConLogf("ge: coop: difficulty: %d extra guards placed, modifiers now damage %.2f aim %.2f\n",
-                    sPlaced, g_AiDamageModifier, g_AiAccuracyModifier);
+        portConLogf("ge: coop: difficulty: %d extra guards placed, modifiers now damage %.2f aim %.2f reaction %.2f\n",
+                    sPlaced, g_AiDamageModifier, g_AiAccuracyModifier, g_AiReactionSpeed);
     }
 }

@@ -8854,7 +8854,7 @@ extern int atoi(const char *);
 extern void portConLogf(const char *fmt, ...);
 
 enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLROW_CANCEL,
-       CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE, CLROW_FRIENDLYFIRE,
+       CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE, CLROW_FRIENDLYFIRE, CLROW_SCALING,
        CLROW_CHARACTER, CLROW_CHAT, CLROW_PUBLIC, CLROW_PASSWORD, CLROW_JOINPUBLIC, CLROW_LAYOUT, CLROW_OPTION,
        CLROW_HOSTLEAVES, CLROW_VSMODE, CLROW_VSARENA, CLROW_VSSCENARIO, CLROW_VSLENGTH, CLROW_VSWEAPONS, CLROW_VSSTART,
        CLROW_DISCORDYES, CLROW_DISCORDNO, CLROW_PROFILE, CLROW_VOICEMUTE, CLROW_LIVES, CLROW_BLEEDOUT, CLROW_RESPAWN,
@@ -9724,11 +9724,15 @@ static void coopLobbyBuildRows(void)
 
         snprintf(diff, sizeof(diff), "%s\n", coopDifficultyName(coopSetting(COOPSET_DIFFICULTY)));
         coopLobbyAdd(coopLobbyIsHost() ? CLROW_DIFFICULTY : CLROW_TEXT, 0, "Guards\n", diff);
+        snprintf(diff, sizeof(diff), "%s\n", coopScalingName(coopSetting(COOPSET_SCALING)));
+        coopLobbyAdd(coopLobbyIsHost() ? CLROW_SCALING : CLROW_TEXT, 0, "Player Scaling\n", diff);
     }
     if (!COOP_VS_ON())
     {
-        coopLobbyAdd(coopLobbyIsHost() ? CLROW_FRIENDLYFIRE : CLROW_TEXT, 0, "Friendly Fire\n",
-                     coopSetting(COOPSET_FRIENDLYFIRE) ? "On\n" : "Off\n");
+        char ff[16];
+
+        snprintf(ff, sizeof(ff), "%s\n", coopFriendlyFireName(coopSetting(COOPSET_FRIENDLYFIRE)));
+        coopLobbyAdd(coopLobbyIsHost() ? CLROW_FRIENDLYFIRE : CLROW_TEXT, 0, "Friendly Fire\n", ff);
         coopLobbyAdd(coopLobbyIsHost() ? CLROW_HOSTLEAVES : CLROW_TEXT, 0, "Host Leaves\n",
                      coopHostLeavesName(coopSetting(COOPSET_HOSTLEAVES)));
     }
@@ -9818,6 +9822,7 @@ static s32 coopLobbySteps(const struct CoopLobbyRow *r)
         case CLROW_CHARACTER:
         case CLROW_DOWNRULE:
         case CLROW_DIFFICULTY:
+        case CLROW_SCALING:
         case CLROW_FRIENDLYFIRE:
         case CLROW_HOSTLEAVES:
         case CLROW_PUBLIC:
@@ -9855,6 +9860,12 @@ static void coopLobbyStep(const struct CoopLobbyRow *r, s32 dir)
             break;
         case CLROW_DIFFICULTY:
             coopSetSetting(COOPSET_DIFFICULTY, (coopSetting(COOPSET_DIFFICULTY) + dir + coopDifficultyCount()) % coopDifficultyCount());
+            break;
+        case CLROW_SCALING:
+            coopSetSetting(COOPSET_SCALING, coopScalingNext(coopSetting(COOPSET_SCALING), dir));
+            break;
+        case CLROW_FRIENDLYFIRE:
+            coopSetSetting(COOPSET_FRIENDLYFIRE, coopFriendlyFireNext(coopSetting(COOPSET_FRIENDLYFIRE), dir));
             break;
         case CLROW_HOSTLEAVES:
             coopSetSetting(COOPSET_HOSTLEAVES, (coopSetting(COOPSET_HOSTLEAVES) + dir + coopHostLeavesCount()) % coopHostLeavesCount());
@@ -9963,6 +9974,8 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
             break;
         case CLROW_DOWNRULE:
         case CLROW_DIFFICULTY:
+        case CLROW_SCALING:
+        case CLROW_FRIENDLYFIRE:
         case CLROW_HOSTLEAVES:
         case CLROW_LAYOUT:
         case CLROW_OPTION:
@@ -9976,9 +9989,6 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
             break;
         case CLROW_CHARACTER:
             coopCharselOpen();     /* L / R on the row still step in place */
-            break;
-        case CLROW_FRIENDLYFIRE:
-            coopSetSetting(COOPSET_FRIENDLYFIRE, !coopSetting(COOPSET_FRIENDLYFIRE));
             break;
         case CLROW_VSMODE:
         case CLROW_VSARENA:
@@ -11243,7 +11253,8 @@ static const char *coopLobbyHelp(const struct CoopLobbyRow *r)
         case CLROW_CHARACTER:   return "Who you play as. Select for the full roster; looks only.\n";
         case CLROW_DOWNRULE:    return "When a player goes down: a partner revives them, a timer brings them back, or both.\n";
         case CLROW_DIFFICULTY:  return "How tough the guards are for the whole team.\n";
-        case CLROW_FRIENDLYFIRE: return "Whether your shots can hurt your partners.\n";
+        case CLROW_SCALING:     return "Tougher guards, and more of them, for 3 or 4 players.\n";
+        case CLROW_FRIENDLYFIRE: return "Whether your shots and blasts hurt partners, and how much.\n";
         case CLROW_HOSTLEAVES:  return "What happens to the game if the host quits.\n";
         case CLROW_LIVES:       return "How many times each player can come back in a mission.\n";
         case CLROW_BLEEDOUT:    return "How long a downed player waits for a revive.\n";
@@ -11936,6 +11947,7 @@ static void coopDebriefValue(char *out, s32 player, s32 row, s32 wide)
         case 2: v = coopStatsGet(player, COOPSTAT_HEAD); break;
         case 3: v = coopStatsGet(player, COOPSTAT_OBJECTIVES); break;
         case 4: v = coopStatsGet(player, COOPSTAT_REVIVES); break;   /* partners they got back up */
+        case 7: v = coopStatsGet(player, COOPSTAT_FRIENDLY); break;  /* shots and blasts that hurt a partner */
         case 5:
         {   /* in health bars, as on the HUD */
             v = coopStatsGet(player, COOPSTAT_DAMAGE);
@@ -11972,10 +11984,17 @@ static void coopDebriefValue(char *out, s32 player, s32 row, s32 wide)
 
 static Gfx *coopDebriefStats(Gfx *DL, s32 y0, s32 pitch)
 {
-    static const char *const labels[] = { "Kills:\n", "Accuracy:\n", "Head hits:\n", "Objectives:\n", "Revives:\n", "Damage:\n", "Downed:\n" };
+    static const char *const labels[] = { "Kills:\n", "Accuracy:\n", "Head hits:\n", "Objectives:\n", "Revives:\n", "Damage:\n", "Downed:\n", "Friendly hits:\n" };
     char buf[48];
     s32 x, y, i, p;
     const s32 ncols = coopStatsColumns();
+    /* Friendly hits only when the mission had friendly fire */
+    const s32 nrows = (s32) (sizeof(labels) / sizeof(labels[0])) - (coopSetting(COOPSET_FRIENDLYFIRE) == COOPFF_OFF);
+
+    if (nrows > 7)
+    {   /* the eighth row fits above the page's foot only a little closer together */
+        pitch = pitch * 7 / 8;
+    }
 
     for (p = 0; p < ncols; p++)
     {
@@ -11987,7 +12006,7 @@ static Gfx *coopDebriefStats(Gfx *DL, s32 y0, s32 pitch)
     DL = microcode_constructor_related_to_menus(DL, 0x37 - 2, y0 + pitch - 1, PORT_SHEET_RULE_R, y0 + pitch, PORT_SHEET_COL_RULE);
     DL = microcode_constructor(DL);
 
-    for (i = 0; i < (s32) (sizeof(labels) / sizeof(labels[0])); i++)
+    for (i = 0; i < nrows; i++)
     {
         x = 0x37;
         y = y0 + (i + 1) * pitch + 2;
