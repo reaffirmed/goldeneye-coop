@@ -16,6 +16,7 @@ s32  coopChrAltBegin(ChrRecord *chr, s32 k);     /* host: a failed "Bond" check,
 void coopChrAltEnd(ChrRecord *chr);              /* that try failed too: the guard's own target again */
 void coopChrAltKeep(ChrRecord *chr, s32 stimulus);  /* it passed: that player is the guard's target */
 s32  coopChrAimedAtByBond(ChrRecord *chr);       /* sub_GAME_7F0333F8 for whoever is Bond in this tick */
+s32  coopChrOnPartnerScreen(ChrRecord *chr);     /* host: a partner can see this chr (chrai.c "if I'm on screen") */
 void coopCollideMover(PropRecord *prop, s32 on); /* chrSetMoving: prop is being moved or tested from */
 s32  coopCollideSkip(PropRecord *prop);          /* 1: prop blocks nothing right now (down, or inside the mover) */
 s32  coopTargetIsRemote(void);
@@ -35,6 +36,9 @@ void coopMissionComplete(void);
 s32  coopFrontTick(void);
 s32  coopAltBondBegin(s32 k); /* 1: "Bond" is now the k-th living partner (from 0), call coopAltBondEnd */
 void coopAltBondEnd(void);
+s32  coopBondHasItem(s32 item);          /* chrai.c: whoever is Bond now holds this item (a partner's from STATE) */
+f32  coopBondHealth(void);               /* and their health, 0..1 */
+void coopBondItemLog(s32 item);          /* log: that check passed for a partner */
 s32  coopCctvWatches(void);              /* propobj.c: 0 on a joiner, the host's cameras raise the alarm */
 void coopCctvAlarm(PropRecord *seen);    /* log: the Bond a camera raised the alarm on */
 void coopAltBondCredit(void *script, s32 k);   /* a script's "either player" check passed: k 0 for our Bond, else partner k-1 */

@@ -2425,8 +2425,21 @@ static void coopHarnessTick(void)
             testgoto = (e != NULL) ? atoi(e) : -1;
         }
         if (testgoto >= 0 && ++inmission == 300)
-        {
-            ChrRecord *c = chrFindByLiteralId(testgoto);
+        {   /* 1024 and up: the chr running that ai list (Statue's Valentin is 1042) */
+            ChrRecord *c = (testgoto < 0x400) ? chrFindByLiteralId(testgoto) : NULL;
+            s32 i;
+
+            for (i = 0; testgoto >= 0x400 && c == NULL && i < g_NumChrSlots; i++)
+            {
+                if (g_ChrSlots[i].model != NULL && g_ChrSlots[i].prop != NULL && g_ChrSlots[i].ailist == ailistFindById(testgoto))
+                {
+                    c = &g_ChrSlots[i];
+                }
+            }
+            if (c == NULL)
+            {
+                portConLogf("ge: coop: testgoto: no chr %d\n", testgoto);
+            }
             if (c != NULL && c->prop != NULL && c->prop->stan != NULL)
             {
                 coopRespawnPlayerAt(&c->prop->pos, c->prop->stan, 0.0f, sLastWeapon);
@@ -2447,13 +2460,34 @@ static void coopHarnessTick(void)
                 testpad = -1;
             }
         }
-        if (testpad >= 0 && sMissionTicks == (u32) padat * 60 && g_CurrentSetup.pads != NULL)
-        {
+        if (testpad >= 0 && sMissionTicks >= (u32) padat * 60 && g_CurrentSetup.pads != NULL)
+        {   /* once: a slow frame steps the ticks past the exact one */
             PadRecord *pad = &g_CurrentSetup.pads[testpad];
             coord3d pos = pad->pos;
 
             coopRespawnPlayerAt(&pos, pad->stan, 0.0f, sLastWeapon);
             portConLogf("ge: coop: testpad -> pad %d at %.0f %.0f %.0f\n", testpad, pos.f[0], pos.f[1], pos.f[2]);
+            testpad = -1;
+        }
+    }
+    if (coopInMission())
+    {   /* GE_COOP_TESTHOLD=<item>:<s>: <s> seconds into the mission, switch to that
+         * item (1 the fists, holstered; harness only) */
+        static s32 testhold = -2, holdat;
+        if (testhold == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTHOLD");
+            if (e == NULL || sscanf(e, "%d:%d", &testhold, &holdat) != 2)
+            {
+                testhold = -1;
+            }
+        }
+        if (testhold >= 0 && sMissionTicks >= (u32) holdat * 60)
+        {
+            bondinvAddInvItem(testhold);
+            gunRequestHandWeaponChange(GUNRIGHT, testhold, 0);
+            portConLogf("ge: coop: testhold -> item %d\n", testhold);
+            testhold = -1;
         }
     }
     if (coopPartnerHere() && coopInMission())
@@ -3034,6 +3068,70 @@ s32 coopChrAimedAtByBond(ChrRecord *chr)
     }
     half = atan2f(getinstsize(chr->model) * 0.8f, d);  /* the body's sphere, as the stock test */
     return diff < half;
+}
+
+/* host, "if I'm on screen" (chrai.c): the host's screen, or a partner's. The
+ * escorts (Natalya in Bunker 2, Control and the Train, the Control
+ * technician) teleport up behind Bond when the check fails, and the host's
+ * screen alone let one pop up in front of a joiner who was watching her. A
+ * partner sees the chr when it is within their view's half width (their STATE
+ * yaw, about 48 degrees, plus the body) and 120 m, with a clear line. */
+s32 coopChrOnPartnerScreen(ChrRecord *chr)
+{
+    PropRecord *saved = g_CoopPropOverride;
+    PropRecord *from;
+    f32 dx, dz, d, diff;
+    s32 p, seen = 0;
+
+    if (sEnabled <= 0 || !coopNetIsHost() || chr == NULL || chr->prop == NULL || chr->model == NULL || coopVersus())
+    {
+        return 0;
+    }
+    for (p = 1; p < COOP_MAX_PLAYERS && !seen; p++)
+    {
+        if (!coopRemoteAliveHere(p))
+        {
+            continue;
+        }
+        from = sR[p].puppet;
+        dx = chr->prop->pos.f[0] - from->pos.f[0];
+        dz = chr->prop->pos.f[2] - from->pos.f[2];
+        d = sqrtf(dx * dx + dz * dz);
+        if (d > 12000.0f)
+        {
+            continue;
+        }
+        if (d > 1.0f)
+        {
+            diff = fmodf(atan2f(dx, dz) - sR[p].st.yaw, 6.2831855f);
+            if (diff < 0.0f)
+            {
+                diff += 6.2831855f;
+            }
+            if (diff > 3.1415927f)
+            {
+                diff = 6.2831855f - diff;
+            }
+            if (diff > 0.84f + atan2f(getinstsize(chr->model), d))
+            {
+                continue;
+            }
+        }
+        g_CoopPropOverride = from;
+        seen = chrlvCurrentPlayerCall7F0B0E24(chr);
+        g_CoopPropOverride = saved;
+        if (seen)
+        {
+            static ChrRecord *logged;
+
+            if (logged != chr)
+            {
+                logged = chr;
+                portConLogf("ge: coop: chr %d is on player %d's screen\n", chr->chrnum, p + 1);
+            }
+        }
+    }
+    return seen;
 }
 
 /* A real stimulus (seen, heard, shot by) commits the guard to whichever
@@ -7377,6 +7475,50 @@ s32 coopAltBondBegin(s32 k)
 void coopAltBondEnd(void)
 {
     g_CoopPropOverride = NULL;
+}
+
+/* What "Bond" holds and how hurt they are, for whoever is Bond right now (a
+ * guard's target, a coopAltBondBegin / coopChrAltBegin try): a partner's from
+ * their STATE, else our own. The game's checks read our own player struct,
+ * so on the host a joiner Valentin was talking to was asked about the host's
+ * gun (Statue), and a taunt about Bond's wounds was about the host's. */
+static s32 coopBondIsPartner(void)
+{
+    s32 p = (g_CoopPropOverride != NULL) ? coopPlayerOfProp(g_CoopPropOverride) : -1;
+
+    return (p > 0 && p < COOP_MAX_PLAYERS && coopRemoteHere(p)) ? p : -1;
+}
+
+s32 coopBondHasItem(s32 item)
+{
+    s32 p = coopBondIsPartner();
+
+    if (p < 0)
+    {
+        return item == getCurrentPlayerWeaponId(GUNRIGHT) || item == getCurrentPlayerWeaponId(GUNLEFT);
+    }
+    return item == sR[p].st.look.weapon[GUNRIGHT] || item == sR[p].st.look.weapon[GUNLEFT];
+}
+
+f32 coopBondHealth(void)
+{
+    s32 p = coopBondIsPartner();
+
+    return (p < 0) ? currentPlayerGetHealth() : sR[p].st.health;
+}
+
+/* a script's "Bond has this item" check passed for a partner */
+void coopBondItemLog(s32 item)
+{
+    s32 p = coopBondIsPartner();
+    static s32 lastp = -1, lastitem = -1;
+
+    if (p > 0 && (p != lastp || item != lastitem))
+    {
+        lastp = p;
+        lastitem = item;
+        portConLogf("ge: coop: script found item %d in player %d's hand\n", item, p + 1);
+    }
 }
 
 /* Security cameras (propobj.c) look for every player on the host. A joiner's

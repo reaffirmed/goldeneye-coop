@@ -1892,3 +1892,51 @@ screen checks. Fixed here (no packet changes, COOP_VERSION stays 13):
   past chr 6 (near miss)" and it runs at the joiner (act 9, 4 m closer).
   Dam bungee started by the host (GE_COOP_TESTPAD=330:10): new, the joiner
   logs "host script command 236" (damage and pickups off); old, it doesn't.
+
+## NPCs a joiner can't talk to (2026-10-28)
+
+Owner's report (v0.4.0): in Statue a joiner can't get the meeting to happen.
+Valentin himself already worked for a joiner (his checks are sight and
+distance, which ask every player since the NPC-reaction fix); the one that
+fails is Janus by Lenin's statue, who only talks once "Bond" has holstered.
+
+- "Bond has item X equipped" read our own player's hands. On the host that
+  is the host's gun, whoever the NPC was facing, so a joiner holstering did
+  nothing and Janus ended the meeting ("If he won't drop the gun kill him!",
+  objective B failed). Now it asks whoever is Bond right now (a guard's
+  target, from their STATE look.weapon; coop.c coopBondHasItem), then every
+  other player: for a chr's script the one holding it becomes its target, as
+  with the sight checks; a level script (Statue's ai_36, which also fails the
+  meeting when Bond draws during it) passes when any player holds it. Not
+  while damage and pickups are off (cutscenes, endings): there the check
+  picks our own Bond's cinema gun. Gadget checks keep coopGadgetItem first.
+- "Bond's health less / greater than" read the host's health. Now the
+  health of whoever is Bond (coopBondHealth), so the taunts after a sight
+  check (Facility, Control, Cradle's Trevelyan) are about the player seen.
+- "If I'm on screen" counted only the host's screen; the escorts (Natalya in
+  Bunker 2, Control and the Train, Control's technician) teleport up behind
+  Bond when nobody sees them, and could pop up in front of a joiner. Now a
+  partner sees a chr within about 48 degrees of their facing plus the body,
+  120 m, with a clear line (coopChrOnPartnerScreen).
+- Audit of every mission's NPC and proximity scripts: the other "Bond" checks
+  either ask every player already (sight, line of sight, distance, pad, room,
+  height, aimed at, heard, collected, gadget used, object used) or follow
+  the NPC's target (angle, run/walk to Bond). Valentin, Natalya (Bunker 2,
+  Jungle, Control, Train), Boris, the Silo and Frigate scientists and
+  hostages, the Surface safe, Baron Samedi and Trevelyan use only those.
+  Surface 1 and 2 reinforcement odds look at Bond's gun (fewer with a weak
+  one); they now count any player's. A partner's near miss
+  (if_guard_shot_from_bond_missed: Janus and Valentin end the meeting when
+  shot at) is left to the host-only audit (PR #44, coopPartnerShotNearMiss).
+- Two-player CI runs (mission_runs.sh) pass on Statue, Bunker 2, Control,
+  Train, Jungle, Cradle, Facility, Aztec, Silo and Frigate.
+- No packet changes; COOP_VERSION stays 13.
+- Harness: GE_COOP_TESTGOTO takes an ai list id (1024 and up) for the chr
+  running it (Statue's Valentin 1042); GE_COOP_TESTHOLD=<item>:<s> switches
+  to that item (1 the fists); TESTPAD and TESTHOLD fire once at or after the
+  second, since a slow software-GL run steps past the exact tick.
+- Test (two games over UDP, US ROM, old build = main at 1f3e068, host left at
+  the start with the PP7): joiner put on Valentin (TESTGOTO=1042), then on
+  pad 59, holstered. Old: Janus "If he won't drop the gun kill him!", B
+  failed. New: "No gun, 007?", the whole conversation, B complete on both
+  games. Shots: npc-talk/ in the project files.
