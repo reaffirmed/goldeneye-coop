@@ -71,6 +71,10 @@ Playing
      numerous with 3 or 4 players, and follows players who leave or drop
      in. Off keeps the two-player fight; 3 Players or 4 Players fixes the
      level whoever is playing.
+   - Guard AI: Classic (default, the original guards) or Smarter: guards
+     look into noises, call nearby guards for help, take cover, flank and
+     spread out over the players. It is the host's Port Option of the same
+     name, so changing it here changes it there too.
    - Friendly Fire: Off (default: your shots, grenades, mines and rockets
      pass your partners by), Reduced (half damage) or Full. A partner who
      is already down can't be hurt. The stats page counts friendly hits.

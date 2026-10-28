@@ -4617,6 +4617,7 @@ static const struct PortSheetRow port_sheet_rows_portopts[] = {
     { SHROW_OPT, "unlock_all" },   /* first */
     { SHROW_OPT, "fix_shootthrough" }, { SHROW_OPT, "distance_fading" },
     { SHROW_OPT, "true_enemy_rockets" },
+    { SHROW_OPT, "guard_ai" },               /* Classic or Smarter guards (coop_ai.c); the host's in co-op */
     { SHROW_OPT, "unlimited_explosions" },   /* default ON */
     { SHROW_OPT, "watch_static" },           /* the watch's fuzz, default ON (vanilla) */
     { SHROW_OPT, "fast_pause" },             /* the watch at Rare's top speed, default OFF */
@@ -8854,7 +8855,7 @@ extern int atoi(const char *);
 extern void portConLogf(const char *fmt, ...);
 
 enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLROW_CANCEL,
-       CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE, CLROW_FRIENDLYFIRE, CLROW_SCALING,
+       CLROW_READY, CLROW_MISSION, CLROW_INVITE, CLROW_OVERLAY, CLROW_LEAVE, CLROW_DOWNRULE, CLROW_DIFFICULTY, CLROW_CONTINUE, CLROW_FRIENDLYFIRE, CLROW_SCALING, CLROW_GUARDAI,
        CLROW_CHARACTER, CLROW_CHAT, CLROW_PUBLIC, CLROW_PASSWORD, CLROW_JOINPUBLIC, CLROW_LAYOUT, CLROW_OPTION,
        CLROW_HOSTLEAVES, CLROW_VSMODE, CLROW_VSARENA, CLROW_VSSCENARIO, CLROW_VSLENGTH, CLROW_VSWEAPONS, CLROW_VSSTART,
        CLROW_DISCORDYES, CLROW_DISCORDNO, CLROW_PROFILE, CLROW_VOICEMUTE, CLROW_LIVES, CLROW_BLEEDOUT, CLROW_RESPAWN,
@@ -9814,6 +9815,8 @@ static void coopLobbyBuildRows(void)
         coopLobbyAdd(coopLobbyIsHost() ? CLROW_DIFFICULTY : CLROW_TEXT, 0, "Guards\n", diff);
         snprintf(diff, sizeof(diff), "%s\n", coopScalingName(coopSetting(COOPSET_SCALING)));
         coopLobbyAdd(coopLobbyIsHost() ? CLROW_SCALING : CLROW_TEXT, 0, "Player Scaling\n", diff);
+        snprintf(diff, sizeof(diff), "%s\n", coopGuardAiName(coopLobbyIsHost() ? coopAiSmarterOption() : coopSetting(COOPSET_GUARDAI)));
+        coopLobbyAdd(coopLobbyIsHost() ? CLROW_GUARDAI : CLROW_TEXT, 0, "Guard AI\n", diff);
     }
     if (!COOP_VS_ON())
     {
@@ -9911,6 +9914,7 @@ static s32 coopLobbySteps(const struct CoopLobbyRow *r)
         case CLROW_DOWNRULE:
         case CLROW_DIFFICULTY:
         case CLROW_SCALING:
+        case CLROW_GUARDAI:
         case CLROW_FRIENDLYFIRE:
         case CLROW_HOSTLEAVES:
         case CLROW_PUBLIC:
@@ -9951,6 +9955,9 @@ static void coopLobbyStep(const struct CoopLobbyRow *r, s32 dir)
             break;
         case CLROW_SCALING:
             coopSetSetting(COOPSET_SCALING, coopScalingNext(coopSetting(COOPSET_SCALING), dir));
+            break;
+        case CLROW_GUARDAI:
+            coopAiSetSmarterOption((coopAiSmarterOption() + dir + coopGuardAiCount()) % coopGuardAiCount());
             break;
         case CLROW_FRIENDLYFIRE:
             coopSetSetting(COOPSET_FRIENDLYFIRE, coopFriendlyFireNext(coopSetting(COOPSET_FRIENDLYFIRE), dir));
@@ -10063,6 +10070,7 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
         case CLROW_DOWNRULE:
         case CLROW_DIFFICULTY:
         case CLROW_SCALING:
+        case CLROW_GUARDAI:
         case CLROW_FRIENDLYFIRE:
         case CLROW_HOSTLEAVES:
         case CLROW_LAYOUT:
@@ -11402,6 +11410,7 @@ static const char *coopLobbyHelp(const struct CoopLobbyRow *r)
         case CLROW_DOWNRULE:    return "When a player goes down: a partner revives them, a timer brings them back, or both.\n";
         case CLROW_DIFFICULTY:  return "How tough the guards are for the whole team.\n";
         case CLROW_SCALING:     return "Tougher guards, and more of them, for 3 or 4 players.\n";
+        case CLROW_GUARDAI:     return "Smarter guards investigate noise, call for help, use cover and flank.\n";
         case CLROW_FRIENDLYFIRE: return "Whether your shots and blasts hurt partners, and how much.\n";
         case CLROW_HOSTLEAVES:  return "What happens to the game if the host quits.\n";
         case CLROW_LIVES:       return "How many times each player can come back in a mission.\n";

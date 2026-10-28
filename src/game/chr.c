@@ -3981,7 +3981,14 @@ void chrCheckGuardsHeardSound(f32 noise)
     {
         if (g_ChrSlots[i].model != NULL)
         {
+#ifndef TARGET_N64
+            f32 dist = chrGetDistanceToBond(&g_ChrSlots[i]);
+            f32 range = g_ChrSlots[i].hearingscale * (noise * 100.0f);
+
+            if (dist < range * coopAiHearScale(&g_ChrSlots[i], dist, range)) /* smarter guards: walls muffle it */
+#else
             if (chrGetDistanceToBond(&g_ChrSlots[i]) < g_ChrSlots[i].hearingscale * (noise * 100.0f))
+#endif
             {
                 chrlvAlertGuardToPlayerPosition(&g_ChrSlots[i]);
             }

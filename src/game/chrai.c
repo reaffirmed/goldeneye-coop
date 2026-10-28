@@ -33,6 +33,9 @@
 #include <random.h>
 #include <snd.h>
 #include <ultra64.h>
+#ifndef TARGET_N64
+#include "coop.h"
+#endif
 
 #ifndef TARGET_N64
 static s32 coopk;  /* the partner a level script check is asking about (coopAltBondBegin) */
@@ -929,6 +932,17 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
         AiListp = AircraftEntityp->ailist;
     }
 
+#ifndef TARGET_N64
+    if (ChrEntityp != NULL && coopAiTick(ChrEntityp))
+    {
+        return; /* smarter guards (coop_ai.c) ran this tick */
+    }
+    if (ChrEntityp != NULL)
+    {   /* it may have handed a burst back to Classic's lists */
+        Offset  = ChrEntityp->aioffset;
+        AiListp = ChrEntityp->ailist;
+    }
+#endif
     if (AiListp) // continue if Has ailist (check once)
     {
         // loop forever (or until broken)
