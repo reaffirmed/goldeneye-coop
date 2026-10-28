@@ -6854,6 +6854,25 @@ void coopAltBondEnd(void)
     g_CoopPropOverride = NULL;
 }
 
+/* Security cameras (propobj.c) look for every player on the host. A joiner's
+ * cameras don't count: its alarm follows the host's, which turned an alarm
+ * raised here back off. */
+s32 coopCctvWatches(void)
+{
+    return !coopIsMirroringClient();
+}
+
+/* a camera raised the alarm on seeing this Bond */
+void coopCctvAlarm(PropRecord *seen)
+{
+    if (sEnabled > 0)
+    {
+        s32 p = coopPlayerOfProp(seen);
+
+        portConLogf("ge: coop: camera saw player %d, alarm on\n", (p >= 0) ? p + 1 : coopSelf() + 1);
+    }
+}
+
 /* A level script's "either player" check (chrai.c) passed: k 0 for our own
  * Bond, else the (k-1)-th living partner. The script's last passer is kept, so
  * when it then sets stage flags (an objective's trigger: the elevator, a

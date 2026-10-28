@@ -27,6 +27,8 @@ void coopMissionComplete(void);
 s32  coopFrontTick(void);
 s32  coopAltBondBegin(s32 k); /* 1: "Bond" is now the k-th living partner (from 0), call coopAltBondEnd */
 void coopAltBondEnd(void);
+s32  coopCctvWatches(void);              /* propobj.c: 0 on a joiner, the host's cameras raise the alarm */
+void coopCctvAlarm(PropRecord *seen);    /* log: the Bond a camera raised the alarm on */
 void coopAltBondCredit(void *script, s32 k);   /* a script's "either player" check passed: k 0 for our Bond, else partner k-1 */
 void coopScriptSetsFlags(void *script);        /* that script sets stage flags: it was whoever passed its last check */
 void coopAiCommand(u8 *list, s32 offset, ChrRecord *self);
