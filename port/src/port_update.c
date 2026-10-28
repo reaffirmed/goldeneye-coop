@@ -178,6 +178,23 @@ static char *rootPathCopy(const char *name)
     return p;
 }
 
+/* a read-only install (Program Files, a locked folder): the download has
+ * nowhere to go, which curl and WinHTTP would only report as a write error */
+#define UPD_READONLY "Can't write to the game's folder; move it somewhere you own"
+
+static int canWrite(const char *path)
+{
+    FILE *f = fopen(path, "wb");
+
+    if (f == NULL)
+    {
+        portConLogf("ge: update: can't write %s\n", path);
+        return 0;
+    }
+    fclose(f);
+    return 1;
+}
+
 static unsigned char *readFile(const char *path, long *len)
 {
     FILE *f = fopen(path, "rb");
@@ -457,6 +474,11 @@ static void doCheck(int quiet)
     makeDir(rootPathCopy("Data"));
     makeDir(rootPathCopy(UPD_DIR));
     portConLogf("ge: update: asking %s (we are %s)\n", apiUrl(), sOwn[0] != '\0' ? sOwn : "an unknown release");
+    if (!canWrite(path))
+    {
+        checkFailed(UPD_READONLY, quiet);
+        return;
+    }
     if (httpGet(apiUrl(), path, 0, err, sizeof(err)) != 0)
     {
         char why[96];
@@ -666,6 +688,11 @@ static void doInstall(void)
     makeDir(rootPathCopy(UPD_DIR));
     snprintf(name, sizeof(name), UPD_DIR "/%s", a.name);
     snprintf(part, sizeof(part), "%s.part", name);
+    if (!canWrite(rootPathCopy(part)))
+    {
+        setFailed(UPD_READONLY);
+        return;
+    }
     portConLogf("ge: update: downloading %s (%ld bytes)\n", a.url, a.size);
     if (httpGet(a.url, rootPathCopy(part), a.size, err, sizeof(err)) != 0)
     {
