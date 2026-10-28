@@ -2429,6 +2429,9 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     if (obj && obj->prop && (obj->runtime_bitflags & RUNTIMEBITFLAG_ACTIVATED))
                     {
                         obj->runtime_bitflags &= ~RUNTIMEBITFLAG_ACTIVATED;
+#ifndef TARGET_N64
+                        coopObjActivatedPass(Entityp, obj);   /* co-op: what it does next is the presser's */
+#endif
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
                     else
@@ -2446,6 +2449,7 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                         obj->state &= ~PROPSTATE_ACTIVATED;
 #ifndef TARGET_N64
                         coopGadgetCheck(obj, AiListp);   /* co-op: a joiner's gadget (Frigate's bombs) */
+                        coopObjActivatedPass(Entityp, obj);
 #endif
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -3307,7 +3311,7 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
 #ifndef TARGET_N64
                     if (objectiveregisters1 != coopflags)
                     {   /* co-op: a new flag is whoever passed this script's last check */
-                        coopScriptSetsFlags(Entityp);
+                        coopScriptSetsFlags(Entityp, ChrEntityp);
                     }
 #endif
                     Offset += sizeof(AiSetObjectiveBitfieldRecord);

@@ -1940,3 +1940,83 @@ fails is Janus by Lenin's statue, who only talks once "Bond" has holstered.
   pad 59, holstered. Old: Janus "If he won't drop the gun kill him!", B
   failed. New: "No gun, 007?", the whole conversation, B complete on both
   games. Shots: npc-talk/ in the project files.
+
+## Tester report after v0.4.0 (2026-10-28)
+
+A tester's report from a stream on the build before v0.4.0. Items already
+fixed (cameras, NPCs stuck and slow, desync, objectives) are left out. No
+packet changes; COOP_VERSION stays 13.
+
+- Spectating: the level music stopped at death and never came back;
+  coopRestoreMusic now runs when spectating starts ("music back after the
+  death"). A dead Bond never runs bondviewProcessInput, so the free camera
+  never saw the mouse; coopSpectateMouse samples it directly (honouring
+  Look Inverted), and smart mouse lock keeps the pointer captured in photo
+  mode and the free camera. Strafe was reversed in both (world x runs to the
+  left of a camera looking along +z). While spectating, sounds are heard
+  from the camera (sub_GAME_7F053894), so a partner's gunshots no longer
+  fade out with the distance to our corpse.
+- Chat: a line can be 5 parts (111 characters typed, COOP_FEED_TEXT 144);
+  a v0.4.0 game drops lines over 3 parts, the wire struct is unchanged.
+  In-mission lines and the SAY: line wrap at 3/5 of the screen
+  (coopFeedWrap), COOPFEED_ROWS 5. Typing is polled while the stage clock
+  is stopped (coopChatTickStill), so the box no longer freezes after a
+  cutscene with controls locked.
+- Objective credit: a partner's Use (COOPEV_USE, the host's own press, an
+  embed) is remembered for 300 ticks (coopObjNoteUse) and the stage script
+  that reads AI_IFObjectWasActivated / UsedGadgetOnObject names who pressed
+  (coopObjActivatedPass), so Dam's PC, Frigate's tracker and Statue's
+  objectives toast the right player. With nobody to credit it falls back to
+  the host, or the first standing partner when the host is dead.
+  coopScriptSetsFlags falls back to a chr script's target.
+- Pickups while the host is down: a partner's pickup used to wait until the
+  host stood up again (the black box "needs several walks over"); the host
+  now applies it while dead (bonddead cleared around propPickupByPlayer).
+- Hostages on high co-op difficulty: guards' shots on chrs no longer take
+  coopDifficultyHealthMul, so a hostage dies to the hostage-taker's shot.
+- Revive: the hold is counted on the downed game; measured both ways (host
+  reviving a joiner and the reverse, GE_COOP_TESTREVIVE / TESTDIE,
+  GE_COOP_RESPAWN=7): 2.5 s each. The downed game now logs "revived by
+  player N after X s (Y s from the first hold)" so a tester's log shows a
+  hold that kept restarting.
+- Harness: GE_COOP_TESTFLAG=<hex>:<s> sets the host's stage flags; the
+  spectate test has a strafe phase.
+- Tests: two games, US ROM. Dam objective C by the joiner (GE_DIFF=2,
+  TESTFLAG=100:5, joiner TESTUSE=-1:6:10): "credit player 2". Joiner
+  pickup with the host down: "player 2 picked up obj ...: ours too".
+  Spectate: music log, mouse pitch, strafe dot product +6 (was -6). Chat
+  wrap over the mock Steam (screenshot). Not run: the hostage shot (could
+  not trigger on Frigate in the harness), partner sounds, chat after a
+  cutscene.
+
+Second pass (the stream's frames, a recount of the report):
+
+- Guards' guns on a joiner: a joiner's chrs don't run their lists, so a gun
+  a guard gets from its own list (guard_try_spawning_item: Statue's ai_5
+  and ai_6 guards, Trevelyan's ambush) never reached our copy, which fired
+  with nothing in its hand. coopApplyGuard now gives our copy the host's
+  right-hand gun when it has none ("host chr N drew gun M"). Harness:
+  GE_COOP_TESTSPAWN=<chrnum>,late arms the spawned copy 2 s later; Dam,
+  the joiner logs "mirrored host chr 5038 (body 37, gun 0)" then "drew gun
+  8".
+- Free camera dead zone: 10 of the stick's 70 units.
+- The stream's 1:02:00 and 1:23:00 "desyncs" are the host's spectator
+  camera in its partner-eyes mode (the frames say WATCHING), with the
+  partner's own body in view. The camera sat at their last STATE while the
+  level was drawn from their drawn body's room, and their body (hidden only
+  where the camera is) was drawn elsewhere: at 1:02 Sagar was at 1.7 s and
+  88% loss, so the view went into the rock and his body walked ahead of
+  it; at 1:23 Crshrry's body stood in a doorway inside a guard. The camera
+  now follows the drawn body (coopSpectateFollow), so view, room and the
+  hidden body agree. Checked at GE_COOP_NETSIM=200:100:50.
+- 1:32:35, Frigate's ending for a player out of lives: spectating carried
+  on into the ending with our room swapped for the partner's, so the
+  cutscene camera went through the boat's hull into the void. Spectating
+  stops for the ending and intro cameras (CAMERAMODE_POSEND, _INTRO).
+- Three players, player 3 revives player 2 (tester's 1:31:00):
+  "revived by player 3 after 5.1 s (2.5 s from the first hold)".
+- Statue's INCOMPLETE ending is the helicopter countdown (ai_37, 180 s):
+  it runs out, flag 0x40, ai_44 blows up the heli and Natalya with it.
+  Natalya gets up when Bond is within 3 m (ai_21's
+  if_guard_distance_to_bond_less_than, already any player's on the host);
+  why she waited for a death in the stream needs the joiner's view.

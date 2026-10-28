@@ -11,9 +11,10 @@
  * which the reliable channel delivers in order; the receiver joins the parts
  * of each message number and shows the line once the last part is in.
  *
- * The feed keeps the newest COOPFEED_LINES lines with who said them; each
- * fades after COOPFEED_SHOW ticks in play (the lobby shows the newest few
- * whatever their age). Toasts (coopFeedToast: a partner completed an
+ * The feed keeps the newest COOPFEED_LINES lines with who said them, each
+ * word-wrapped onto up to COOPFEED_ROWS rows in play; each fades after
+ * COOPFEED_SHOW ticks in play (the lobby shows the newest few whatever
+ * their age). Toasts (coopFeedToast: a partner completed an
  * objective, joined or left, gave us ammo; the host left, ...) stack above
  * the chat lines, newest lowest, for COOPTOAST_SHOW ticks, fading in and
  * out: the lead in the player's colour and the rest after it in white,
@@ -62,9 +63,10 @@ extern s32 portTextInputActive(void);
 #endif
 
 #define COOPCHAT_PART     24    /* characters in one event */
-#define COOPCHAT_PARTS    3
+#define COOPCHAT_PARTS    5     /* up to 111 typed; a v0.4.0 game drops a line of more than 3 parts */
 #define COOPCHAT_MAX      (COOPCHAT_PART * COOPCHAT_PARTS - 9)  /* typed; leaves room for "NAME: " on screen */
 #define COOPFEED_LINES    6
+#define COOPFEED_ROWS     5     /* a chat line wraps onto up to this many rows */
 #define COOPFEED_SHOW     (60 * 10)     /* a line stays 10 s in play */
 #define COOPFEED_FADE     60
 #define COOPTOAST_SHOW    (60 * 5)
@@ -390,10 +392,10 @@ static void coopChatTestTick(s32 inmission)
     coopChatTestOne(&lobby, !inmission && coopLobbyHasPartner() && coopLobbyPartnerOnScreen(), sNow);
 }
 
+static void coopChatInput(void);
+
 void coopChatTick(s32 inmission)
 {
-    s32 guard;
-
     sNow++;
     coopChatTestTick(inmission);
     if (sEatEscape > 0)
@@ -413,6 +415,24 @@ void coopChatTick(s32 inmission)
         coopChatClose();
         return;
     }
+    coopChatInput();
+}
+
+/* the stage's clock is stopped (locked controls: a script's camera, the
+ * moments after a cutscene; the pause): the open line still takes its keys,
+ * which no longer reach Bond, so it can be typed, sent or dropped */
+void coopChatTickStill(void)
+{
+    if (sTyping && coopSessionActive())
+    {
+        coopChatInput();
+    }
+}
+
+static void coopChatInput(void)
+{
+    s32 guard;
+
     for (guard = 0; guard < 64 && sTyping; guard++)
     {
         char c = 0;
@@ -567,18 +587,18 @@ static const char *coopToastWords(const char *in, s32 avail, char *out, s32 cap)
     return in;
 }
 
-/* add the words of in at row/x on, wrapping to new rows up to COOPTOAST_LINES;
- * the last row is cut with "..." */
-static s32 coopToastFlow(CoopToastPiece *pc, s32 n, s32 *row, s32 *x, const char *in, s32 maxw, s32 lead)
+/* add the words of in at row/x on, wrapping to new rows up to maxrows
+ * (pc holds maxrows * 2 pieces); the last row is cut with "..." */
+static s32 coopToastFlowRows(CoopToastPiece *pc, s32 n, s32 *row, s32 *x, const char *in, s32 maxw, s32 lead, s32 maxrows)
 {
-    while (*in != '\0' && n < COOPTOAST_LINES * 2)
+    while (*in != '\0' && n < maxrows * 2)
     {
         CoopToastPiece *p = &pc[n];
         const char *next = coopToastWords(in, maxw - *x, p->text, sizeof(p->text));
 
         if (next == in)
         {   /* not one word fits: a new row, or cut it on the last */
-            if (*x > 0 && *row < COOPTOAST_LINES - 1)
+            if (*x > 0 && *row < maxrows - 1)
             {
                 (*row)++;
                 *x = 0;
@@ -588,7 +608,7 @@ static s32 coopToastFlow(CoopToastPiece *pc, s32 n, s32 *row, s32 *x, const char
             coopFeedFit(p->text, maxw - *x);
             next = "";
         }
-        else if (*next != '\0' && *row == COOPTOAST_LINES - 1)
+        else if (*next != '\0' && *row == maxrows - 1)
         {   /* more than the last row holds */
             coopFeedText(p->text, sizeof(p->text), in);
             coopFeedFit(p->text, maxw - *x);
@@ -608,6 +628,11 @@ static s32 coopToastFlow(CoopToastPiece *pc, s32 n, s32 *row, s32 *x, const char
         }
     }
     return n;
+}
+
+static s32 coopToastFlow(CoopToastPiece *pc, s32 n, s32 *row, s32 *x, const char *in, s32 maxw, s32 lead)
+{
+    return coopToastFlowRows(pc, n, row, x, in, maxw, lead, COOPTOAST_LINES);
 }
 
 /* a toast's pieces: the lead (to '|') then "- " and the rest, word-wrapped
@@ -688,11 +713,24 @@ static Gfx *coopToastsRender(Gfx *gdl, s32 left, s32 y)
     return gdl;
 }
 
+/* a chat line word-wrapped to maxw, up to COOPFEED_ROWS rows (the name
+ * with the start of the line, as said); returns the pieces, *rows the rows */
+static s32 coopFeedWrap(const char *line, s32 maxw, CoopToastPiece *pc, s32 *rows)
+{
+    s32 row = 0, x = 0;
+    s32 n = coopToastFlowRows(pc, 0, &row, &x, line, maxw, 1, COOPFEED_ROWS);
+
+    *rows = row + 1;
+    return n;
+}
+
 /* the chat lines, bottom left, newest lowest, and the toasts stacked above them */
 Gfx *coopFeedRender(Gfx *gdl)
 {
     s32 left = viGetViewLeft() + 0x14;
     s32 bottom = viGetViewTop() + viGetViewHeight() - 0x34;
+    const s32 maxw = viGetViewWidth() * 3 / 5;
+    CoopToastPiece pc[COOPFEED_ROWS * 2];
     s32 y;
     s32 i;
     s32 any;
@@ -721,20 +759,29 @@ Gfx *coopFeedRender(Gfx *gdl)
     y = bottom;
     if (sTyping)
     {
-        char typed[96];
-        char text[100];
+        char typed[COOP_FEED_TEXT];
+        s32 rows = 0, w = 0, n, k;
 
         snprintf(typed, sizeof(typed), "SAY: %s_", sLine);
-        coopFeedText(text, sizeof(text), typed);
-        gdl = microcode_constructor_related_to_menus(gdl, left - 3, y - 2, left + viGetViewWidth() / 2, y + 0x0B, 0x00000080);
-        gdl = coopFeedPrint(gdl, left, y, text, 0xFFFFFFFF);
+        n = coopFeedWrap(typed, maxw, pc, &rows);
+        for (k = 0; k < n; k++)
+        {
+            w = (pc[k].w > w) ? pc[k].w : w;
+        }
+        w = (w < viGetViewWidth() / 2) ? viGetViewWidth() / 2 : w + 3;
+        y -= (rows - 1) * 0x0B;
+        gdl = microcode_constructor_related_to_menus(gdl, left - 3, y - 2, left + w, y + rows * 0x0B, 0x00000080);
+        for (k = 0; k < n; k++)
+        {
+            gdl = coopFeedPrint(gdl, left + pc[k].x, y + pc[k].row * 0x0B, pc[k].text, 0xFFFFFFFF);
+        }
         y -= 0x0C;
     }
     for (i = sFeedCount - 1; i >= 0; i--)
     {
         u32 age = sNow - sFeed[i].tick;
-        char text[100];
         s32 a = 0xFF;
+        s32 rows = 0, n, k;
 
         if (age >= COOPFEED_SHOW && !sTyping)
         {
@@ -744,8 +791,13 @@ Gfx *coopFeedRender(Gfx *gdl)
         {
             a = (s32) ((COOPFEED_SHOW - age) * 0xFF / COOPFEED_FADE);
         }
-        coopFeedText(text, sizeof(text), sFeed[i].text);
-        gdl = coopFeedPrint(gdl, left, y, text, coopFeedAlpha(coopFeedColour(sFeed[i].player), a));
+        n = coopFeedWrap(sFeed[i].text, maxw, pc, &rows);
+        y -= (rows - 1) * 0x0B;     /* newest lowest: a wrapped line grows upwards */
+        for (k = 0; k < n; k++)
+        {
+            gdl = coopFeedPrint(gdl, left + pc[k].x, y + pc[k].row * 0x0B, pc[k].text,
+                                coopFeedAlpha(coopFeedColour(sFeed[i].player), a));
+        }
         y -= 0x0B;
     }
     gdl = coopToastsRender(gdl, left, y + 0x0B - 4);

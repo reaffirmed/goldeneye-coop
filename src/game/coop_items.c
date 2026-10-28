@@ -950,7 +950,7 @@ static void coopItemsApplyStuck(const CoopStuckMsg *m, s32 from)
     if (objCoopEmbed(prop, host->prop))
     {
         it->embedfix = 1;
-        coopObjNoteActor(from, 0);  /* an objective it completes is theirs (coop_objective.c) */
+        coopObjNoteUse(from);   /* an objective it completes is theirs (coop_objective.c) */
         portConLogf("ge: coop: player %d's item %04x stuck to obj %d here too\n", from + 1, m->id, m->objofs);
     }
 }

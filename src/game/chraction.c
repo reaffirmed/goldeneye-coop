@@ -2618,6 +2618,14 @@ bool handles_shot_actors(ChrRecord *self, s32 hitpart, coord3d *vector, s32 weap
         {
             damageToCause *= g_AiHealthModifier;
         }
+#ifndef TARGET_N64
+        if (!isPlayer)
+        {   /* co-op difficulty and Player Scaling make every chr tougher for the
+             * players' guns; a guard's shot (Frigate's hostage-takers at their
+             * hostage) keeps the mission's own strength */
+            damageToCause *= coopDifficultyHealthMul();
+        }
+#endif
 
         vec.x = myprop->pos.x - vector->x;
         vec.y = myprop->pos.y - vector->y;

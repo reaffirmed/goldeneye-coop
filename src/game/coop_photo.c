@@ -178,9 +178,11 @@ static void coopPhotoMove(f32 fwd, f32 side)
     StandTile *tile = sTile;
     f32 floor, dx, dy, dz;
 
-    want.f[0] += (-st * cp * fwd + ct * side) * PHOTO_SPEED;
+    /* the view's right is (-cos, -sin) of theta: the world's x runs to the
+     * left of a camera looking along +z */
+    want.f[0] += (-st * cp * fwd - ct * side) * PHOTO_SPEED;
     want.f[1] += sp * fwd * PHOTO_SPEED;
-    want.f[2] += (ct * cp * fwd + st * side) * PHOTO_SPEED;
+    want.f[2] += (ct * cp * fwd - st * side) * PHOTO_SPEED;
     dx = want.f[0] - eye->f[0];
     dy = want.f[1] - eye->f[1];
     dz = want.f[2] - eye->f[2];
