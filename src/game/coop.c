@@ -47,6 +47,7 @@
 #include "front.h"
 #include "file.h"
 #include "gun.h"
+#include "math_atan2f.h"   /* the game's math.h has no atan2f: undeclared, it returned garbage (-w hides it) */
 
 extern s32 chrlvCurrentPlayerCall7F0B0E24(ChrRecord *self);
 
@@ -82,7 +83,7 @@ u32 randomGetNext(void);
 extern void portConLogf(const char *fmt, ...);
 
 #define COOP_MAGIC   0x50434547u /* "GECP" */
-#define COOP_VERSION 13 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
+#define COOP_VERSION 14 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
                           6: host migration (AI sync, bye, addresses in the roster);
                           7: pings, chat, objective credit, team times, cross-save (COOPEV 16, 20..31, COOPPKT 10);
                           8: versus (COOPEV 32..36, COOPPKT 16);
@@ -93,7 +94,9 @@ extern void portConLogf(const char *fmt, ...);
                           12: lives, bleed-out and respawn times (COOPSET 8..10, 16 settings in HELLO, STATE out);
                               gadgets in USE, where a throw stuck (COOPEV 29), the tank (COOPPKT 11);
                           13: Player Scaling (COOPSET 11), Friendly Fire Reduced and blasts, the victim scales a
-                              partner's hit (HIT friendly), a blast's owner (EXPLODE), Friendly hits stat */
+                              partner's hit (HIT friendly), a blast's owner (EXPLODE), Friendly hits stat;
+                          14: the host's mission countdown in WORLD, its blast relayed (COOPEV_AICMD); versus shares
+                              the arena's pickups (COOPEV 37), thrown items, dropped guns, object damage and knocks */
 
 enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7, COOPPKT_AISYNC = 8, COOPPKT_BYE = 9 };
 /* 10 and 11 (COOPPKT_EXT_FIRST..LAST in coop.h) are coop_ext.c's features' own packets;
@@ -182,7 +185,14 @@ typedef struct
     u8 keycopied;
     u8 alarm;
     u16 calm;           /* ticks since the sender was last in a fight (capped) */
+    f32 clock;          /* the host's mission countdown (ticks left) */
+    u8 clockflags;      /* COOP_CLOCK_* */
+    u8 pad[3];
 } CoopWorldPkt;
+
+#define COOP_CLOCK_RUNNING 1
+#define COOP_CLOCK_SHOWN   2
+#define COOP_CLOCK_SET     4    /* the host's level script has used the countdown */
 
 /* Reliable, in-order events (hits, shots, doors, ...). Every EVENTS packet
  * carries all unacked events plus an ack of what we have received. */
@@ -351,6 +361,8 @@ static s32 sSelfPlayer;         /* our player number: 0 the host, a joiner's fro
 static u32 sMissionTicks;       /* ticks in this mission */
 static s32 sLateJoin;           /* joiner: followed the host into a mission under way */
 static u32 sDropInSince;        /* sLateJoin: sTick we started watching for a safe moment, 0 not yet */
+static s32 sHostWaitFar;        /* joiner: the host's silence began on a poor line of ours, or after an earlier one */
+static s32 sHostHiccups;        /* joiner: times the host went quiet and came back this mission */
 static void coopDropInTick(void);
 static s32 sOnLobbyScreen;      /* front.c: the lobby screen is up */
 static u32 sLastHurtTick;   /* local Bond lost health */
@@ -359,6 +371,7 @@ static f32 sLastHealth;
 static s32 sLastWeapon = ITEM_UNARMED;
 static u32 sDeadSince;      /* sTick our Bond's death fade finished, 0 alive */
 static s32 sReviveHold;     /* while down: ticks a partner has held Use over us */
+static u32 sReviveFirst;    /* while down: the tick a partner first held Use over us, 0 none */
 static s32 sBledOut;        /* out until the mission ends: COOPOUT_BLEDOUT (revive only, down too long) or COOPOUT_LIVES */
 static s32 sLivesLeft = -1; /* this mission's lives left (COOPSET_LIVES), -1 unlimited */
 static s32 coopLivesStart(void);
@@ -406,9 +419,12 @@ static CoopClock sClock[COOP_MAX_PLAYERS];  /* each player's clock against ours 
 typedef struct
 {
     CoopEvent out[COOP_EVENT_RING];
+    u32 outSentMs[COOP_EVENT_RING]; /* when each was last sent (coopNowMs) */
     u32 outNext;        /* seq the next queued event gets */
     u32 outAcked;       /* the peer has everything up to here */
     u32 inDone;         /* we have applied everything up to here */
+    CoopEvent in[COOP_EVENT_RING];  /* events that came ahead of a missing one, by seq */
+    u32 inSeq[COOP_EVENT_RING];     /* the seq each slot of in holds, 0 none */
     u32 outSentUpTo;
     u32 evLastSend;
     s32 ackDirty;
@@ -469,6 +485,7 @@ static void coopSendWorld(void);
 static void coopApplyPickup(CoopEvent *ev);
 static void coopApplyMissionEnd(CoopEvent *ev);
 static void coopSendHello(void);
+static void coopSendHelloNow(void);
 static void coopApplyExplosion(CoopEvent *ev);
 static void coopApplyAiCommand(CoopEvent *ev);
 static s32 sPendingCinemaList = -1;
@@ -477,6 +494,8 @@ static void coopPendingCinemaTick(void);
 static s32 coopLocalCalm(void);
 static void coopTrackCombat(void);
 static void coopApplyWorld(CoopWorldPkt *p);
+static void coopCradleFallTick(void);
+static s32 sClockSet;
 static s32 coopSetupOfs(void *rec);
 static StandTile *coopFindStan(coord3d *pos, StandTile *from, coord3d *frompos);
 static s32 coopIsMirroringClient(void);
@@ -645,6 +664,25 @@ static void coopRemotesTick(void);
 static void coopCinemaTick(void);
 static void coopQueueEventTo(CoopEvent *ev, s32 to);
 
+/* host: STATE to channel c (ours, and the others' it relays) at half rate,
+ * 30 a second: with three or four players, or on a poor line. Every player's
+ * STATE to every joiner at 60 a second was most of the host's upload (each
+ * player added 10 KB/s to every other joiner's line and to the host's), so a
+ * third or fourth player raised everyone's ping on a slow upload. Partners
+ * are drawn between samples (coop_interp.c), which allows for the longer
+ * gap; the newest shots ride in every STATE (COOP_SHOTS_KEPT). Not in versus,
+ * which has its own tuning. */
+static s32 coopStateThin(s32 c)
+{
+    CoopLink l;
+
+    if (coopVersus())
+    {
+        return 0;
+    }
+    return coopLobbyPlayerCount() >= 3 || (coopNetLink(coopPlayerOfChan(c), &l) && l.quality == COOPLINK_POOR);
+}
+
 static void coopSendState(void)
 {
     CoopStatePkt p;
@@ -674,7 +712,22 @@ static void coopSendState(void)
     p.calm = (u16) coopLocalCalm();
     p.out = (u8) sBledOut;
     p.ms = coopNowMs();
-    coopNetSend(&p, sizeof(p));
+    if (coopNetIsHost())
+    {
+        s32 c;
+
+        for (c = 0; c < COOP_NET_MAX_PEERS; c++)
+        {
+            if ((sTick & 1) == 0 || !coopStateThin(c))
+            {
+                coopNetSendTo(c, &p, sizeof(p));
+            }
+        }
+    }
+    else
+    {
+        coopNetSend(&p, sizeof(p));
+    }
 
     if ((sTick % 300) == 1)
     {
@@ -729,6 +782,7 @@ static void coopChanReset(CoopChan *ch)
     ch->inDone = 0;
     ch->ackDirty = 0;
     ch->evLastSend = 0;
+    memset(ch->inSeq, 0, sizeof(ch->inSeq));
 }
 
 /* A player that restarted (a crash, or rejoining from the lobby) starts its
@@ -769,16 +823,22 @@ static void coopRecvEvents(s32 c, CoopEventsPkt *e)
         ch->outAcked = e->ack;
     }
     for (k = 0; k < e->count; k++)
-    {
+    {   /* kept by seq: jitter reorders packets, and one lost must not cost the ones after it a resend */
         u32 seq = e->firstseq + k;
+
+        if ((s32) (seq - ch->inDone) > 0 && (s32) (seq - ch->inDone) <= COOP_EVENT_RING)
+        {
+            ch->in[seq % COOP_EVENT_RING] = e->ev[k];
+            ch->inSeq[seq % COOP_EVENT_RING] = seq;
+        }
+    }
+    while (ch->inSeq[(ch->inDone + 1) % COOP_EVENT_RING] == ch->inDone + 1)
+    {   /* in order, from the first not yet applied */
         CoopEvent ev;
 
-        if (seq != ch->inDone + 1)
-        {
-            continue;
-        }
-        ch->inDone = seq;
-        ev = e->ev[k];
+        ch->inDone++;
+        ch->inSeq[ch->inDone % COOP_EVENT_RING] = 0;
+        ev = ch->in[ch->inDone % COOP_EVENT_RING];
         if (coopNetIsHost())
         {
             ev.from = (u8) coopPlayerOfChan(c);   /* a joiner can only speak for itself */
@@ -813,10 +873,12 @@ static void coopRecvState(s32 c, CoopStatePkt *p)
 
     if (coopNetIsHost())
     {
+        static u8 relayed[COOP_NET_MAX_PEERS][COOP_NET_MAX_PEERS];
+
         p->player = (u8) coopPlayerOfChan(c);
         for (q = 0; q < COOP_NET_MAX_PEERS; q++)
-        {   /* every joiner sees every other one */
-            if (q != c)
+        {   /* every joiner sees every other one (every other STATE where coopStateThin) */
+            if (q != c && ((++relayed[q][c] & 1) != 0 || !coopStateThin(q)))
             {
                 coopNetSendTo(q, p, sizeof(*p));
             }
@@ -1122,6 +1184,27 @@ static void coopTimeTick(void)
         if (sGuardStale != 0)
         {
             portConLogf("ge: coop: net: %u guard snapshot entries came after newer ones (positions kept, the rest skipped)\n", sGuardStale);
+        }
+        for (p = 0; p < COOP_NET_MAX_PEERS; p++)
+        {   /* what we send each peer: the busiest packet types */
+            unsigned int by[32], pkts, total = coopNetSentTake(p, by, &pkts);
+            char line[160];
+            s32 k, n = 0;
+
+            if (total == 0 || !coopNetPeerConnected(p))
+            {
+                continue;
+            }
+            for (k = 0; k < 32 && n < (s32) sizeof(line) - 16; k++)
+            {
+                if (by[k] * 20 >= total)
+                {
+                    n += snprintf(line + n, sizeof(line) - n, " %d:%u", k, (by[k] * 100 + total / 2) / total);
+                }
+            }
+            line[n] = '\0';
+            portConLogf("ge: coop: net: to player %d %.1f KB/s in %u packets/s (%% by type:%s)\n", coopPlayerOfChan(p) + 1,
+                        total / 10240.0f, pkts / 10, line);   /* this log comes every 10 s */
         }
         for (p = 0; p < COOP_MAX_PLAYERS; p++)
         {
@@ -1767,9 +1850,11 @@ void coopStageStart(void)
     memset(sChrHostDying, 0, sizeof(sChrHostDying));
     coopPredictReset();
     sMissionTicks = 0;
+    sHostHiccups = 0;
     sNumPeerHeld = 0;
     memset(sScriptPass, 0, sizeof(sScriptPass));    /* a new mission's scripts */
     sNumTeamPicks = 0;
+    sClockSet = 0;
     sLastHurtTick = sLastFightTick = sDeadSince = 0;
     sBledOut = 0;
     sLivesLeft = coopLivesStart();
@@ -1827,6 +1912,7 @@ static void coopTickBody(void)
     }
     if (g_ClockTimer <= 0)
     {
+        coopChatTickStill();    /* a line opened just before still takes its keys (coop_chat.c) */
         if (sHold)
         {
             coopHoldTick(); /* the mission card: everyone loads in first */
@@ -1864,6 +1950,7 @@ static void coopTickBody(void)
     {   /* the multiplayer game's own rules; the others' bodies, not puppets (coop_versus.c) */
         coopSendState();
         coopVersusTick();
+        coopItemsTick((s32) sMissionTicks);     /* thrown things and dropped guns settle as the thrower's did */
         return;
     }
     coopStatsMissionTick(coopPartnerHere());
@@ -1923,6 +2010,7 @@ static void coopTickBody(void)
         }
     }
 
+    coopCradleFallTick();
     coopHarnessTick();
 
     coopRemotesTick();
@@ -2285,6 +2373,42 @@ static void coopHarnessTick(void)
             portConLogf("ge: coop: testworld: alarm + flag 0x40000000\n");
         }
     }
+    {   /* GE_COOP_TESTFLAG=<hex>:<s>: host sets those stage flags <s> seconds into the mission
+         * (harness only: an objective's earlier steps, e.g. Dam's modem 100) */
+        static s32 testflag = -2;
+        static unsigned int flagbits;
+        if (testflag == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTFLAG");
+            testflag = -1;
+            if (e != NULL && sscanf(e, "%x:%d", &flagbits, &testflag) != 2)
+            {
+                testflag = -1;
+            }
+        }
+        if (testflag >= 0 && coopNetIsHost() && coopInMission() && sMissionTicks >= (u32) testflag * 60)
+        {
+            testflag = -1;
+            objectiveregisters1 |= flagbits;
+            portConLogf("ge: coop: testflag: stage flags |= %x\n", flagbits);
+        }
+    }
+    {   /* GE_COOP_TESTCLOCK=1: log the mission countdown every 5 s (harness only) */
+        static s32 testclock = -1;
+        static u32 clocklast;
+        if (testclock == -1)
+        {
+            testclock = getenv("GE_COOP_TESTCLOCK") != NULL;
+        }
+        if (testclock && coopInMission() && (sMissionTicks < clocklast || sMissionTicks >= clocklast + 300))
+        {
+            clocklast = sMissionTicks;
+            portConLogf("ge: coop: testclock: %s, %s, %.1f s left, mission %u s\n",
+                        countdownTimerIsRunning() ? "running" : "stopped",
+                        (clock_drawn_flag & 1) ? "hidden" : "shown",
+                        countdownTimerGetValue() / 60.0f, sMissionTicks / 60);
+        }
+    }
     if (coopNetIsHost() && coopInMission() && coopRemoteHere(1) && sR[1].puppet != NULL)
     {   /* GE_COOP_TESTHIT=<s>: <s> seconds in, a small hit on player 2 from the nearest guard that
          * can see their puppet and one from the farthest guard (harness only: lag compensation) */
@@ -2416,7 +2540,9 @@ static void coopHarnessTick(void)
     }
 
     if (coopPartnerHere() && coopInMission())
-    {   /* GE_COOP_TESTGOTO=<chrnum>: once, 5 s into the mission, stand where that chr stands (harness only) */
+    {   /* GE_COOP_TESTGOTO=<chrnum>: once, 5 s into the mission, stand where that chr stands;
+         * a chr not there yet (spawned later: Facility's Doak) is looked for every second
+         * until 90 s (harness only) */
         static s32 testgoto = -2;
         static s32 inmission;
         if (testgoto == -2)
@@ -2424,14 +2550,28 @@ static void coopHarnessTick(void)
             const char *e = getenv("GE_COOP_TESTGOTO");
             testgoto = (e != NULL) ? atoi(e) : -1;
         }
-        if (testgoto >= 0 && ++inmission == 300)
-        {
-            ChrRecord *c = chrFindByLiteralId(testgoto);
+        if (testgoto >= 0 && ++inmission >= 300 && inmission % 60 == 0 && inmission <= 5400)
+        {   /* 1024 and up: the chr running that ai list (Statue's Valentin is 1042) */
+            ChrRecord *c = (testgoto < 0x400) ? chrFindByLiteralId(testgoto) : NULL;
+            s32 i;
+
+            for (i = 0; testgoto >= 0x400 && c == NULL && i < g_NumChrSlots; i++)
+            {
+                if (g_ChrSlots[i].model != NULL && g_ChrSlots[i].prop != NULL && g_ChrSlots[i].ailist == ailistFindById(testgoto))
+                {
+                    c = &g_ChrSlots[i];
+                }
+            }
+            if (c == NULL && (inmission == 300 || inmission == 5400))
+            {
+                portConLogf("ge: coop: testgoto: no chr %d\n", testgoto);
+            }
             if (c != NULL && c->prop != NULL && c->prop->stan != NULL)
             {
                 coopRespawnPlayerAt(&c->prop->pos, c->prop->stan, 0.0f, sLastWeapon);
                 portConLogf("ge: coop: testgoto -> chr %d at %.0f %.0f %.0f\n", testgoto,
                             c->prop->pos.f[0], c->prop->pos.f[1], c->prop->pos.f[2]);
+                testgoto = -1;
             }
         }
     }
@@ -2447,13 +2587,34 @@ static void coopHarnessTick(void)
                 testpad = -1;
             }
         }
-        if (testpad >= 0 && sMissionTicks == (u32) padat * 60 && g_CurrentSetup.pads != NULL)
-        {
+        if (testpad >= 0 && sMissionTicks >= (u32) padat * 60 && g_CurrentSetup.pads != NULL)
+        {   /* once: a slow frame steps the ticks past the exact one */
             PadRecord *pad = &g_CurrentSetup.pads[testpad];
             coord3d pos = pad->pos;
 
             coopRespawnPlayerAt(&pos, pad->stan, 0.0f, sLastWeapon);
             portConLogf("ge: coop: testpad -> pad %d at %.0f %.0f %.0f\n", testpad, pos.f[0], pos.f[1], pos.f[2]);
+            testpad = -1;
+        }
+    }
+    if (coopInMission())
+    {   /* GE_COOP_TESTHOLD=<item>:<s>: <s> seconds into the mission, switch to that
+         * item (1 the fists, holstered; harness only) */
+        static s32 testhold = -2, holdat;
+        if (testhold == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTHOLD");
+            if (e == NULL || sscanf(e, "%d:%d", &testhold, &holdat) != 2)
+            {
+                testhold = -1;
+            }
+        }
+        if (testhold >= 0 && sMissionTicks >= (u32) holdat * 60)
+        {
+            bondinvAddInvItem(testhold);
+            gunRequestHandWeaponChange(GUNRIGHT, testhold, 0);
+            portConLogf("ge: coop: testhold -> item %d\n", testhold);
+            testhold = -1;
         }
     }
     if (coopPartnerHere() && coopInMission())
@@ -2505,6 +2666,99 @@ static void coopHarnessTick(void)
     {
         coopLookTestTick((s32) sMissionTicks);   /* GE_COOP_TESTFIRE, GE_COOP_TESTLOOK (coop_look.c) */
     }
+    if (coopIsMirroringClient() && coopInMission() && !sLateJoin && g_CurrentPlayer->bondhealth > 0.0f)
+    {   /* GE_COOP_TESTHUNT=<s>: from <s> s into the mission, stand 3 m in front of the nearest
+         * living guard and keep its chest in the sights (GE_COOP_TESTFIRE fires); the next one
+         * once the host says it is down, or after 8 s (harness only) */
+        static s32 testhunt = -2;
+        static s16 target = -1;
+        static u32 since, downs, tries;
+        PropRecord *bond = g_CurrentPlayer->prop;
+        ChrRecord *c = (target >= 0) ? chrFindByLiteralId(target) : NULL;
+        s32 slot = (c != NULL) ? (s32) (c - g_ChrSlots) : -1;
+
+        if (testhunt == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTHUNT");
+            testhunt = (e != NULL) ? atoi(e) * 60 : -1;
+        }
+        if (testhunt >= 0 && (s32) sMissionTicks >= testhunt && bond != NULL)
+        {
+            if (c != NULL && slot >= 0 && slot < COOP_MAX_CHRS && sChrHostDying[slot])
+            {
+                downs++;
+                portConLogf("ge: coop: testhunt: guard %d down on the host after %.1f s (%u of %u)\n",
+                            target, (sTick - since) / 60.0f, downs, tries);
+                c = NULL;
+            }
+            else if (c != NULL && sTick - since > 480)
+            {
+                portConLogf("ge: coop: testhunt: guard %d still up after 8 s (%u of %u)\n", target, downs, tries);
+                c = NULL;
+            }
+            if (c == NULL || c->prop == NULL)
+            {
+                f32 best = 0.0f;
+                s32 i;
+
+                for (i = 0, c = NULL; i < g_NumChrSlots && i < COOP_MAX_CHRS; i++)
+                {
+                    ChrRecord *g = &g_ChrSlots[i];
+                    f32 dx, dz;
+
+                    if (g->model == NULL || g->prop == NULL || g->prop->stan == NULL || coopIsPlayerChr(g)
+                        || sChrHostDying[i] || sChrLastSync[i] == 0 || (g->chrflags & CHRFLAG_HIDDEN)
+                        || g->actiontype == ACT_DIE || g->actiontype == ACT_DEAD || g->chrnum == target)
+                    {
+                        continue;
+                    }
+                    dx = g->prop->pos.f[0] - bond->pos.f[0];
+                    dz = g->prop->pos.f[2] - bond->pos.f[2];
+                    if (c == NULL || dx * dx + dz * dz < best)
+                    {
+                        c = g;
+                        best = dx * dx + dz * dz;
+                    }
+                }
+                target = (c != NULL) ? c->chrnum : -1;
+                since = sTick;
+                if (c != NULL)
+                {
+                    f32 a = getsubroty(c->model);
+                    coord3d to;
+                    StandTile *stan;
+
+                    tries++;
+                    to.f[0] = c->prop->pos.f[0] + 300.0f * sinf(a);
+                    to.f[1] = c->prop->pos.f[1];
+                    to.f[2] = c->prop->pos.f[2] + 300.0f * cosf(a);
+                    stan = coopFindStan(&to, c->prop->stan, &c->prop->pos);   /* walked from the guard's own floor */
+                    if (stan == NULL)
+                    {
+                        to = c->prop->pos;
+                        stan = c->prop->stan;
+                    }
+                    coopRespawnPlayerAt(&to, stan, 0.0f, sLastWeapon);
+                    portConLogf("ge: coop: testhunt: after guard %d at %.0f %.0f %.0f\n", target,
+                                c->prop->pos.f[0], c->prop->pos.f[1], c->prop->pos.f[2]);
+                }
+            }
+            if (c != NULL && c->prop != NULL)
+            {
+                f32 dx = c->prop->pos.f[0] - bond->pos.f[0];
+                f32 dy = c->prop->pos.f[1] - 20.0f - bond->pos.f[1];   /* low: auto-aim lifts it onto the body */
+                f32 dz = c->prop->pos.f[2] - bond->pos.f[2];
+                f32 d = sqrtf(dx * dx + dz * dz);
+
+                g_CurrentPlayer->vv_theta = atan2f(-dx, dz) * 57.29578f;
+                if (g_CurrentPlayer->vv_theta < 0.0f)
+                {
+                    g_CurrentPlayer->vv_theta += 360.0f;
+                }
+                g_CurrentPlayer->vv_verta = atan2f(dy, (d > 1.0f) ? d : 1.0f) * 57.29578f;
+            }
+        }
+    }
     if (coopHostAbortAsks())
     {   /* GE_COOP_TESTABORT=<s>:handover|endall: the host aborts from the watch that far into the mission, and answers (harness only) */
         static s32 testabort = -2;
@@ -2525,14 +2779,27 @@ static void coopHarnessTick(void)
     }
     if (coopNetIsHost() && coopPartnerHere())
     {   /* GE_COOP_TESTSPAWN=<chrnum>: once, at 15 s, spawn a copy of that chr next to Bond;
-         * <chrnum>,unarmed leaves it without a gun, like Trevelyan's Statue ambush (harness only) */
+         * <chrnum>,unarmed leaves it without a gun, like Trevelyan's Statue ambush; <chrnum>,late
+         * gives it the gun 2 s later, as a guard's own guard_try_spawning_item does (harness only) */
         static s32 testspawn = -2;
         static s32 testspawnarmed = 1;
+        static s32 testspawnlate = -1;
         if (testspawn == -2)
         {
             const char *e = getenv("GE_COOP_TESTSPAWN");
             testspawn = (e != NULL) ? atoi(e) : -1;
-            testspawnarmed = (e == NULL || strstr(e, "unarmed") == NULL);
+            testspawnarmed = (e == NULL || (strstr(e, "unarmed") == NULL && strstr(e, "late") == NULL));
+            testspawnlate = (e != NULL && strstr(e, "late") != NULL) ? 0 : -1;
+        }
+        if (testspawnlate > 0 && sTick >= 1020)
+        {
+            ChrRecord *late = chrFindByLiteralId(testspawnlate);
+            if (late != NULL && late->prop != NULL)
+            {
+                chrGiveWeapon(late, PROP_CHRKALASH, ITEM_AK47, 0);
+                portConLogf("ge: coop: testspawn: chr %d armed late\n", testspawnlate);
+            }
+            testspawnlate = -1;
         }
         if (testspawn >= 0 && sTick >= 900 && coopInMission())
         {
@@ -2549,6 +2816,10 @@ static void coopHarnessTick(void)
                 if (np != NULL && testspawnarmed)
                 {
                     chrGiveWeapon(np->chr, PROP_CHRKALASH, ITEM_AK47, 0);
+                }
+                if (np != NULL && testspawnlate == 0)
+                {
+                    testspawnlate = np->chr->chrnum;
                 }
                 portConLogf("ge: coop: testspawn -> chr %d (free %d)\n", np ? np->chr->chrnum : -1, chrGetNumFree());
             }
@@ -2996,6 +3267,20 @@ void coopChrAltKeep(ChrRecord *chr, s32 stimulus)
     sAltFrom = t;
 }
 
+/* host, in a guard's tick: the player that is "Bond" for it, 0 our own
+ * (coop_ai.c counts the guards on each player) */
+s32 coopChrCurrentTarget(void)
+{
+    s32 t = (g_CoopPropOverride != NULL) ? coopPlayerOfProp(g_CoopPropOverride) : COOPTGT_LOCAL;
+
+    return (t < 0) ? COOPTGT_LOCAL : t;
+}
+
+s32 coopTargetablePlayer(s32 t)
+{
+    return sEnabled > 0 && t >= 0 && t < COOPTGT_COUNT && coopTargetable(t);
+}
+
 /* host: "Bond is aiming at me" (sub_GAME_7F0333F8) for whoever Bond is in
  * this guard's tick. That test reads our own crosshair, so for a partner it
  * is their facing against the chr's body, with the same line of sight. */
@@ -3023,10 +3308,18 @@ s32 coopChrAimedAtByBond(ChrRecord *chr)
         return 1;
     }
     want = atan2f(dx, dz);
-    diff = fmodf(want - sR[p].st.yaw, 6.2831855f);
-    if (diff < 0.0f)
+    diff = want - sR[p].st.yaw;
+    if (!(diff > -20.0f && diff < 20.0f))
     {
+        return 0;   /* not a yaw (a bad packet): the wraps below would never end */
+    }
+    while (diff < 0.0f)
+    {   /* no fmodf in the game's math.h */
         diff += 6.2831855f;
+    }
+    while (diff >= 6.2831855f)
+    {
+        diff -= 6.2831855f;
     }
     if (diff > 3.1415927f)
     {
@@ -3034,6 +3327,70 @@ s32 coopChrAimedAtByBond(ChrRecord *chr)
     }
     half = atan2f(getinstsize(chr->model) * 0.8f, d);  /* the body's sphere, as the stock test */
     return diff < half;
+}
+
+/* host, "if I'm on screen" (chrai.c): the host's screen, or a partner's. The
+ * escorts (Natalya in Bunker 2, Control and the Train, the Control
+ * technician) teleport up behind Bond when the check fails, and the host's
+ * screen alone let one pop up in front of a joiner who was watching her. A
+ * partner sees the chr when it is within their view's half width (their STATE
+ * yaw, about 48 degrees, plus the body) and 120 m, with a clear line. */
+s32 coopChrOnPartnerScreen(ChrRecord *chr)
+{
+    PropRecord *saved = g_CoopPropOverride;
+    PropRecord *from;
+    f32 dx, dz, d, diff;
+    s32 p, seen = 0;
+
+    if (sEnabled <= 0 || !coopNetIsHost() || chr == NULL || chr->prop == NULL || chr->model == NULL || coopVersus())
+    {
+        return 0;
+    }
+    for (p = 1; p < COOP_MAX_PLAYERS && !seen; p++)
+    {
+        if (!coopRemoteAliveHere(p))
+        {
+            continue;
+        }
+        from = sR[p].puppet;
+        dx = chr->prop->pos.f[0] - from->pos.f[0];
+        dz = chr->prop->pos.f[2] - from->pos.f[2];
+        d = sqrtf(dx * dx + dz * dz);
+        if (d > 12000.0f)
+        {
+            continue;
+        }
+        if (d > 1.0f)
+        {
+            diff = fmodf(atan2f(dx, dz) - sR[p].st.yaw, 6.2831855f);
+            if (diff < 0.0f)
+            {
+                diff += 6.2831855f;
+            }
+            if (diff > 3.1415927f)
+            {
+                diff = 6.2831855f - diff;
+            }
+            if (diff > 0.84f + atan2f(getinstsize(chr->model), d))
+            {
+                continue;
+            }
+        }
+        g_CoopPropOverride = from;
+        seen = chrlvCurrentPlayerCall7F0B0E24(chr);
+        g_CoopPropOverride = saved;
+        if (seen)
+        {
+            static ChrRecord *logged;
+
+            if (logged != chr)
+            {
+                logged = chr;
+                portConLogf("ge: coop: chr %d is on player %d's screen\n", chr->chrnum, p + 1);
+            }
+        }
+    }
+    return seen;
 }
 
 /* A real stimulus (seen, heard, shot by) commits the guard to whichever
@@ -3122,6 +3479,108 @@ s32 coopTargetIsDead(void)
     return 1;
 }
 
+/* bondviewGetPlayerYawRadians for whoever is Bond in this guard's tick: a
+ * partner's is the facing their STATE says (the same convention), not ours.
+ * "Bond's facing" picks a pad beside or behind Bond (Streets' and Jungle's
+ * civilians) and the angle a chr is at from Bond's view. */
+f32 coopTargetYaw(void)
+{
+    if (g_CoopPropOverride != NULL)
+    {
+        s32 p = coopPlayerOfProp(g_CoopPropOverride);
+
+        if (p >= 0)
+        {
+            return sR[p].st.yaw;
+        }
+    }
+    return bondviewGetPlayerYawRadians();
+}
+
+/* host: one of a partner's bullets, from their gun to where it stopped (the
+ * tracer coop_look.c draws). Our own shots flag every guard whose bounds they
+ * cross as a near miss (chrTestHit), which the standard guard script answers
+ * with "Bond missed me": it startles and attacks. A partner's misses never
+ * reach chrTestHit here, so a guard they shot past stood still. The same
+ * bounds test along their tracer, and the guard turns to that player. */
+void coopPartnerShotNearMiss(ChrRecord *shooter, coord3d *from, coord3d *end)
+{
+    PropRecord *savedoverride;
+    coord3d dir;
+    f32 len;
+    s32 p, i, h;
+
+    if (sEnabled <= 0 || !coopNetIsHost() || coopVersus() || shooter == NULL || shooter->prop == NULL
+        || g_ChrSlots == NULL)
+    {
+        return;
+    }
+    p = coopPlayerOfProp(shooter->prop);
+    if (p < 0 || !coopRemoteAliveHere(p))
+    {
+        return;
+    }
+    dir.f[0] = end->f[0] - from->f[0];
+    dir.f[1] = end->f[1] - from->f[1];
+    dir.f[2] = end->f[2] - from->f[2];
+    len = sqrtf(dir.f[0] * dir.f[0] + dir.f[1] * dir.f[1] + dir.f[2] * dir.f[2]);
+    if (!(len >= 1.0f))
+    {
+        return;
+    }
+    dir.f[0] /= len;
+    dir.f[1] /= len;
+    dir.f[2] /= len;
+    for (i = 0; i < g_NumChrSlots; i++)
+    {
+        ChrRecord *chr = &g_ChrSlots[i];
+        coord3d centre, off;
+        f32 t, size, held, d2;
+
+        if (chr->model == NULL || chr->prop == NULL || chr->actiontype == ACT_DEAD || coopIsPlayerChr(chr)
+            || (chr->chrflags & CHRFLAG_HIDDEN))
+        {
+            continue;
+        }
+        getsuboffset(chr->model, &centre);
+        off.f[0] = centre.f[0] - from->f[0];
+        off.f[1] = centre.f[1] - from->f[1];
+        off.f[2] = centre.f[2] - from->f[2];
+        t = off.f[0] * dir.f[0] + off.f[1] * dir.f[1] + off.f[2] * dir.f[2];
+        if (t < 0.0f || t > len)
+        {   /* behind the gun, or past where the bullet stopped (a wall) */
+            continue;
+        }
+        held = 0.0f;
+        for (h = 0; h < 2; h++)
+        {   /* as chrTestHit: the bounds grow by the biggest gun held */
+            if (chr->weapons_held[h] != NULL && chr->weapons_held[h]->weapon != NULL
+                && chr->weapons_held[h]->weapon->model != NULL)
+            {
+                f32 gun = chr->model->scale * getinstsize(chr->weapons_held[h]->weapon->model);
+
+                if (gun > held)
+                {
+                    held = gun;
+                }
+            }
+        }
+        size = getinstsize(chr->model) + held;
+        d2 = off.f[0] * off.f[0] + off.f[1] * off.f[1] + off.f[2] * off.f[2] - t * t;
+        if (d2 >= size * size)
+        {
+            continue;
+        }
+        chr->chrflags |= CHRFLAG_NEAR_MISS;
+        chr->numclosearghs++;
+        savedoverride = g_CoopPropOverride;
+        g_CoopPropOverride = shooter->prop;   /* the stimulus is that player's */
+        coopChrStimulus(chr);
+        g_CoopPropOverride = savedoverride;
+        portConLogf("ge: coop: player %d's shot went past chr %d (near miss)\n", p + 1, chr->chrnum);
+    }
+}
+
 /* Damage a guard dealt to "Bond". Returns 1 when it belonged to the peer. */
 s32 coopTargetRecordDamage(f32 damage, f32 angle)
 {
@@ -3145,12 +3604,56 @@ s32 coopTargetRecordDamage(f32 damage, f32 angle)
 
 /* ---- guard mirroring (host sends, client applies) ----------------------- */
 
+/* Not every guard in every snapshot: a body that has finished falling goes
+ * once a second, a guard more than COOP_GUARD_FAR from every player every
+ * other snapshot (10 a second, still drawn smoothly that far off); the rest,
+ * and anyone firing or dying, every time. Late in a mission most chrs are
+ * bodies, and the guards were most of what the host sent each joiner (about
+ * 23 KB/s of 45 on Dam), which a far-away player's line felt first. Joiners
+ * free a chr missing from the snapshots for COOP_GUARD_GONE ticks. */
+#define COOP_GUARD_FAR   6000.0f
+#define COOP_GUARD_GONE  300
+
+static s32 coopGuardDue(ChrRecord *chr, s32 i, s32 firing)
+{
+    f32 best = -1.0f;
+    s32 p;
+
+    if (firing || chr->actiontype == ACT_DIE)
+    {
+        return 1;
+    }
+    if (chr->actiontype == ACT_DEAD)
+    {
+        return ((sGuardSnap + i) % 20) == 0;
+    }
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {   /* the nearest player, us included (a spectating joiner watches one of us) */
+        const f32 *at = (p != coopSelf()) ? (sR[p].valid ? sR[p].st.pos : NULL)
+                        : (g_CurrentPlayer->prop != NULL) ? g_CurrentPlayer->prop->pos.f : NULL;
+        f32 dx, dz;
+
+        if (at == NULL)
+        {
+            continue;
+        }
+        dx = chr->prop->pos.f[0] - at[0];
+        dz = chr->prop->pos.f[2] - at[2];
+        if (best < 0.0f || dx * dx + dz * dz < best)
+        {
+            best = dx * dx + dz * dz;
+        }
+    }
+    return best < COOP_GUARD_FAR * COOP_GUARD_FAR || ((sGuardSnap + i) & 1) == 0;
+}
+
 static void coopSendGuards(void)
 {
     CoopGuardsPkt pkt;
     s32 i;
     s32 index = 0;
     s32 hdr = (s32) ((u8 *) &pkt.ent[0] - (u8 *) &pkt);
+    s32 sent = 0;
 
     sGuardSnap++;
     memset(&pkt, 0, hdr);
@@ -3166,9 +3669,32 @@ static void coopSendGuards(void)
         CoopGuardEnt *e;
         ModelAnimation *anim;
 
+        u8 fire = 0;
+
         if (chr->model == NULL || chr->prop == NULL || coopIsPlayerChr(chr))
         {
             continue;
+        }
+        if (i < COOP_MAX_CHRS)
+        {   /* firecount ticks on every fire tick, shot or not */
+            if (chr->firecount[GUNRIGHT] != sChrFireSeen[i][GUNRIGHT])
+            {
+                fire |= GSF_FIRE_R;
+            }
+            if (chr->firecount[GUNLEFT] != sChrFireSeen[i][GUNLEFT])
+            {
+                fire |= GSF_FIRE_L;
+            }
+            sChrFireSeen[i][GUNRIGHT] = chr->firecount[GUNRIGHT];
+            sChrFireSeen[i][GUNLEFT] = chr->firecount[GUNLEFT];
+        }
+        if (!coopGuardDue(chr, i, fire != 0 || (i < COOP_MAX_CHRS && sChrFiring[i] != 0)))
+        {
+            continue;
+        }
+        if (i < COOP_MAX_CHRS)
+        {
+            sChrFiring[i] = fire;   /* host: whether it fired since the last snapshot (a stop goes out too) */
         }
 
         if (pkt.count == 0)
@@ -3177,23 +3703,12 @@ static void coopSendGuards(void)
         }
         e = &pkt.ent[pkt.count++];
         index++;
+        sent++;
 
         /* pkt is on the stack: an unarmed chr would otherwise send junk as its gun */
         memset(e, 0, sizeof(*e));
         e->chrnum = chr->chrnum;
-        if (i < COOP_MAX_CHRS)
-        {   /* firecount ticks on every fire tick, shot or not */
-            if (chr->firecount[GUNRIGHT] != sChrFireSeen[i][GUNRIGHT])
-            {
-                e->flags |= GSF_FIRE_R;
-            }
-            if (chr->firecount[GUNLEFT] != sChrFireSeen[i][GUNLEFT])
-            {
-                e->flags |= GSF_FIRE_L;
-            }
-            sChrFireSeen[i][GUNRIGHT] = chr->firecount[GUNRIGHT];
-            sChrFireSeen[i][GUNLEFT] = chr->firecount[GUNLEFT];
-        }
+        e->flags = fire;
         e->body = (u8) chr->bodynum;
         e->head = (u8) chr->headnum;
         {
@@ -3367,6 +3882,14 @@ static void coopApplyGuard(CoopGuardEnt *e)
     {
         chr->chrflags &= ~CHRFLAG_HIDDEN;
     }
+    if (e->gunitem > 0 && e->gunitem < ITEM_IDS_MAX && e->gunmodel >= 0 && e->gunmodel < PROP_MAX
+        && !(e->flags & GSF_DYING) && chrGetEquippedWeaponProp(chr, GUNRIGHT) == NULL)
+    {   /* a gun the host's guard got after we first saw it (its own list's
+         * guard_try_spawning_item, as Statue's ambush and Alec's men do):
+         * our copy never runs that, so it fired with nothing in its hand */
+        chrGiveWeapon(chr, e->gunmodel, e->gunitem, 0);
+        portConLogf("ge: coop: host chr %d drew gun %d\n", e->chrnum, e->gunitem);
+    }
 
     pos.f[0] = e->pos[0];
     pos.f[1] = e->pos[1];
@@ -3533,7 +4056,7 @@ static void coopReapGuards(void)
         {
             sChrLastSync[i] = sTick; /* start the clock when we first see it */
         }
-        else if (sTick - sChrLastSync[i] > 120 && !(chr->hidden & CHRHIDDEN_REMOVE))
+        else if (sTick - sChrLastSync[i] > COOP_GUARD_GONE && !(chr->hidden & CHRHIDDEN_REMOVE))
         {
             portConLogf("ge: coop: chr %d gone on the host, removing\n", chr->chrnum);
             chr->hidden |= CHRHIDDEN_REMOVE;
@@ -3936,32 +4459,49 @@ static void coopQueueEvent(CoopEvent *ev)
     coopQueueEventTo(ev, COOP_ALL);
 }
 
-/* Send every unacked event at most every 4 ticks (at once when there is
- * something new or an ack owed). Repeats cover loss; seq numbers drop the
- * duplicates on the other side. More than a packet's worth goes as up to
- * COOP_EVENT_BURST packets at once: on a long line a busy moment (a firefight,
- * a late joiner's doors and pickups) would otherwise drain at one packet per
- * round trip and fill the ring. */
+/* New events go out at once, once. Unacked ones are sent again when the
+ * oldest has waited a round trip and a bit (coopEventResendMs): sending the
+ * whole unacked window every few ticks, and with every ack, sent each event
+ * five or six times on a 400 ms line and flooded it. The receiver keeps
+ * events that arrive ahead of a missing one, so a loss costs one resend.
+ * A busy moment goes as up to COOP_EVENT_BURST packets at once. */
 #define COOP_EVENT_BURST 4
+
+static u32 coopEventResendMs(s32 c)
+{
+    u32 ms = (u32) (sRtt[c] * 1.25f + sRttDev[c] * 2.0f) + 50;
+
+    if (sRtt[c] <= 0.0f)
+    {
+        ms = 250;   /* not measured yet */
+    }
+    return (ms < 80) ? 80 : (ms > 1200) ? 1200 : ms;
+}
 
 static void coopFlushChan(s32 c)
 {
     CoopChan *ch = &sChan[c];
     CoopEventsPkt pkt;
     s32 hdr = (s32) ((u8 *) &pkt.ev[0] - (u8 *) &pkt);
+    u32 now = coopNowMs();
     u32 seq;
     s32 burst;
     s32 pending = (s32) (ch->outNext - 1 - ch->outAcked);
     s32 fresh = (s32) (ch->outNext - 1 - ch->outSentUpTo) > 0;
-    s32 due = pending > 0 && (fresh || sTick - ch->evLastSend >= 4);
+    s32 resend = pending > 0 && (s32) (ch->outSentUpTo - ch->outAcked) > 0
+                 && now - ch->outSentMs[(ch->outAcked + 1) % COOP_EVENT_RING] >= coopEventResendMs(c);
 
-    if (!coopNetPeerConnected(c) || (!ch->ackDirty && !due))
+    if (!coopNetPeerConnected(c) || (!ch->ackDirty && !fresh && !resend))
     {
         return;
     }
 
-    seq = ch->outAcked + 1;
-    for (burst = 0; burst < (due ? COOP_EVENT_BURST : 1) && (burst == 0 || seq < ch->outNext); burst++)
+    if ((s32) (ch->outSentUpTo - ch->outAcked) < 0)
+    {
+        ch->outSentUpTo = ch->outAcked;     /* a reset channel */
+    }
+    seq = resend ? ch->outAcked + 1 : fresh ? ch->outSentUpTo + 1 : ch->outNext;
+    for (burst = 0; burst < COOP_EVENT_BURST && (burst == 0 || seq < ch->outNext); burst++)
     {
         memset(&pkt, 0, hdr);
         pkt.magic = COOP_MAGIC;
@@ -3973,6 +4513,7 @@ static void coopFlushChan(s32 c)
         for (; seq < ch->outNext && pkt.count < COOP_EVENTS_PER_PKT; seq++)
         {
             pkt.ev[pkt.count++] = ch->out[seq % COOP_EVENT_RING];
+            ch->outSentMs[seq % COOP_EVENT_RING] = now;
         }
         coopNetSendTo(c, &pkt, hdr + (s32) (pkt.count * sizeof(CoopEvent)));
     }
@@ -4342,13 +4883,31 @@ s32 coopObjDamage(ObjectRecord *obj, f32 damage, coord3d *pos, s32 item, s32 pla
     CoopEvent ev;
     s32 ofs;
 
-    if (sEnabled <= 0 || sApplyingRemoteObj || !coopNetHasPeer() || !coopPartnerHere() || coopVersus())
+    if (sEnabled <= 0 || sApplyingRemoteObj || !coopNetHasPeer() || !coopPartnerHere())
     {
         return 0;
     }
     ofs = coopSetupOfs(obj);
     if (ofs < 0)
     {
+        return 0;
+    }
+    if (coopVersus())
+    {   /* no world owner: our own shots and punches land here and in every other
+         * arena; blasts already go off in each (coop_versus.c, coop_items.c) */
+        if (player == 0 && item != 0x1D)    /* 0x1D: explosion */
+        {
+            memset(&ev, 0, sizeof(ev));
+            ev.kind = COOPEV_OBJDMG;
+            ev.u.obj.objofs = ofs;
+            ev.u.obj.damage = damage;
+            ev.u.obj.pos[0] = pos->f[0];
+            ev.u.obj.pos[1] = pos->f[1];
+            ev.u.obj.pos[2] = pos->f[2];
+            ev.u.obj.item = (s16) item;
+            ev.u.obj.player = 0;
+            coopQueueEventTo(&ev, COOP_ALL);
+        }
         return 0;
     }
     if (!coopNetIsHost())
@@ -4388,7 +4947,19 @@ static void coopApplyObjDamage(CoopEvent *ev)
     pos.f[0] = ev->u.obj.pos[0];
     pos.f[1] = ev->u.obj.pos[1];
     pos.f[2] = ev->u.obj.pos[2];
-    if (coopNetIsHost())
+    if (coopVersus())
+    {   /* their shot, as theirs here: a barrel it sets off is their kill */
+        s32 li = coopVsLocalOfNet(ev->from);
+
+        if (li <= 0)
+        {
+            return;
+        }
+        sApplyingRemoteObj = 1;
+        objApplyDamage(obj, ev->u.obj.damage, &pos, ev->u.obj.item, li);
+        sApplyingRemoteObj = 0;
+    }
+    else if (coopNetIsHost())
     {
         /* the joiner's shot: apply as ours; the hook sends the result back */
         coopObjNoteActor(ev->from, 1);
@@ -4421,7 +4992,7 @@ void coopObjKnocked(ObjectRecord *obj, s32 bounce, coord3d *viewdir)
     coord3d dir;
     s32 ofs;
 
-    if (sEnabled <= 0 || sApplyingKnock || coopVersus() || !coopNetHasPeer() || !coopPartnerHere() || (!bounce && !sKnockChildren))
+    if (sEnabled <= 0 || sApplyingKnock || !coopNetHasPeer() || !coopPartnerHere() || (!bounce && !sKnockChildren))
     {
         return;
     }
@@ -4515,6 +5086,7 @@ s32 coopGadgetItem(void *script)
 }
 
 static void coopSendObjUse(ObjectRecord *obj, s32 gadget);
+static void coopNoteActivated(void *obj, s32 player);
 
 void coopObjUsed(ObjectRecord *obj)
 {
@@ -4534,6 +5106,11 @@ static void coopSendObjUse(ObjectRecord *obj, s32 gadget)
     CoopEvent ev;
     s32 ofs;
 
+    if (sEnabled > 0 && !sApplyingUse && !coopVersus() && coopNetIsHost() && coopPartnerHere())
+    {   /* the host's own press: an objective it finishes is ours */
+        coopNoteActivated(obj, coopSelf());
+        coopObjNoteUse(coopSelf());
+    }
     if (sEnabled <= 0 || sApplyingUse || coopVersus() || coopNetIsHost() || !coopNetHasPeer() || !coopPartnerHere())
     {
         return;
@@ -4570,7 +5147,8 @@ static void coopApplyObjUse(CoopEvent *ev)
         obj->state |= PROPSTATE_ACTIVATED;
         sGadgetObj = obj;
         sGadgetItem = ev->u.use.gadget;
-        coopObjNoteActor(ev->from, 0);
+        coopNoteActivated(obj, ev->from);
+        coopObjNoteUse(ev->from);
         portConLogf("ge: coop: player %d used item %d on obj %d\n", ev->from + 1, ev->u.use.gadget, ev->u.use.objofs);
         return;
     }
@@ -4589,7 +5167,8 @@ static void coopApplyObjUse(CoopEvent *ev)
     obj->runtime_bitflags |= RUNTIMEBITFLAG_ACTIVATED;
     /* no door-switch link here (sub_GAME_7F03E6A0): the joiner's press already ran it and its
      * DOOR events carry the doors; running it again toggled the gate back shut on the joiner */
-    coopObjNoteActor(ev->from, 0);  /* an objective the press completes is theirs (coop_objective.c) */
+    coopNoteActivated(obj, ev->from);
+    coopObjNoteUse(ev->from);   /* an objective the press completes, now or a little later, is theirs (coop_objective.c) */
     sApplyingUse = 0;
     portConLogf("ge: coop: player %d used obj %d (type %d)\n", ev->from + 1, ev->u.use.objofs, obj->type);
 }
@@ -4615,6 +5194,41 @@ s32 coopSkipExplosionDamage(ChrRecord *chr)
  * Level scripts run on the host only, so its stage flags are the truth. The
  * criteria either player can meet (entering a room, a deposit, a photo,
  * copying the key) are OR'd together, so the team shares one objective list. */
+
+/* ---- the mission countdown -------------------------------------------------
+ * Statue's helicopter, Silo's and Bunker 2's self-destructs, and the other
+ * level timers (Dam, Streets, Surface 2, Train, Aztec, Cradle). Every game ran its own copy of the level
+ * script's countdown: a player who dropped in got a fresh full timer (or none,
+ * where it starts after the intro swirl), and the blast at zero
+ * (AI_TriggerExplosionsAroundBond) went off only in the game whose own timer
+ * ran out. Now the host's timer is the team's: its value rides the WORLD
+ * packet, a joiner's own script commands for the countdown and the blast are
+ * stepped over (coopAiSkip), and the host's blast is relayed with the other
+ * presentation commands, so it goes off around every player at once. */
+/* sClockSet (declared above): host, a level script has set or started the countdown this mission */
+
+static void coopApplyClock(CoopWorldPkt *p)
+{
+    s32 running = (p->clockflags & COOP_CLOCK_RUNNING) != 0;
+    s32 shown = (p->clockflags & COOP_CLOCK_SHOWN) != 0;
+    f32 off = countdownTimerGetValue() - p->clock;
+
+    if (!(p->clockflags & COOP_CLOCK_SET))
+    {
+        return;
+    }
+    if (running != (countdownTimerIsRunning() != 0) || shown != !(clock_drawn_flag & 1))
+    {
+        portConLogf("ge: coop: countdown %s and %s, %.1f s left (host)\n", running ? "running" : "stopped",
+                    shown ? "shown" : "hidden", p->clock / 60.0f);
+    }
+    if (off > 30.0f || off < -30.0f || running != (countdownTimerIsRunning() != 0))
+    {   /* half a second out, or started or stopped: the host's */
+        countdownTimerSetValue(p->clock);
+    }
+    countdownTimerSetRunning(running);
+    countdownTimerSetVisible(1, shown);
+}
 
 static void coopSendWorld(void)
 {
@@ -4653,6 +5267,12 @@ static void coopSendWorld(void)
     p.keycopied = g_CurrentPlayer->copiedgoldeneye != 0;
     p.alarm = alarmIsActive() != 0;
     p.calm = (u16) coopLocalCalm();
+    if (coopNetIsHost() && sClockSet)
+    {
+        p.clock = countdownTimerGetValue();
+        p.clockflags = COOP_CLOCK_SET | (countdownTimerIsRunning() ? COOP_CLOCK_RUNNING : 0)
+                     | ((clock_drawn_flag & 1) ? 0 : COOP_CLOCK_SHOWN);
+    }
     coopNetSend(&p, sizeof(p));
 }
 
@@ -4704,6 +5324,7 @@ static void coopApplyWorld(CoopWorldPkt *p)
             portConLogf("ge: coop: alarm off (host)\n");
             alarmDeactivate();
         }
+        coopApplyClock(p);
     }
     for (r = ptr_last_enter_room_subobject_entry_type20, i = 0; r != NULL && i < 32; r = r->next, i++)
     {
@@ -4800,11 +5421,8 @@ void coopPickedUp(ObjectRecord *obj, s32 kept)
     s32 ofs;
 
     if (coopVersus())
-    {   /* each arena keeps its own guns; only the scenario's item is shared */
-        if (obj->type == PROPDEF_COLLECTABLE)
-        {
-            coopVersusPickedUp(((WeaponObjRecord *) obj)->weaponnum);
-        }
+    {   /* it leaves every arena (coop_versus.c) */
+        coopVersusPickedUp(obj);
         return;
     }
     if (sEnabled <= 0 || sApplyingRemotePick)
@@ -4849,15 +5467,23 @@ static s32 coopTeamPickTry(s32 i)
         portConLogf("ge: coop: player %d took body armour %d: removed here\n", sTeamPickFrom[i] + 1, sTeamPick[i]);
         return 1;
     }
-    if (!coopInMission() || g_CurrentPlayer->bonddead || g_ClockTimer <= 0)
-    {
-        return 0; /* later */
+    if (!coopInMission() || g_ClockTimer <= 0 || (g_CurrentPlayer->bonddead && !coopNetIsHost()))
+    {   /* later; the host takes it even while down: its inventory is what the
+         * collect objectives check (Statue's flight recorder, a partner's
+         * pickup while the host waits to respawn) */
+        return 0;
     }
     sApplyingRemotePick = 1;
-    op = propPickupByPlayer(prop, TRUE);
-    if (op != TICKOP_NONE)
-    {
-        propExecuteTickOperation(prop, op);
+    {   /* the stock pickup refuses a dead Bond: the host down, stood up for it, quietly */
+        const s32 down = g_CurrentPlayer->bonddead;
+
+        g_CurrentPlayer->bonddead = 0;
+        op = propPickupByPlayer(prop, !down);
+        if (op != TICKOP_NONE)
+        {
+            propExecuteTickOperation(prop, op);
+        }
+        g_CurrentPlayer->bonddead = down;
     }
     sApplyingRemotePick = 0;
     if (op == TICKOP_NONE)
@@ -4878,6 +5504,32 @@ static void coopTeamPicksTick(void)
         {
             sTeamPickDone[i] = 1;
         }
+    }
+}
+
+/* A level script handing "Bond" an item (Facility's Dr. Doak and his door
+ * decoder, AI_BondCollectObject) gives it to the host's Bond, and the stock
+ * pickup refuses a dead one: with the host down or out of lives while a
+ * partner talked to Doak, the decoder went nowhere. Stand the host up for it,
+ * as for a partner's pickup; coopPickedUp then shares it with the team. */
+s32 coopScriptGiveBegin(void)
+{
+    const s32 down = g_CurrentPlayer->bonddead;
+
+    if (!down || sEnabled <= 0 || !coopNetIsHost() || !coopInMission())
+    {
+        return -1;
+    }
+    g_CurrentPlayer->bonddead = 0;
+    portConLogf("ge: coop: a script gives Bond an item while the host is down: taken for the team\n");
+    return down;
+}
+
+void coopScriptGiveEnd(s32 down)
+{
+    if (down >= 0)
+    {
+        g_CurrentPlayer->bonddead = down;
     }
 }
 
@@ -5251,6 +5903,7 @@ s32 coopDeadTick(void)
 
         sDeadSince = sTick;
         sReviveHold = 0;
+        sReviveFirst = 0;
         sBledOut = 0;
         sDeathStan = (bond != NULL) ? bond->stan : NULL;
         if (bond != NULL)
@@ -5307,9 +5960,15 @@ s32 coopDeadTick(void)
         }
         if (over >= 0)
         {
+            if (sReviveHold == 0 && sReviveFirst == 0)
+            {
+                sReviveFirst = sTick;   /* the first hold over us since we fell */
+            }
             if (++sReviveHold >= COOP_REVIVE_HOLD)
             {
-                portConLogf("ge: coop: revived by player %d after %.1f s\n", over + 1, dead / 60.0f);
+                portConLogf("ge: coop: revived by player %d after %.1f s (%.1f s from the first hold)\n", over + 1, dead / 60.0f,
+                            (sTick - sReviveFirst) / 60.0f);
+                sReviveFirst = 0;
                 sR[over].puppetGhost = 1;
                 coopRespawnPlayerAt(&sDeathPos, sDeathStan, sDeathYaw, sLastWeapon);
                 g_CurrentPlayer->bondhealth = 0.5f;     /* back on your feet, not fresh */
@@ -5608,13 +6267,15 @@ s32 coopHudRespawnEta(void)
 
 /* ---- menus: hello and following the host ------------------------------------ */
 
+static s32 sHelloNow;   /* send this hello whatever the tick (coopSendHelloNow) */
+
 static void coopSendHello(void)
 {
     CoopHelloPkt p;
 
     s32 c, i;
 
-    if ((sTick % (sOnLobbyScreen ? 15 : 60)) != 0 || !coopNetHasPeer())
+    if ((!sHelloNow && (sTick % (sOnLobbyScreen ? 15 : 60)) != 0) || !coopNetHasPeer())
     {
         return;
     }
@@ -5630,6 +6291,10 @@ static void coopSendHello(void)
     p.inlobby = (u8) sOnLobbyScreen;
     p.downrule = (u8) sDownRule;
     p.character = (u8) coopCharacter();
+    if (coopNetIsHost())
+    {   /* Guard AI is the host's Port Option; the slot only shows it to the joiner */
+        sSettings[COOPSET_GUARDAI] = (u8) coopAiSmarterOption();
+    }
     memcpy(p.settings, sSettings, sizeof(p.settings));
     p.missionticks = coopInMission() ? sMissionTicks : 0;
     p.hold = (u8) ((sHold ? 1 : 0) | (sHoldArrived << 4));
@@ -6188,6 +6853,7 @@ s32 coopSessionActive(void)
 
 #define COOP_SILENT_MS        2000    /* nothing from the host this long: say so */
 #define COOP_HOST_WAIT_MS     3500    /* and, mid-mission, wait this much longer for it to come back */
+#define COOP_HOST_WAIT_FAR_MS 12000   /* or this long on a long or shaky line of our own (coopHostWaitMs) */
 #define COOP_HOST_WAIT_LOAD_MS 12000  /* or this long while it may still be loading (a slower PC) */
 #define COOP_NEWHOST_WAIT_MS  8000    /* the player picked to host must answer within this */
 #define COOP_LOST_MS          3000    /* host: a joiner quiet this long has lost its connection */
@@ -6198,12 +6864,17 @@ s32 coopSessionActive(void)
 enum { HOSTW_NONE, HOSTW_SILENT, HOSTW_NEWHOST };
 
 /* how long a silent host gets: short once we both play the same mission
- * (it was there a moment ago: a crash or a lost connection, not a load) */
+ * (it was there a moment ago: a crash or a lost connection, not a load).
+ * On a long or shaky line the silence is more likely ours: a far-away
+ * player gave up on the host after 5.5 s and, the others still playing
+ * with it, went on alone as a host of its own. A host that really goes says
+ * so (BYE from its crash report, or Steam sees it leave), so only a pulled
+ * cable waits the longer time. */
 static u32 coopHostWaitMs(void)
 {
     if (coopInMission() && sMissionTicks > 600 && sHostHello.stage == bossGetStageNum())
     {
-        return COOP_HOST_WAIT_MS;
+        return sHostWaitFar ? COOP_HOST_WAIT_FAR_MS : COOP_HOST_WAIT_MS;
     }
     return COOP_HOST_WAIT_LOAD_MS;
 }
@@ -6412,22 +7083,30 @@ static void coopApplyEndAll(void)
     sPendingEnd = 1;
 }
 
+/* a hello now, off its period. Not by setting sTick to 0 for the call: the
+ * roster's "here" test (a hello within 180 ticks) then read every joiner as
+ * gone, and a host lost just after such a hello left each joiner hosting
+ * alone. */
+static void coopSendHelloNow(void)
+{
+    sHelloNow = 1;
+    coopSendHello();
+    sHelloNow = 0;
+}
+
 /* while paused (the watch) or in a cutscene coopTick does not run: keep
  * saying hello so nobody takes the quiet for a dropped game */
 static void coopKeepAlive(void)
 {
     static u32 last;
     u32 now = coopNowMs();
-    u32 t = sTick;
 
     if (sEnabled <= 0 || !coopNetHasPeer() || now - last < 500)
     {
         return;
     }
     last = now;
-    sTick = 0;  /* coopSendHello sends when sTick is a multiple of its period */
-    coopSendHello();
-    sTick = t;
+    coopSendHelloNow();
 }
 
 /* ---- the mission card: everyone starts together (coop_screens.c draws it) ----
@@ -6476,15 +7155,11 @@ static void coopHoldStart(void)
 
 static void coopHoldEnd(const char *why)
 {
-    u32 t = sTick;
-
     sHold = 0;
     portConLogf("ge: coop: mission card down after %d ms (%s)\n", (int) (coopNowMs() - sHoldMs), why);
     if (coopNetIsHost())
     {   /* tell them at once, not at the next hello */
-        sTick = 0;
-        coopSendHello();
-        sTick = t;
+        coopSendHelloNow();
     }
 }
 
@@ -6500,11 +7175,7 @@ static void coopHoldTick(void)
     coopFlushEvents();
     if ((sTick % 15) == 0)
     {
-        u32 t = sTick;
-
-        sTick = 0;
-        coopSendHello();
-        sTick = t;
+        coopSendHelloNow();
     }
     if (coopNetIsHost())
     {
@@ -6803,6 +7474,7 @@ static void coopRenumber(const s32 *newof)
     }
     coopStatsRemap(newof);
     coopVoiceRenumber(newof);
+    coopVoteRenumber(newof);
 }
 
 /* The host is gone: pick the next one and go over to it. */
@@ -7110,6 +7782,7 @@ static void coopSessionTick(void)
             {
                 sHostWaiting = HOSTW_SILENT;
                 sHostWaitMs = now;
+                sHostWaitFar = sHostHiccups > 0 || sRtt[0] >= COOP_LINK_POOR_RTT || sRttDev[0] >= COOP_LINK_POOR_JITTER;
                 portConLogf("ge: coop: nothing from the host for %d s, waiting for it\n", (int) (quiet / 1000));
             }
             else if (coopInMission() && sHostHello.stage == LEVELID_TITLE && sMissionTicks > 300 && !sPendingEnd)
@@ -7135,6 +7808,7 @@ static void coopSessionTick(void)
             if (quiet < 1000)
             {
                 sHostWaiting = HOSTW_NONE;
+                sHostHiccups++;
                 portConLogf("ge: coop: the host is back\n");
                 coopBanner("THE HOST IS BACK", "");
             }
@@ -7277,6 +7951,103 @@ void coopAltBondEnd(void)
     g_CoopPropOverride = NULL;
 }
 
+/* A level script's room, pad and height checks look at our own Bond first,
+ * then the living partners. The host's Bond lies where it fell while the
+ * host waits to be revived or watches with no lives left: that body counted
+ * as Bond standing there (in Cradle's fall shaft, at a pad Trevelyan runs
+ * from, in an objective room). While a partner stands, a down host's body
+ * is nobody. */
+s32 coopOwnBondCounts(void)
+{
+    s32 p;
+
+    if (sEnabled <= 0 || !coopNetIsHost() || g_CoopPropOverride != NULL || !g_CurrentPlayer->bonddead)
+    {
+        return 1;
+    }
+    for (p = 1; p < COOP_MAX_PLAYERS; p++)
+    {
+        if (coopRemoteAliveHere(p))
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Cradle: falling off the dish into its shaft (pad 147's room, below y -2550
+ * then -4070) runs the level script's "Bond fell" ending, and with partners
+ * that list (0x041c) ended the mission for everybody when any one of them
+ * fell. In co-op those two checks never pass (chrai.c) and each game kills
+ * its own Bond at the bottom of the shaft instead: an ordinary death, with
+ * the lives, bleed-out and team-out rules any other death has. */
+#define COOP_CRADLE_FALL_PAD 147
+#define COOP_CRADLE_FALL_Y   -4070.0f
+
+s32 coopLevelFallCheckOff(f32 y)
+{
+    return sEnabled > 0 && !coopVersus() && bossGetStageNum() == LEVELID_CRADLE
+        && (y == -2550.0f || y == COOP_CRADLE_FALL_Y);
+}
+
+static void coopCradleFallTick(void)
+{
+    if (!coopLevelFallCheckOff(COOP_CRADLE_FALL_Y) || !coopInMission()
+        || g_CurrentPlayer->bonddead || g_PlayerInvincible || g_CoopPropOverride != NULL)
+    {
+        return;
+    }
+    if (getCurrentPlayerProp()->pos.y < COOP_CRADLE_FALL_Y && check_if_actor_is_at_preset(NULL, COOP_CRADLE_FALL_PAD))
+    {
+        portConLogf("ge: coop: fell into the Cradle shaft: a death of our own\n");
+        bondviewCallRecordDamageKills(10.0f, 0.0f, -1, 1);
+    }
+}
+
+/* What "Bond" holds and how hurt they are, for whoever is Bond right now (a
+ * guard's target, a coopAltBondBegin / coopChrAltBegin try): a partner's from
+ * their STATE, else our own. The game's checks read our own player struct,
+ * so on the host a joiner Valentin was talking to was asked about the host's
+ * gun (Statue), and a taunt about Bond's wounds was about the host's. */
+static s32 coopBondIsPartner(void)
+{
+    s32 p = (g_CoopPropOverride != NULL) ? coopPlayerOfProp(g_CoopPropOverride) : -1;
+
+    return (p > 0 && p < COOP_MAX_PLAYERS && coopRemoteHere(p)) ? p : -1;
+}
+
+s32 coopBondHasItem(s32 item)
+{
+    s32 p = coopBondIsPartner();
+
+    if (p < 0)
+    {
+        return item == getCurrentPlayerWeaponId(GUNRIGHT) || item == getCurrentPlayerWeaponId(GUNLEFT);
+    }
+    return item == sR[p].st.look.weapon[GUNRIGHT] || item == sR[p].st.look.weapon[GUNLEFT];
+}
+
+f32 coopBondHealth(void)
+{
+    s32 p = coopBondIsPartner();
+
+    return (p < 0) ? currentPlayerGetHealth() : sR[p].st.health;
+}
+
+/* a script's "Bond has this item" check passed for a partner */
+void coopBondItemLog(s32 item)
+{
+    s32 p = coopBondIsPartner();
+    static s32 lastp = -1, lastitem = -1;
+
+    if (p > 0 && (p != lastp || item != lastitem))
+    {
+        lastp = p;
+        lastitem = item;
+        portConLogf("ge: coop: script found item %d in player %d's hand\n", item, p + 1);
+    }
+}
+
 /* Security cameras (propobj.c) look for every player on the host. A joiner's
  * cameras don't count: its alarm follows the host's, which turned an alarm
  * raised here back off. */
@@ -7302,6 +8073,71 @@ void coopCctvAlarm(PropRecord *seen)
  * room) the credit goes to the player its check was about, not to whoever a
  * different script's check (run every tick) last saw. */
 
+/* Who last pressed Use (or a gadget) on an object, for the script that later
+ * finds it activated (chrai.c if_object_was_activated): Dam's mainframe
+ * finishes its objective after a download, long after the press. */
+#define COOP_ACTIVATED 16
+static struct
+{
+    void *obj;
+    s8 player;
+} sActivated[COOP_ACTIVATED];
+static s32 sActivatedNext;
+
+static void coopNoteActivated(void *obj, s32 player)
+{
+    s32 i;
+
+    for (i = 0; i < COOP_ACTIVATED && sActivated[i].obj != obj; i++)
+    {
+    }
+    if (i == COOP_ACTIVATED)
+    {
+        i = sActivatedNext;
+        sActivatedNext = (sActivatedNext + 1) % COOP_ACTIVATED;
+    }
+    sActivated[i].obj = obj;
+    sActivated[i].player = (s8) player;
+}
+
+static void coopScriptPassBy(void *script, s32 who)
+{
+    s32 i;
+
+    for (i = 0; i < COOP_SCRIPTPASS && sScriptPass[i].script != script; i++)
+    {
+    }
+    if (i == COOP_SCRIPTPASS)
+    {
+        i = sScriptPassNext;
+        sScriptPassNext = (sScriptPassNext + 1) % COOP_SCRIPTPASS;
+    }
+    sScriptPass[i].script = script;
+    sScriptPass[i].player = (s8) who;
+}
+
+/* chrai.c: script found obj activated (or a gadget used on it); its next
+ * stage flags are the presser's */
+void coopObjActivatedPass(void *script, void *obj)
+{
+    s32 i;
+
+    if (sEnabled <= 0 || !coopNetIsHost())
+    {
+        return;
+    }
+    for (i = 0; i < COOP_ACTIVATED; i++)
+    {
+        if (sActivated[i].obj == obj && obj != NULL)
+        {
+            portConLogf("ge: coop: a script found player %d's press\n", sActivated[i].player + 1);
+            coopScriptPassBy(script, sActivated[i].player);
+            return;
+        }
+    }
+    coopScriptPassBy(script, coopSelf());   /* nobody pressed it from afar: the host did */
+}
+
 void coopAltBondCredit(void *script, s32 k)
 {
     s32 who = coopSelf();
@@ -7321,19 +8157,10 @@ void coopAltBondCredit(void *script, s32 k)
     {
         return;
     }
-    for (i = 0; i < COOP_SCRIPTPASS && sScriptPass[i].script != script; i++)
-    {
-    }
-    if (i == COOP_SCRIPTPASS)
-    {
-        i = sScriptPassNext;
-        sScriptPassNext = (sScriptPassNext + 1) % COOP_SCRIPTPASS;
-    }
-    sScriptPass[i].script = script;
-    sScriptPass[i].player = (s8) who;
+    coopScriptPassBy(script, who);
 }
 
-void coopScriptSetsFlags(void *script)
+void coopScriptSetsFlags(void *script, void *chr)
 {
     s32 i;
 
@@ -7344,6 +8171,13 @@ void coopScriptSetsFlags(void *script)
             coopObjNoteActor(sScriptPass[i].player, 0);
             return;
         }
+    }
+    if (chr != NULL && sEnabled > 0 && coopNetIsHost())
+    {   /* a chr's own script (Valentin, Janus, a scientist): the player it is
+         * dealing with, the one its "Bond" is right now */
+        s32 p = (sTickChr == chr && g_CoopPropOverride != NULL) ? coopPlayerOfProp(g_CoopPropOverride) : -1;
+
+        coopObjNoteActor((p >= 0) ? p : coopSelf(), 0);
     }
 }
 
@@ -7598,6 +8432,7 @@ static s32 coopIsPresentationCmd(u8 cmd)
         case AI_BondEquipItemCinema:
         case AI_BondHideWeapons:
         case AI_BondSetLockedVelocity:
+        case AI_BondDisableDamageAndPickups:   /* only endings use it: no one is shot or picks up during the host's */
         case AI_TextPrintBottom:
         case AI_TextPrintTop:
         case AI_MusicPlaySlot:
@@ -7606,6 +8441,7 @@ static s32 coopIsPresentationCmd(u8 cmd)
         case AI_ShowAllChrs:
         case AI_MoveObject:     /* the Runway plane to its take-off pad */
         case AI_TriggerFadeAndExitLevelOnButtonPress:   /* an ending anyone may vote to skip (coop_vote.c) */
+        case AI_TriggerExplosionsAroundBond:   /* a self-destruct's blast at zero: around every player */
             return 1;
         default:
             return 0;
@@ -7614,11 +8450,35 @@ static s32 coopIsPresentationCmd(u8 cmd)
 
 static s32 sApplyingRemoteAi;
 
+/* a joiner's own copy of the level scripts leaves these to the host: the
+ * countdown (WORLD's clock) and the blast when it runs out (relayed) */
+static s32 coopHostOwnsCmd(u8 cmd)
+{
+    switch (cmd)
+    {
+        case AI_HudCountdownShow:
+        case AI_HudCountdownHide:
+        case AI_HudCountdownSet:
+        case AI_HudCountdownStop:
+        case AI_HudCountdownStart:
+        case AI_TriggerExplosionsAroundBond:
+            return sEnabled > 0 && !coopVersus() && coopInMission();
+        default:
+            return 0;
+    }
+}
+
 void coopAiCommand(u8 *list, s32 offset, ChrRecord *self)
 {
     CoopEvent ev;
     s32 len;
     u8 cmd = list[offset];
+
+    if ((cmd == AI_HudCountdownSet || cmd == AI_HudCountdownStart || cmd == AI_HudCountdownShow)
+        && sEnabled > 0 && coopNetIsHost())
+    {
+        sClockSet = 1;   /* from now on WORLD carries it (coopSendWorld) */
+    }
 
     if (cmd == AI_SetChrAiList && list[offset + 1] == (u8) CHR_BOND_CINEMA)
     {
@@ -7696,6 +8556,10 @@ static void coopPendingCinemaTick(void)
  * steps over them) */
 s32 coopAiSkip(u8 *list, s32 offset, ChrRecord *self)
 {
+    if (sEnabled > 0 && !coopNetIsHost() && !sApplyingRemoteAi && coopHostOwnsCmd(list[offset]))
+    {
+        return 1;   /* the host's countdown and blast (coopApplyClock, coopApplyAiCommand) */
+    }
     return sEnabled > 0 && !coopNetIsHost() && sHostEndingHere && !sApplyingRemoteAi
         && g_CameraMode == CAMERAMODE_POSEND && coopIsPresentationCmd(list[offset])
         && (self == NULL || g_CurrentPlayer->prop == NULL || self != g_CurrentPlayer->prop->chr);

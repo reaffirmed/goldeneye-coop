@@ -13783,10 +13783,19 @@ s32 sub_GAME_7F053894(coord3d *pos, f32 low, f32 high)
 
     for (index = 0; index < count; index++)
     {
+        coord3d *at;
+
         prop  = g_playerPointers[index]->prop;
-        diffx = prop->pos.x - pos->x;
-        diffy = prop->pos.y - pos->y;
-        diffz = prop->pos.z - pos->z;
+        at = &prop->pos;
+#ifndef TARGET_N64
+        if (count == 1 && coopSpectatePos(0) != NULL)
+        {   /* co-op, down and watching a partner: we hear from the camera, not our body */
+            at = coopSpectatePos(0);
+        }
+#endif
+        diffx = at->x - pos->x;
+        diffy = at->y - pos->y;
+        diffz = at->z - pos->z;
         distance = sqrtf(diffx * diffx + diffy * diffy + diffz * diffz);
 
         if (distance < shortest_distance)
@@ -16241,6 +16250,12 @@ void drop_inventory(void)
             {
                 propobjSetDropped(prop, DROPTYPE_DEFAULT);
                 objDrop(prop);
+#ifndef TARGET_N64
+                if (item != ITEM_TOKEN && item != ITEM_GOLDENGUN)
+                {   /* online versus: it falls in the other arenas too (the scenario's item goes by VSKILL) */
+                    coopItemsPlayerDropped(prop);
+                }
+#endif
             }
         }
     }

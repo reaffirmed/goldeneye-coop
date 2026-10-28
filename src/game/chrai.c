@@ -33,9 +33,13 @@
 #include <random.h>
 #include <snd.h>
 #include <ultra64.h>
+#ifndef TARGET_N64
+#include "coop.h"
+#endif
 
 #ifndef TARGET_N64
 static s32 coopk;  /* the partner a level script check is asking about (coopAltBondBegin) */
+s32 coopLevelFallCheckOff(f32 y);  /* coop.h comes in later: undeclared, the f32 would go as a double */
 /* the end of one coopChrAltBegin try: keep that player as the guard's target
  * when it settled the check, else back to its own */
 #define COOP_ALT_DONE(settled, stimulus) \
@@ -929,6 +933,17 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
         AiListp = AircraftEntityp->ailist;
     }
 
+#ifndef TARGET_N64
+    if (ChrEntityp != NULL && coopAiTick(ChrEntityp))
+    {
+        return; /* smarter guards (coop_ai.c) ran this tick */
+    }
+    if (ChrEntityp != NULL)
+    {   /* it may have handed a burst back to Classic's lists */
+        Offset  = ChrEntityp->aioffset;
+        AiListp = ChrEntityp->ailist;
+    }
+#endif
     if (AiListp) // continue if Has ailist (check once)
     {
         // loop forever (or until broken)
@@ -1923,7 +1938,11 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 case AI_IFImOnScreen:
                 {
                     AiIFImOnScreenRecord *ai = AiListp + Offset;
-                    if ((ChrEntityp->prop->flags & PROPFLAG_ONSCREEN))
+                    if ((ChrEntityp->prop->flags & PROPFLAG_ONSCREEN)
+#ifndef TARGET_N64
+                        || coopChrOnPartnerScreen(ChrEntityp) /* co-op: on a partner's screen too */
+#endif
+                        )
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -2180,6 +2199,7 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     f32                                           value = ntohs(ai->DISTANCE) * 10.0f;
                     s32                                           near  = value > chrGetDistanceFromBondToPad(ChrEntityp, pad);
 #ifndef TARGET_N64
+                    near = near && coopOwnBondCounts(); /* co-op: not a down host's body */
                     for (coopk = 0; !near && coopAltBondBegin(coopk); coopk++) /* co-op: either player counts */
                     {
                         near = value > chrGetDistanceFromBondToPad(ChrEntityp, pad);
@@ -2207,6 +2227,7 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     f32                                              value = ntohs(ai->DISTANCE) * 10.0f;
                     s32                                              far   = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
 #ifndef TARGET_N64
+                    far = far || !coopOwnBondCounts(); /* co-op: not a down host's body */
                     for (coopk = 0; far && coopAltBondBegin(coopk); coopk++) /* co-op: both players must be away */
                     {
                         far = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
@@ -2243,6 +2264,7 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     u16                          pad_id = ntohs(ai->PAD);
                     s32                          inroom = check_if_actor_is_at_preset(ChrEntityp, pad_id);
 #ifndef TARGET_N64
+                    inroom = inroom && coopOwnBondCounts(); /* co-op: not a down host's body */
                     for (coopk = 0; !inroom && coopAltBondBegin(coopk); coopk++) /* co-op: either player counts */
                     {
                         inroom = check_if_actor_is_at_preset(ChrEntityp, pad_id);
@@ -2337,8 +2359,47 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     AiIFBondHasItemEquippedRecord *ai = AiListp + Offset;
 #ifndef TARGET_N64
                     s32 coopitem = coopGadgetItem(AiListp); /* co-op: the item the partner used, when the last check found their gadget */
-                    if (coopitem >= 0 ? ai->ITEM_NUM == coopitem
-                                      : ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNRIGHT) || ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNLEFT))
+                    s32 has;
+
+                    /* co-op: whoever is Bond (a guard's target), else any
+                     * player holding it (Valentin's "put your gun away"): for
+                     * a guard's script the one holding it becomes its target,
+                     * as with a sight check. Not in a cutscene or an ending,
+                     * where it picks our own Bond's cinema gun. */
+                    if (coopitem >= 0)
+                    {
+                        has = ai->ITEM_NUM == coopitem;
+                    }
+                    else if (g_PlayerInvincible)
+                    {
+                        has = ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNRIGHT) || ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNLEFT);
+                    }
+                    else if (!(has = coopBondHasItem(ai->ITEM_NUM)))
+                    {
+                        for (coopk = 0; !has && coopChrAltBegin(ChrEntityp, coopk); coopk++)
+                        {
+                            has = coopBondHasItem(ai->ITEM_NUM);
+                            if (has)
+                            {
+                                coopBondItemLog(ai->ITEM_NUM);
+                            }
+                            COOP_ALT_DONE(has, 0);
+                        }
+                        for (coopk = 0; !has && coopAltBondBegin(coopk); coopk++) /* a level script: either player */
+                        {
+                            has = coopBondHasItem(ai->ITEM_NUM);
+                            if (has)
+                            {
+                                coopBondItemLog(ai->ITEM_NUM);
+                            }
+                            coopAltBondEnd();
+                        }
+                    }
+                    else
+                    {
+                        coopBondItemLog(ai->ITEM_NUM);
+                    }
+                    if (has)
 #else
                     if (ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNRIGHT) || ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNLEFT)) // order matters
 #endif
@@ -2386,6 +2447,9 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     if (obj && obj->prop && (obj->runtime_bitflags & RUNTIMEBITFLAG_ACTIVATED))
                     {
                         obj->runtime_bitflags &= ~RUNTIMEBITFLAG_ACTIVATED;
+#ifndef TARGET_N64
+                        coopObjActivatedPass(Entityp, obj);   /* co-op: what it does next is the presser's */
+#endif
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
                     else
@@ -2403,6 +2467,7 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                         obj->state &= ~PROPSTATE_ACTIVATED;
 #ifndef TARGET_N64
                         coopGadgetCheck(obj, AiListp);   /* co-op: a joiner's gadget (Frigate's bombs) */
+                        coopObjActivatedPass(Entityp, obj);
 #endif
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -2506,8 +2571,14 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     ObjectRecord              *obj = objFindByTagId(ai->OBJECT_TAG);
                     if (obj && obj->prop)
                     {
+#ifndef TARGET_N64
+                        s32 coopdown = coopScriptGiveBegin(); /* co-op: a down host still takes it, for the team */
+#endif
                         TICKOP op = propPickupByPlayer(obj->prop, FALSE);
                         propExecuteTickOperation(obj->prop, op);
+#ifndef TARGET_N64
+                        coopScriptGiveEnd(coopdown);
+#endif
                     }
                     Offset += sizeof(AiBondCollectObjectRecord);
                     break;
@@ -2842,7 +2913,11 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 {
                     AiIFBondHealthLessThanRecord *ai  = AiListp + Offset;
                     float                         val = (ai->HEALTH) / 255.0f;
+#ifndef TARGET_N64
+                    if (val > coopBondHealth()) /* co-op: the health of whoever is Bond (the player a taunt is about) */
+#else
                     if (val > currentPlayerGetHealth())
+#endif
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -2856,7 +2931,11 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 {
                     AiIFBondHealthGreaterThanRecord *ai  = AiListp + Offset;
                     float                            val = (ai->HEALTH) / 255.0f;
+#ifndef TARGET_N64
+                    if (val < coopBondHealth()) /* co-op: the health of whoever is Bond (the player a taunt is about) */
+#else
                     if (val < currentPlayerGetHealth())
+#endif
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -3256,7 +3335,7 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
 #ifndef TARGET_N64
                     if (objectiveregisters1 != coopflags)
                     {   /* co-op: a new flag is whoever passed this script's last check */
-                        coopScriptSetsFlags(Entityp);
+                        coopScriptSetsFlags(Entityp, ChrEntityp);
                     }
 #endif
                     Offset += sizeof(AiSetObjectiveBitfieldRecord);
@@ -4212,10 +4291,15 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     f32                         bondpos = (s16)ntohs(ai->Y_POS);
                     s32                         below   = getCurrentPlayerProp()->pos.y < bondpos;
 #ifndef TARGET_N64
+                    below = below && coopOwnBondCounts(); /* co-op: not a down host's body */
                     for (coopk = 0; !below && coopAltBondBegin(coopk); coopk++) /* co-op: either player counts */
                     {
                         below = getCurrentPlayerProp()->pos.y < bondpos;
                         coopAltBondEnd();
+                    }
+                    if (coopLevelFallCheckOff(bondpos))
+                    {   /* co-op: a fall is that player's own death (coop.c, coopCradleFallTick) */
+                        below = 0;
                     }
                     if (below)
                     {

@@ -45,10 +45,12 @@
 #define PORT_COOP_TANKFLAGS(f)       coopGuardTankFlags(f)
 #define PORT_COOP_DUCKHEIGHT()       coopTargetDuckingHeight()
 #define PORT_COOP_DAMAGESHOWTIME()   coopTargetDamageShowTime()
+#define PORT_COOP_BONDYAW()          coopTargetYaw()
 #else
 #define PORT_COOP_TANKFLAGS(f)       bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, f)
 #define PORT_COOP_DUCKHEIGHT()       bondviewGetPlayerDuckingHeightRelated(g_CurrentPlayer)
 #define PORT_COOP_DAMAGESHOWTIME()   bondviewGetIfCurrentPlayerDamageShowTime()
+#define PORT_COOP_BONDYAW()          bondviewGetPlayerYawRadians()
 #endif
 #endif
 
@@ -2616,6 +2618,14 @@ bool handles_shot_actors(ChrRecord *self, s32 hitpart, coord3d *vector, s32 weap
         {
             damageToCause *= g_AiHealthModifier;
         }
+#ifndef TARGET_N64
+        if (!isPlayer)
+        {   /* co-op difficulty and Player Scaling make every chr tougher for the
+             * players' guns; a guard's shot (Frigate's hostage-takers at their
+             * hostage) keeps the mission's own strength */
+            damageToCause *= coopDifficultyHealthMul();
+        }
+#endif
 
         vec.x = myprop->pos.x - vector->x;
         vec.y = myprop->pos.y - vector->y;
@@ -10240,7 +10250,7 @@ coord3d *chrlvGetChrOrPresetLocation(ChrRecord *self, s32 flags, s32 lookup_id, 
 */
 f32 chrGetAngleFromBond(ChrRecord *self)
 {
-    f32 radBondHeading   = bondviewGetPlayerYawRadians();
+    f32 radBondHeading   = PORT_COOP_BONDYAW();
     PropRecord *myprop   = self->prop;
     PropRecord *bondprop = getCurrentPlayerProp();
     f32 anglebetween     = atan2f(myprop->pos.x - bondprop->pos.x, myprop->pos.z - bondprop->pos.z);
@@ -11056,7 +11066,7 @@ bool sub_GAME_7F033AAC(ChrRecord *self, u8 padnum)
         return check_2328_preset_set_with_method(self, padnum);
     }
 
-    sp1C           = bondviewGetPlayerYawRadians();
+    sp1C           = PORT_COOP_BONDYAW();
     bondprop       = getCurrentPlayerProp();
     bondnearestpad = chrlvFindPathNeighborRelated(&bondprop->pos, bondprop->stan, sp1C, padnum);
 

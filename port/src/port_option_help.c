@@ -27,6 +27,7 @@ static const struct PortOptHelp sHelp[] = {
     { "fix_shootthrough",   "Fixes shots passing through some walls." },
     { "distance_fading",    "Distant props and characters fade out." },
     { "true_enemy_rockets", "Enemy Rockets cheat stops guards keeping their old guns." },
+    { "guard_ai",           "Smarter guards investigate noise, call for help, use cover and flank." },
     { "unlimited_explosions", "Up to 100 explosions at once." },
     { "watch_static",       "Shows the watch screen's static." },
     { "fast_pause",         "Watch opens and closes at full speed." },

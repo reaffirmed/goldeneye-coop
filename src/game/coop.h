@@ -16,6 +16,7 @@ s32  coopChrAltBegin(ChrRecord *chr, s32 k);     /* host: a failed "Bond" check,
 void coopChrAltEnd(ChrRecord *chr);              /* that try failed too: the guard's own target again */
 void coopChrAltKeep(ChrRecord *chr, s32 stimulus);  /* it passed: that player is the guard's target */
 s32  coopChrAimedAtByBond(ChrRecord *chr);       /* sub_GAME_7F0333F8 for whoever is Bond in this tick */
+s32  coopChrOnPartnerScreen(ChrRecord *chr);     /* host: a partner can see this chr (chrai.c "if I'm on screen") */
 void coopCollideMover(PropRecord *prop, s32 on); /* chrSetMoving: prop is being moved or tested from */
 s32  coopCollideSkip(PropRecord *prop);          /* 1: prop blocks nothing right now (down, or inside the mover) */
 s32  coopTargetIsRemote(void);
@@ -23,20 +24,30 @@ void coopGuardTankFlags(s32 flag);
 f32  coopTargetDuckingHeight(void);
 s32  coopTargetDamageShowTime(void);
 s32  coopTargetIsDead(void);
+f32  coopTargetYaw(void);                        /* bondviewGetPlayerYawRadians for whoever is Bond in this tick */
+void coopPartnerShotNearMiss(ChrRecord *shooter, coord3d *from, coord3d *end); /* host: a partner's bullet passed close to a guard */
 s32  coopTargetRecordDamage(f32 damage, f32 angle);
 void coopDoorStateChanged(DoorRecord *door, s32 state);
 s32  coopObjDamage(ObjectRecord *obj, f32 damage, coord3d *pos, s32 item, s32 player); /* 1: skip */
 s32  coopSkipExplosionDamage(ChrRecord *chr);
 void coopPickedUp(ObjectRecord *obj, s32 kept);
+s32  coopScriptGiveBegin(void);        /* chrai.c AI_BondCollectObject: stand a down host up for it; pass the result to ...End */
+void coopScriptGiveEnd(s32 down);
 s32  coopPeerHolds(ObjectRecord *obj);
 void coopMissionComplete(void);
 s32  coopFrontTick(void);
 s32  coopAltBondBegin(s32 k); /* 1: "Bond" is now the k-th living partner (from 0), call coopAltBondEnd */
 void coopAltBondEnd(void);
+s32  coopOwnBondCounts(void);         /* 0: a level script's own-Bond check skips the host's body (down, a partner standing) */
+s32  coopLevelFallCheckOff(f32 y);   /* 1: a level script's fall check that co-op leaves to each player's own game */
+s32  coopBondHasItem(s32 item);          /* chrai.c: whoever is Bond now holds this item (a partner's from STATE) */
+f32  coopBondHealth(void);               /* and their health, 0..1 */
+void coopBondItemLog(s32 item);          /* log: that check passed for a partner */
 s32  coopCctvWatches(void);              /* propobj.c: 0 on a joiner, the host's cameras raise the alarm */
 void coopCctvAlarm(PropRecord *seen);    /* log: the Bond a camera raised the alarm on */
 void coopAltBondCredit(void *script, s32 k);   /* a script's "either player" check passed: k 0 for our Bond, else partner k-1 */
-void coopScriptSetsFlags(void *script);        /* that script sets stage flags: it was whoever passed its last check */
+void coopObjActivatedPass(void *script, void *obj);   /* that script found obj activated: its flags are the presser's */
+void coopScriptSetsFlags(void *script, void *chr);     /* that script (a chr's, or chr NULL) sets stage flags: it was whoever passed its last check */
 void coopAiCommand(u8 *list, s32 offset, ChrRecord *self);
 s32  coopAiSkip(u8 *list, s32 offset, ChrRecord *self);   /* joiner: step over our late copy of the host's ending commands */
 s32  coopDeadTick(void); /* 1: co-op owns this death (waiting or respawned) */
@@ -118,6 +129,7 @@ s32  coopSkipPassed(s32 kind);
 s32  coopSkipVotes(s32 *need, s32 *mine);
 s32  coopSkipWaitingFor(s32 i);
 s32  coopSkipTestPress(void);
+void coopVoteRenumber(const s32 *newof);  /* coop.c: host migration's renumbering */
 s32  coopVoteThisStage(void);       /* front.c: the mission whose debrief is up, -1 none */
 s32  coopVoteNextStage(void);       /* front.c: the mission after it, -1 none (failed, or the last) */
 void coopVoteStartMission(s32 stage);   /* front.c: host, start it; the others follow */
@@ -145,10 +157,21 @@ enum
     COOPSET_BLEEDOUT,       /* revive only: time down before bleeding out, a coopBleedOutName index (0 60 s) */
     COOPSET_RESPAWN,        /* the timer's wait, a coopRespawnName index (0 3-20 s, sooner when it is quiet) */
     COOPSET_SCALING,        /* guards by player count: COOPSCALE_* (0 auto) */
+    COOPSET_GUARDAI,        /* the guards' AI: COOPAI_CLASSIC (0) or COOPAI_SMARTER (coop_ai.c) */
     COOPSET_MAX = 16
 };
 s32  coopSetting(s32 which);
 void coopSetSetting(s32 which, s32 value);
+
+/* smarter guards (coop_ai.c): COOPSET_GUARDAI in co-op, the guard_ai Port Option in solo */
+enum { COOPAI_CLASSIC = 0, COOPAI_SMARTER = 1 };
+s32  coopAiSmarter(void); s32 coopAiSmarterOption(void); void coopAiSetSmarterOption(s32 mode);                   /* this mission's guards are the smarter ones */
+s32  coopAiTick(ChrRecord *chr);            /* chrai.c ai(): 1 when the smarter AI ran the chr's tick */
+f32  coopAiHearScale(ChrRecord *chr, f32 dist, f32 range);  /* chr.c: hearing through walls */
+s32  coopGuardAiCount(void);
+const char *coopGuardAiName(s32 mode);
+s32  coopChrCurrentTarget(void);            /* host, in a guard's tick: the player that is Bond, 0 ours */
+s32  coopTargetablePlayer(s32 t);           /* host: player t is in the mission and alive */
 
 /* co-op difficulty (coop_difficulty.c): COOPSET_DIFFICULTY's modes */
 s32  coopLobbyPlayerCount(void);          /* players in the session, us included */
@@ -358,10 +381,11 @@ Gfx *coopPhotoRender(Gfx *gdl);
 /* watching a partner while we are down (coop_spectate.c) */
 void coopSpectateTick(void);
 void coopSpectateStop(void);
+void coopRestoreMusic(void);   /* bondview2.c: the level music after a death */
 void coopSpectateDropIn(s32 on);
 s32  coopSpectateTarget(void);     /* whose eyes we look out of, -1 none (or the free camera) */
 s32  coopSpectateHud(s32 *who);    /* 1 watching *who, 2 the free camera, 0 neither */
-void coopSpectateLook(f32 lookdx, f32 lookdy, s32 direct, f32 yawdeg, f32 pitchdeg);
+void coopSpectateMouse(f32 *dx, f32 *dy, s32 *direct, f32 *yawdeg, f32 *pitchdeg);   /* bondview2.c */
 s32  coopSpectateCamera(struct coord3d *pos, struct coord3d *look, struct coord3d *up);
 s32  coopSpectateRoom(u8 *room);
 struct coord3d *coopSpectatePos(s32 three);
@@ -420,6 +444,7 @@ typedef struct
 void coopLookFill(CoopLook *out);
 void coopLookReset(CoopLookPuppet *lp);
 void coopLookPuppetTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look, s32 dead, s32 self);
+void coopLookBodyTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look, s32 dead, s32 self);   /* versus: Rare's code poses it */
 void coopLookShotBegin(s32 hand, s32 weapon, coord3d *from, coord3d *dir); /* chrprop.c chraiDefaultWeaponFireHandler */
 void coopLookShotBg(coord3d *pos, coord3d *normal, s32 impact, s32 room, s32 texture, s32 spark);
 void coopLookShotChr(PropRecord *prop, coord3d *pos, s32 hitpart);           /* chr.c chrHandleBulletHit */
@@ -465,7 +490,7 @@ Gfx *coopFigureDraw(Gfx *DL, s32 pick, s32 x, s32 y, s32 w, s32 h, f32 yaw, s32 
 #define COOPPKT_VERSUS 16
 #define COOP_ALL 0xFF               /* as coop.c: an event for everyone */
 #define COOP_PUPPET_CHRNUM 30000    /* as coop.c: + player number, a player's body's chrnum on the others' games */
-enum { COOPEV_VSHIT = 32, COOPEV_VSKILL, COOPEV_VSEND, COOPEV_VSITEM, COOPEV_VSBOOM };
+enum { COOPEV_VSHIT = 32, COOPEV_VSKILL, COOPEV_VSEND, COOPEV_VSITEM, COOPEV_VSBOOM, COOPEV_VSPICK };
 typedef struct
 {
     f32 pos[3];
@@ -490,12 +515,13 @@ void coopVersusClear(void);
 void coopVersusRenumber(const s32 *newof);          /* host migration: old session numbers to new (-1 gone) */
 u32  coopVersusSerial(void);
 void coopVersusStageStart(void);
+void coopVersusTestInput(s8 *stick_x, s8 *stick_y, u16 *buttons);   /* bondview2.c MoveBond: GE_VS_WANDER */
 s32  coopVersusStartPad(s32 li, s32 count);
 s32  coopVersusDamage(f32 damage, f32 vx, f32 vz, s32 attacker, s32 armour);   /* 1: not ours to deal */
 void coopVersusBlast(s32 on);
 void coopVersusKilled(s32 victim, s32 killer, s32 gg);
 void coopVersusExplosion(PropRecord *source, coord3d *pos, s32 type, u8 *rooms);
-void coopVersusPickedUp(s32 item);
+void coopVersusPickedUp(ObjectRecord *obj);   /* coop.c coopPickedUp: we took something in a versus arena */
 void coopVersusApplyEvent(s32 kind, s32 from, const void *raw);
 void coopVersusMatchOver(void);
 s32  coopVersusPktSize(void);
@@ -569,12 +595,13 @@ void coopChatPress(void);
 s32  coopChatTyping(void);
 s32  coopChatEatEscape(void);   /* 1: this Escape was the chat's, not the pause's */
 void coopChatTick(s32 inmission);
+void coopChatTickStill(void);   /* the open line while the stage clock is stopped */
 void coopChatApply(const u8 *raw, s32 from);
 #define COOPTOAST_ALERT (-2)    /* a toast's "player" for session news (host left, ...): red */
 void coopFeedToast(const char *text, s32 player);   /* bottom left, the lead in the player's colour (-1 white); '|' starts the rest */
 void coopFeedClock(void);   /* the feed's clock while co-op is off */
 Gfx *coopFeedRender(Gfx *gdl);                       /* in play (coop_hud.c) */
-#define COOP_FEED_TEXT 104     /* a chat line: a name, ": " and the most a message holds */
+#define COOP_FEED_TEXT 144     /* a chat line: a name, ": " and the most a message holds */
 s32  coopFeedLines(s32 maxlines, char lines[][COOP_FEED_TEXT], s32 *players);  /* the newest chat lines as typed, for the lobby */
 void coopChatTypedLine(char *out, s32 cap);         /* the line being typed */
 
@@ -593,6 +620,7 @@ s32  coopItemsIsPartners(ObjectRecord *obj);            /* a partner's remote mi
 s32  coopItemsEmbedPending(ObjectRecord *obj);          /* propobj.c: stuck by a partner's word, matrix still to work out */
 s32  coopItemsUnsettled(PropRecord *prop);             /* propobj.c weaponFindThrown: a partner's throw, still in the air for them */
 void coopItemsPickedUp(ObjectRecord *obj);
+void coopItemsPlayerDropped(PropRecord *prop);   /* propobj.c drop_inventory: versus, what our death dropped */
 s32  coopInMissionNow(void);
 void coopObjKnockChildren(s32 haschildren);             /* propobj.c objHit */
 void coopObjKnocked(ObjectRecord *obj, s32 bounce, coord3d *viewdir);
@@ -622,6 +650,7 @@ s32  coopVoiceMuteRowMask(void);
  * objective and every game shows a toast for a partner's */
 void coopObjNoteActor(s32 player, s32 damage);  /* host: something player did just changed the world */
 void coopObjNoteSelf(void);     /* this game's own Bond did it: a photo, a room, a pickup, ... */
+void coopObjNoteUse(s32 player);    /* host: player used or planted something; credit for a few seconds */
 void coopObjStatusChanged(s32 index, s32 letter, s32 status);  /* objective_status.c */
 void coopObjTick(s32 inmission);
 void coopObjApply(s32 kind, const u8 *raw, s32 from);

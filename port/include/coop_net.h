@@ -22,6 +22,7 @@ const char *coopNetPeerName(int peer);  /* Steam name, or ip:port */
 unsigned long long coopNetPeerId(int peer); /* SteamID, or address and port; 0 when free */
 void coopNetSend(const void *buf, int len);             /* to every peer */
 void coopNetSendTo(int peer, const void *buf, int len);
+unsigned int coopNetSentTake(int peer, unsigned int *bytesbytype, unsigned int *pkts);  /* bytes sent to peer since the last call; bytesbytype[32] by packet type */
 int  coopNetRecv(void *buf, int cap);   /* bytes, or 0 when nothing is queued */
 int  coopNetRecvFrom(void *buf, int cap, int *peer);    /* ...and which slot sent it */
 void coopNetShutdown(void);

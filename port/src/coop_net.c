@@ -17,6 +17,9 @@
  * arrives is held <ms> plus up to <jitter> more before the game sees it, so
  * they also come out of order, and <loss> percent are dropped. Both
  * directions when every copy sets it, as the scripts do.
+ * GE_COOP_NETCUT=<s>:<len s> (tests): <s> seconds after the network opens,
+ * nothing goes out or comes in for <len> seconds (a dropped Wi-Fi, a line
+ * gone quiet).
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -226,8 +229,104 @@ unsigned long long coopNetPeerId(int peer)
     return ((unsigned long long) ntohl(sPeer[peer].sin_addr.s_addr) << 16) | ntohs(sPeer[peer].sin_port);
 }
 
+/* what we sent each peer, by packet type (the u16 at 6), since coopNetSentTake last read it */
+#define COOP_NET_TYPES 32
+static unsigned int sSentBytes[COOP_NET_MAX_PEERS][COOP_NET_TYPES];
+static unsigned int sSentPkts[COOP_NET_MAX_PEERS];
+
+static void coopNetCount(int peer, const void *buf, int len)
+{
+    int type = (len >= 8) ? ((const unsigned short *) buf)[3] : 0;
+
+    if (peer >= 0 && peer < COOP_NET_MAX_PEERS && coopNetPeerConnected(peer))
+    {
+        sSentBytes[peer][(type >= 0 && type < COOP_NET_TYPES) ? type : 0] += (unsigned int) len;
+        sSentPkts[peer]++;
+    }
+}
+
+unsigned int coopNetSentTake(int peer, unsigned int *bytesbytype, unsigned int *pkts)
+{
+    unsigned int total = 0;
+    int t;
+
+    if (peer < 0 || peer >= COOP_NET_MAX_PEERS)
+    {
+        return 0;
+    }
+    for (t = 0; t < COOP_NET_TYPES; t++)
+    {
+        total += sSentBytes[peer][t];
+        if (bytesbytype != NULL)
+        {
+            bytesbytype[t] = sSentBytes[peer][t];
+        }
+    }
+    if (pkts != NULL)
+    {
+        *pkts = sSentPkts[peer];
+    }
+    memset(sSentBytes[peer], 0, sizeof(sSentBytes[peer]));
+    sSentPkts[peer] = 0;
+    return total;
+}
+
+extern unsigned long long portProfNow(void);
+
+/* GE_COOP_NETCUT: 1 while the line is cut */
+static int coopNetCut(void)
+{
+    static int at = -2, len;
+    static unsigned long long t0;
+
+    if (at == -2)
+    {
+        const char *e = getenv("GE_COOP_NETCUT");
+
+        at = -1;
+        t0 = portProfNow();
+        if (e != NULL && sscanf(e, "%d:%d", &at, &len) == 2)
+        {
+            portConLogf("ge: coop: netcut: the line goes quiet %d s in, for %d s\n", at, len);
+        }
+        else
+        {
+            at = -1;
+        }
+    }
+    if (at < 0)
+    {
+        return 0;
+    }
+    {
+        unsigned long long s = (portProfNow() - t0) / 1000000ull;
+        static int said;
+
+        if (s >= (unsigned long long) at && s < (unsigned long long) (at + len))
+        {
+            if (!said)
+            {
+                said = 1;
+                portConLogf("ge: coop: netcut: line cut\n");
+            }
+            return 1;
+        }
+        if (said == 1 && s >= (unsigned long long) (at + len))
+        {
+            said = 2;
+            portConLogf("ge: coop: netcut: line back\n");
+        }
+    }
+    return 0;
+}
+
 void coopNetSendTo(int peer, const void *buf, int len)
 {
+    if (coopNetCut())
+    {
+        return;
+    }
+    coopNetCount(peer, buf, len);
     if (sSteam)
     {
         coopSteamSendTo(peer, buf, len);
@@ -313,8 +412,6 @@ static int coopNetRecvRaw(void *buf, int cap, int *peer)
 
 /* ---- GE_COOP_NETSIM: a slow, jittery, lossy line for tests ---------------- */
 
-extern unsigned long long portProfNow(void);
-
 #define NETSIM_SLOTS 512
 typedef struct
 {
@@ -351,6 +448,13 @@ int coopNetRecvFrom(void *buf, int cap, int *peer)
             sSimRand ^= (unsigned int) portProfNow();
             portConLogf("ge: coop: netsim: %d ms + up to %d ms jitter, %d%% loss\n", sSimLat, sSimJit, sSimLoss);
         }
+    }
+    if (coopNetCut())
+    {
+        while (coopNetRecvRaw(tmp, sizeof(tmp), &from) > 0)
+        {   /* lost on the way */
+        }
+        return 0;
     }
     if (!sSimOn)
     {

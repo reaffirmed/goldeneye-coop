@@ -482,9 +482,11 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; (cutsce
   runs once as the stage starts, so it only queues MENU_COOP_LOBBY; the
   lobby's init ends the match).
 - The name at the bottom right is the Steam name.
-- Not shared: ordinary weapon and armour pickups (each world has its own),
-  guns a victim drops (only the scenario item), the per-PC Multiplayer
-  Options in midas.ini. A player who drops out leaves a still body.
+- Shared since COOP_VERSION 14 (see "Versus gameplay" below): the arena's
+  weapon, ammo and armour pickups and their respawn timers, guns a victim
+  drops, thrown grenades and mines, object damage. Not shared: the per-PC
+  Multiplayer Options in midas.ini. A player who drops out leaves a still
+  body.
 - Harness: GE_COOP_VERSUS=<arena>:<scenario>:<length>:<weapons> (host's
   rows), GE_VS_HUNT=<s> (step 4 m from the next player with a clear walk,
   face them; tries another side every 5 s without a hit; tops up the
@@ -1857,3 +1859,460 @@ along the foot). UI only, no protocol change.
   image has xdotool now (menu_input.sh needed it too).
 - Checked host and joiner over the mock Steam, before (v0.3.0) and after,
   in and out of a lobby: every tab. Shots: menu-text/ in the project files.
+
+## Host-only checks audit (2026-10-28)
+
+Owner's question after the Valentin report: what else only works for the
+host's Bond? Every place that reads "Bond" (the level-script and chr AI
+commands, chraction.c's Bond helpers, propobj.c's objects, doors and
+interaction, objectives, pickups, explosions, countdowns, endings) was
+classified; the full list is in the thread's report. Most were already
+handled (either-player pad, room and height checks; team inventory; the
+guard target machine; Use, gadget and door relays; OR'd criteria). The
+Valentin thread fixed "Bond holds X", "Bond's health" and the escorts'
+screen checks. Fixed here (no packet changes, COOP_VERSION stays 13):
+
+- Near misses: only our own bullets reach chrTestHit, which flags a guard
+  they pass as CHRFLAG_NEAR_MISS, and the standard guard list's "Bond missed
+  me" then startles it and sends it to attack. A partner's misses did
+  nothing on the host, so a joiner could miss a guard with the silenced PP7
+  all day. The host now runs the same bounds test along each partner's
+  tracer (coopPartnerShotNearMiss, from coopLookPlayShot: their gun to where
+  the bullet stopped) and commits the guard to that player (a stimulus).
+- Bond's facing: chrGetAngleFromBond and sub_GAME_7F033AAC ("a pad beside or
+  behind Bond", Streets' and Jungle's civilians) read our yaw even while
+  Bond was a partner's puppet. coopTargetYaw gives the partner's STATE yaw.
+- Endings: AI_BondDisableDamageAndPickups (only endings use it) is relayed
+  with the other presentation commands, so a joiner can't be shot or pick
+  things up during an ending the host's script started.
+- Harness: GE_COOP_TESTAIMCHR=<chrnum>:<s>[:<deg>] faces that chr's body
+  turned <deg> degrees for 8 s from <s> seconds in.
+- Tests (two games over UDP, US ROM, old build = main at 1f3e068): Dam,
+  joiner 15 m from guard 6 fires the silenced PP7 4 degrees to its side
+  (GE_COOP_TESTAIMCHR=6:20:4 GE_COOP_TESTFIRE=5:22:4), no hit: old, guard 6
+  stays where it is (act 1 then 3, same spot); new, "player 2's shot went
+  past chr 6 (near miss)" and it runs at the joiner (act 9, 4 m closer).
+  Dam bungee started by the host (GE_COOP_TESTPAD=330:10): new, the joiner
+  logs "host script command 236" (damage and pickups off); old, it doesn't.
+
+## NPCs a joiner can't talk to (2026-10-28)
+
+Owner's report (v0.4.0): in Statue a joiner can't get the meeting to happen.
+Valentin himself already worked for a joiner (his checks are sight and
+distance, which ask every player since the NPC-reaction fix); the one that
+fails is Janus by Lenin's statue, who only talks once "Bond" has holstered.
+
+- "Bond has item X equipped" read our own player's hands. On the host that
+  is the host's gun, whoever the NPC was facing, so a joiner holstering did
+  nothing and Janus ended the meeting ("If he won't drop the gun kill him!",
+  objective B failed). Now it asks whoever is Bond right now (a guard's
+  target, from their STATE look.weapon; coop.c coopBondHasItem), then every
+  other player: for a chr's script the one holding it becomes its target, as
+  with the sight checks; a level script (Statue's ai_36, which also fails the
+  meeting when Bond draws during it) passes when any player holds it. Not
+  while damage and pickups are off (cutscenes, endings): there the check
+  picks our own Bond's cinema gun. Gadget checks keep coopGadgetItem first.
+- "Bond's health less / greater than" read the host's health. Now the
+  health of whoever is Bond (coopBondHealth), so the taunts after a sight
+  check (Facility, Control, Cradle's Trevelyan) are about the player seen.
+- "If I'm on screen" counted only the host's screen; the escorts (Natalya in
+  Bunker 2, Control and the Train, Control's technician) teleport up behind
+  Bond when nobody sees them, and could pop up in front of a joiner. Now a
+  partner sees a chr within about 48 degrees of their facing plus the body,
+  120 m, with a clear line (coopChrOnPartnerScreen).
+- Audit of every mission's NPC and proximity scripts: the other "Bond" checks
+  either ask every player already (sight, line of sight, distance, pad, room,
+  height, aimed at, heard, collected, gadget used, object used) or follow
+  the NPC's target (angle, run/walk to Bond). Valentin, Natalya (Bunker 2,
+  Jungle, Control, Train), Boris, the Silo and Frigate scientists and
+  hostages, the Surface safe, Baron Samedi and Trevelyan use only those.
+  Surface 1 and 2 reinforcement odds look at Bond's gun (fewer with a weak
+  one); they now count any player's. A partner's near miss
+  (if_guard_shot_from_bond_missed: Janus and Valentin end the meeting when
+  shot at) is left to the host-only audit (PR #44, coopPartnerShotNearMiss).
+- Two-player CI runs (mission_runs.sh) pass on Statue, Bunker 2, Control,
+  Train, Jungle, Cradle, Facility, Aztec, Silo and Frigate.
+- No packet changes; COOP_VERSION stays 13.
+- Harness: GE_COOP_TESTGOTO takes an ai list id (1024 and up) for the chr
+  running it (Statue's Valentin 1042); GE_COOP_TESTHOLD=<item>:<s> switches
+  to that item (1 the fists); TESTPAD and TESTHOLD fire once at or after the
+  second, since a slow software-GL run steps past the exact tick.
+- Test (two games over UDP, US ROM, old build = main at 1f3e068, host left at
+  the start with the PP7): joiner put on Valentin (TESTGOTO=1042), then on
+  pad 59, holstered. Old: Janus "If he won't drop the gun kill him!", B
+  failed. New: "No gun, 007?", the whole conversation, B complete on both
+  games. Shots: npc-talk/ in the project files.
+
+## Tester report after v0.4.0 (2026-10-28)
+
+A tester's report from a stream on the build before v0.4.0. Items already
+fixed (cameras, NPCs stuck and slow, desync, objectives) are left out. No
+packet changes; COOP_VERSION stays 13.
+
+- Spectating: the level music stopped at death and never came back;
+  coopRestoreMusic now runs when spectating starts ("music back after the
+  death"). A dead Bond never runs bondviewProcessInput, so the free camera
+  never saw the mouse; coopSpectateMouse samples it directly (honouring
+  Look Inverted), and smart mouse lock keeps the pointer captured in photo
+  mode and the free camera. Strafe was reversed in both (world x runs to the
+  left of a camera looking along +z). While spectating, sounds are heard
+  from the camera (sub_GAME_7F053894), so a partner's gunshots no longer
+  fade out with the distance to our corpse.
+- Chat: a line can be 5 parts (111 characters typed, COOP_FEED_TEXT 144);
+  a v0.4.0 game drops lines over 3 parts, the wire struct is unchanged.
+  In-mission lines and the SAY: line wrap at 3/5 of the screen
+  (coopFeedWrap), COOPFEED_ROWS 5. Typing is polled while the stage clock
+  is stopped (coopChatTickStill), so the box no longer freezes after a
+  cutscene with controls locked.
+- Objective credit: a partner's Use (COOPEV_USE, the host's own press, an
+  embed) is remembered for 300 ticks (coopObjNoteUse) and the stage script
+  that reads AI_IFObjectWasActivated / UsedGadgetOnObject names who pressed
+  (coopObjActivatedPass), so Dam's PC, Frigate's tracker and Statue's
+  objectives toast the right player. With nobody to credit it falls back to
+  the host, or the first standing partner when the host is dead.
+  coopScriptSetsFlags falls back to a chr script's target.
+- Pickups while the host is down: a partner's pickup used to wait until the
+  host stood up again (the black box "needs several walks over"); the host
+  now applies it while dead (bonddead cleared around propPickupByPlayer).
+- Hostages on high co-op difficulty: guards' shots on chrs no longer take
+  coopDifficultyHealthMul, so a hostage dies to the hostage-taker's shot.
+- Revive: the hold is counted on the downed game; measured both ways (host
+  reviving a joiner and the reverse, GE_COOP_TESTREVIVE / TESTDIE,
+  GE_COOP_RESPAWN=7): 2.5 s each. The downed game now logs "revived by
+  player N after X s (Y s from the first hold)" so a tester's log shows a
+  hold that kept restarting.
+- Harness: GE_COOP_TESTFLAG=<hex>:<s> sets the host's stage flags; the
+  spectate test has a strafe phase.
+- Tests: two games, US ROM. Dam objective C by the joiner (GE_DIFF=2,
+  TESTFLAG=100:5, joiner TESTUSE=-1:6:10): "credit player 2". Joiner
+  pickup with the host down: "player 2 picked up obj ...: ours too".
+  Spectate: music log, mouse pitch, strafe dot product +6 (was -6). Chat
+  wrap over the mock Steam (screenshot). Not run: the hostage shot (could
+  not trigger on Frigate in the harness), partner sounds, chat after a
+  cutscene.
+
+Second pass (the stream's frames, a recount of the report):
+
+- Guards' guns on a joiner: a joiner's chrs don't run their lists, so a gun
+  a guard gets from its own list (guard_try_spawning_item: Statue's ai_5
+  and ai_6 guards, Trevelyan's ambush) never reached our copy, which fired
+  with nothing in its hand. coopApplyGuard now gives our copy the host's
+  right-hand gun when it has none ("host chr N drew gun M"). Harness:
+  GE_COOP_TESTSPAWN=<chrnum>,late arms the spawned copy 2 s later; Dam,
+  the joiner logs "mirrored host chr 5038 (body 37, gun 0)" then "drew gun
+  8".
+- Free camera dead zone: 10 of the stick's 70 units.
+- The stream's 1:02:00 and 1:23:00 "desyncs" are the host's spectator
+  camera in its partner-eyes mode (the frames say WATCHING), with the
+  partner's own body in view. The camera sat at their last STATE while the
+  level was drawn from their drawn body's room, and their body (hidden only
+  where the camera is) was drawn elsewhere: at 1:02 Sagar was at 1.7 s and
+  88% loss, so the view went into the rock and his body walked ahead of
+  it; at 1:23 Crshrry's body stood in a doorway inside a guard. The camera
+  now follows the drawn body (coopSpectateFollow), so view, room and the
+  hidden body agree. Checked at GE_COOP_NETSIM=200:100:50.
+- 1:32:35, Frigate's ending for a player out of lives: spectating carried
+  on into the ending with our room swapped for the partner's, so the
+  cutscene camera went through the boat's hull into the void. Spectating
+  stops for the ending and intro cameras (CAMERAMODE_POSEND, _INTRO).
+- Three players, player 3 revives player 2 (tester's 1:31:00):
+  "revived by player 3 after 5.1 s (2.5 s from the first hold)".
+- Statue's INCOMPLETE ending is the helicopter countdown (ai_37, 180 s):
+  it runs out, flag 0x40, ai_44 blows up the heli and Natalya with it.
+  Natalya gets up when Bond is within 3 m (ai_21's
+  if_guard_distance_to_bond_less_than, already any player's on the host);
+  why she waited for a death in the stream needs the joiner's view.
+
+## Overlooked: hellos, votes, a read-only folder (2026-10-28)
+
+A sweep for bugs outside the host-only audit, tested at 3 and 4 players over
+the mock Steam with the US cart (copy of host_drop.sh with GE_SKIPINTRO=0:
+its A taps in the first 15 s can land on the lobby's Leave row and make the
+harness host hand over and re-host).
+
+- Host migration split a 3-4 player group. Forced hellos (coopKeepAlive in
+  cutscenes and pauses, the mission card) set sTick to 0 for the call, so the
+  roster's "here" test (a hello within 180 ticks) read every joiner as gone.
+  Joiners' player counts flapped 2/3 all mission ("scaling Auto as 3
+  players" / "as 2 players" every few seconds), and a host lost right after
+  one of those hellos left each joiner hosting alone ("player 2 hosts ... 1
+  players" on player 2 and "player 3 hosts ... 1 players" on player 3).
+  coopSendHelloNow sends off-period without touching sTick. Retested: host
+  killed while player 3 was down (Revive, 2 lives): player 2 hosts both,
+  player 3 follows, is revived by the new host 19 s later; two scaling lines
+  in the whole run.
+- Votes (coop_vote.c): the after-mission vote and the skip vote count only
+  players still talking (coopLobbyPlayerHere, so a crash stops counting after
+  3 s, not after the 30 s the connection is kept); a skip vote recounts each
+  tick so a leaver can't hold it; coopVoteRenumber moves votes to their
+  players' new numbers in a migration. Tested: 3 players, player 3 votes
+  Lobby and is killed, player 2 then the host vote Replay: "decided replay
+  (2 of 2 voted)" on the host's vote, not after the 30 s clock.
+- Updater: in a folder the player can't write, the check and the install
+  said "download failed (curl 23)" (WinHTTP: "can't write <long path>").
+  Both try the file first: "Can't write to the game's folder; move it
+  somewhere you own". Tested as an unprivileged user on a read-only copy, and
+  the same copy writable installs.
+- Checked, no change: 4 players with 5% loss on each joiner, player 4 killed
+  and rejoining mid-mission (snapshot, drop-in beside the host, 1 object
+  corrected, no unresolved desync); versus ignores the co-op Friendly Fire
+  and Scaling rows (hidden in versus; blasts check coopVersus, bullets go
+  through coopVersusDamage, not puppets).
+
+## Smarter guards (2026-10-28, COOP_VERSION stays 13)
+
+Owner's pick: an optional guard AI, planned in the thread first (two
+settings, a Port Option, Classic untouched, Smarter runs count for cheats
+and team times). All of it is in src/game/coop_ai.c; Classic runs none of it.
+
+- The setting: Port Option "Guard AI" ([display] guard_ai, Classic 0 by
+  default, Smarter 1). In co-op only the host runs guards, so the host's
+  option decides; the host's Game Setup row (under Player Scaling) edits the
+  same option, and COOPSET_GUARDAI (slot 12) only carries it to the joiners'
+  lobby text. Read once a mission (coopAiSmarter latches per stage), so a
+  change mid-mission waits for the next. Versus always plays Classic.
+- The hook: ai() in chrai.c asks coopAiTick first; nonzero skips the
+  script for that tick. A guard is the brain's only while it is a generic
+  armed guard (not hidden or invincible, no puppet) on one of the stock
+  guard lists (standard, simple, clone, persistently chase) or on Attack /
+  Run to / Startle / Idle called from one. Level scripts, scripted
+  characters and every other list run as before, and the brain lets go the
+  moment a script moves the guard elsewhere.
+- Hearing: chrCheckGuardsHeardSound scales the range by coopAiHearScale:
+  in the outer half of the range, a door or wall between the guard and the
+  shot halves it (one line test, doors only). Partners' shots already wake
+  guards in Classic too (coopPuppetNoise, PR #42) - the plan said Smarter
+  only, but that change came first as a tester fix and is left as it is.
+- Looking (a guard that heard or saw something but not Bond): LOOK (turn
+  and look round), INVESTIGATE (walk to the heard spot, run when answering a
+  call), SEARCH (two nearby waypoints), RETURN to post. A body seen within
+  15 m sends a guard to look into it. Seeing a target from any of these
+  starts the fight.
+- Fighting: on first sight the guard calls up to 3 calm guards within 20 m
+  (they investigate the spot, so they come in looking, not knowing), points,
+  and 1 in 4 run for a working alarm within 30 m (one at a time, 60 s apart,
+  never when it is already ringing). Then bursts (the script's Attack Bond,
+  handed back after each); after 2-3 bursts or a hit, COVER (a pad 1.5-9 m
+  away with no line to the target), DUCK (kneel 1-2 s), PEEK (back out to
+  fire). At 65% damage it falls back once. Losing sight: hold 1 s, then 1 in
+  3 flank to a side pad, else advance to the last seen spot; 30 s with
+  nothing ends in a search and the walk home. With two or more players a
+  guard every 4 s turns to the player the fewest guards are on, if it can
+  see them.
+- Netcode: none. Only the host runs guards and its brain state is not sent;
+  joiners see the result in the usual guard snapshots, so the protocol
+  stays 13 and Classic and Smarter hosts both work with any 13 joiner.
+- Cost: sight and cover searches are capped (40 line tests a search, 2
+  searches a tick); one small brain per chr slot (256).
+- Harness: GE_GUARDAI=0|1 (the option without midas.ini), GE_GUARDAIDBG=1
+  (state changes, calls, splits, muffled shots), GE_GUARDAI_TESTNOISE=<s>[,<loudness>]
+  (one gunshot from Bond at <s> seconds).
+- Tested with the US cart: Dam (solo, a test shot: look, investigate,
+  search, return; Classic in the same run walks straight to Bond; a fight
+  from 18892,1,17060: cover, duck, peek in cycles), Archives (solo and two
+  players: call for help, advance, flank, guards splitting between players),
+  six two-player missions over the mock Steam with Smarter on the host
+  (dam, facility, archives, frigate, surface, depot: all pass, no desyncs),
+  and Classic against the build before it in the same Dam run (differences
+  within run-to-run noise). Shots: smart-ai/ in the project files.
+- Not seen in a run yet: the alarm run, the fall back, a guard finding a
+  body. Each has its own GE_GUARDAIDBG line to look for.
+
+## Far-away players dropping in mid-mission (2026-10-28)
+
+Tester report: a player from Colombia dropped in to a running co-op mission;
+then desync, the joiner couldn't kill guards, and it disconnected. COOP_VERSION
+stays 13 (no packet changes).
+
+- Harness: coop/docker/far_drop_in.sh. The host starts Dam with a nearby
+  partner (NEARSIM 30:10:0); at LATE s a third copy on FARSIM (300:80:3)
+  drops in. GE_COOP_TESTHUNT=<s> on the far one: stands 3 m from the
+  nearest living guard and aims at it, GE_COOP_TESTFIRE fires a KF7; it logs
+  each guard the host reports down. GE_COOP_NETCUT=<s>:<len> (coop_net.c)
+  cuts a copy's line both ways for <len> s. The 10 s net log now has what we
+  send each peer ("net: to player N .. KB/s in .. packets/s (% by type)",
+  coopNetSentTake).
+- At 300 ms every shot the far joiner sent was applied on the host (64 of
+  64) and it killed what it could see. Shots carry the chrnum and are not
+  checked against positions or clocks, so a stale view doesn't reject them.
+  The failure was what follows.
+- The host's keep-alive hello (coopKeepAlive, and the mission card's) set
+  sTick to 0 around coopSendHello to force a send. coopLobbyPlayerHere then
+  aged every joiner's last hello by minus sTick, so each of those hellos told
+  the joiners nobody else was here. With 3-4 players, the joiners' player
+  count flipped every half second (Player Scaling's guard health for kill
+  prediction, skip votes, voice, stats resends), and the host-migration
+  roster (sHostHello) was often "nobody". coopSendHelloNow sends out of turn
+  without touching sTick.
+- The disconnect, reproduced with NETCUT 7 s on the far joiner (old build):
+  after 2 + 3.5 s of silence it took the host as gone and migrated to the
+  near joiner (still with the host, so it never took over), then to itself:
+  "YOU ARE THE HOST NOW", alone in its own world, its shots going nowhere;
+  the real host showed "disconnected" 30 s later. A host that really goes
+  says so (BYE from the crash report, or Steam sees it leave the lobby), so
+  the quiet case is mostly our own line. A joiner whose line was poor when
+  the silence began (round trip from 250 ms or jitter from 80 ms), or that
+  already had a silence this mission, now waits COOP_HOST_WAIT_FAR_MS (12 s)
+  before migrating, inside the host's 30 s before it drops a joiner. Same
+  test, new build: "the host is back", nothing lost.
+- Reliable events: every unacked event went out again every 4 ticks, with
+  every new event and with every ack, so on a 400 ms line each went 5-6
+  times, more in a firefight. Now a new event goes once, the unacked ones
+  again when the oldest has waited the round trip x 1.25 + 2 x jitter + 50
+  ms (80..1200), and the receiver keeps events that arrive ahead of a
+  missing one (CoopChan.in / inSeq) instead of dropping them for a resend.
+- What the host sends each joiner, Dam, 3 players (far_drop_in.sh): 45
+  KB/s and 145 packets/s, 44% STATE and 52% guard snapshots. Now:
+  - Guards: a finished body once a second, a guard more than 60 m from every
+    player 10 a second, the rest (and anyone firing or dying) 20 a second
+    (coopGuardDue). Joiners free a chr missing for 5 s (was 2).
+  - STATE (ours and the relayed ones) at 30 a second to each joiner when 3+
+    players are in the session or that joiner's line is poor (coopStateThin;
+    not versus). Each player added 10 KB/s to every other joiner's line and
+    the host's upload, so a third or fourth player raised everyone's ping on
+    a slow upload.
+  - Result, same run: 25 KB/s and 86 packets/s to each joiner.
+- Checked: far_drop_in.sh with HOSTENV GE_COOP_TESTEND=7000 and the far
+  copy's line cut for 6 s: dropped in, 11 guards down, 63 of 63 shots
+  applied, the host came back, the mission ended together.
+  mission_runs.sh: dam facility runway surface bunker1 silo; JOINAFTER=30
+  dam facility frigate; the same at NETSIM=300:120:4: 12 of 12 pass.
+- Found on the way: coop.c used atan2f and fmodf and coop_give.c fabsf
+  without a declaration (the game's include/math.h has none of them, and -w
+  hides it): they returned garbage, so "the partner aims at this guard"
+  (coopChrAimedAtByBond) and give-to-partner's height check were noise.
+  coop.c includes math_atan2f.h now; the other two are written out.
+
+## Mission-by-mission risk review (2026-10-28)
+
+Owner's question: what else could break in co-op, mission by mission? Every
+mission's level and NPC scripts were read for checks on "Bond" that the
+earlier audits don't cover; the full per-mission table is in the thread's
+artifact. Tested on main plus #44 to #50, two games over the mock Steam, US
+ROM. Fixed here (no packet changes, COOP_VERSION stays 13):
+
+- Facility, Dr. Doak: the script hands "Bond" the door decoder
+  (AI_BondCollectObject). That gives it to the host's Bond, and the stock
+  pickup refuses a dead one, so with the host down (bleeding out or out of
+  lives) while a partner met Doak the decoder went nowhere: objective B
+  completed, nobody could open the bottling room door. The host is stood up
+  for that pickup (coopScriptGiveBegin/End, as for a partner's pickup while
+  the host is down) and coopPickedUp shares it. Test: GE_DIFF=2, host
+  GE_COOP_LIVES=1 GE_COOP_TESTDIE=240, joiner GE_COOP_TESTPAD=11:6
+  GE_COOP_TESTGOTO=79. Old: B complete, no pickup on either game. New:
+  "a script gives Bond an item while the host is down: taken for the
+  team", host "we picked up obj 41432", joiner "player 1 picked up obj
+  41432: ours too".
+- A down host's body counted as "Bond" for a level script's room, pad
+  distance and height checks (coopAltBondBegin adds the living partners,
+  but the first check is always our own Bond, dead or not): a host bleeding
+  out or spectating inside an objective room, Cradle's fall shaft or by a pad
+  Trevelyan runs from kept those checks true (and "every player far" false).
+  While a partner stands, the down host's body is nobody
+  (coopOwnBondCounts). Checked by reading; the two-player CI runs pass.
+- Harness: GE_COOP_TESTGOTO looks for a chr that isn't there yet every
+  second until 90 s (Doak is spawned when someone enters his lab).
+
+Found, not fixed here:
+
+- Facility (seen, cosmetic): the joiner gets "objective B failed" for about a
+  second when it reaches Doak's lab first; its own copy of the flags has
+  0x10000 until the host's WORLD packet clears it.
+
+Second round (same day), also fixed here (this round does change the
+WORLD packet: COOP_VERSION 14):
+
+- Cradle fall: ai_39 is the "Bond fell off the platform" check (in pad
+  147's room, below y -2550 then -4070: list 0x041c, KIA and the fall
+  ending). Any one player dropping into that shaft ended the mission for
+  the team (all_objectives_complete=0), host or joiner, and the host's
+  partner loop also ran it when a joiner's puppet came up out of the shaft
+  on respawn. In co-op those two height checks never pass
+  (coopLevelFallCheckOff in AI_IFBondYPosLessThan) and each game kills its
+  own Bond at the bottom of the shaft (coopCradleFallTick): an ordinary
+  death, so lives, bleed-out and the team-out rule decide. chrai.c sees
+  coop.h only further down, so it declares coopLevelFallCheckOff itself:
+  undeclared, its f32 went as a double and the check read garbage. Tests
+  (GE_COOP_TESTPAD=147:10, GE_AIDBG=1 to watch for list 1052): joiner falls (three runs) ->
+  joiner down and spectating, respawned by the host 20 s later where the
+  host was calm, no 1052 and no mission end; host falls -> the same the
+  other way round; joiner falls on its last life (GE_COOP_LIVES=1) ->
+  joiner out, host plays on; both fall -> both down, back to the lobby
+  with the mission failed. Before this, three of five joiner falls ended
+  the mission through 1052 just after the joiner's respawn.
+- Countdowns (Silo, Statue, Bunker 2, Train, and every other
+  hud_countdown_* user): each game ran its own copy of the timer from its
+  own copy of the script, so a player who dropped in late had a clock that
+  started when they arrived, and the blast (AI_TriggerExplosionsAroundBond)
+  went off in each game on its own clock. Confirmed on Silo, GE_DIFF=1,
+  joiner 30 s late: host 449 s at its start, joiner 444 s at its own start
+  some 25 s later, so its blast and fail came 25 s after the host's. Now the
+  host owns the clock: a joiner skips its own HudCountdownSet/Start/Stop/
+  Show/Hide and the blast (coopAiSkip, coopHostOwnsCmd), the host relays
+  the blast like other presentation commands, and the WORLD packet carries
+  the clock (value, running, shown; a joiner snaps to it when more than
+  half a second off). COOP_VERSION 14: a joiner now leaves its countdown
+  to the host, so both sides must be this build. Retest: the late Silo joiner shows "countdown running and shown,
+  427.3 s left (host)" on arrival and stays in step; Bunker 2 with both
+  joining together, and with the host out of lives (GE_COOP_LIVES=1
+  GE_COOP_TESTDIE=600), stops on the host's zero and the blast reaches the
+  living joiner. Statue and Bunker 2 with players joining together were
+  already within a second before the fix; Train's timer needs chrs 0x46
+  and 0x48 gone and wasn't reached in the harness.
+- Harness: GE_COOP_TESTFLAG=<hex>:<s> sets stage flags on the host that far
+  in (the hex as the game holds it: if_objective_bitfield_is_set_on's
+  argument in a setup file is byte-reversed, 0x00800000 there is 8000
+  here); GE_COOP_TESTCLOCK=1 logs the countdown every 5 s.
+
+## Versus gameplay: bodies, pickups, drops, throws, objects (2026-10-28, COOP_VERSION 14)
+
+Owner's report: online versus "doesn't play properly": animations are
+weird, items aren't synced, players don't look where they're going.
+
+- Root cause of the bodies: lvlViewMoveTick (boss.c) ran MoveBond for every
+  player, the other PCs' players included. With no pads for them it zeroed
+  their speeds every frame and kept vv_theta from the spawn, and
+  playerTick's remote-body block then posed them from that: the idle anim
+  (532, rate 0.05, "slow motion") facing the spawn direction while the
+  real player ran about (audit before: facing off by up to 179 degrees).
+  Found with a hardware watchpoint on the remote player's speedforwards.
+  Now boss.c skips coopVsRemote players, and coopVsFeedPlayer
+  (coop_versus.c) fills their player struct from STATE each tick: vv_theta
+  from the yaw, speedforwards/sideways/theta, aim (field_2A08/2A0C),
+  headanim, crouch, the gun flash per hand. Rare's own playerTick then
+  picks the run, strafe, back and crouch anims and turns the body, as in
+  split screen. coopLookBodyTick (coop_look.c) is the puppet tick without
+  the animation part: guns, shots and sounds only.
+- Pickups: taking an arena object sends COOPEV_VSPICK (37: setup offset,
+  type, item). The other games free it the same way (objFree +
+  TICKOP_FREE), or if it is still on its way back reset its timetoregen to
+  CHROBJ_REGEN_TICKS, so everyone's respawn timer starts together. The
+  scenario item still goes as VSITEM.
+- Drops and throws: coop_items is on in versus. drop_inventory sends each
+  gun a dying player drops (COOPEV_DROP, chrnum COOP_PUPPET_CHRNUM + net
+  index); thrown grenades and mines replay owned by the thrower's body
+  (RUNTIMEBITFLAG_OWNER is the local index of that player, so the kill is
+  theirs); the thrower's game says where they came to rest. Picking one up
+  only removes it elsewhere. Guard-drop code stays co-op only.
+- Objects: object damage from a player goes to everyone (OBJDMG, applied as
+  that player's local index) and knocks are shared; doors already were.
+  coopVersusExplosion skips blasts coop_items is replaying.
+- Harness: GE_VS_WANDER=<s> (walk about: run and turn with a B pulse for
+  doors, strafe, back, stand turning on the spot, stand, 3 s each, through
+  coopVersusTestInput in MoveBond; the turning adds to vv_theta as the
+  mouse does, since the stick's x strafes in the PC layouts),
+  GE_VS_AUDIT=1 (every 2 s per other player: their yaw, facing error less
+  the sidestep lean, anim and rate, speeds, aim sent and drawn, flash;
+  every 10 s "vsitems": pickups here and coming back with a hash, dropped
+  or thrown items, damaged objects and open doors with hashes),
+  GE_VS_PICKUPS=<s> (step onto the nearest pickup every 4 s).
+- Checked over the mock Steam with GE_NETSIM 120-150 ms: 2, 3 and 4 players
+  on Temple and Facility. Facing within 5 degrees in every sample, a
+  player standing still and turning on the spot included (the tester
+  stream's opponent who never turned toward the shooter); anims
+  follow the movement; the pickup and respawn hashes match on every game
+  at quiet moments; death drops, grenades (thrown, landed, went off
+  together) and object damage reach the others; 4 players at
+  120 ms: the kill table was the same on all four and the end reached
+  everyone. Story co-op runs (dam, facility, frigate) still pass.
+- Shots: versus-gameplay/ in the project files.

@@ -600,6 +600,7 @@ static void coopLookPlayShot(ChrRecord *chr, const CoopShot *s, s32 self)
         from.f[1] = chr->prop->pos.f[1] + 30.0f;
         from.f[2] = chr->prop->pos.f[2];
     }
+    coopPartnerShotNearMiss(chr, &from, &end);  /* host: guards it went past heard it whizz by (coop.c) */
 
     sub_GAME_7F02BFE4(chr, hand, 1);        /* the gun's sound, as a guard's */
     CapBeamLengthAndDecideIfRendered(&chr->beams[hand], s->weapon, &from, &end);
@@ -707,9 +708,7 @@ static void coopLookShots(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *lo
     }
 }
 
-/* every tick, for each puppet; self is the chrnum our own Bond goes by on
- * the other games, so their shots at us draw no puff on our screen */
-void coopLookPuppetTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look, s32 dead, s32 self)
+static void coopLookTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look, s32 dead, s32 self, s32 animate)
 {
     s32 h;
 
@@ -719,10 +718,13 @@ void coopLookPuppetTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look
     }
     chr->hidden &= ~CHRHIDDEN_FIRE_TRACER;  /* the sound's repeat gate (sub_GAME_7F02BFE4), per tick */
     coopLookGuns(lp, chr, look, dead);
-    coopLookAnimate(lp, chr, look, dead);
-    for (h = GUNRIGHT; h <= GUNLEFT; h++)
+    if (animate)
     {
-        chrSetFiring(chr, h, !dead && (look->flash & (1 << h)) != 0);
+        coopLookAnimate(lp, chr, look, dead);
+        for (h = GUNRIGHT; h <= GUNLEFT; h++)
+        {
+            chrSetFiring(chr, h, !dead && (look->flash & (1 << h)) != 0);
+        }
     }
     if (!dead)
     {
@@ -733,6 +735,20 @@ void coopLookPuppetTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look
         lp->shotseq = look->shotseq;
     }
     coopAudioPuppetCue(lp, chr, look);  /* their draw and reload sounds, from where they stand (coop_audio.c) */
+}
+
+/* every tick, for each puppet; self is the chrnum our own Bond goes by on
+ * the other games, so their shots at us draw no puff on our screen */
+void coopLookPuppetTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look, s32 dead, s32 self)
+{
+    coopLookTick(lp, chr, look, dead, self, 1);
+}
+
+/* a versus body: guns, shots and sounds; Rare's own multiplayer code poses
+ * it and lights its muzzle flash from its player struct (coop_versus.c) */
+void coopLookBodyTick(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look, s32 dead, s32 self)
+{
+    coopLookTick(lp, chr, look, dead, self, 0);
 }
 
 /* ---- test harness (coop.c coopHarnessTick, bondview2.c MoveBond) ---------
@@ -767,6 +783,59 @@ static void coopLookTestParse(void)
 
 extern void coopGiveTestDraw(s32 weapon);
 
+/* GE_COOP_TESTAIMCHR=<chrnum>:<s>[:<deg>]: from <s> seconds into the mission,
+ * for 8 s, face that chr's body turned <deg> degrees to the right (a shot
+ * that goes past it rather than into it) */
+static void coopLookTestAimChr(s32 missionticks, PropRecord *bond)
+{
+    static s32 chrnum = -2, at;
+    static f32 deg;
+    ChrRecord *chr;
+    coord3d centre;
+    f32 dx, dy, dz;
+
+    if (chrnum == -2)
+    {
+        const char *e = getenv("GE_COOP_TESTAIMCHR");
+
+        chrnum = -1;
+        deg = 0.0f;
+        if (e == NULL || sscanf(e, "%d:%d:%f", &chrnum, &at, &deg) < 2)
+        {
+            chrnum = -1;
+        }
+        at *= 60;
+    }
+    if (chrnum < 0 || bond == NULL || missionticks < at || missionticks >= at + 480)
+    {
+        return;
+    }
+    chr = chrFindByLiteralId(chrnum);
+    if (chr == NULL || chr->model == NULL)
+    {
+        return;
+    }
+    getsuboffset(chr->model, &centre);
+    dx = centre.f[0] - bond->pos.f[0];
+    dy = centre.f[1] - bond->pos.f[1];
+    dz = centre.f[2] - bond->pos.f[2];
+    g_CurrentPlayer->vv_theta = -(atan2f(dx, dz) * 180.0f) / M_PI_F + deg;
+    while (g_CurrentPlayer->vv_theta < 0.0f)
+    {
+        g_CurrentPlayer->vv_theta += 360.0f;
+    }
+    while (g_CurrentPlayer->vv_theta >= 360.0f)
+    {
+        g_CurrentPlayer->vv_theta -= 360.0f;
+    }
+    g_CurrentPlayer->vv_verta = (atan2f(dy, sqrtf(dx * dx + dz * dz)) * 180.0f) / M_PI_F;
+    if ((missionticks - at) % 60 == 0)
+    {
+        portConLogf("ge: coop: testaimchr: chr %d at %.0f m, turned %.1f deg\n", chrnum,
+                    sqrtf(dx * dx + dz * dz) / 100.0f, deg);
+    }
+}
+
 void coopLookTestTick(s32 missionticks)
 {
     CoopHudPartner p;
@@ -785,6 +854,7 @@ void coopLookTestTick(s32 missionticks)
     {
         portConLogf("ge: coop: testfire: firing item %d for %d ticks\n", sTestFireItem, sTestFireLen);
     }
+    coopLookTestAimChr(missionticks, bond);
     if (sTestLookAt < 0 || missionticks < sTestLookAt || bond == NULL || !coopHudPartner(&p))
     {
         return;

@@ -37,6 +37,12 @@ extern void gunRequestHandWeaponChange(enum GUNHAND hand, s32 nextWeapon, s32 cy
 
 #define COOPGIVE_RANGE   250.0f /* horizontal, about 2.5 m */
 #define COOPGIVE_HEIGHT  200.0f /* not across floors */
+/* no fabsf in the game's math.h: undeclared, it returned garbage (-w hides it) */
+static f32 coopGiveAbs(f32 v)
+{
+    return (v < 0.0f) ? -v : v;
+}
+
 #define COOPGIVE_FRONT   0.5f   /* cos of the half angle in front of you: 60 degrees */
 
 /* ammo you can hand over: real rounds, not gadgets or the watch */
@@ -138,7 +144,7 @@ void coopGivePress(void)
                 neardist = dist;
                 near = q;
             }
-            if (!q.dead && dist <= COOPGIVE_RANGE && fabsf(q.pos.f[1] - bond->pos.f[1]) <= COOPGIVE_HEIGHT
+            if (!q.dead && dist <= COOPGIVE_RANGE && coopGiveAbs(q.pos.f[1] - bond->pos.f[1]) <= COOPGIVE_HEIGHT
                 && front >= COOPGIVE_FRONT && front > bestfront)
             {
                 bestfront = front;
@@ -156,7 +162,7 @@ void coopGivePress(void)
                 portConLogf("ge: coop: give: refused: the partner is down\n");
                 snprintf(msg, sizeof(msg), "%s is down.\n", name);
             }
-            else if (neardist > COOPGIVE_RANGE || fabsf(near.pos.f[1] - bond->pos.f[1]) > COOPGIVE_HEIGHT)
+            else if (neardist > COOPGIVE_RANGE || coopGiveAbs(near.pos.f[1] - bond->pos.f[1]) > COOPGIVE_HEIGHT)
             {
                 portConLogf("ge: coop: give: partner too far (%.0f %.0f %.0f vs %.0f %.0f %.0f)\n", near.pos.f[0], near.pos.f[1],
                             near.pos.f[2], bond->pos.f[0], bond->pos.f[1], bond->pos.f[2]);

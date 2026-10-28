@@ -25,6 +25,10 @@
  * Each world's copy of a blast hurts that world's own Bond, as any blast
  * does (standing on a partner's mine hurts); our watch only sets off our
  * own remote mines.
+ *
+ * Online versus uses the throws too (a copy is owned by the thrower's body,
+ * so a kill is theirs), and the drops for the guns a dead player leaves; a
+ * dropped gun goes to whoever picks it up, not to everyone.
  */
 #include <ultra64.h>
 #include <string.h>
@@ -149,7 +153,7 @@ static s32 sExplodingOwner;         /* 1 + the player whose item it is, 0 ours *
 
 static s32 coopItemsOn(void)
 {
-    return coopEnabled() && !coopVersus() && coopSessionActive();
+    return coopEnabled() && coopSessionActive();
 }
 
 /* the throws worth seeing: everything that is thrown as an object (not knives, which hurt by touch) */
@@ -341,7 +345,13 @@ static void coopItemsApplyThrow(const CoopThrowMoreMsg *b, s32 from)
     {
         return;
     }
-    if (coopExtRemoteView(from, &view))
+    if (coopVersus())
+    {   /* their body, and their player number here for whose kill it is */
+        s32 li = coopVsLocalOfNet(from);
+
+        owner = (li > 0 && g_playerPointers[li] != NULL) ? g_playerPointers[li]->prop : NULL;
+    }
+    else if (coopExtRemoteView(from, &view))
     {
         owner = view.prop;
     }
@@ -361,6 +371,11 @@ static void coopItemsApplyThrow(const CoopThrowMoreMsg *b, s32 from)
         portConLogf("ge: coop: could not replay player %d's throw (item %d)\n", from + 1, sPendingThrow.item);
         return;
     }
+    if (coopVersus() && coopVsLocalOfNet(from) > 0)
+    {   /* propExplode credits its owner; our detonator leaves it alone */
+        obj->runtime_bitflags &= ~RUNTIMEBITFLAG_OWNER;
+        obj->runtime_bitflags |= (u32) coopVsLocalOfNet(from) << RUNTIMEBITSHIFT_OWNER;
+    }
     coopItemAdd(b->id, COOPITEM_THROWN, obj);
     portConLogf("ge: coop: player %d threw item %d (id %04x) at %.0f %.0f %.0f\n", from + 1, sPendingThrow.item, b->id,
                 pos.f[0], pos.f[1], pos.f[2]);
@@ -372,7 +387,7 @@ static void coopItemsApplyThrow(const CoopThrowMoreMsg *b, s32 from)
  * 1: keep it in hand, the host says what drops */
 s32 coopItemsChrDropping(ChrRecord *chr)
 {
-    if (!coopItemsOn() || sApplying || coopExtIsHost() || chr == NULL || chr->prop == NULL || coopPropIsPartner(chr->prop))
+    if (!coopItemsOn() || coopVersus() || sApplying || coopExtIsHost() || chr == NULL || chr->prop == NULL || coopPropIsPartner(chr->prop))
     {
         return 0;
     }
@@ -385,7 +400,7 @@ void coopItemsChrDropped(ChrRecord *chr, PropRecord *prop)
     ObjectRecord *obj;
     CoopDropMsg m;
 
-    if (!coopItemsOn() || !coopExtIsHost() || chr == NULL || prop == NULL || (prop->type != PROP_TYPE_WEAPON && prop->type != PROP_TYPE_OBJ)
+    if (!coopItemsOn() || coopVersus() || !coopExtIsHost() || chr == NULL || prop == NULL || (prop->type != PROP_TYPE_WEAPON && prop->type != PROP_TYPE_OBJ)
         || prop->parent != NULL || chr->prop == NULL || coopPropIsPartner(chr->prop))
     {
         return;
@@ -407,6 +422,33 @@ void coopItemsChrDropped(ChrRecord *chr, PropRecord *prop)
     coopItemAdd(m.id, COOPITEM_DROP, obj);
     coopExtSend(COOPEV_DROP, 0xFF, &m, sizeof(m));
     portConLogf("ge: coop: guard %d dropped item %d (id %04x)\n", m.chrnum, m.item, m.id);
+}
+
+/* propobj.c drop_inventory, versus: our player died and dropped prop; the
+ * same gun falls from our body in the other arenas (COOPEV_DROP, from the
+ * chrnum our body goes by there) and is picked up once */
+void coopItemsPlayerDropped(PropRecord *prop)
+{
+    ObjectRecord *obj;
+    CoopDropMsg m;
+
+    if (!coopItemsOn() || !coopVersus() || sApplying || prop == NULL || prop->type != PROP_TYPE_WEAPON
+        || (obj = prop->obj) == NULL || g_CurrentPlayer->prop == NULL)
+    {
+        return;
+    }
+    memset(&m, 0, sizeof(m));
+    m.id = coopItemNewId();
+    m.chrnum = (s16) (COOP_PUPPET_CHRNUM + coopExtSelf());
+    m.item = (s8) ((WeaponObjRecord *) obj)->weaponnum;
+    m.model = (s16) obj->obj;
+    m.stage = bossGetStageNum();
+    m.pos[0] = g_CurrentPlayer->prop->pos.f[0];
+    m.pos[1] = g_CurrentPlayer->prop->pos.f[1];
+    m.pos[2] = g_CurrentPlayer->prop->pos.f[2];
+    coopItemAdd(m.id, COOPITEM_DROP, obj);
+    coopExtSend(COOPEV_DROP, 0xFF, &m, sizeof(m));
+    portConLogf("ge: coop: we dropped item %d (id %04x)\n", m.item, m.id);
 }
 
 static void coopItemsApplyDrop(const CoopDropMsg *m)
@@ -600,8 +642,8 @@ static void coopItemsApplyGone(const CoopGoneMsg *g, s32 from)
         return;
     }
     it->used = 0;
-    if (it->kind == COOPITEM_DROP && coopInMissionNow())
-    {   /* a gun: the pickup rule gives everyone what it holds */
+    if (it->kind == COOPITEM_DROP && coopInMissionNow() && !coopVersus())
+    {   /* a gun: the pickup rule gives everyone what it holds (in versus it is only theirs) */
         TICKOP op;
 
         sApplying = 1;
@@ -712,7 +754,7 @@ static void coopItemsRestTick(void)
 {
     s32 i, k;
 
-    if (!coopItemsOn() || !coopExtIsHost() || !coopInMissionNow())
+    if (!coopItemsOn() || (!coopExtIsHost() && !coopVersus()) || !coopInMissionNow())
     {
         return;
     }
@@ -724,7 +766,7 @@ static void coopItemsRestTick(void)
         f32 q[4];
 
         if (!it->used || it->rested || it->kind != COOPITEM_DROP || !coopItemLive(it) || obj->prop->parent != NULL
-            || coopItemsAirborne(obj))
+            || coopItemsAirborne(obj) || (coopVersus() && (it->id >> 14) != (u16) (coopExtSelf() & 3)))   /* versus: the dropper's word */
         {
             continue;
         }
@@ -794,7 +836,7 @@ static void coopItemsApplyRest(const CoopDropRestMsg *r)
     prop->stan = stan;
     obj->runtime_pos = pos;
     setupUpdateObjectRoomPosition(obj);
-    portConLogf("ge: coop: drop %04x put where the host's came to rest\n", r->id);
+    portConLogf("ge: coop: drop %04x put where the %s came to rest\n", r->id, coopVersus() ? "dropper's" : "host's");
 }
 
 /* ---- where a throw ended up ---------------------------------------------------
@@ -950,7 +992,7 @@ static void coopItemsApplyStuck(const CoopStuckMsg *m, s32 from)
     if (objCoopEmbed(prop, host->prop))
     {
         it->embedfix = 1;
-        coopObjNoteActor(from, 0);  /* an objective it completes is theirs (coop_objective.c) */
+        coopObjNoteUse(from);   /* an objective it completes is theirs (coop_objective.c) */
         portConLogf("ge: coop: player %d's item %04x stuck to obj %d here too\n", from + 1, m->id, m->objofs);
     }
 }

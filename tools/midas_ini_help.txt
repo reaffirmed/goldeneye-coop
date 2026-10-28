@@ -228,6 +228,10 @@ padN_stickmode.
                       |            | room portals; 0 = original bug
   true_enemy_rockets  | 1          | 0 restores the original Enemy Rockets
                       |            | cheat bug (guards keep old weapon)
+  guard_ai            | 0          | 1 Smarter guards: they investigate
+                      |            | noise, call for help, use cover and
+                      |            | flank. 0 Classic. In co-op the
+                      |            | host's value counts
   unlimited_explosions| 1          | 100 explosions at once instead of 6.
                       |            | Demo playback always uses 6
   adzy                | 0          | 1 = play missions as the Siberian
