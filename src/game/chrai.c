@@ -1923,7 +1923,11 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 case AI_IFImOnScreen:
                 {
                     AiIFImOnScreenRecord *ai = AiListp + Offset;
-                    if ((ChrEntityp->prop->flags & PROPFLAG_ONSCREEN))
+                    if ((ChrEntityp->prop->flags & PROPFLAG_ONSCREEN)
+#ifndef TARGET_N64
+                        || coopChrOnPartnerScreen(ChrEntityp) /* co-op: on a partner's screen too */
+#endif
+                        )
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -2337,8 +2341,47 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     AiIFBondHasItemEquippedRecord *ai = AiListp + Offset;
 #ifndef TARGET_N64
                     s32 coopitem = coopGadgetItem(AiListp); /* co-op: the item the partner used, when the last check found their gadget */
-                    if (coopitem >= 0 ? ai->ITEM_NUM == coopitem
-                                      : ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNRIGHT) || ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNLEFT))
+                    s32 has;
+
+                    /* co-op: whoever is Bond (a guard's target), else any
+                     * player holding it (Valentin's "put your gun away"): for
+                     * a guard's script the one holding it becomes its target,
+                     * as with a sight check. Not in a cutscene or an ending,
+                     * where it picks our own Bond's cinema gun. */
+                    if (coopitem >= 0)
+                    {
+                        has = ai->ITEM_NUM == coopitem;
+                    }
+                    else if (g_PlayerInvincible)
+                    {
+                        has = ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNRIGHT) || ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNLEFT);
+                    }
+                    else if (!(has = coopBondHasItem(ai->ITEM_NUM)))
+                    {
+                        for (coopk = 0; !has && coopChrAltBegin(ChrEntityp, coopk); coopk++)
+                        {
+                            has = coopBondHasItem(ai->ITEM_NUM);
+                            if (has)
+                            {
+                                coopBondItemLog(ai->ITEM_NUM);
+                            }
+                            COOP_ALT_DONE(has, 0);
+                        }
+                        for (coopk = 0; !has && coopAltBondBegin(coopk); coopk++) /* a level script: either player */
+                        {
+                            has = coopBondHasItem(ai->ITEM_NUM);
+                            if (has)
+                            {
+                                coopBondItemLog(ai->ITEM_NUM);
+                            }
+                            coopAltBondEnd();
+                        }
+                    }
+                    else
+                    {
+                        coopBondItemLog(ai->ITEM_NUM);
+                    }
+                    if (has)
 #else
                     if (ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNRIGHT) || ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNLEFT)) // order matters
 #endif
@@ -2842,7 +2885,11 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 {
                     AiIFBondHealthLessThanRecord *ai  = AiListp + Offset;
                     float                         val = (ai->HEALTH) / 255.0f;
+#ifndef TARGET_N64
+                    if (val > coopBondHealth()) /* co-op: the health of whoever is Bond (the player a taunt is about) */
+#else
                     if (val > currentPlayerGetHealth())
+#endif
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -2856,7 +2903,11 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 {
                     AiIFBondHealthGreaterThanRecord *ai  = AiListp + Offset;
                     float                            val = (ai->HEALTH) / 255.0f;
+#ifndef TARGET_N64
+                    if (val < coopBondHealth()) /* co-op: the health of whoever is Bond (the player a taunt is about) */
+#else
                     if (val < currentPlayerGetHealth())
+#endif
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
