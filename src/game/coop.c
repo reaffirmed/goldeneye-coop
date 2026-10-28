@@ -497,6 +497,7 @@ static void coopApplyExplosion(CoopEvent *ev);
 static void coopApplyAiCommand(CoopEvent *ev);
 static s32 sPendingCinemaList = -1;
 static s32 sHostEndingHere;    /* joiner: we play the host's ending; its exit is the host's to send */
+static s32 sHostEndingBegun;   /* joiner: the host's script has started an ending (damage and pickups off) */
 static void coopPendingCinemaTick(void);
 static s32 coopLocalCalm(void);
 static void coopTrackCombat(void);
@@ -1845,6 +1846,7 @@ void coopStageStart(void)
 
     sPendingCinemaList = -1;
     sHostEndingHere = 0;
+    sHostEndingBegun = 0;
     coopSeenReset();
     sWorldHostFlags = sWorldOwnFlags = 0;
 
@@ -7878,6 +7880,13 @@ static void coopMigrate(void)
         sHostWaiting = HOSTW_NONE;
         snprintf(line, sizeof(line), "%s %s", sGoneHostName, sHostLeftHow == COOPBYE_HANDOFF ? "HANDED OVER" : "LEFT");
         coopBanner("YOU ARE THE HOST NOW", line);
+        if ((sHostEndingHere || sHostEndingBegun) && coopInStage())
+        {   /* the old host's ending was ours to follow and its exit was the old host's to send:
+             * nobody would end the mission, so we end it as the host's would have */
+            portConLogf("ge: coop: the host left during its ending: ending the mission\n");
+            sHostEndingHere = sHostEndingBegun = 0;
+            bossReturnTitleStage();
+        }
     }
     else
     {
@@ -9049,6 +9058,10 @@ static void coopApplyAiCommand(CoopEvent *ev)
     sApplyingRemoteAi = 0;
     chr->ailist = savedlist;
     chr->aioffset = savedofs;
+    if (list[0] == AI_BondDisableDamageAndPickups)
+    {
+        sHostEndingBegun = 1;   /* only endings use it */
+    }
     portConLogf("ge: coop: host script command %d\n", list[0]);
 }
 
