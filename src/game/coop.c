@@ -48,6 +48,7 @@
 #include "file.h"
 #include "gun.h"
 #include "math_atan2f.h"   /* the game's math.h has no atan2f: undeclared, it returned garbage (-w hides it) */
+#include "port_save.h"
 
 extern s32 chrlvCurrentPlayerCall7F0B0E24(ChrRecord *self);
 
@@ -5964,11 +5965,83 @@ s32 coopSetting(s32 which)
     return (which >= 0 && which < COOPSET_MAX) ? sSettings[which] : 0;
 }
 
+/* The host's lobby choices are kept in Data/Saves between launches. Versus
+ * mode itself and the guard AI (a Port Option) are not: the lobby opens in
+ * co-op. Harness runs (GE_NOINISAVE) neither read nor write it. */
+#define COOP_LOBBY_FILE "coop_lobby.txt"
+static const char *const sLobbyKeys[COOPSET_MAX] = {
+    "difficulty", "friendlyfire", NULL, "vsarena", "vsscenario", "vslength", "vsweapons",
+    "hostleaves", "lives", "bleedout", "respawn", "scaling", NULL,
+};
+
+static void coopLobbyLoad(void)
+{
+    FILE *f;
+    int version;
+    char key[32];
+    int v;
+    s32 i;
+    static s32 loaded = 0;
+
+    if (loaded)
+    {
+        return;
+    }
+    loaded = 1;
+    if (getenv("GE_NOINISAVE") != NULL || (f = portSaveOpenRead(COOP_LOBBY_FILE, NULL, &version)) == NULL)
+    {
+        return;
+    }
+    while (fscanf(f, " %31[^=\n]=%d", key, &v) == 2)
+    {
+        if (strcmp(key, "downrule") == 0 && v >= COOPDOWN_BOTH && v <= COOPDOWN_REVIVE)
+        {
+            sDownRule = v;
+        }
+        for (i = 0; i < COOPSET_MAX; i++)
+        {
+            if (sLobbyKeys[i] != NULL && strcmp(key, sLobbyKeys[i]) == 0 && v >= 0 && v < 256)
+            {
+                sSettings[i] = (u8) v;
+            }
+        }
+    }
+    fclose(f);
+    portConLogf("ge: coop: lobby settings from %s\n", COOP_LOBBY_FILE);
+}
+
+static void coopLobbySave(void)
+{
+    FILE *f;
+    s32 i;
+
+    if (getenv("GE_NOINISAVE") != NULL || (f = portSaveOpenWrite(COOP_LOBBY_FILE, "coop-lobby", 1)) == NULL)
+    {
+        return;
+    }
+    fprintf(f, "downrule=%d\n", (int) sDownRule);
+    for (i = 0; i < COOPSET_MAX; i++)
+    {
+        if (sLobbyKeys[i] != NULL)
+        {
+            fprintf(f, "%s=%d\n", sLobbyKeys[i], (int) sSettings[i]);
+        }
+    }
+    portSaveCommit(f);
+}
+
 void coopSetSetting(s32 which, s32 value)
 {
+    coopLobbyLoad();   /* first, so a change made before the lobby opens is not lost under the file's */
     if (which >= 0 && which < COOPSET_MAX && (coopLobbyIsHost() || sEnabled <= 0))
     {
+        s32 changed = sSettings[which] != (u8) value;
+
         sSettings[which] = (u8) value;
+        if (changed && sLobbyKeys[which] != NULL)
+        {
+            coopLobbySave();
+        }
     }
 }
 
@@ -6011,9 +6084,11 @@ s32 coopDownRule(void)
 
 void coopSetDownRule(s32 rule)
 {
-    if (rule >= COOPDOWN_BOTH && rule <= COOPDOWN_REVIVE && coopLobbyIsHost())
+    coopLobbyLoad();
+    if (rule >= COOPDOWN_BOTH && rule <= COOPDOWN_REVIVE && coopLobbyIsHost() && rule != sDownRule)
     {
         sDownRule = rule;
+        coopLobbySave();
     }
 }
 
@@ -6532,6 +6607,7 @@ s32 coopFrontTick(void)
             const char *r = getenv("GE_COOP_RESPAWN");
             const char *s = getenv("GE_COOP_SCALING");
             testdiff = 0;
+            coopLobbyLoad();
             if (s != NULL)
             {   /* GE_COOP_SCALING=<COOPSCALE_*>: 0 auto, 1 off, 2 as 3, 3 as 4 */
                 sSettings[COOPSET_SCALING] = (u8) atoi(s);
