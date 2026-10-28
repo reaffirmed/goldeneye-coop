@@ -6820,7 +6820,7 @@ s32 coopHostLeavesCount(void)
 
 const char *coopHostLeavesName(s32 rule)
 {
-    return (rule == 1) ? "Back to Lobby\n" : "Next Player Hosts\n";
+    return (rule == 1) ? "Back to Lobby\n" : "New Host\n";
 }
 
 

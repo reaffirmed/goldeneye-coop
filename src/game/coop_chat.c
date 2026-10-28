@@ -85,7 +85,7 @@ typedef struct
 
 typedef struct
 {
-    char text[80];
+    char text[COOP_FEED_TEXT];
     s32 player;     /* -1 a note from the game */
     u32 tick;
 } CoopFeedLine;
@@ -159,7 +159,7 @@ static void coopFeedPush(const char *text, s32 player)
 static void coopChatShow(s32 player, const char *said)
 {
     char name[24];
-    char line[96];
+    char line[COOP_FEED_TEXT];
     const char *who = coopPlayerName(player);
 
     snprintf(name, sizeof(name), "%s", (who != NULL && who[0] != '\0') ? who : "PARTNER");
@@ -463,7 +463,7 @@ void coopChatTick(s32 inmission)
 
 /* ---- drawing ----------------------------------------------------------------- */
 
-s32 coopFeedLines(s32 maxlines, char lines[][80], s32 *players)
+s32 coopFeedLines(s32 maxlines, char lines[][COOP_FEED_TEXT], s32 *players)
 {
     s32 first = (sFeedCount > maxlines) ? sFeedCount - maxlines : 0;
     s32 n = 0;
@@ -471,7 +471,7 @@ s32 coopFeedLines(s32 maxlines, char lines[][80], s32 *players)
 
     for (i = first; i < sFeedCount; i++, n++)
     {   /* as typed: the lobby's font has lowercase */
-        snprintf(lines[n], 80, "%s", sFeed[i].text);
+        snprintf(lines[n], COOP_FEED_TEXT, "%s", sFeed[i].text);
         players[n] = sFeed[i].player;
     }
     return n;
