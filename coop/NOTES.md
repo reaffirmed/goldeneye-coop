@@ -2020,3 +2020,39 @@ Second pass (the stream's frames, a recount of the report):
   Natalya gets up when Bond is within 3 m (ai_21's
   if_guard_distance_to_bond_less_than, already any player's on the host);
   why she waited for a death in the stream needs the joiner's view.
+
+## Overlooked: hellos, votes, a read-only folder (2026-10-28)
+
+A sweep for bugs outside the host-only audit, tested at 3 and 4 players over
+the mock Steam with the US cart (copy of host_drop.sh with GE_SKIPINTRO=0:
+its A taps in the first 15 s can land on the lobby's Leave row and make the
+harness host hand over and re-host).
+
+- Host migration split a 3-4 player group. Forced hellos (coopKeepAlive in
+  cutscenes and pauses, the mission card) set sTick to 0 for the call, so the
+  roster's "here" test (a hello within 180 ticks) read every joiner as gone.
+  Joiners' player counts flapped 2/3 all mission ("scaling Auto as 3
+  players" / "as 2 players" every few seconds), and a host lost right after
+  one of those hellos left each joiner hosting alone ("player 2 hosts ... 1
+  players" on player 2 and "player 3 hosts ... 1 players" on player 3).
+  coopSendHelloNow sends off-period without touching sTick. Retested: host
+  killed while player 3 was down (Revive, 2 lives): player 2 hosts both,
+  player 3 follows, is revived by the new host 19 s later; two scaling lines
+  in the whole run.
+- Votes (coop_vote.c): the after-mission vote and the skip vote count only
+  players still talking (coopLobbyPlayerHere, so a crash stops counting after
+  3 s, not after the 30 s the connection is kept); a skip vote recounts each
+  tick so a leaver can't hold it; coopVoteRenumber moves votes to their
+  players' new numbers in a migration. Tested: 3 players, player 3 votes
+  Lobby and is killed, player 2 then the host vote Replay: "decided replay
+  (2 of 2 voted)" on the host's vote, not after the 30 s clock.
+- Updater: in a folder the player can't write, the check and the install
+  said "download failed (curl 23)" (WinHTTP: "can't write <long path>").
+  Both try the file first: "Can't write to the game's folder; move it
+  somewhere you own". Tested as an unprivileged user on a read-only copy, and
+  the same copy writable installs.
+- Checked, no change: 4 players with 5% loss on each joiner, player 4 killed
+  and rejoining mid-mission (snapshot, drop-in beside the host, 1 object
+  corrected, no unresolved desync); versus ignores the co-op Friendly Fire
+  and Scaling rows (hidden in versus; blasts check coopVersus, bullets go
+  through coopVersusDamage, not puppets).

@@ -125,6 +125,7 @@ s32  coopSkipPassed(s32 kind);
 s32  coopSkipVotes(s32 *need, s32 *mine);
 s32  coopSkipWaitingFor(s32 i);
 s32  coopSkipTestPress(void);
+void coopVoteRenumber(const s32 *newof);  /* coop.c: host migration's renumbering */
 s32  coopVoteThisStage(void);       /* front.c: the mission whose debrief is up, -1 none */
 s32  coopVoteNextStage(void);       /* front.c: the mission after it, -1 none (failed, or the last) */
 void coopVoteStartMission(s32 stage);   /* front.c: host, start it; the others follow */

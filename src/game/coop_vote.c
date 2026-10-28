@@ -84,10 +84,16 @@ static s32 coopVoteCount(const u8 *votes, s32 choice)
     return n;
 }
 
+/* players still talking to us, us included: one who crashed or lost the line
+ * stops counting after 3 s, not after the 30 s their connection is kept */
 static s32 coopVotePresent(void)
 {
-    s32 n = coopLobbyPlayerCount();
+    s32 p, n = 0;
 
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        n += (p == coopDesignSelf() || coopLobbyPlayerHere(p));
+    }
     return (n < 1) ? 1 : n;
 }
 
@@ -135,15 +141,29 @@ static void coopVoteTake(s32 player, s32 choice)
     portConLogf("ge: coop: vote: player %d votes %s\n", player + 1, coopVoteName(choice));
 }
 
+/* the votes of the players still here: a player who left takes theirs along */
+static void coopVoteHere(const u8 *votes, u8 *out)
+{
+    s32 p;
+
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        out[p] = (p == coopDesignSelf() || coopLobbyPlayerHere(p)) ? votes[p] : 0xFF;
+    }
+}
+
 /* host: everyone has voted, or the time is up */
 static void coopVoteDecide(void)
 {
     s32 voted = 0, best = -1, bestn = 0, tie = 0, c, p, n;
-    s32 host = sVotes[0];
+    u8 votes[COOP_MAX_PLAYERS];
+    s32 host;
 
+    coopVoteHere(sVotes, votes);
+    host = votes[coopDesignSelf()];
     for (p = 0; p < COOP_MAX_PLAYERS; p++)
     {
-        voted += (sVotes[p] != 0xFF);
+        voted += (votes[p] != 0xFF);
     }
     if (voted == 0)
     {
@@ -160,7 +180,7 @@ static void coopVoteDecide(void)
     }
     for (c = 0; c < COOPVOTE_COUNT; c++)
     {
-        n = coopVoteCount(sVotes, c);
+        n = coopVoteCount(votes, c);
         if (n > bestn)
         {
             best = c;
@@ -174,7 +194,7 @@ static void coopVoteDecide(void)
     }
     if (tie)
     {   /* the host's way if the host is in the tie, else the lobby */
-        best = (host != 0xFF && coopVoteCount(sVotes, host) == bestn) ? host : COOPVOTE_LOBBY;
+        best = (host != 0xFF && coopVoteCount(votes, host) == bestn) ? host : COOPVOTE_LOBBY;
     }
     sOutcome = best;
     sActIn = VOTE_ACT_AFTER;
@@ -317,10 +337,24 @@ static void coopSkipSendTally(void)
     coopDesignSend(COOPEV_VOTE, COOP_ALL_PLAYERS, &m, sizeof(m));
 }
 
+/* host: the skip votes of the players still here, against more than half of them */
+static s32 coopSkipCount(void)
+{
+    s32 p, n = 0;
+
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        n += sSkipVotes[p] && (p == coopDesignSelf() || coopLobbyPlayerHere(p));
+    }
+    sSkipNeed = coopVotePresent() / 2 + 1;
+    sSkipPassed = (n >= sSkipNeed);
+    return n;
+}
+
 /* host: player p wants this cutscene skipped */
 static void coopSkipTake(s32 player, s32 kind, s32 stage)
 {
-    s32 p, n = 0;
+    s32 n;
 
     if (stage != bossGetStageNum() || player < 0 || player >= COOP_MAX_PLAYERS)
     {
@@ -335,14 +369,27 @@ static void coopSkipTake(s32 player, s32 kind, s32 stage)
         return;
     }
     sSkipVotes[player] = 1;
-    sSkipNeed = coopVotePresent() / 2 + 1;
-    for (p = 0; p < COOP_MAX_PLAYERS; p++)
-    {
-        n += sSkipVotes[p];
-    }
-    sSkipPassed = (n >= sSkipNeed);
+    n = coopSkipCount();
     portConLogf("ge: coop: skip vote: player %d, %d of %d needed%s\n", player + 1, n, sSkipNeed, sSkipPassed ? ": skipping" : "");
     coopSkipSendTally();
+}
+
+/* host, each tick of a skip vote: someone left, so it may need fewer now */
+static void coopSkipRecount(void)
+{
+    const s32 need = sSkipNeed;
+    s32 n;
+
+    if (sSkipKind == 0 || sSkipPassed || sSkipStage != bossGetStageNum())
+    {
+        return;
+    }
+    n = coopSkipCount();
+    if (sSkipNeed != need || sSkipPassed)
+    {
+        portConLogf("ge: coop: skip vote: %d of %d needed now%s\n", n, sSkipNeed, sSkipPassed ? ": skipping" : "");
+        coopSkipSendTally();
+    }
 }
 
 /* bondview2.c: a skip press in cutscene `kind` (COOPSKIP_*). 1: skip now (no
@@ -460,6 +507,26 @@ s32 coopSkipTestPress(void)
     return was;
 }
 
+/* host migration renumbered everyone: newof[old] = new, -1 gone (coop.c coopRenumber) */
+void coopVoteRenumber(const s32 *newof)
+{
+    u8 votes[COOP_MAX_PLAYERS], skips[COOP_MAX_PLAYERS];
+    s32 p;
+
+    memset(votes, 0xFF, sizeof(votes));
+    memset(skips, 0, sizeof(skips));
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        if (newof[p] >= 0 && newof[p] < COOP_MAX_PLAYERS)
+        {
+            votes[newof[p]] = sVotes[p];
+            skips[newof[p]] = sSkipVotes[p];
+        }
+    }
+    memcpy(sVotes, votes, sizeof(sVotes));
+    memcpy(sSkipVotes, skips, sizeof(sSkipVotes));
+}
+
 /* ---- events and the tick -------------------------------------------------- */
 
 void coopVoteApply(const u8 *raw, s32 from)
@@ -543,6 +610,10 @@ void coopVoteTick(s32 inmission)
         if (!coopCutsceneActive() && !stop_time_flag)
         {
             sSkipKind = 0;
+        }
+        if (coopDesignIsHost())
+        {
+            coopSkipRecount();
         }
         coopSkipHarness();
         return;

@@ -5878,13 +5878,15 @@ s32 coopHudRespawnEta(void)
 
 /* ---- menus: hello and following the host ------------------------------------ */
 
+static s32 sHelloNow;   /* send this hello whatever the tick (coopSendHelloNow) */
+
 static void coopSendHello(void)
 {
     CoopHelloPkt p;
 
     s32 c, i;
 
-    if ((sTick % (sOnLobbyScreen ? 15 : 60)) != 0 || !coopNetHasPeer())
+    if ((!sHelloNow && (sTick % (sOnLobbyScreen ? 15 : 60)) != 0) || !coopNetHasPeer())
     {
         return;
     }
@@ -6682,22 +6684,30 @@ static void coopApplyEndAll(void)
     sPendingEnd = 1;
 }
 
+/* a hello now, off its period. Not by setting sTick to 0 for the call: the
+ * roster's "here" test (a hello within 180 ticks) then read every joiner as
+ * gone, and a host lost just after such a hello left each joiner hosting
+ * alone. */
+static void coopSendHelloNow(void)
+{
+    sHelloNow = 1;
+    coopSendHello();
+    sHelloNow = 0;
+}
+
 /* while paused (the watch) or in a cutscene coopTick does not run: keep
  * saying hello so nobody takes the quiet for a dropped game */
 static void coopKeepAlive(void)
 {
     static u32 last;
     u32 now = coopNowMs();
-    u32 t = sTick;
 
     if (sEnabled <= 0 || !coopNetHasPeer() || now - last < 500)
     {
         return;
     }
     last = now;
-    sTick = 0;  /* coopSendHello sends when sTick is a multiple of its period */
-    coopSendHello();
-    sTick = t;
+    coopSendHelloNow();
 }
 
 /* ---- the mission card: everyone starts together (coop_screens.c draws it) ----
@@ -6746,15 +6756,11 @@ static void coopHoldStart(void)
 
 static void coopHoldEnd(const char *why)
 {
-    u32 t = sTick;
-
     sHold = 0;
     portConLogf("ge: coop: mission card down after %d ms (%s)\n", (int) (coopNowMs() - sHoldMs), why);
     if (coopNetIsHost())
     {   /* tell them at once, not at the next hello */
-        sTick = 0;
-        coopSendHello();
-        sTick = t;
+        coopSendHelloNow();
     }
 }
 
@@ -6770,11 +6776,7 @@ static void coopHoldTick(void)
     coopFlushEvents();
     if ((sTick % 15) == 0)
     {
-        u32 t = sTick;
-
-        sTick = 0;
-        coopSendHello();
-        sTick = t;
+        coopSendHelloNow();
     }
     if (coopNetIsHost())
     {
@@ -7073,6 +7075,7 @@ static void coopRenumber(const s32 *newof)
     }
     coopStatsRemap(newof);
     coopVoiceRenumber(newof);
+    coopVoteRenumber(newof);
 }
 
 /* The host is gone: pick the next one and go over to it. */
