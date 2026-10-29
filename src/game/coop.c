@@ -8918,6 +8918,7 @@ void coopScriptSetsFlags(void *script, void *chr)
  * relayed from a joiner) to the other joiners, whose copy shows the effect
  * and hurts their own Bond. Object explosions are replayed through OBJDMG. */
 
+s32 g_CoopObjExploding;
 static s32 sApplyingRemoteBoom;
 static s32 sApplyingHostBoom;    /* joiner: playing the host's explosion */
 static s32 sApplyingBoomOwner;   /* joiner: whose the host says it is, 1 + player, 0 not a player's */
@@ -8953,8 +8954,9 @@ void coopExplosionCreated(PropRecord *source, coord3d *pos, s32 type, u8 *rooms)
     }
     if (coopIsMirroringClient())
     {
-        if (!sApplyingRemoteBoom)
-        {
+        if (!sApplyingRemoteBoom && !g_CoopObjExploding)
+        {   /* an object's blast is the host's, already: its damage event made it here
+             * (sent back, it went off twice there; Train's carriages in its ending) */
             ev.u.boom.owner = (u8) (coopSelf() + 1);
             coopQueueEventTo(&ev, 0);
             portConLogf("ge: coop: our explosion (type %d), sent to host\n", type);
