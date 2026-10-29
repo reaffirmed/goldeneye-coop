@@ -2516,3 +2516,18 @@ protocol change.
   the Co-op Menu row to Classic and back; Classic scrolled top to bottom
   hosting, joined and not hosting; the character select on Classic.
   Shots: menu-classic/ in the project files.
+
+## GAMEPLAY hub: Accessibility unreachable
+
+- Options > GAMEPLAY reuses the folder screen as a hub of four pages
+  (General, HUD, Port Options, Accessibility) at the folder's 0x20 pitch,
+  so the fourth row sat at y 0x13C. frontUpdateControlStickPosition stops
+  the crosshair 20 short of the screen's foot (about y 0x136), so mouse,
+  stick and keys all topped out on Port Options and Accessibility could
+  never be picked. It predates the Classic menu (it came with the fourth
+  page), and reaches it from Files > Options and from All Options alike.
+- portOptionsRowY closes the pitch to 0x18 when a hub has more than three
+  rows; the band test, the constructor and both cursor snaps use it. The
+  three-row folder and the two-row AUDIO VISUAL hub keep 0x20.
+- Checked: no other folder, hub, sheet or lobby row lies below the
+  crosshair's reach. Shots: accessibility/ in the project files.

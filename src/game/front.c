@@ -4050,6 +4050,7 @@ static const s32 port_sheet_gameplay_pages[];
 static const s32 port_sheet_display_pages[];
 static s32 portOptionsRowCount(void);
 static s32 portOptionsRowKind(s32 r);
+static s32 portOptionsRowY(s32 r);
 static s32 port_sheet_kind = PORT_SHEET_CREDITS; /* which placeholder sheet menu1C shows / was asked for */
 /* Where Back goes: a sheet opened from another sheet returns to it, and one
  * opened from the Options folder returns to the folder. The tree is only two
@@ -4273,7 +4274,7 @@ void interface_menu1B_portoptions(void)
         port_options_row_highlighted = 0;
         for (r = 1; r < portOptionsRowCount(); r++)
         {
-            if ((f32) (PORT_OPTIONS_ROW_Y0 + r * PORT_OPTIONS_ROW_PITCH - 2) <= cursor_v_pos)
+            if ((f32) (portOptionsRowY(r) - 2) <= cursor_v_pos)
             {
                 port_options_row_highlighted = r;
             }
@@ -4324,7 +4325,7 @@ void interface_menu1B_portoptions(void)
         if (r < PORT_OPTIONS_ROWS && frontCursorSnapAllowed())
         {
             cursor_h_pos = 126.0f;
-            cursor_v_pos = (f32) (PORT_OPTIONS_ROW_Y0 + r * PORT_OPTIONS_ROW_PITCH + 6);
+            cursor_v_pos = (f32) (portOptionsRowY(r) + 6);
         }
         return;
     }
@@ -4358,7 +4359,7 @@ Gfx *constructor_menu1B_portoptions(Gfx *DL)
 
     for (i = 0; i < portOptionsRowCount(); i++)
     {   /* row i starts at the Files menu's first row (y 0xDC); band y-2 .. y+14 */
-        s32 row_y = PORT_OPTIONS_ROW_Y0 + (i * PORT_OPTIONS_ROW_PITCH);
+        s32 row_y = portOptionsRowY(i);
 
         sprintf(number, "%d.\n", i + 1);
         x = 0x96;
@@ -4749,6 +4750,14 @@ static s32 portOptionsRowCount(void)
         return (s32) (sizeof(port_sheet_display_pages) / sizeof(port_sheet_display_pages[0]));
     }
     return PORT_OPTIONS_ROWS;
+}
+
+/* Row r's top. Three rows keep the Files menu's 0x20 pitch; a hub with more
+ * (GAMEPLAY's four pages) closes it up, since the crosshair stops 20 short of
+ * the screen's foot (y 0x136) and a fourth row at 0x13C could never be picked. */
+static s32 portOptionsRowY(s32 r)
+{
+    return PORT_OPTIONS_ROW_Y0 + r * ((portOptionsRowCount() > 3) ? 0x18 : PORT_OPTIONS_ROW_PITCH);
 }
 
 static s32 portOptionsRowKind(s32 r)
@@ -7351,7 +7360,7 @@ static void portSheetLeave(s32 tohub)
             if (frontCursorSnapAllowed())
             {
                 cursor_h_pos = 126.0f;
-                cursor_v_pos = (f32) (PORT_OPTIONS_ROW_Y0 + r * PORT_OPTIONS_ROW_PITCH + 6);
+                cursor_v_pos = (f32) (portOptionsRowY(r) + 6);
             }
             return;
         }
