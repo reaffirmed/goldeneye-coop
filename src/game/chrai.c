@@ -38,6 +38,7 @@
 #endif
 
 #ifndef TARGET_N64
+void *g_CoopAiEntity;  /* the chr or object whose list ai() runs */
 static s32 coopk;  /* the partner a level script check is asking about (coopAltBondBegin) */
 s32 coopLevelFallCheckOff(f32 y);  /* coop.h comes in later: undeclared, the f32 would go as a double */
 /* the end of one coopChrAltBegin try: keep that player as the guard's target
@@ -899,6 +900,9 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
     AircraftRecord *AircraftEntityp = NULL;
     AIRecord       *AiListp         = NULL;
     s32             Offset;
+#ifndef TARGET_N64
+    s32             coopskip;
+#endif
 
     if (EntityType == PROP_TYPE_CHR)
     {
@@ -916,6 +920,9 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
         }
     }
 
+#ifndef TARGET_N64
+    g_CoopAiEntity = (void *) Entityp;    /* co-op: whose list this is (coop.c coopEndingHold) */
+#endif
     // Load ailist
     if (ChrEntityp)
     {
@@ -955,7 +962,27 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
              */
 #ifndef TARGET_N64
             coopAiCommand((u8 *) AiListp, Offset, ChrEntityp); /* co-op: cutscene and HUD commands reach the joiner */
-            if (coopAiSkip((u8 *) AiListp, Offset, ChrEntityp))
+            coopskip = coopAiSkip((u8 *) AiListp, Offset, ChrEntityp);
+            if (coopskip == 2)
+            {   /* wait at this command, as a yield that stays put */
+                if (ChrEntityp)
+                {
+                    ChrEntityp->ailist   = AiListp;
+                    ChrEntityp->aioffset = Offset;
+                }
+                else if (VehichleEntityp)
+                {
+                    VehichleEntityp->ailist   = AiListp;
+                    VehichleEntityp->aioffset = Offset;
+                }
+                else if (AircraftEntityp)
+                {
+                    AircraftEntityp->ailist   = AiListp;
+                    AircraftEntityp->aioffset = Offset;
+                }
+                return;
+            }
+            if (coopskip)
             {
                 Offset += chraiitemsize((u8 *) AiListp, Offset);
                 continue;

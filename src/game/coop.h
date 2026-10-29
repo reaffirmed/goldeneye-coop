@@ -51,7 +51,7 @@ void coopAltBondCredit(void *script, s32 k);   /* a script's "either player" che
 void coopObjActivatedPass(void *script, void *obj);   /* that script found obj activated: its flags are the presser's */
 void coopScriptSetsFlags(void *script, void *chr);     /* that script (a chr's, or chr NULL) sets stage flags: it was whoever passed its last check */
 void coopAiCommand(u8 *list, s32 offset, ChrRecord *self);
-s32  coopAiSkip(u8 *list, s32 offset, ChrRecord *self);   /* joiner: step over our late copy of the host's ending commands */
+s32  coopAiSkip(u8 *list, s32 offset, ChrRecord *self);   /* joiner: step over our late copy of the host's ending commands (1), or wait at an ending for the host's (2) */
 s32  coopDeadTick(void); /* 1: co-op owns this death (waiting or respawned) */
 void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon);
 void coopTeleportPlayerTo(coord3d *pos, StandTile *stan, f32 yaw);    /* bondview2.c */
@@ -99,7 +99,8 @@ enum
     COOPEV_CINEMA = 56,     /* host -> all: CoopCinemaMsg, the host's intro is over */
     COOPEV_VOTE = 57,       /* to the host: a vote; host -> all: the count (coop_vote.c) */
     COOPEV_LIVES = 58,      /* to the host: our lives this mission; host -> a returning joiner: what it had left (coop.c) */
-    COOPEV_SEEN = 59        /* to the host: guards our screen has drawn (CHRFLAG_HAS_BEEN_ON_SCREEN, coop.c) */
+    COOPEV_SEEN = 59,       /* to the host: guards our screen has drawn (CHRFLAG_HAS_BEEN_ON_SCREEN, coop.c) */
+    COOPEV_ENDING = 60      /* to the host: our copy of the level script reached an ending first (coop.c coopAiSkip) */
 };
 #define COOP_ALL_PLAYERS 0xFF   /* coopDesignSend's `to`: everyone */
 void coopDesignSend(s32 kind, s32 to, const void *payload, s32 len);

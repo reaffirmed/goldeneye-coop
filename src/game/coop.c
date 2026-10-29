@@ -381,6 +381,7 @@ static s32 coopLivesStart(void);
 static void coopLivesTick(void);
 static void coopLivesApply(const u8 *raw, s32 from);
 static void coopSeenApply(const u8 *raw, s32 from);
+static void coopEndingApply(const u8 *raw, s32 from);
 static void coopSeenTick(void);
 static void coopSeenReset(void);
 static s32 sDefsBytes;  /* size of the stage's setup prop defs */
@@ -739,9 +740,12 @@ static void coopSendState(void)
         coopNetSend(&p, sizeof(p));
     }
 
-    if ((sTick % 300) == 1)
+    if ((sTick % 60) == 1)
     {
-        portConLogf("ge: coop: local pos %.0f %.0f %.0f yaw %.2f\n", p.pos[0], p.pos[1], p.pos[2], p.yaw);
+        PropRecord *bond = getCurrentPlayerProp();
+
+        portConLogf("ge: coop: local pos %.0f %.0f %.0f yaw %.2f room %d\n", p.pos[0], p.pos[1], p.pos[2], p.yaw,
+                    (bond != NULL && bond->stan != NULL) ? (int) bond->stan->room : -1);
     }
 }
 
@@ -2310,8 +2314,9 @@ static void coopRemotesTick(void)
             if ((sTick % 60) == 0)
             {
                 ChrRecord *c = r->puppet->chr;
-                portConLogf("ge: coop: puppet %d pos %.0f %.0f %.0f stan %p chrflags %x hidden %x propflags %x anim %d ghost %d\n",
+                portConLogf("ge: coop: puppet %d pos %.0f %.0f %.0f stan %p room %d chrflags %x hidden %x propflags %x anim %d ghost %d\n",
                             p + 1, r->puppet->pos.f[0], r->puppet->pos.f[1], r->puppet->pos.f[2], (void *) r->puppet->stan,
+                            r->puppet->stan != NULL ? (int) r->puppet->stan->room : -1,
                             c->chrflags, c->hidden, r->puppet->flags, r->puppetAnim, r->puppetGhost);
             }
         }
@@ -2632,25 +2637,29 @@ static void coopHarnessTick(void)
         }
     }
     if (coopPartnerHere() && coopInMission())
-    {   /* GE_COOP_TESTPAD=<pad>:<s>: <s> seconds into the mission, stand on that
-         * (unbound) pad; 330 is the Dam bungee room (harness only) */
-        static s32 testpad = -2, padat;
-        if (testpad == -2)
+    {   /* GE_COOP_TESTPAD=<pad>:<s>[,<pad>:<s>...]: <s> seconds into the mission,
+         * stand on that (unbound) pad, and so on for each; 330 is the Dam
+         * bungee room, Frigate's 153 the boat (harness only) */
+        static s32 testpad[4] = { -2 }, padat[4], npads, padnext;
+        if (testpad[0] == -2)
         {
             const char *e = getenv("GE_COOP_TESTPAD");
-            if (e == NULL || sscanf(e, "%d:%d", &testpad, &padat) != 2)
+            testpad[0] = -1;
+            while (e != NULL && npads < 4 && sscanf(e, "%d:%d", &testpad[npads], &padat[npads]) == 2)
             {
-                testpad = -1;
+                npads++;
+                e = strchr(e, ',');
+                e = (e != NULL) ? e + 1 : NULL;
             }
         }
-        if (testpad >= 0 && sMissionTicks >= (u32) padat * 60 && g_CurrentSetup.pads != NULL)
-        {   /* once: a slow frame steps the ticks past the exact one */
-            PadRecord *pad = &g_CurrentSetup.pads[testpad];
+        if (padnext < npads && sMissionTicks >= (u32) padat[padnext] * 60 && g_CurrentSetup.pads != NULL)
+        {   /* once each: a slow frame steps the ticks past the exact one */
+            PadRecord *pad = &g_CurrentSetup.pads[testpad[padnext]];
             coord3d pos = pad->pos;
 
             coopRespawnPlayerAt(&pos, pad->stan, 0.0f, sLastWeapon);
-            portConLogf("ge: coop: testpad -> pad %d at %.0f %.0f %.0f\n", testpad, pos.f[0], pos.f[1], pos.f[2]);
-            testpad = -1;
+            portConLogf("ge: coop: testpad -> pad %d at %.0f %.0f %.0f\n", testpad[padnext], pos.f[0], pos.f[1], pos.f[2]);
+            padnext++;
         }
     }
     if (coopPartnerHere() && coopInMission())
@@ -4814,6 +4823,10 @@ static void coopApplyEvent(CoopEvent *ev)
             else if (ev->kind == COOPEV_SEEN)
             {
                 coopSeenApply(ev->u.raw, ev->from);
+            }
+            else if (ev->kind == COOPEV_ENDING)
+            {
+                coopEndingApply(ev->u.raw, ev->from);
             }
             else if (ev->kind >= COOPEV_DESIGN_FIRST && ev->kind <= COOPEV_DESIGN_LAST)
             {
@@ -9224,6 +9237,144 @@ static void coopPendingCinemaTick(void)
     }
 }
 
+/* An ending that the joiner's copy of the level script reaches first. Exit
+ * checks ask about "Bond", and on the host either player counts while on a
+ * joiner only its own Bond does, so the two copies can disagree: Frigate's
+ * exit waits for Bond to leave the boat and come back, and on the host the
+ * host still standing on the boat kept it waiting, while the joiner's copy
+ * saw its own Bond return and played the ending alone; the host played on
+ * until that ending finished the mission. Now a joiner's copy stops at the
+ * ending's first command (damage and pickups off: only endings use it) and
+ * asks the host to run the same list from there; the host's ending then
+ * reaches everyone as any ending does. If the host's has not begun after
+ * COOP_ENDING_WAIT (an older host), ours goes on as before. */
+#define COOP_ENDING_WAIT 180
+
+typedef struct
+{
+    s32 stage;
+    s32 offset;     /* of the command in the list */
+    u16 list;       /* the list's id */
+    u8 isobj;       /* runs on: 0 a chr (who = chrnum), 1 a vehicle or aircraft (who = its setup offset) */
+    u8 pad;
+    s32 who;
+} CoopEndingMsg;
+
+extern void *g_CoopAiEntity;
+
+s32 chraiGetAIListID(AIRecord *AIList, bool *isGlobalAIList);
+
+static s32 sEndingWait;         /* joiner: ticks our copy has waited at an ending, this stage */
+static s32 sEndingWaitStage = -1;
+
+static s32 coopEndingHold(u8 *list, s32 offset, ChrRecord *self)
+{
+    CoopEndingMsg m;
+    bool global;
+
+    if (sEndingWaitStage != bossGetStageNum())
+    {
+        sEndingWaitStage = bossGetStageNum();
+        sEndingWait = 0;
+    }
+    if (sEndingWait >= COOP_ENDING_WAIT)
+    {
+        return 0;
+    }
+    if (sEndingWait++ == 0)
+    {
+        memset(&m, 0, sizeof(m));
+        m.stage = bossGetStageNum();
+        m.offset = offset;
+        m.list = (u16) chraiGetAIListID((AIRecord *) list, &global);
+        if (self != NULL)
+        {
+            m.who = self->chrnum;
+        }
+        else
+        {
+            m.isobj = 1;
+            m.who = coopSetupOfs(g_CoopAiEntity);
+        }
+        coopDesignSend(COOPEV_ENDING, 0, &m, sizeof(m));
+        portConLogf("ge: coop: our script reached an ending first (list %04x at %d): asking the host to start it\n", m.list, offset);
+    }
+    else if (sEndingWait == COOP_ENDING_WAIT)
+    {
+        portConLogf("ge: coop: the host's ending did not start: ours goes on\n");
+        return 0;
+    }
+    return 1;
+}
+
+/* host: a joiner's copy reached an ending; run our copy of that list from there */
+static void coopEndingApply(const u8 *raw, s32 from)
+{
+    CoopEndingMsg m;
+    AIRecord *list;
+
+    memcpy(&m, raw, sizeof(m));
+    if (!coopNetIsHost() || m.stage != bossGetStageNum() || !coopInMission() || m.offset < 0)
+    {
+        return;
+    }
+    list = ailistFindById(m.list);
+    if (list == NULL || ((u8 *) list)[m.offset] != AI_BondDisableDamageAndPickups)
+    {
+        portConLogf("ge: coop: player %d's ending (list %04x at %d) is not one here\n", from + 1, m.list, m.offset);
+        return;
+    }
+    if (!m.isobj)
+    {
+        ChrRecord *c = chrFindByLiteralId(m.who);
+
+        s32 i;
+
+        for (i = 0; (c == NULL || c->ailist != list) && i < g_NumChrSlots; i++)
+        {   /* the chr by its number: one the level made at run time is numbered by each game's own count */
+            c = (g_ChrSlots[i].ailist == list) ? &g_ChrSlots[i] : c;
+        }
+        for (i = 0; (c == NULL || c->ailist != list) && i < g_ActiveChrsCount; i++)
+        {   /* the level's background lists (0x1000 up) run on chrs of their own (chrnum 0xFE) */
+            c = (g_ActiveChrs[i].ailist == list) ? &g_ActiveChrs[i] : c;
+        }
+        if (c != NULL && c->ailist == list)
+        {
+            if (c->aioffset != m.offset)
+            {
+                c->aioffset = m.offset;
+                c->sleep = 0;
+                portConLogf("ge: coop: player %d reached the ending: our list %04x (chr %d) runs it\n", from + 1, m.list, c->chrnum);
+            }
+            return;
+        }
+    }
+    else if (m.who >= 0 && coopSetupOfs((u8 *) g_CurrentSetup.propDefs + m.who) >= 0)
+    {
+        ObjectRecord *o = (ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + m.who);
+
+        if (o->type == PROPDEF_VEHICHLE && ((VehichleRecord *) o)->ailist == list)
+        {
+            if (((VehichleRecord *) o)->aioffset != m.offset)
+            {
+                ((VehichleRecord *) o)->aioffset = m.offset;
+                portConLogf("ge: coop: player %d reached the ending: our list %04x (vehicle) runs it\n", from + 1, m.list);
+            }
+            return;
+        }
+        if (o->type == PROPDEF_AIRCRAFT && ((AircraftRecord *) o)->ailist == list)
+        {
+            if (((AircraftRecord *) o)->aioffset != m.offset)
+            {
+                ((AircraftRecord *) o)->aioffset = m.offset;
+                portConLogf("ge: coop: player %d reached the ending: our list %04x (aircraft) runs it\n", from + 1, m.list);
+            }
+            return;
+        }
+    }
+    portConLogf("ge: coop: player %d's ending: list %04x is not running here (%s %d)\n", from + 1, m.list, m.isobj ? "object" : "chr", m.who);
+}
+
 /* joiner: while our body plays the host's ending, the host's camera, fade and
  * text commands reach us from the host (coopApplyAiCommand) and our body's
  * list runs its own; our copy of the level script gets to the same ending a
@@ -9234,6 +9385,11 @@ s32 coopAiSkip(u8 *list, s32 offset, ChrRecord *self)
     if (sEnabled > 0 && !coopNetIsHost() && !sApplyingRemoteAi && coopHostOwnsCmd(list[offset]))
     {
         return 1;   /* the host's countdown and blast (coopApplyClock, coopApplyAiCommand) */
+    }
+    if (sEnabled > 0 && !coopNetIsHost() && !sApplyingRemoteAi && list[offset] == AI_BondDisableDamageAndPickups
+        && !sHostEndingBegun && !coopVersus() && coopInMission() && coopRemoteHere(0) && coopEndingHold(list, offset, self))
+    {
+        return 2;   /* wait here for the host's */
     }
     return sEnabled > 0 && !coopNetIsHost() && sHostEndingHere && !sApplyingRemoteAi
         && g_CameraMode == CAMERAMODE_POSEND && coopIsPresentationCmd(list[offset])
