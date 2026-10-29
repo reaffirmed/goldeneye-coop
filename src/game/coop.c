@@ -1924,6 +1924,12 @@ void coopStageStart(void)
 {
     s32 i;
 
+    if (bossGetStageNum() != LEVELID_TITLE)
+    {   /* off the lobby screen: a joiner's mission starts on the host's word,
+         * not through the lobby's own close, and its partners then left it
+         * out of every vote (coop_vote.c's coopVoter) */
+        sOnLobbyScreen = 0;
+    }
     sPendingCinemaList = -1;
     sHostEndingHere = 0;
     sHostEndingBegun = 0;
