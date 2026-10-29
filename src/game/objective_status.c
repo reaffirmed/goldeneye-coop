@@ -219,7 +219,11 @@ OBJECTIVESTATUS get_status_of_objective(s32 objectiveNum) //#MATCH
                         }
                         case PROPDEF_OBJECTIVE_FAIL_CONDITION:
                         {
+#ifndef TARGET_N64
+                            if (coopFailFlagSet(objective->ObjRefID))
+#else
                             if (chrHasStageFlag(NULL, objective->ObjRefID))
+#endif
                             {
                                 currentstatus = OBJECTIVESTATUS_FAILED;
                             }

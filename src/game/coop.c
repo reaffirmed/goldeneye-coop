@@ -5678,6 +5678,20 @@ static void coopSendWorld(void)
     coopNetSend(&p, sizeof(p));
 }
 
+/* objective_status.c, a fail condition's stage flag: a joiner shows the
+ * objective failed only once the host's flags have it. Its own copy of a
+ * script can set a fail flag the host's never does (Facility: it reached Doak
+ * first; Train: it shot guard 4), and the objective read failed for a moment
+ * before the host's flags took it back. Completions still show at once. */
+s32 coopFailFlagSet(s32 flag)
+{
+    if (sEnabled > 0 && !coopNetIsHost() && coopNetHasPeer() && coopInMission() && !coopVersus())
+    {
+        return (sWorldHostFlags & (u32) flag) != 0;
+    }
+    return (objectiveregisters1 & flag) != 0;
+}
+
 /* A joiner runs the level scripts too, and its own copy of one can set a
  * flag a moment before the host's does (the joiner planted the mine): the
  * host's older flags would take it away again for a packet or two, and the
