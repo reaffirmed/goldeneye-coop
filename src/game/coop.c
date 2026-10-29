@@ -5678,6 +5678,23 @@ static void coopSendWorld(void)
     coopNetSend(&p, sizeof(p));
 }
 
+/* chrai.c, "Bond is far from the pad": as a rule every player has to be
+ * away (one left behind still counts as Bond being there). A few scenes use it
+ * as a leash instead, where one player leaving is what breaks it, and there
+ * any player counts:
+ *  - Statue's unmasking (background list 0x1000): walk away from the statue
+ *    and Janus's guards open fire, which is why Bond can't walk up to Janus */
+s32 coopAnyPlayerLeaves(u8 *list)
+{
+    bool global;
+
+    if (sEnabled <= 0 || !coopNetIsHost() || !coopPartnerHere() || coopVersus())
+    {
+        return 0;
+    }
+    return bossGetStageNum() == LEVELID_STATUE && chraiGetAIListID((AIRecord *) list, &global) == 0x1000;
+}
+
 /* objective_status.c, a fail condition's stage flag: a joiner shows the
  * objective failed only once the host's flags have it. Its own copy of a
  * script can set a fail flag the host's never does (Facility: it reached Doak

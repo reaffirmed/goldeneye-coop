@@ -2255,10 +2255,22 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     s32                                              far   = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
 #ifndef TARGET_N64
                     far = far || !coopOwnBondCounts(); /* co-op: not a down host's body */
-                    for (coopk = 0; far && coopAltBondBegin(coopk); coopk++) /* co-op: both players must be away */
+                    if (coopAnyPlayerLeaves(AiListp))
+                    {   /* a scene's "stay here" rule: any one player leaving breaks it */
+                        far = far && coopOwnBondCounts();
+                        for (coopk = 0; !far && coopAltBondBegin(coopk); coopk++)
+                        {
+                            far = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
+                            coopAltBondEnd();
+                        }
+                    }
+                    else
                     {
-                        far = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
-                        coopAltBondEnd();
+                        for (coopk = 0; far && coopAltBondBegin(coopk); coopk++) /* co-op: both players must be away */
+                        {
+                            far = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
+                            coopAltBondEnd();
+                        }
                     }
 #endif
                     if (far)

@@ -21,6 +21,7 @@ s32  coopChrOnPartnerScreen(ChrRecord *chr);     /* host: a partner can see this
 void coopCollideMover(PropRecord *prop, s32 on); /* chrSetMoving: prop is being moved or tested from */
 void coopLookRandomStart(void);   /* initguards.c bodiesReset: seed the guards' looks for this mission */
 u32  coopLookRandom(void);         /* the next roll for a guard's look (randomGetNext outside a story session) */
+s32  coopAnyPlayerLeaves(u8 *list);  /* chrai.c: a scene's leash, where one player leaving breaks it */
 s32  coopFailFlagSet(s32 flag);      /* objective_status.c: a fail condition's flag, the host's word on a joiner */
 s32  coopPropIsCorpse(PropRecord *prop);         /* our own body lying where we fell (only on our game) */
 s32  coopCollideSkip(PropRecord *prop);          /* 1: prop blocks nothing right now (down, or inside the mover) */
