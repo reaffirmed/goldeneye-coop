@@ -175,6 +175,7 @@ s32  coopGuardAiCount(void);
 const char *coopGuardAiName(s32 mode);
 s32  coopChrCurrentTarget(void);            /* host, in a guard's tick: the player that is Bond, 0 ours */
 s32  coopTargetablePlayer(s32 t);           /* host: player t is in the mission and alive */
+PropRecord *coopTargetablePlayerProp(s32 t); /* host: that player's body while coopTargetablePlayer, else NULL */
 
 /* co-op difficulty (coop_difficulty.c): COOPSET_DIFFICULTY's modes */
 s32  coopLobbyPlayerCount(void);          /* players in the session, us included */

@@ -2169,6 +2169,23 @@ target (another player may see it); the alarm run checks straight-line
 distance, not path length; the brain's state isn't sent, so after a
 migration guards start over from their chr records.
 
+Followed up (2026-10-29):
+- Cover from one player only: real. Three players on Dam (host Smarter,
+  both joiners hunting), a debug count of the other players with a line to
+  each cover pad picked: 5 of 21 in view of another player. Cover now has
+  to be out of sight of every player a guard could fight
+  (coopTargetablePlayerProp); the same run: 0 of 19, guards still take
+  cover as often. No packet change.
+- Alarms: only Dam (4), Bunker 1 (2) and Surface 1 (1) of the 20 missions
+  have alarm objects. Along the waypoints, every guard of ours within 30 m
+  reaches them in 0-51 m, except Dam's 10074 from the tunnel guards (10,
+  11, 12, 45: no route). chrGoToPad fails there, so they fight on, and no
+  60 s alarm cooldown is spent. In Bunker 1 one runner (guard 8) got stuck
+  9 m short and gave up at its 12 s limit, another (9) set it off twice.
+  Left as it is.
+- Guards starting over after a migration: left as designed (sending the
+  brain would need a protocol change).
+
 ## Far-away players dropping in mid-mission (2026-10-28)
 
 Tester report: a player from Colombia dropped in to a running co-op mission;
