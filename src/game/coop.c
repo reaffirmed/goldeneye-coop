@@ -3316,6 +3316,13 @@ s32 coopTargetablePlayer(s32 t)
     return sEnabled > 0 && t >= 0 && t < COOPTGT_COUNT && coopTargetable(t);
 }
 
+/* host: player t's body if a guard could fight them now, else NULL
+ * (coop_ai.c looks for cover none of them can see) */
+PropRecord *coopTargetablePlayerProp(s32 t)
+{
+    return coopTargetablePlayer(t) ? coopTargetProp(t) : NULL;
+}
+
 /* host: "Bond is aiming at me" (sub_GAME_7F0333F8) for whoever Bond is in
  * this guard's tick. That test reads our own crosshair, so for a partner it
  * is their facing against the chr's body, with the same line of sight. */

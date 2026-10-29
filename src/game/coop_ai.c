@@ -398,16 +398,15 @@ static s32 coopAiArrived(ChrRecord *chr, CoopAiBrain *b)
     return coopAiStopped(chr) && g_GlobalTimer > b->since60 + 10;
 }
 
-/* would a guard standing at pos (on stan) see the target? the sight ray of
+/* would a guard standing at pos (on stan) see this player? the sight ray of
  * chrCanSeeBond, from there */
-static s32 coopAiLineToTarget(ChrRecord *chr, coord3d *pos, StandTile *stan)
+static s32 coopAiLineFrom(ChrRecord *chr, coord3d *pos, StandTile *stan, PropRecord *target)
 {
-    PropRecord *target = getCurrentPlayerProp();
     StandTile *st = stan;
     f32 h = chr->chrheight - 20.0f;
     s32 clear;
 
-    if (target == NULL || stan == NULL)
+    if (target == NULL || target->stan == NULL || stan == NULL)
     {
         return 0;
     }
@@ -416,6 +415,33 @@ static s32 coopAiLineToTarget(ChrRecord *chr, coord3d *pos, StandTile *stan)
                                      CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_PATHBLOCKER | CDTYPE_AIOPAQUE, h, h, 0.0f, 1.0f);
     chrSetMoving(chr, TRUE);
     return clear && st == target->stan;
+}
+
+/* would it see its target from there, or (co-op) any other player? cover
+ * from one player in full view of another is no cover */
+static s32 coopAiLineToTarget(ChrRecord *chr, coord3d *pos, StandTile *stan)
+{
+    PropRecord *target = getCurrentPlayerProp();
+    s32 t;
+
+    if (target == NULL || stan == NULL)
+    {
+        return 0;
+    }
+    if (coopAiLineFrom(chr, pos, stan, target))
+    {
+        return 1;
+    }
+    for (t = 0; coopEnabled() && t < COOP_MAX_PLAYERS; t++)
+    {
+        PropRecord *other = coopTargetablePlayerProp(t);
+
+        if (other != NULL && other != target && coopAiLineFrom(chr, pos, stan, other))
+        {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static s32 coopAiPadTaken(ChrRecord *chr, s32 pad)
