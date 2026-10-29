@@ -2429,7 +2429,7 @@ protocol change.
   Friendly Fire, Host Leaves, Lobby, Password, versus rows) is on GAME
   SETUP once hosting. What a player couldn't reach from the screen: the
   rest of the Options folder (video, audio, HUD, accessibility, key binds,
-  Port Options such as textures' Classic Mode).
+  Port Options).
 - CONTROLS is now OPTIONS, and ends with "All Options": the Files menu's
   Options folder, with the lobby running behind it (coopFrontTick); its
   PREVIOUS comes back onto the row (port_options_from_coop,
