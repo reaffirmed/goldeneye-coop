@@ -380,7 +380,11 @@ static u32 coopReplWorldHash(void)
     return coopReplFnv(coopReplFnv(2166136261u, (u32) objectiveregisters1), alarmIsActive() ? 1 : 0);
 }
 
-/* which chrs exist (order free: each one adds its own hash); partners' puppets left out */
+/* which chrs exist (order free: each one adds its own hash); partners' puppets
+ * left out, and bodies: a joiner frees a body a few seconds after the host
+ * stops sending it (coopReapGuards), so with guards dying every few seconds
+ * (the joiner blowing up Caverns' consoles) the two sets of bodies never
+ * matched for long and this read as a lasting desync */
 static u32 coopReplChrHash(void)
 {
     u32 sum = 0;
@@ -391,7 +395,8 @@ static u32 coopReplChrHash(void)
         ChrRecord *chr = &g_ChrSlots[i];
 
         if (chr->model == NULL || chr->prop == NULL
-            || (chr->chrnum >= COOP_PUPPET_CHRNUM && chr->chrnum <= COOP_PUPPET_CHRNUM + COOP_MAX_PLAYERS))   /* and our own body while down */
+            || (chr->chrnum >= COOP_PUPPET_CHRNUM && chr->chrnum <= COOP_PUPPET_CHRNUM + COOP_MAX_PLAYERS)   /* and our own body while down */
+            || chr->actiontype == ACT_DIE || chr->actiontype == ACT_DEAD)
         {
             continue;
         }
