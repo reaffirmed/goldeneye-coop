@@ -532,7 +532,10 @@ static void coopLookAnimate(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *
     }
     if (setanim && anim != 0)
     {
-        if (model->anim2 == NULL)
+        /* while a merge runs (anim2) only a new animation starts: the idle
+         * loops merge for longer than they last, so a puppet that went from
+         * no gun to a gun kept its unarmed idle for good */
+        if (model->anim2 == NULL || anim != lp->anim)
         {
             modelSetAnimation(model, (ModelAnimation *) anim, 0, (frame >= 0.0f) ? frame : 0.0f, rate, 16.0f);
             lp->anim = anim;
