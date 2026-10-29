@@ -2793,5 +2793,28 @@ protocol change.
   gone on the host, removing" lines for the spawned guards. Every other
   stage passed. A v0.5.2 build (7238ac0) fails the same way on the same
   runs (1 of 4 vs 2 of 4 for v0.5.3), so it predates #59 and #60. The
-  mission still completes on both copies. Not fixed yet: listed as a known
-  issue in the v0.5.3 notes.
+  mission still completes on both copies. Listed as a known issue in the
+  v0.5.3 notes.
+- Cause: the joiner runs its own copy of the level scripts (g_ActiveChrs,
+  chrlvAllChrTick, not gated like the guards' own lists), and Surface 2's
+  reinforcement script spawned guards there too (AI_TRYSpawningChrAtPad).
+  chrAllocate numbers them from player1_guardID, which on the joiner also
+  counts its mirror stand-ins (coopMirrorSpawn), so its 50xx were not
+  the host's. The host never sent those numbers, the reaper freed them 5 s
+  later, the joiner's script spawned again, and the chr sets stayed apart
+  for more than the 10 s the checksum allows.
+- Fix: coopScriptSpawnsLeftToHost(). On a joiner with the host in the
+  stage, the three script spawns (at pad, next to chr, clone) take their
+  success branch without making a chr; the host's arrive in its snapshots
+  as before. Checked: 12 of 12 surface2 runs at PAR=4 (2 of 8 failed
+  before), then every mission, the 3 late joins and the joiner checks.
+- Streets, found in 60 s runs (TESTEND=3600) and failing the same way on
+  main before this (4 of 4): its script shows civilians 39 and 40 for about
+  half a second every few seconds. Each showing left a stand-in on the
+  joiner for COOP_GUARD_GONE (5 s), so the joiner nearly always had one the
+  host didn't. coopReapGuards now frees a living chr after
+  COOP_GUARD_GONE_LIVE (1 s; the host sends it 10 or 20 times a second) and
+  keeps 5 s for bodies, which go once a second. Streets 4 of 4 at 60 s;
+  every mission, late joins, joiner checks and 12 more surface2 runs pass.
+  In the 60 s runs idle players sometimes die before the end (Archives,
+  Depot, Cradle), with or without these changes.

@@ -3752,9 +3752,13 @@ s32 coopTargetRecordDamage(f32 damage, f32 angle)
  * and anyone firing or dying, every time. Late in a mission most chrs are
  * bodies, and the guards were most of what the host sent each joiner (about
  * 23 KB/s of 45 on Dam), which a far-away player's line felt first. Joiners
- * free a chr missing from the snapshots for COOP_GUARD_GONE ticks. */
+ * free a chr missing from the snapshots for COOP_GUARD_GONE ticks, a living
+ * one (sent 10 or 20 times a second) after COOP_GUARD_GONE_LIVE: Streets'
+ * script shows civilians 39 and 40 for half a second every few seconds, and
+ * 5 s copies of them kept the joiner's chrs from ever matching the host's. */
 #define COOP_GUARD_FAR   6000.0f
 #define COOP_GUARD_GONE  300
+#define COOP_GUARD_GONE_LIVE 60
 
 static s32 coopGuardDue(ChrRecord *chr, s32 i, s32 firing)
 {
@@ -4177,7 +4181,7 @@ static void coopClientGunfire(void)
     }
 }
 
-/* Chrs the host freed stop showing up in snapshots; free ours after 2 s. */
+/* Chrs the host freed stop showing up in snapshots; free ours after 1 s, or 5 s for a body. */
 static void coopReapGuards(void)
 {
     s32 i;
@@ -4198,7 +4202,8 @@ static void coopReapGuards(void)
         {
             sChrLastSync[i] = sTick; /* start the clock when we first see it */
         }
-        else if (sTick - sChrLastSync[i] > COOP_GUARD_GONE && !(chr->hidden & CHRHIDDEN_REMOVE))
+        else if (sTick - sChrLastSync[i] > (sChrHostDying[i] ? COOP_GUARD_GONE : COOP_GUARD_GONE_LIVE)
+                 && !(chr->hidden & CHRHIDDEN_REMOVE))
         {
             portConLogf("ge: coop: chr %d gone on the host, removing\n", chr->chrnum);
             chr->hidden |= CHRHIDDEN_REMOVE;
@@ -9124,6 +9129,17 @@ s32 coopKeepBodyList(ChrRecord *chr, AIRecord *list)
 {
     return sEnabled > 0 && !coopNetIsHost() && sHostEndingHere && g_CurrentPlayer->prop != NULL
         && chr == g_CurrentPlayer->prop->chr && chr->ailist == list;
+}
+
+/* joiner: our copy of the level scripts spawns guards too (Surface 2's
+ * reinforcements), numbered by our own count, which drifts from the host's.
+ * The host's spawns reach us in its snapshots, so ours were extras the reaper
+ * freed 5 s later and the script spawned again: the chrs never matched the
+ * host's (repl "unresolved desync"). chrai.c takes the spawn's success branch
+ * without making a chr. */
+s32 coopScriptSpawnsLeftToHost(void)
+{
+    return sEnabled > 0 && !coopNetIsHost() && coopRemoteHere(0) && !coopVersus();
 }
 
 static void coopApplyAiCommand(CoopEvent *ev)
