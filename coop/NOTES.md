@@ -2572,3 +2572,13 @@ protocol change.
   success branch without making a chr; the host's arrive in its snapshots
   as before. Checked: 12 of 12 surface2 runs at PAR=4 (2 of 8 failed
   before), then every mission, the 3 late joins and the joiner checks.
+- Streets, found in 60 s runs (TESTEND=3600) and failing the same way on
+  main before this (4 of 4): its script shows civilians 39 and 40 for about
+  half a second every few seconds. Each showing left a stand-in on the
+  joiner for COOP_GUARD_GONE (5 s), so the joiner nearly always had one the
+  host didn't. coopReapGuards now frees a living chr after
+  COOP_GUARD_GONE_LIVE (1 s; the host sends it 10 or 20 times a second) and
+  keeps 5 s for bodies, which go once a second. Streets 4 of 4 at 60 s;
+  every mission, late joins, joiner checks and 12 more surface2 runs pass.
+  In the 60 s runs idle players sometimes die before the end (Archives,
+  Depot, Cradle), with or without these changes.
