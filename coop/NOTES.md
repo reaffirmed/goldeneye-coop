@@ -2169,6 +2169,23 @@ target (another player may see it); the alarm run checks straight-line
 distance, not path length; the brain's state isn't sent, so after a
 migration guards start over from their chr records.
 
+Followed up (2026-10-29):
+- Cover from one player only: real. Three players on Dam (host Smarter,
+  both joiners hunting), a debug count of the other players with a line to
+  each cover pad picked: 5 of 21 in view of another player. Cover now has
+  to be out of sight of every player a guard could fight
+  (coopTargetablePlayerProp); the same run: 0 of 19, guards still take
+  cover as often. No packet change.
+- Alarms: only Dam (4), Bunker 1 (2) and Surface 1 (1) of the 20 missions
+  have alarm objects. Along the waypoints, every guard of ours within 30 m
+  reaches them in 0-51 m, except Dam's 10074 from the tunnel guards (10,
+  11, 12, 45: no route). chrGoToPad fails there, so they fight on, and no
+  60 s alarm cooldown is spent. In Bunker 1 one runner (guard 8) got stuck
+  9 m short and gave up at its 12 s limit, another (9) set it off twice.
+  Left as it is.
+- Guards starting over after a migration: left as designed (sending the
+  brain would need a protocol change).
+
 ## Far-away players dropping in mid-mission (2026-10-28)
 
 Tester report: a player from Colombia dropped in to a running co-op mission;
@@ -2516,3 +2533,29 @@ protocol change.
   the Co-op Menu row to Classic and back; Classic scrolled top to bottom
   hosting, joined and not hosting; the character select on Classic.
   Shots: menu-classic/ in the project files.
+
+## GAMEPLAY hub: Accessibility unreachable
+
+- Options > GAMEPLAY reuses the folder screen as a hub of four pages
+  (General, HUD, Port Options, Accessibility) at the folder's 0x20 pitch,
+  so the fourth row sat at y 0x13C. frontUpdateControlStickPosition stops
+  the crosshair 20 short of the screen's foot (about y 0x136), so mouse,
+  stick and keys all topped out on Port Options and Accessibility could
+  never be picked. It predates the Classic menu (it came with the fourth
+  page), and reaches it from Files > Options and from All Options alike.
+- portOptionsRowY closes the pitch to 0x18 when a hub has more than three
+  rows; the band test, the constructor and both cursor snaps use it. The
+  three-row folder and the two-row AUDIO VISUAL hub keep 0x20.
+- Checked: no other folder, hub, sheet or lobby row lies below the
+  crosshair's reach. Shots: accessibility/ in the project files.
+
+## Surface 2: chrs out of step on the joiner (v0.5.3 release runs)
+
+- In the local mission runs for v0.5.3 (US cart, mock Steam, PAR=4),
+  surface2 failed on "repl: unresolved desync: the chrs here are not the
+  host's" in about half its runs, each time around the joiner's "chr 50xx
+  gone on the host, removing" lines for the spawned guards. Every other
+  stage passed. A v0.5.2 build (7238ac0) fails the same way on the same
+  runs (1 of 4 vs 2 of 4 for v0.5.3), so it predates #59 and #60. The
+  mission still completes on both copies. Not fixed yet: listed as a known
+  issue in the v0.5.3 notes.
