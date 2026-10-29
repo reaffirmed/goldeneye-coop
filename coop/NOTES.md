@@ -2818,3 +2818,14 @@ protocol change.
   every mission, late joins, joiner checks and 12 more surface2 runs pass.
   In the 60 s runs idle players sometimes die before the end (Archives,
   Depot, Cradle), with or without these changes.
+
+## v0.6.0 release runs (PR #62 with #63 merged in)
+
+- US cart, Linux i686 build, mock Steam, `coop/ci/mission_runs.sh` at PAR=4,
+  default options: 20 of 20 missions pass (1 corrected desync each on Dam
+  and Jungle), 3 of 3 late joins pass, 4 of 4 joiner checks pass.
+- The same 20 with GE_GUARDAI=1 (Smarter): 20 of 20 pass, the same two
+  corrected desyncs.
+- "chr N gone on the host" on the joiner: Streets 5 (civilians 39 and 40,
+  as expected), Surface 2 2, Hostage 1. Before #63 the stage 3 scripted
+  runs had 428.
