@@ -5237,6 +5237,10 @@ s32 coopObjDamage(ObjectRecord *obj, f32 damage, coord3d *pos, s32 item, s32 pla
             return 1;
         }
     }
+    else if (item != ITEM_UNARMED && (obj->flags & PROPFLAG_INVINCIBLE))
+    {
+        return 0;   /* no damage here (objApplyDamage), so none to send */
+    }
     memset(&ev, 0, sizeof(ev));
     ev.kind = COOPEV_OBJDMG;
     ev.u.obj.objofs = ofs;
@@ -5287,6 +5291,12 @@ static void coopApplyObjDamage(CoopEvent *ev)
     }
     else
     {
+        if (ev->u.obj.item != ITEM_UNARMED)
+        {   /* the host's copy took it, so it is not invincible there: a script
+             * turned that off first (Train's ending, before each carriage
+             * blows), which only the host's copy of the script did */
+            obj->flags &= ~PROPFLAG_INVINCIBLE;
+        }
         sApplyingRemoteObj = 1;
         objApplyDamage(obj, ev->u.obj.damage, &pos, ev->u.obj.item, ev->u.obj.player);
         sApplyingRemoteObj = 0;
