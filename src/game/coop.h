@@ -12,6 +12,7 @@ extern PropRecord *g_CoopPropOverride;
 s32  coopChrTickBegin(ChrRecord *chr); /* 0: skip (client mirrors the host) */
 void coopChrTickEnd(void);
 void coopChrStimulus(ChrRecord *chr);
+s32  coopChrSlot(const ChrRecord *chr);           /* its index in g_ChrSlots, or -1 */
 s32  coopChrAltBegin(ChrRecord *chr, s32 k);     /* host: a failed "Bond" check, try the k-th other player (1: they are Bond now) */
 void coopChrAltEnd(ChrRecord *chr);              /* that try failed too: the guard's own target again */
 void coopChrAltKeep(ChrRecord *chr, s32 stimulus);  /* it passed: that player is the guard's target */
@@ -56,6 +57,7 @@ void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon);
 void coopTeleportPlayerTo(coord3d *pos, StandTile *stan, f32 yaw);    /* bondview2.c */
 s32  coopCinemaFocus(coord3d *out);                                     /* bondview2.c: a scripted cinema's pad */
 s32  coopKeepBodyList(ChrRecord *chr, AIRecord *list);  /* joiner: the host's ending list already runs on our body */
+s32  coopScriptSpawnsLeftToHost(void);  /* joiner: a level script's spawn is the host's, mirrored from its snapshots */
 s32  coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid);
 s32  coopShotPuppet(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, s32 isPlayer);
 
@@ -171,11 +173,40 @@ enum { COOPAI_CLASSIC = 0, COOPAI_SMARTER = 1 };
 s32  coopAiSmarter(void); s32 coopAiSmarterOption(void); void coopAiSetSmarterOption(s32 mode);                   /* this mission's guards are the smarter ones */
 s32  coopAiTick(ChrRecord *chr);            /* chrai.c ai(): 1 when the smarter AI ran the chr's tick */
 f32  coopAiHearScale(ChrRecord *chr, f32 dist, f32 range);  /* chr.c: hearing through walls */
+void coopAiDoorOpened(DoorRecord *door, s32 state);    /* propobj.c doorSetOpenState: a clue, if a player opened it */
 s32  coopGuardAiCount(void);
 const char *coopGuardAiName(s32 mode);
 s32  coopChrCurrentTarget(void);            /* host, in a guard's tick: the player that is Bond, 0 ours */
 s32  coopTargetablePlayer(s32 t);           /* host: player t is in the mission and alive */
 PropRecord *coopTargetablePlayerProp(s32 t); /* host: that player's body while coopTargetablePlayer, else NULL */
+typedef struct
+{
+    PropRecord *prop;
+    u8 shotseq;     /* CoopLook.shotseq: a change is a shot */
+    u8 flash;       /* the muzzle flash shows (CoopLook.flash) */
+    u8 cue;         /* CoopLook.cue: draws and reloads */
+    u8 reviving;    /* holding Use over a downed partner */
+    f32 yaw;        /* where they face, radians, model convention */
+} CoopAiPlayerView;
+s32  coopAiPlayerView(s32 t, CoopAiPlayerView *out);    /* host or solo: player t for the smarter guards, 0 not in the fight */
+u8   coopLookShotSeq(void);                 /* coop_look.c: our shots so far (CoopLook.shotseq) */
+/* smarter guards' barks: a callout over the guard's head and a sting, shown
+ * on every game that has Guard Barks on */
+enum
+{
+    COOPBARK_SPOTTED = 0, COOPBARK_LOST, COOPBARK_HELP, COOPBARK_COVER, COOPBARK_GRENADE,
+    COOPBARK_BODY, COOPBARK_ALARM, COOPBARK_RETREAT, COOPBARK_CLUE, COOPBARK_GIVEUP, COOPBARK_COUNT
+};
+typedef struct
+{
+    s16 chrnum;
+    u8 kind;        /* COOPBARK_* */
+    f32 alpha;      /* fades out at the end */
+} CoopBarkMark;
+s32  coopAiBarkAt(s32 i, CoopBarkMark *out);    /* coop_hud.c: the i-th bark on show, 0 past the last */
+const char *coopAiBarkText(s32 kind);
+void coopAiBarkApply(const u8 *raw, s32 from);  /* COOPEV_BARK from the host */
+void coopAudioAtPos(s32 sfx, coord3d *pos);     /* coop_audio.c: a sound from there, as a guard's */
 
 /* co-op difficulty (coop_difficulty.c): COOPSET_DIFFICULTY's modes */
 s32  coopLobbyPlayerCount(void);          /* players in the session, us included */
@@ -548,7 +579,8 @@ enum
     COOPEV_THROWMORE = 26,  /* its second half */
     COOPEV_ITEMGONE = 27,   /* to all: a thrown or dropped item went off or was picked up */
     COOPEV_DROP = 28,       /* host -> all: a guard dropped its gun */
-    COOPEV_ITEMSTUCK = 29   /* to all: where our thrown item stuck or landed (coop_items.c) */
+    COOPEV_ITEMSTUCK = 29,  /* to all: where our thrown item stuck or landed (coop_items.c) */
+    COOPEV_BARK = 30        /* host -> all: a smarter guard's callout (coop_ai.c; an older joiner ignores it) */
 };
 typedef struct
 {

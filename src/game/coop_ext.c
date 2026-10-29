@@ -64,5 +64,8 @@ void coopExtApply(s32 kind, const u8 *raw, s32 from)
         case COOPEV_ITEMSTUCK:
             coopItemsApply(kind, raw, from);
             break;
+        case COOPEV_BARK:
+            coopAiBarkApply(raw, from);
+            break;
     }
 }

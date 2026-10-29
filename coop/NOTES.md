@@ -2186,6 +2186,242 @@ Followed up (2026-10-29):
 - Guards starting over after a migration: left as designed (sending the
   brain would need a protocol change).
 
+## Smarter guards: alert levels, suppression, grenades, revives (2026-10-29, COOP_VERSION stays 14)
+
+Stage 1 of the dynamic guards plan. All in src/game/coop_ai.c and Smarter
+only; Classic runs none of it (coopAiTick and coopAiHearScale return before
+any of it when the mission's guards are Classic).
+
+- The players: once a tick the brain reads each player through
+  coopAiPlayerView (coop.c): where they stand, CoopLook.shotseq and the
+  muzzle flash (a shot), CoopLook.cue (a reload, coop_audio.c), the STATE's
+  revive byte (holding Use over a downed partner) and the yaw. The host
+  already had all of it from STATE; solo reads our own Bond. No packet change.
+- Alert level, one per mission: calm, suspicious (a guard looks into a shot),
+  alerted (a guard fights, sees a guard shot, or finds a body), lockdown (the
+  alarm rings, or a second body is found). Suspicious calms after 45 quiet
+  seconds, alerted only falls back to suspicious after 90, lockdown stays.
+  Higher levels: searches check 3 waypoints (4 in lockdown), investigations
+  run from alerted on, a lost target is given up after 30/45/60 s, calls
+  bring 4 guards, from alerted on 1 in 2 guards (all in lockdown) hold where
+  their search ended instead of walking back to post, and in lockdown one
+  calm guard every 20 s sets out on a sweep of the waypoints round its post
+  (2 out at most) and hearing reaches 25% further.
+- Suppression: its target fired within 20 ticks, within 20 m, facing within
+  15 degrees of it (no line of sight needed, so firing at its cover counts).
+  Shot at in the open after a burst: to cover at once. Ducking: stays down
+  0.5 s past each shot, 5 s at most.
+- Reloads: its target began a reload within 1.5 s: a ducking guard steps out
+  at once, and one that just lost sight runs to where it last saw them.
+- Grenades on campers: a target within 2.5 m of one spot for 6 s, seen in
+  the last 3 s, 4 to 20 m off, after the guard has fought 4 s: the guard
+  points (Classic's surprised one hand, the warning everyone sees), then a
+  second later throws Classic's grenade (actor_draws_throws_grenade_at_player
+  with the roll forced). One a fight per guard, 8 s between any two, 15 s
+  between two at the same player. Never with anyone who isn't one of our
+  guards (a hostage, a scientist, Natalya, a scripted guard) within 8 m of
+  the target, checked at the point and again at the throw, so a grenade
+  can't fail an objective. The grenade is the guards' usual dropped item
+  (coop_items.c), so it lands and goes off on every screen; as in the
+  original, a player standing on it before it goes off picks it up.
+- Revives: every 0.5 s a fighting guard that can see a player holding Use
+  over a downed partner turns to them; the head-count split leaves a guard
+  on a reviver alone.
+- Scripted characters: the brain only takes plain armed guards on the shared
+  guard lists (coopAiOwns, unchanged), so every new move, the sweeps and the
+  holds included, only ever moves those. A level script that gives one of
+  them its own list takes it back at once, as before.
+- Harness: GE_GUARDAIDBG=1 adds "player N reloads", "keeps its head down",
+  "no grenade: chr N is near the target"; always logged: alert changes,
+  sweeps, holds, "pushes while player N reloads", "points out player N",
+  "throws a grenade", "turns to player N, who is reviving a partner".
+- Tested with the US cart over the mock Steam (Dam, host Smarter):
+  - 2 players, the joiner at pad 179 firing (GE_COOP_TESTPAD=179:3,
+    GE_COOP_TESTFIRE): calm -> suspicious -> alerted, guard 22 ran for the
+    alarm -> lockdown; sweeps (guards 43, 4, 28) and lockdown holds (5040,
+    13); guards 10022, 41 and 22 pointed and threw at the joiner. Their
+    grenades went off on both games (item 0001, 0004: "went off: ours goes
+    too" on the joiner); one landed at the joiner's feet and it picked it up.
+  - the joiner firing a KF7 for 50 s: "player 2 reloads" each magazine;
+    guard 10022 left its duck the tick after one (duck -> peek in 1 tick).
+    The joiner firing 12 degrees off guard 10022 (GE_COOP_TESTAIMCHR): guard
+    22, ducking in its line, kept its head down.
+  - 3 players, revive rule (GE_COOP_DOWNRULE=2), all at pad 179, player 3
+    down at 30 s (GE_COOP_TESTDIE), player 2 reviving (GE_COOP_TESTREVIVE):
+    guards 22 and 41 turned to player 2, who still got player 3 up in 2.8 s.
+  - Scripted missions: all 20 missions twice (Smarter, then Classic), both
+    players acting and invulnerable for 100 s: the host firing from its
+    start, the joiner hunting guards with a KF7 (GE_COOP_TESTHUNT,
+    GE_COOP_TESTFIRE). Smarter reached alerted on 16 and lockdown on 2 (Silo,
+    Bunker 2). Every objective that failed failed the same way in the
+    Classic run (Silo, Bunker 2, Statue, Jungle, Caverns: the joiner's
+    gunfire), except Archives C: the hunting joiner shot Natalya (chr 0),
+    a harness artifact (it hunts the nearest chr). Grenades were held back
+    near a bystander 13 times (Facility chr 6, Frigate, Bunker 2, Streets,
+    Control). Unresolved desyncs ("the chrs here are not the host's") 25
+    with Smarter against 28 with Classic over the same runs, no crashes.
+- Rebased on PR #59 (cover out of sight of every player): no overlap, the
+  Dam run above repeated on the rebased build (lockdown, sweeps, holds, a
+  grenade that went off on both games).
+
+## Smarter guards: barks (2026-10-29, COOP_VERSION stays 14)
+
+Stage 2: a smarter guard calls out what it is doing, as text over its head
+and a short sting. No voice: the text is the port's, every sting is one of
+the game's own sounds (CONTRIBUTING: no made audio).
+
+- What and when (host or solo, coop_ai.c coopAiBark): OVER THERE! (first
+  sight, nobody came) or NEED BACKUP! (its call brought help), WHERE DID
+  THEY GO? (lost them: 1 in 2 advances, and giving up), COVER ME! (1 in 2
+  moves to cover), GRENADE! (the point before a throw, always), MAN DOWN!
+  (found a body), SOUND THE ALARM! (runs for one), FALL BACK! (hurt, falls
+  back). One guard barks at most once in 3 s, the grenade warning excepted.
+- Stings, played at the guard as its other sounds (coopAudioAtPos, out to
+  40 m): the security camera's beep (spotted), the quiet beep (lost, fall
+  back), the radio (backup, man down), the rifle cock (cover me), the bing
+  (grenade), the alarm switch (alarm). Picked by name, not tuned by ear yet.
+- Sync: COOPEV_BARK (30, the last free EXT kind) host -> all: the chrnum and
+  the bark. An older v14 joiner's coopExtApply has no case for it and drops
+  it, so the version stays 14 and mixed builds still play (no barks there).
+- Showing (every game): up to 6 at once, 2 s each, the last half second
+  fading, sized like a name tag (coop_hud.c coopHudBark); GRENADE! red, the
+  rest amber. Not hidden by walls: a shout carries.
+- Port Option "Guard Barks" ([display] guard_barks, default on), each
+  player's own: off shows and plays nothing on that game. On the PORT
+  OPTIONS sheet and the watch's Port Options page, under Guard AI.
+- Harness: GE_GUARDAI_BARKSHOT=1 saves bark_p<player>_<n>.bmp a quarter
+  second into each of the first 12 barks shown. Logs: "guard N barks <text>"
+  on the host, "host's guard N barks <kind>" on a joiner (GE_GUARDAIDBG).
+- Tested (Dam, 2 players, mock Steam, host Smarter, the joiner at pad 179
+  facing guard 41, GE_COOP_TESTAIMCHR=41:12:10:70): the host barked 9 times
+  in 80 s, the joiner got all of them; its shots show OVER THERE! over guard
+  41, then a red GRENADE! as it pointed. With guard_barks=0 in midas.ini the
+  host still decided and sent 8, both games showed none (no shots taken).
+- Scripted missions again (all 20, Smarter, both players acting and
+  invulnerable, 100 s): objective failures the same as Classic's on every
+  mission (Statue 10, Bunker 2, Jungle and Caverns 2 each, the rest none;
+  Archives clean this time), no crashes, 25 desyncs in all (Classic 28).
+  The host barked 176 times; the joiner logged all 176.
+
+## Smarter guards: clues, roles, wounds, regrouping, cut-offs (2026-10-29, COOP_VERSION stays 14)
+
+Stage 3 of the dynamic guards plan, all in src/game/coop_ai.c (Smarter only;
+Classic never reaches it; only plain armed guards on the shared lists, as
+before). Nothing new on the wire: the host already had every player's
+position, and the two new barks are COOPEV_BARK kinds 8 and 9 (a stage-2
+build drops kinds it doesn't know).
+
+- Clues. A calm guard on post looks round once a second (with its look for
+  bodies) and goes to see (WHO'S THERE?, then the usual look, walk, search,
+  walk back) when, within 15 m and in sight:
+  - a door a player opened is still open (propobj.c doorSetOpenState calls
+    coopAiDoorOpened: a shut door starting to open with a player within 3 m
+    and no chr within 2.5 m; a joiner's door reaches the host through
+    coopApplyDoor, which calls the same function), for 60 s;
+  - something was smashed in the last 60 s (once a second the active objects
+    are scanned; what was already smashed at the start doesn't count; doors,
+    guns, ammo, keys and armour are left out). GoldenEye has no lights to
+    shoot out, so a smashed window, camera or monitor stands in for them.
+  - Footsteps: a player moving over 4 units a tick (a full-stick run is about
+    7.5) within 5 m (2.5 m through a wall, 6.25 m in lockdown).
+  Seeing a guard shot was already there (Classic's reaction, investigated).
+  Clues a guard walked past while fighting or searching don't count after.
+- Roles, from the chrnum and the stage (the same guard fights the same way):
+  1 in 4 a rusher (cover only after 3 to 4 bursts, no pause before chasing,
+  flanks 2 times in 3, never regroups or surrenders), 1 in 4 an anchor
+  (cover after 1 to 2 bursts, crouches longer, waits 3 s before moving, never
+  flanks or cuts off, always holds where its search ended when alerted), the
+  rest riflemen (stage 1's behaviour). "guard N fights as <role>" in the log.
+- Wounds: half its health gone, a guard walks wherever it would have run
+  (GoldenEye has no limp animation). Three quarters gone, no other guard of
+  ours fighting within 15 m and the player within 6 m and in sight: 1 in 2
+  (GE_GUARDAI_TESTGIVEUP: always) it surrenders: DON'T SHOOT!, Classic's
+  surrender (hands up, the gun dropped, mirrored to joiners by COOPEV_DROP).
+  The brain then holds it there (its list doesn't run), puts the hands back
+  up after a hit, and lets go if it dies or a level script gives it a list.
+  Shooting it still kills it.
+- Regrouping: two of our guards dead within 20 m of a fighting guard in the
+  last 20 s (alerted or higher): once a fight it runs (FALL BACK!) to the
+  biggest group of calm guards of ours within 40 m that is farther from the
+  target and at least 12 m from it, and makes its stand there (no chasing;
+  when it gives the target up it searches round there).
+- Cutting off: co-op, the guard's target 15 m or more from every partner,
+  out of sight: 1 in 2 (GE_GUARDAI_TESTCUTOFF: always) a guard that isn't an
+  anchor runs to the waypoint by the target on the side towards the nearest
+  partner; one guard at a time.
+- Harness: GE_COOP_TESTSNEAK=<chr>:<s>:<m>[:<stick>] (joiner: stand on the
+  waypoint nearest <m> metres behind a guard, then run up beside it, by
+  GE_GOTO's steering; lv.c g_PortGotoSet/g_PortGotoPace),
+  GE_GUARDAI_TESTCLUE=<chr>:<s> (a smashed-object clue in sight of a guard),
+  GE_GUARDAI_TESTHURT=<chr>:<s>:<part>, GE_GUARDAI_LISTCHRS=<s> (our guards
+  and the shut doors near them), GE_GUARDAI_STEPDBG=1 (player speeds).
+- Tested on Dam (2 players, mock Steam, host Smarter):
+  - Footsteps: joiner run up behind guard 4 from 4 to 6 m, four runs: guard 4
+    heard them at 2 to 3 m three times (WHO'S THERE!, turned, fought), and
+    once guard 5 saw them first. A slow walk could not be driven from the
+    harness (the stick values tried all moved Bond at run speed on the
+    host's view), so "walking is quiet" is untested.
+  - Doors: the joiner's TESTDOOR at pads 173, 180, 257 logged "player 2
+    opened a door" on the host. No guard was placed to see those doors, so a
+    guard reacting to a real opened door is untested; the reaction itself was
+    tested with TESTCLUE: guards 22, 28 and 41 each noticed the clue 6 to 12
+    m off, looked, walked there, searched and went back, and the joiner got
+    the WHO'S THERE? bark.
+  - Guard 39 at 80% hurt (TESTHURT) with the joiner running up: it walked
+    instead of running, fell back, cut player 2 off (57 m from the host) and
+    then surrendered; the gun it dropped landed on both games. A second run
+    the same way fell back three times and never surrendered (the joiner was
+    never within 6 m in its sight when it decided).
+  - Scripted missions (all 20, Smarter, both players acting and
+    invulnerable, 100 s): objective failures the same as Classic's (Silo 4,
+    as in stage 1's Classic run; Statue 10, Bunker 2, Jungle and Caverns 2
+    each; the rest none), no crashes, 28 desyncs in all (Classic 28).
+    Regroups 58, cut-offs 8, guards walking hurt 6, footsteps heard 3, no
+    surrenders; the hunting joiner moves by teleport and opens no doors, so
+    doors and clues saw no use there.
+  - On the host's side, a joiner standing at a pad 1 m below the floor (Dam
+    pad 196 by TESTPAD) kept its puppet at the spawn: coopPuppetUpdate finds
+    no stand tile below that point. A harness artifact, but it would hide a
+    joiner from the guards if a real one ever stood there.
+
+## Smarter guards: alert budget and alertness, 007 screen sliders (2026-10-29, COOP_VERSION stays 14)
+
+Stage 4 of the dynamic guards plan. Two Port Options ([display], Gameplay,
+under Guard Barks; on the GAMEPLAY sheet and the watch's Port Options page),
+read by the game that runs the guards, so the host's count in co-op and
+nothing goes on the wire:
+
+- guard_budget, "Alert Budget": escalations a mission, None, 10 to 100, or
+  No Limit (101); default 40. Each guard answering a call for help, an alarm
+  run, a grenade, a lockdown sweep, a cut-off and a regroup spends one
+  (coop_ai.c coopAiAfford / coopAiSpend). Spent, the guards still fight,
+  search, take cover, suppress and push, but bring no one else in and try
+  nothing new. "alert budget spent" in the log. The level's own alarm and
+  scripts are untouched.
+- guard_alertness, "Guard Alertness": 25 to 200 %, default 100 (stage 3's
+  behaviour). Scales the smarter guards' hearing (coopAiHearScale, so below
+  100 % they hear less than Classic), the reach for bodies, clues and
+  footsteps, and how long the alert takes to calm down (45 s / 90 s at 100 %).
+- The 007 screen: with Smarter picked (guard_ai, as the lobby row edits it)
+  the screen shows six sliders, its four and Guard alertness and Alert
+  budget, 26 pixels apart from y 160 (the original's four sit 33 apart from
+  164, and two more would run off the paper); with Classic it is the
+  original screen. Dragging sets the option live, letting go saves it
+  (front.c port007*). GE_MENU=z007 opens it for Dam at 007.
+- Harness: GE_GUARDAI_BUDGET and GE_GUARDAI_ALERTNESS stand in for midas.ini.
+- Tested: the 007 screen at Smarter and Classic (screenshots), and a drag
+  on Alert budget set it to 60. Caverns and Frigate with the hunting joiner,
+  budget 0 against No Limit: no call for help, grenade, regroup or cut-off at
+  0; 3 calls, 3 regroups and a cut-off without a limit. Dam with budget 3:
+  a call, a grenade and an alarm run, then "alert budget spent" and nothing
+  more. Alertness 50 % against 200 % with a clue 12 m from guard 28: ignored
+  at 50 % (7.5 m reach), noticed at 200 %.
+- Scripted missions (all 20, Smarter at the defaults, both players acting
+  and invulnerable, 100 s): objective failures within Classic's (Silo 2, of
+  Classic's 4; Statue 10, Bunker 2, Jungle and Caverns 2 each; the rest
+  none), no crashes, 24 desyncs in all (Classic 28). The default budget of
+  40 was never spent in 100 s.
+
 ## Far-away players dropping in mid-mission (2026-10-28)
 
 Tester report: a player from Colombia dropped in to a running co-op mission;
@@ -2557,5 +2793,52 @@ protocol change.
   gone on the host, removing" lines for the spawned guards. Every other
   stage passed. A v0.5.2 build (7238ac0) fails the same way on the same
   runs (1 of 4 vs 2 of 4 for v0.5.3), so it predates #59 and #60. The
-  mission still completes on both copies. Not fixed yet: listed as a known
-  issue in the v0.5.3 notes.
+  mission still completes on both copies. Listed as a known issue in the
+  v0.5.3 notes.
+- Cause: the joiner runs its own copy of the level scripts (g_ActiveChrs,
+  chrlvAllChrTick, not gated like the guards' own lists), and Surface 2's
+  reinforcement script spawned guards there too (AI_TRYSpawningChrAtPad).
+  chrAllocate numbers them from player1_guardID, which on the joiner also
+  counts its mirror stand-ins (coopMirrorSpawn), so its 50xx were not
+  the host's. The host never sent those numbers, the reaper freed them 5 s
+  later, the joiner's script spawned again, and the chr sets stayed apart
+  for more than the 10 s the checksum allows.
+- Fix: coopScriptSpawnsLeftToHost(). On a joiner with the host in the
+  stage, the three script spawns (at pad, next to chr, clone) take their
+  success branch without making a chr; the host's arrive in its snapshots
+  as before. Checked: 12 of 12 surface2 runs at PAR=4 (2 of 8 failed
+  before), then every mission, the 3 late joins and the joiner checks.
+- Streets, found in 60 s runs (TESTEND=3600) and failing the same way on
+  main before this (4 of 4): its script shows civilians 39 and 40 for about
+  half a second every few seconds. Each showing left a stand-in on the
+  joiner for COOP_GUARD_GONE (5 s), so the joiner nearly always had one the
+  host didn't. coopReapGuards now frees a living chr after
+  COOP_GUARD_GONE_LIVE (1 s; the host sends it 10 or 20 times a second) and
+  keeps 5 s for bodies, which go once a second. Streets 4 of 4 at 60 s;
+  every mission, late joins, joiner checks and 12 more surface2 runs pass.
+  In the 60 s runs idle players sometimes die before the end (Archives,
+  Depot, Cradle), with or without these changes.
+
+## v0.6.0 release runs (PR #62 with #63 merged in)
+
+- US cart, Linux i686 build, mock Steam, `coop/ci/mission_runs.sh` at PAR=4,
+  default options: 20 of 20 missions pass (1 corrected desync each on Dam
+  and Jungle), 3 of 3 late joins pass, 4 of 4 joiner checks pass.
+- The same 20 with GE_GUARDAI=1 (Smarter): 20 of 20 pass, the same two
+  corrected desyncs.
+- "chr N gone on the host" on the joiner: Streets 5 (civilians 39 and 40,
+  as expected), Surface 2 2, Hostage 1. Before #63 the stage 3 scripted
+  runs had 428.
+- The two-player scripted check with Smarter (both acting, 100 s a
+  stage) crashed once on Statue as the mission started: coopAiBrainOf
+  read past sBrain. `chr - g_ChrSlots` was trusted after a range check,
+  but chrlvAllChrTick also ticks g_ActiveChrs, which can sit just past
+  the slots at an offset that isn't a whole number of ChrRecords, so the
+  index was garbage. coopChrSlot() checks the byte offset; every lookup
+  by slot in coop.c and coop_ai.c uses it. The same code was in v0.5.3.
+- Rerun on the fixed build: mission runs 20/20, late joins 3/3, joiner
+  checks 4/4, Smarter mission runs 20/20; scripted check with Smarter on
+  all 20 plus Statue 3 more times, no crashes. Objective failures as
+  Classic's (Statue, Bunker 2, Jungle, Caverns); Train once showed
+  objective B failed on the joiner for a moment after it shot guard 4,
+  and the host's state put it back (the host never failed it).

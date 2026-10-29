@@ -293,6 +293,11 @@ void coopLookShotEnd(void)
     sShotSeq++;
 }
 
+u8 coopLookShotSeq(void)
+{
+    return sShotSeq;
+}
+
 /* ---- their side: the puppet ---------------------------------------------- */
 
 void coopLookReset(CoopLookPuppet *lp)

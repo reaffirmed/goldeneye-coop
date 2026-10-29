@@ -23,6 +23,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <bondaicommands.h>
 #include <bondgame.h>
@@ -1671,6 +1672,25 @@ static void coopPuppetRemove(CoopRemote *r)
 
 /* host: a guard a partner may be looking at. The game stops animating guards
  * off the host's screen, and the partners see the frozen pose. */
+/* the chr's index in g_ChrSlots, or -1: a chr that isn't one of the slots
+ * (g_ActiveChrs, the level scripts' own) can sit just past them, where
+ * chr - g_ChrSlots is garbage */
+s32 coopChrSlot(const ChrRecord *chr)
+{
+    uintptr_t off;
+
+    if (chr == NULL || g_ChrSlots == NULL || (uintptr_t) chr < (uintptr_t) g_ChrSlots)
+    {
+        return -1;
+    }
+    off = (uintptr_t) chr - (uintptr_t) g_ChrSlots;
+    if (off % sizeof(ChrRecord) != 0 || off / sizeof(ChrRecord) >= (uintptr_t) g_NumChrSlots)
+    {
+        return -1;
+    }
+    return (s32) (off / sizeof(ChrRecord));
+}
+
 s32 coopChrNearPartner(ChrRecord *chr)
 {
     s32 p;
@@ -2148,7 +2168,7 @@ static s32 coopHitBehindCover(CoopEvent *ev)
         return 0;
     }
     from = chr->prop->pos;
-    slot = chr - g_ChrSlots;
+    slot = coopChrSlot(chr);
     if (slot >= 0 && slot < COOP_MAX_CHRS && sGuardTrack[slot].n > 0 && sGuardTrackNum[slot] == chr->chrnum)
     {   /* where it fired from: its newest snapshot, not where it is drawn */
         const CoopSample *nw = &sGuardTrack[slot].s[sGuardTrack[slot].n - 1];
@@ -2632,6 +2652,72 @@ static void coopHarnessTick(void)
             testpad = -1;
         }
     }
+    if (coopPartnerHere() && coopInMission())
+    {   /* GE_COOP_TESTSNEAK=<chrnum>:<s>:<m>[:<stick>]: <s> seconds into the
+         * mission, stand on the waypoint nearest a point <m> metres behind that
+         * guard, on its floor, then run (GE_GOTO's steering; <stick> forward,
+         * 70 a run, 25 a walk) to 1.5 m beside it: a player coming up behind
+         * a guard (harness only) */
+        static s32 sneakchr = -2, sneakat;
+        static f32 sneakm;
+        if (sneakchr == -2)
+        {
+            extern s32 g_PortGotoPace;
+            const char *e = getenv("GE_COOP_TESTSNEAK");
+            s32 pace = 70;
+            if (e == NULL || sscanf(e, "%d:%d:%f:%d", &sneakchr, &sneakat, &sneakm, &pace) < 3)
+            {
+                sneakchr = -1;
+            }
+            g_PortGotoPace = pace;
+        }
+        if (sneakchr >= 0 && sMissionTicks >= (u32) sneakat * 60 && g_CurrentSetup.pathwaypoints != NULL)
+        {
+            extern s32 g_PortGotoSet;
+            extern coord3d g_PortGotoTo;
+            ChrRecord *c = chrFindByLiteralId(sneakchr);
+
+            if (c != NULL && c->prop != NULL && c->model != NULL)
+            {
+                f32 rot = getsubroty(c->model);
+                f32 fx = sinf(rot), fz = cosf(rot);
+                f32 bx = c->prop->pos.f[0] - fx * sneakm * 100.0f, bz = c->prop->pos.f[2] - fz * sneakm * 100.0f;
+                waypoint *wp;
+                s32 best = -1;
+                f32 bestd2 = 1.0e30f;
+
+                for (wp = g_CurrentSetup.pathwaypoints; wp->padID >= 0; wp++)
+                {
+                    PadRecord *pad = &g_CurrentSetup.pads[wp->padID];
+                    f32 dx = pad->pos.f[0] - bx, dz = pad->pos.f[2] - bz, dy = pad->pos.f[1] - c->prop->pos.f[1];
+
+                    if (pad->stan != NULL && dy > -200.0f && dy < 200.0f && dx * dx + dz * dz < bestd2)
+                    {
+                        bestd2 = dx * dx + dz * dz;
+                        best = wp->padID;
+                    }
+                }
+                if (best >= 0)
+                {
+                    PadRecord *pad = &g_CurrentSetup.pads[best];
+                    coord3d pos = pad->pos;
+
+                    coopRespawnPlayerAt(&pos, pad->stan, 0.0f, sLastWeapon);
+                    g_PortGotoTo.f[0] = c->prop->pos.f[0] + fz * 150.0f;    /* beside it, not into it */
+                    g_PortGotoTo.f[1] = c->prop->pos.f[1];
+                    g_PortGotoTo.f[2] = c->prop->pos.f[2] - fx * 150.0f;
+                    g_PortGotoSet = 1;
+                    portConLogf("ge: coop: testsneak: pad %d (%.0f m from the spot behind guard %d), running to it\n", best,
+                                sqrtf(bestd2) / 100.0f, sneakchr);
+                }
+                else
+                {
+                    portConLogf("ge: coop: testsneak: no waypoint near guard %d\n", sneakchr);
+                }
+            }
+            sneakchr = -1;
+        }
+    }
     if (coopInMission())
     {   /* GE_COOP_TESTHOLD=<item>:<s>: <s> seconds into the mission, switch to that
          * item (1 the fists, holstered; harness only) */
@@ -2710,7 +2796,7 @@ static void coopHarnessTick(void)
         static u32 since, downs, tries;
         PropRecord *bond = g_CurrentPlayer->prop;
         ChrRecord *c = (target >= 0) ? chrFindByLiteralId(target) : NULL;
-        s32 slot = (c != NULL) ? (s32) (c - g_ChrSlots) : -1;
+        s32 slot = coopChrSlot(c);
 
         if (testhunt == -2)
         {
@@ -3044,7 +3130,7 @@ static CoopChrTarget *coopChrState(ChrRecord *chr)
     {
         return NULL;
     }
-    slot = chr - g_ChrSlots;
+    slot = coopChrSlot(chr);
     if (slot < 0 || slot >= g_NumChrSlots || slot >= COOP_MAX_CHRS)
     {
         return NULL;
@@ -3321,6 +3407,40 @@ s32 coopTargetablePlayer(s32 t)
 PropRecord *coopTargetablePlayerProp(s32 t)
 {
     return coopTargetablePlayer(t) ? coopTargetProp(t) : NULL;
+}
+
+/* host, or solo: what the smarter guards (coop_ai.c) watch of player t (where
+ * they stand, their shots and gun cues, a revive under way); 0 when t is not
+ * in the fight */
+s32 coopAiPlayerView(s32 t, CoopAiPlayerView *out)
+{
+    memset(out, 0, sizeof(*out));
+    if (t == COOPTGT_LOCAL && (sEnabled <= 0 || coopNetIsHost()))
+    {
+        if (g_CurrentPlayer == NULL || g_CurrentPlayer->prop == NULL || g_CurrentPlayer->bonddead)
+        {
+            return 0;
+        }
+        out->prop = g_CurrentPlayer->prop;
+        out->shotseq = coopLookShotSeq();
+        out->flash = (g_CurrentPlayer->hands[GUNRIGHT].field_87D ? 1 : 0) | (g_CurrentPlayer->hands[GUNLEFT].field_87D ? 2 : 0);
+        out->cue = coopAudioCueByte();
+        out->reviving = sEnabled > 0 && coopReviveTarget() != 0;
+        out->yaw = bondviewGetPlayerYawRadians();
+        return 1;
+    }
+    if (sEnabled <= 0 || !coopNetIsHost() || coopVersus() || t <= COOPTGT_LOCAL || t >= COOPTGT_COUNT
+        || !coopRemoteAliveHere(t))
+    {
+        return 0;
+    }
+    out->prop = sR[t].puppet;
+    out->shotseq = sR[t].st.look.shotseq;
+    out->flash = sR[t].st.look.flash;
+    out->cue = sR[t].st.look.cue;
+    out->reviving = sR[t].st.revive != 0;
+    out->yaw = sR[t].st.yaw;
+    return 1;
 }
 
 /* host: "Bond is aiming at me" (sub_GAME_7F0333F8) for whoever Bond is in
@@ -3652,9 +3772,13 @@ s32 coopTargetRecordDamage(f32 damage, f32 angle)
  * and anyone firing or dying, every time. Late in a mission most chrs are
  * bodies, and the guards were most of what the host sent each joiner (about
  * 23 KB/s of 45 on Dam), which a far-away player's line felt first. Joiners
- * free a chr missing from the snapshots for COOP_GUARD_GONE ticks. */
+ * free a chr missing from the snapshots for COOP_GUARD_GONE ticks, a living
+ * one (sent 10 or 20 times a second) after COOP_GUARD_GONE_LIVE: Streets'
+ * script shows civilians 39 and 40 for half a second every few seconds, and
+ * 5 s copies of them kept the joiner's chrs from ever matching the host's. */
 #define COOP_GUARD_FAR   6000.0f
 #define COOP_GUARD_GONE  300
+#define COOP_GUARD_GONE_LIVE 60
 
 static s32 coopGuardDue(ChrRecord *chr, s32 i, s32 firing)
 {
@@ -3888,7 +4012,7 @@ static void coopApplyGuard(CoopGuardEnt *e)
         return;
     }
     prop = chr->prop;
-    slot = chr - g_ChrSlots;
+    slot = coopChrSlot(chr);
     if (slot >= 0 && slot < COOP_MAX_CHRS && sGuardTrackNum[slot] == chr->chrnum && sGuardTrack[slot].n > 0
         && (s32) (sGuardTrack[slot].s[sGuardTrack[slot].n - 1].ms - sGuardPktMs) > 0)
     {   /* an older snapshot than one we applied (jitter reorders them): its spot goes in the
@@ -4077,7 +4201,7 @@ static void coopClientGunfire(void)
     }
 }
 
-/* Chrs the host freed stop showing up in snapshots; free ours after 2 s. */
+/* Chrs the host freed stop showing up in snapshots; free ours after 1 s, or 5 s for a body. */
 static void coopReapGuards(void)
 {
     s32 i;
@@ -4098,7 +4222,8 @@ static void coopReapGuards(void)
         {
             sChrLastSync[i] = sTick; /* start the clock when we first see it */
         }
-        else if (sTick - sChrLastSync[i] > COOP_GUARD_GONE && !(chr->hidden & CHRHIDDEN_REMOVE))
+        else if (sTick - sChrLastSync[i] > (sChrHostDying[i] ? COOP_GUARD_GONE : COOP_GUARD_GONE_LIVE)
+                 && !(chr->hidden & CHRHIDDEN_REMOVE))
         {
             portConLogf("ge: coop: chr %d gone on the host, removing\n", chr->chrnum);
             chr->hidden |= CHRHIDDEN_REMOVE;
@@ -4185,7 +4310,7 @@ static struct ChrHitReaction *coopHitReaction(s32 hitpart)
 
 static void coopPredictShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, u8 *kind, u8 *idx)
 {
-    s32 slot = chr - g_ChrSlots;
+    s32 slot = coopChrSlot(chr);
     struct ChrHitReaction *hr;
     struct StruckAnim *sa;
     f32 dmg;
@@ -7696,7 +7821,7 @@ static void coopRecvAiSync(CoopAiPkt *p)
         {
             continue;
         }
-        slot = chr - g_ChrSlots;
+        slot = coopChrSlot(chr);
         if (slot >= 0 && slot < COOP_MAX_CHRS)
         {
             sAiSync[slot] = p->ent[k];
@@ -9024,6 +9149,17 @@ s32 coopKeepBodyList(ChrRecord *chr, AIRecord *list)
 {
     return sEnabled > 0 && !coopNetIsHost() && sHostEndingHere && g_CurrentPlayer->prop != NULL
         && chr == g_CurrentPlayer->prop->chr && chr->ailist == list;
+}
+
+/* joiner: our copy of the level scripts spawns guards too (Surface 2's
+ * reinforcements), numbered by our own count, which drifts from the host's.
+ * The host's spawns reach us in its snapshots, so ours were extras the reaper
+ * freed 5 s later and the script spawned again: the chrs never matched the
+ * host's (repl "unresolved desync"). chrai.c takes the spawn's success branch
+ * without making a chr. */
+s32 coopScriptSpawnsLeftToHost(void)
+{
+    return sEnabled > 0 && !coopNetIsHost() && coopRemoteHere(0) && !coopVersus();
 }
 
 static void coopApplyAiCommand(CoopEvent *ev)

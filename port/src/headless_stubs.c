@@ -75,6 +75,21 @@ s32 portGuardAiSmarter(void)
     return 0;
 }
 
+s32 portGuardBarks(void)
+{
+    return 1;
+}
+
+s32 portGuardAlertness(void)
+{
+    return 100;
+}
+
+s32 portGuardBudget(void)
+{
+    return 40;
+}
+
 s32 portCoopMenuClassic(void)
 {
     return 0;

@@ -262,6 +262,9 @@ static int s_CfgDistanceFading = 0;    /* 1 = enable distance-based prop/charact
                                        * fogGetPropDistColor); 0 = always fully
                                        * opaque regardless of distance */
 static int s_CfgGuardAi = 0;          /* [display] guard_ai: 0 Classic guards, 1 Smarter (coop_ai.c) */
+static int s_CfgGuardBarks = 1;       /* [display] guard_barks: smarter guards' callouts and stings shown here */
+static int s_CfgGuardAlertness = 100; /* [display] guard_alertness: smarter guards' hearing and noticing, 25..200 % */
+static int s_CfgGuardBudget = 40;     /* [display] guard_budget: smarter guards' escalations a mission, 101 no limit */
 static int s_CfgCoopMenu = 0;         /* [display] coop_menu: 0 the Modern CO-OP screen, 1 Classic (the folder, front.c) */
 static int s_CfgTrueEnemyRockets = 1; /* 0 = restore the vanilla Enemy Rockets
                                        * cheat bug (chrai.c AI_TRYGiveMeItem
@@ -632,6 +635,24 @@ s32 portDistanceFadingEnabled(void)
 s32 portGuardAiSmarter(void)
 {
     return s_CfgGuardAi;
+}
+
+/** midas.ini [display] guard_barks: show smarter guards' callouts and play their stings (each player's own) */
+s32 portGuardBarks(void)
+{
+    return s_CfgGuardBarks;
+}
+
+/** midas.ini [display] guard_alertness: how far smarter guards hear and notice, and how long they stay on edge (percent) */
+s32 portGuardAlertness(void)
+{
+    return s_CfgGuardAlertness;
+}
+
+/** midas.ini [display] guard_budget: how many times a mission smarter guards may escalate (101: no limit) */
+s32 portGuardBudget(void)
+{
+    return s_CfgGuardBudget;
 }
 
 /** midas.ini [display] coop_menu: the CO-OP screen drawn on the original folder (1) or Modern (0) */
@@ -1159,6 +1180,19 @@ static int videoSetDisplayOption(const char *key, const char *value)
     if (SDL_strcasecmp(key, "distance_fading") == 0) { s_CfgDistanceFading = SDL_atoi(value); return 1; }
     if (SDL_strcasecmp(key, "true_enemy_rockets") == 0) { s_CfgTrueEnemyRockets = SDL_atoi(value); return 1; }
     if (SDL_strcasecmp(key, "guard_ai") == 0)      { s_CfgGuardAi = SDL_atoi(value) != 0; return 1; }
+    if (SDL_strcasecmp(key, "guard_barks") == 0)   { s_CfgGuardBarks = SDL_atoi(value) != 0; return 1; }
+    if (SDL_strcasecmp(key, "guard_alertness") == 0)
+    {
+        s_CfgGuardAlertness = SDL_atoi(value);
+        s_CfgGuardAlertness = (s_CfgGuardAlertness < 25) ? 25 : (s_CfgGuardAlertness > 200) ? 200 : s_CfgGuardAlertness;
+        return 1;
+    }
+    if (SDL_strcasecmp(key, "guard_budget") == 0)
+    {
+        s_CfgGuardBudget = SDL_atoi(value);
+        s_CfgGuardBudget = (s_CfgGuardBudget < 0) ? 0 : (s_CfgGuardBudget > 101) ? 101 : s_CfgGuardBudget;
+        return 1;
+    }
     if (SDL_strcasecmp(key, "coop_menu") == 0)     { s_CfgCoopMenu = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "show_fps") == 0)      { s_CfgShowFps = SDL_atoi(value); return 1; }
     if (SDL_strcasecmp(key, "classic_saved") == 0)
@@ -1601,6 +1635,9 @@ s32 portVideoOptionGet(const char *key, s32 *out)
     if (SDL_strcasecmp(key, "fix_shootthrough") == 0) { *out = s_CfgFixShootThrough; return 1; }
     if (SDL_strcasecmp(key, "true_enemy_rockets") == 0) { *out = s_CfgTrueEnemyRockets; return 1; }
     if (SDL_strcasecmp(key, "guard_ai") == 0)      { *out = s_CfgGuardAi; return 1; }
+    if (SDL_strcasecmp(key, "guard_barks") == 0)   { *out = s_CfgGuardBarks; return 1; }
+    if (SDL_strcasecmp(key, "guard_alertness") == 0) { *out = s_CfgGuardAlertness; return 1; }
+    if (SDL_strcasecmp(key, "guard_budget") == 0)  { *out = s_CfgGuardBudget; return 1; }
     if (SDL_strcasecmp(key, "coop_menu") == 0)     { *out = s_CfgCoopMenu; return 1; }
     if (SDL_strcasecmp(key, "adzy") == 0)          { *out = s_CfgAdzy;         return 1; }
     if (SDL_strcasecmp(key, "unlock_all") == 0)    { *out = s_CfgUnlockAll;    return 1; }
@@ -2365,6 +2402,9 @@ static void videoWriteDefaultIni(void)
     fprintf(f, "distance_fading=%d\n", s_CfgDistanceFading);
     fprintf(f, "true_enemy_rockets=%d\n", s_CfgTrueEnemyRockets);
     fprintf(f, "guard_ai=%d\n", s_CfgGuardAi);
+    fprintf(f, "guard_barks=%d\n", s_CfgGuardBarks);
+    fprintf(f, "guard_alertness=%d\n", s_CfgGuardAlertness);
+    fprintf(f, "guard_budget=%d\n", s_CfgGuardBudget);
     fprintf(f, "coop_menu=%d\n", s_CfgCoopMenu);
     fprintf(f, "hfov_wide=%d\n", (int) videoHfovWide());
     fprintf(f, "weapon_fov=%d\n", s_CfgWeaponFov);

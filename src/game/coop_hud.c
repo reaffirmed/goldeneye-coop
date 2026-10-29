@@ -44,6 +44,7 @@
 #include "lv.h"
 #include "objective_status.h"
 #include "language.h"
+#include "chr.h"
 #include "coop.h"
 
 extern Gfx *portHudScaleBegin(Gfx *gdl, f32 x, f32 y);
@@ -191,6 +192,71 @@ static Gfx *coopHudSpeaker(Gfx *gdl, s32 x, s32 y, u32 colour, s32 waves, s32 mu
         gdl = microcode_constructor_related_to_menus(gdl, x - 1, y + 3, x + 10, y + 4, COOP_HUD_COL_FAIL);
     }
     return gdl;
+}
+
+/* a smarter guard's callout over its head (coop_ai.c barks), when it is in
+ * front of us and within 40 m; sized like a name tag, a grenade warning red */
+static Gfx *coopHudBark(Gfx *gdl, CoopBarkMark *m)
+{
+    PropRecord *self = g_CurrentPlayer->prop;
+    ChrRecord *chr = chrFindByLiteralId(m->chrnum);
+    coord3d v;
+    coord2d s;
+    const char *text;
+    f32 dx, dy, dz, dist, k, scale;
+    s32 th = 0, tw = 0;
+    s32 x, y, px, py;
+
+    if (self == NULL || chr == NULL || chr->prop == NULL || chr->model == NULL)
+    {
+        return gdl;
+    }
+    v.f[0] = chr->prop->pos.f[0];
+    v.f[1] = chr->ground + chr->chrheight - 5.0f;   /* just over the head */
+    v.f[2] = chr->prop->pos.f[2];
+    dx = v.f[0] - self->pos.f[0];
+    dy = v.f[1] - self->pos.f[1];
+    dz = v.f[2] - self->pos.f[2];
+    dist = sqrtf(dx * dx + dy * dy + dz * dz);
+    if (dist > 4000.0f)
+    {
+        return gdl;
+    }
+    mtx4TransformVecInPlace(camGetWorldToScreenMtxf(), &v);
+    if (v.f[2] > -10.0f)
+    {
+        return gdl;   /* behind the camera */
+    }
+    transform3Dto2DCoords(&v, &s);
+    s.f[0] = bondviewAimPinX(s.f[0]);
+    k = (dist - COOP_TAG_NEAR) / (COOP_TAG_FAR - COOP_TAG_NEAR);
+    k = (k < 0.0f) ? 0.0f : (k > 1.0f) ? 1.0f : k;
+    scale = COOP_TAG_NEAR_SCALE + (COOP_TAG_FAR_SCALE - COOP_TAG_NEAR_SCALE) * k;
+    text = coopAiBarkText(m->kind);
+    textMeasure(&th, &tw, (char *) text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+    px = (s32) s.f[0];
+    py = (s32) s.f[1];
+    x = px - tw / 2;
+    y = py - th;
+    if (px - (s32) (tw * scale) / 2 < viGetViewLeft() + 2 || px + (s32) (tw * scale) / 2 > viGetViewLeft() + viGetViewWidth() - 2
+        || py - (s32) (th * scale) < viGetViewTop() + 2 || py > viGetViewTop() + viGetViewHeight() - 2)
+    {
+        return gdl;
+    }
+    gdl = microcode_constructor(gdl);
+    {
+        s32 x4 = px * 4, y4 = py * 4;
+
+        x4 = (x4 < 0) ? 0 : (x4 > 0xFFE) ? 0xFFE : x4;
+        y4 = (y4 < 0) ? 0 : (y4 > 0xFFE) ? 0xFFE : y4;
+        gDPNoOpTag(gdl++, 0x5A000000u | (u32) (scale * coopTextScale() * 256.0f + 0.5f));   /* times Text Size */
+        gDPNoOpTag(gdl++, 0x58000000u | ((u32) x4 << 12) | (u32) y4);
+    }
+    gdl = textRenderOutlined(gdl, &x, &y, (char *) text, ptrFontBankGothicChars, ptrFontBankGothic,
+                             coopHudWithAlpha(m->kind == COOPBARK_GRENADE ? COOP_HUD_COL_FAIL : COOP_HUD_COL_WARN, m->alpha),
+                             coopHudWithAlpha(COOP_HUD_COL_SHADOW, m->alpha), (s32) viGetX(), viGetY(), 0, 0);
+    gDPNoOpTag(gdl++, 0x58FFFFFFu);
+    return combiner_bayer_lod_perspective(gdl);
 }
 
 /* the partner's name and distance over their head, when they are in front of us */
@@ -959,6 +1025,14 @@ Gfx *coopHudRender(Gfx *gdl)
     if (coopCutsceneActive())
     {
         return coopHudSkipVote(gdl);   /* the partners are in the shot, not tagged */
+    }
+    {
+        CoopBarkMark m;
+
+        for (i = 0; coopAiBarkAt(i, &m); i++)
+        {
+            gdl = coopHudBark(gdl, &m);
+        }
     }
     memset(&p, 0, sizeof(p));
     partner = coopHudPartner(&p);

@@ -14626,6 +14626,7 @@ void doorSetOpenState(DoorRecord *door, s32 newstate)
 {
 #ifndef TARGET_N64
     coopDoorStateChanged(door, newstate); /* co-op: mirror to the peer */
+    coopAiDoorOpened(door, newstate);     /* Smarter guards: a door a player opened is a clue */
     if (newstate == DOORSTATE_OPENING && door->prop != NULL
         && (door->openstate == DOORSTATE_STATIONARY || door->openstate == DOORSTATE_WAITING))
     {

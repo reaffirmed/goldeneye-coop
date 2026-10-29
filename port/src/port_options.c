@@ -112,6 +112,11 @@ static const s32 sTextSizeVals[] = { 100, 125, 150, 200 };
 static const char *const sTextSizeText[] = { "100%\n", "125%\n", "150%\n", "200%\n" };
 static const char *const sHoldToggleText[] = { "Hold\n", "Toggle\n" };
 static const char *const sGuardAiText[] = { "Classic\n", "Smarter\n" };
+/* smarter guards' alert budget: escalations a mission (coop_ai.c coopAiSpend); 101 is no limit */
+static const s32 sGuardBudgetVals[] = { 0, 10, 20, 30, 40, 50, 60, 80, 100, 101 };
+static const char *const sGuardBudgetText[] = {
+    "None\n", "10\n", "20\n", "30\n", "40\n", "50\n", "60\n", "80\n", "100\n", "No Limit\n"
+};
 static const char *const sCoopMenuText[] = { "Modern\n", "Classic\n" };
 static const char *const sMsaaText[] = { "OFF\n", "2x\n", "4x\n", "8x\n" };
 
@@ -254,6 +259,9 @@ static const struct PortOpt sOpts[] = {
     TOGGLE("fix_shootthrough",   "[display]", "Shoot-Through Fix\n",  PORTOPT_CAT_GAMEPLAY),
     TOGGLE("true_enemy_rockets", "[display]", "True Enemy Rockets\n", PORTOPT_CAT_GAMEPLAY),
     TOGGLET("guard_ai",          "[display]", "Guard AI\n",           PORTOPT_CAT_GAMEPLAY, sGuardAiText),
+    TOGGLE("guard_barks",        "[display]", "Guard Barks\n",        PORTOPT_CAT_GAMEPLAY),
+    INTR("guard_alertness",      "[display]", "Guard Alertness\n",    PORTOPT_CAT_GAMEPLAY, 25, 200, 25, "%"),
+    ENUMR("guard_budget",        "[display]", "Alert Budget\n",       PORTOPT_CAT_GAMEPLAY, sGuardBudgetVals, sGuardBudgetText, NULL),
     TOGGLET("coop_menu",         "[display]", "Co-op Menu\n",         PORTOPT_CAT_GAMEPLAY, sCoopMenuText),
     /* adzy (play as ssf character) is ini-only */
     TOGGLE("unlock_all",         "[display]", "Unlock All\n",         PORTOPT_CAT_GAMEPLAY),
