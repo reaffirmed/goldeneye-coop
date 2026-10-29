@@ -321,6 +321,10 @@ static s32 coopAiAlertnessPct(void);
 
 static s32 coopAiDecideOn(void)
 {
+    if (!COOP_SMARTER_AI)
+    {   /* paused: Classic even for a v0.6.0 host's Smarter (COOPSET_GUARDAI) */
+        return 0;
+    }
     if (coopVersus())
     {
         return 0;
@@ -339,6 +343,10 @@ s32 coopAiSmarterOption(void)
 {
     const char *e = getenv("GE_GUARDAI");
 
+    if (!COOP_SMARTER_AI)
+    {   /* paused: a saved guard_ai=1 is kept in midas.ini but not used */
+        return COOPAI_CLASSIC;
+    }
     if (e != NULL)
     {
         return atoi(e) == COOPAI_SMARTER ? COOPAI_SMARTER : COOPAI_CLASSIC;
@@ -349,6 +357,10 @@ s32 coopAiSmarterOption(void)
 /* the host's lobby row edits the same Port Option (saved to midas.ini) */
 void coopAiSetSmarterOption(s32 mode)
 {
+    if (!COOP_SMARTER_AI)
+    {
+        mode = COOPAI_CLASSIC;
+    }
     portOptSetValue(portOptFind("guard_ai"), mode == COOPAI_SMARTER);
     coopSetSetting(COOPSET_GUARDAI, mode);
 }
@@ -782,7 +794,7 @@ static void coopAiBarkShow(s32 chrnum, s32 kind)
     PropRecord *bond = getCurrentPlayerProp();
     s32 i, slot = 0;
 
-    if (kind < 0 || kind >= COOPBARK_COUNT || !portGuardBarks() || chr == NULL || chr->prop == NULL)
+    if (!COOP_SMARTER_AI || kind < 0 || kind >= COOPBARK_COUNT || !portGuardBarks() || chr == NULL || chr->prop == NULL)
     {
         return;
     }

@@ -370,6 +370,16 @@ option(GE_VIDEO "Build the fast3d renderer (SDL2 + OpenGL)" OFF)
 # Testing convenience: every solo mission, bonus stage and difficulty
 # (incl. 007 mode) selectable regardless of save state. Progression logic
 # untouched otherwise - saves still record normally.
+# Smarter guards (src/game/coop_ai.c): paused since v0.6.1 until the core game
+# is done. OFF builds Classic guards only and hides the Guard AI, Guard Barks,
+# Guard Alertness and Alert Budget rows; the code stays in the tree.
+option(COOP_SMARTER_AI "Build the Smarter guard AI option (paused, see coop/NOTES.md)" OFF)
+if(COOP_SMARTER_AI)
+    add_compile_definitions(COOP_SMARTER_AI=1)
+else()
+    add_compile_definitions(COOP_SMARTER_AI=0)
+endif()
+
 option(GE_UNLOCK_ALL "Unlock all missions and difficulties (testing)" OFF)
 if(GE_UNLOCK_ALL)
     add_compile_definitions(GE_UNLOCK_ALL=1)

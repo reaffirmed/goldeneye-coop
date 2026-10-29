@@ -168,7 +168,12 @@ enum
 s32  coopSetting(s32 which);
 void coopSetSetting(s32 which, s32 value);
 
-/* smarter guards (coop_ai.c): COOPSET_GUARDAI in co-op, the guard_ai Port Option in solo */
+/* smarter guards (coop_ai.c): COOPSET_GUARDAI in co-op, the guard_ai Port Option in solo.
+ * Paused since v0.6.1: built only with -DCOOP_SMARTER_AI=ON (CMakeLists.txt);
+ * otherwise every game plays Classic, whatever midas.ini or the host says. */
+#ifndef COOP_SMARTER_AI
+#define COOP_SMARTER_AI 0
+#endif
 enum { COOPAI_CLASSIC = 0, COOPAI_SMARTER = 1 };
 s32  coopAiSmarter(void); s32 coopAiSmarterOption(void); void coopAiSetSmarterOption(s32 mode);                   /* this mission's guards are the smarter ones */
 s32  coopAiTick(ChrRecord *chr);            /* chrai.c ai(): 1 when the smarter AI ran the chr's tick */
