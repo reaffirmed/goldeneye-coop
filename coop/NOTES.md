@@ -2842,3 +2842,29 @@ protocol change.
   Classic's (Statue, Bunker 2, Jungle, Caverns); Train once showed
   objective B failed on the joiner for a moment after it shot guard 4,
   and the host's state put it back (the host never failed it).
+
+## Smarter guards paused (v0.6.1, COOP_VERSION stays 14)
+
+Owner's call: Smart AI off until the core game (sync fixes, campaign,
+multiplayer) is done, then developed further. Paused, not deleted.
+
+- Build flag COOP_SMARTER_AI (CMake option, OFF by default; coop.h falls
+  back to 0). OFF: coopAiDecideOn and coopAiSmarterOption always say
+  Classic (a saved guard_ai=1 and GE_GUARDAI=1 are ignored), the host's
+  lobby sends COOPSET_GUARDAI 0, coopAiBarkShow drops barks (so a v0.6.0
+  host on Smarter shows no callouts on a v0.6.1 joiner), and the Guard AI,
+  Guard Barks, Guard Alertness and Alert Budget rows are left out of the
+  Port Options sheet, the watch page and GAME SETUP; the 007 screen keeps
+  the original four sliders (port007Smarter). The options stay in the
+  table and midas.ini, so a value saved now comes back with the flag.
+- Back on: `cmake -DCOOP_SMARTER_AI=ON`; every GE_GUARDAI* harness switch
+  works again. The unmerged "smarter fixes" branch was not taken.
+- Protocol unchanged: a v0.6.0 host with Smarter still runs it for its
+  joiners (only the host runs guards); the release notes say so.
+- No mission runs for this release (owner's call, the change only turns
+  Smarter off); smoke check below.
+- Smoke check (US cart, Linux i686, mock Steam), with GE_GUARDAI=1 set to
+  ask for Smarter: solo Dam and a two-player Dam through the lobby boot and
+  play, no "smarter guards on" in any log; Port Options sheet without the
+  four rows, the 007 screen with its four sliders, the host's GAME SETUP
+  without Guard AI. Shots: smart-ai-paused/ in the project files.

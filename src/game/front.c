@@ -4627,10 +4627,12 @@ static const struct PortSheetRow port_sheet_rows_portopts[] = {
     { SHROW_OPT, "unlock_all" },   /* first */
     { SHROW_OPT, "fix_shootthrough" }, { SHROW_OPT, "distance_fading" },
     { SHROW_OPT, "true_enemy_rockets" },
+#if COOP_SMARTER_AI   /* paused since v0.6.1 (coop.h) */
     { SHROW_OPT, "guard_ai" },               /* Classic or Smarter guards (coop_ai.c); the host's in co-op */
     { SHROW_OPT, "guard_barks" },            /* their callouts and stings, each player's own */
     { SHROW_OPT, "guard_alertness" },        /* their hearing and noticing, the host's in co-op */
     { SHROW_OPT, "guard_budget" },           /* their escalations a mission, the host's in co-op */
+#endif
     { SHROW_OPT, "coop_menu" },              /* the CO-OP screen: Modern, or Classic on the folder */
     { SHROW_OPT, "unlimited_explosions" },   /* default ON */
     { SHROW_OPT, "watch_static" },           /* the watch's fuzz, default ON (vanilla) */
@@ -9920,8 +9922,10 @@ static void coopLobbyBuildRows(void)
         coopLobbyAdd(coopLobbyIsHost() ? CLROW_DIFFICULTY : CLROW_TEXT, 0, "Guard Strength\n", diff);
         snprintf(diff, sizeof(diff), "%s\n", coopScalingName(coopSetting(COOPSET_SCALING)));
         coopLobbyAdd(coopLobbyIsHost() ? CLROW_SCALING : CLROW_TEXT, 0, "Player Scaling\n", diff);
+#if COOP_SMARTER_AI
         snprintf(diff, sizeof(diff), "%s\n", coopGuardAiName(coopLobbyIsHost() ? coopAiSmarterOption() : coopSetting(COOPSET_GUARDAI)));
         coopLobbyAdd(coopLobbyIsHost() ? CLROW_GUARDAI : CLROW_TEXT, 0, "Guard AI\n", diff);
+#endif
     }
     if (!COOP_VS_ON())
     {
