@@ -61,7 +61,7 @@ static struct GlyphLook glyphLook(s32 action)
         g.round = 0;
         g.text = (action == MENUGLYPH_ACCEPT) ? "ENTER" : (action == MENUGLYPH_BACK) ? "ESC"
                : (action == MENUGLYPH_CHAT) ? "T" : (action == MENUGLYPH_ARROWS || action == MENUGLYPH_DPAD) ? "ARROWS"
-               : (action == MENUGLYPH_TABS) ? "," : (action == MENUGLYPH_TABS_R) ? "."   /* watch_prev / watch_next */
+               : (action == MENUGLYPH_TABS) ? "," : (action == MENUGLYPH_TABS_R) ? "TAB"   /* the tab bar's: Tab steps on (, and . still work) */
                : "CLICK";   /* L and R: a click steps the row */
         return g;
     }

@@ -18,14 +18,18 @@ Playing
 1. Everyone starts ProjectMidas.exe, pick a folder and choose
    "3. CO-OP".
    The CO-OP screen is laid out like Modern Warfare 2's lobby: tabs along
-   the top (PLAY / LOBBY, GAME SETUP, FIND GAMES / INVITE, CONTROLS, CHAT),
+   the top (PLAY / LOBBY, GAME SETUP, FIND GAMES / INVITE, OPTIONS, CHAT),
    the tab's rows down the left, your party and the next mission (or the
    arena) on the right, a line along the foot saying what the row under the
    cursor does, and the buttons for the pad (or keys) you used last under
-   that. Change tab with LB / RB (L1 / R1) on a pad, , and . on the keyboard
-   (the watch's page keys), or a click on the tab. Up / Down (D-pad, arrow
+   that. Change tab with LB / RB (L1 / R1) on a pad, Tab (Shift+Tab goes
+   back) or , and . on the keyboard, or a click on the tab. Up / Down (D-pad, arrow
    keys) pick a row; a row with arrows either side of its value steps with
    Left / Right or a click on an arrow; A / Enter selects; B / Esc goes back.
+   Prefer the original look? Set OPTIONS > "Co-op Menu" (or Options >
+   Gameplay > Port Options > Co-op Menu) to Classic: the same rows as one
+   list on the folder's paper, with photo cards for the party, as before.
+   Every co-op option is on both.
 2. The host picks "Host a Game". Your online Steam friends are listed on
    the INVITE tab; pick one to invite them (or use "Steam Invite Window").
    Invite up to three friends.
@@ -52,11 +56,13 @@ Playing
    Public games are listed on the FIND GAMES tab with the host's name and
    how many are in; one marked "Password" asks for it before you join.
    If the CO-OP screen says "Wrong password.", try again.
-   The CONTROLS tab has your profile, the controller layout, Field of View,
-   Mouse Look, Mouse Speed and voice chat; Left / Right step each one
-   (the same settings as in the Options menus).
-4. The host can set the rules on the GAME SETUP tab before starting (the
-   others see them there):
+   The OPTIONS tab has your profile, the controller layout, Field of View,
+   Mouse Look, Mouse Speed, voice chat and the Co-op Menu look; Left /
+   Right step each one (the same settings as in the Options menus).
+   "All Options" opens the whole Options folder (video, audio, HUD,
+   accessibility, key binds, Port Options); its PREVIOUS comes back here.
+4. Once hosting, the host sets the rules on the GAME SETUP tab before
+   starting (the others see them there):
    - Continue: jumps to the next mission you have not beaten together.
    - When Down: Revive or Timer, Revive only, or Timer only.
    - Respawn (with a timer): 3-20 s (default, sooner when it is quiet) or
@@ -66,7 +72,7 @@ Playing
    - Lives: Unlimited (default), or 1, 2, 3, 5 or 10 each per mission.
      Every time you go down costs one; when you go down on your last life
      you are out until the mission ends.
-   - Guards: Normal, Hard (tougher, more of them) or Brutal.
+   - Guard Strength: Normal, Hard (tougher, more of them) or Brutal.
    - Player Scaling: Auto (default) makes guards tougher, sharper and more
      numerous with 3 or 4 players, and follows players who leave or drop
      in. Off keeps the two-player fight; 3 Players or 4 Players fixes the
@@ -295,8 +301,9 @@ it doesn't match. If a file can't be replaced, everything is put back.
 - A host turned you away with "Update needed to join": the game looks for
   the update at once and offers it, so you can install it and join again.
   If the host is the one on the old version, it says so.
-- CONTROLS tab: "Update Check" On / Off (midas.ini [display] auto_update),
-  and "Check Now", which shows your version and asks GitHub again.
+- OPTIONS tab: "Update Check" On / Off (midas.ini [display] auto_update),
+  and "Game Version", which shows your version; select it to ask GitHub
+  again.
 - Behind a firewall that blocks GitHub, download the zip from the releases
   page instead and unzip it over this folder.
 

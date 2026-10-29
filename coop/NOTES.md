@@ -2106,7 +2106,8 @@ and team times). All of it is in src/game/coop_ai.c; Classic runs none of it.
   searches a tick); one small brain per chr slot (256).
 - Harness: GE_GUARDAI=0|1 (the option without midas.ini), GE_GUARDAIDBG=1
   (state changes, calls, splits, muffled shots), GE_GUARDAI_TESTNOISE=<s>[,<loudness>]
-  (one gunshot from Bond at <s> seconds).
+  (one gunshot from Bond at <s> seconds), GE_GUARDAI_TESTALARM=1 (a first
+  sighting always looks for an alarm).
 - Tested with the US cart: Dam (solo, a test shot: look, investigate,
   search, return; Classic in the same run walks straight to Bond; a fight
   from 18892,1,17060: cover, duck, peek in cycles), Archives (solo and two
@@ -2116,7 +2117,57 @@ and team times). All of it is in src/game/coop_ai.c; Classic runs none of it.
   and Classic against the build before it in the same Dam run (differences
   within run-to-run noise). Shots: smart-ai/ in the project files.
 - Not seen in a run yet: the alarm run, the fall back, a guard finding a
-  body. Each has its own GE_GUARDAIDBG line to look for.
+  body. Each has its own GE_GUARDAIDBG line to look for. (All three seen
+  since, see the next section.)
+
+## Smarter guards: code review and the three unseen moves (2026-10-29, COOP_VERSION stays 14)
+
+The module had only been play-tested. Read end to end, then the three moves
+never seen were driven in two-player Dam runs (Smarter on the host, Classic
+on the joiner's own option):
+
+- Alarm run: the joiner stood by guard 41 (GE_COOP_TESTPAD=179:3,
+  GE_COOP_TESTHUNT); 41 ran down the tower to the alarm at pad 10070 and set
+  it off, the joiner logged "alarm on (host)" and saw it run past. With
+  GE_GUARDAI_TESTALARM=1 (the 1 in 4 roll always passes) and without it in a
+  longer run (guard 22, same alarm). Facility and Bunker have no alarm
+  objects; Surface's one has no guard of ours within 30 m.
+- Fall back: GE_COOP_TESTSHOT=41,201 on the joiner (a quarter-damage shot
+  every 2 s); after the third (75%) 41 fell back to pad 190/191/177, ducked,
+  fought on, and died to the fourth.
+- Body: GE_COOP_TESTSHOT=12,8 on the joiner (one silent head shot from the
+  start, out of sight); guards 10, 11 and 45 each found it once, looked,
+  walked over, searched two waypoints and went back to post.
+
+Fixed:
+- A guard never found a body: the once-a-second check was
+  (g_GlobalTimer + slot * 7) % 60 == 0, and g_GlobalTimer steps by the
+  frames since the last tick (2 at 30 Hz), so many guards never hit 0.
+  Before/after on the same run: 0 finds, 3. Now a per-guard timer.
+- Once that works, a guard would have walked back out to the same body every
+  time it got back to post. Each guard remembers 8 bodies: one it found, one
+  it saw fall, and the ones in view when it gets back to post.
+- SEARCH went straight home: in its first 2 ticks the state didn't wait, so
+  both waypoints were picked (and dropped) at once. It now waits for the walk
+  (coopAiArrived already skips the first 10 ticks).
+- A host migration switched the guards to the new host's own Guard AI
+  option mid-mission (joiners latch at the mission start, before the first
+  snapshot, from their own option). A joiner now latches COOPSET_GUARDAI,
+  the host's. Before/after: host (Smarter) leaves at 40 s, the joiner
+  (Classic) hosts, a test gunshot at 50 s: no smarter moves, 36.
+
+Checked and fine: the joiner runs no brain while it mirrors (its chr ticks
+are skipped), the host's brain uses the guard's own target in co-op
+(g_CoopPropOverride), partners' shots are muffled from the partner's spot,
+alarms and the guards' moves reach joiners in the usual snapshots. A
+three-player Dam run (host Smarter, both joiners fighting): no unresolved
+desync; the one "objects corrected" per joiner is a crate shot near the
+host's start, and a Classic run shows the same.
+
+Left as design, not bugs: cover is only out of sight of the guard's own
+target (another player may see it); the alarm run checks straight-line
+distance, not path length; the brain's state isn't sent, so after a
+migration guards start over from their chr records.
 
 ## Far-away players dropping in mid-mission (2026-10-28)
 
@@ -2416,3 +2467,52 @@ older build drops in coopDesignApply, so no protocol bump.
   drone gun, hostage taker, Natalya).
 - Deferred: a per-user data folder for read-only installs (moves where saves
   live; its own change).
+
+## The CO-OP screen: clearer, and a Classic look (2026-10-29)
+
+Owner's report: testers find the MW2-style screen confusing and think it
+may be missing options; and a way back to the original menu. UI only, no
+protocol change.
+
+- Compared every row against the folder lobby before the MW2 change
+  (339c342^) and the mod's options: no co-op row was lost; every rule
+  (When Down, Respawn / Bleed Out, Lives, Guards, Player Scaling, Guard AI,
+  Friendly Fire, Host Leaves, Lobby, Password, versus rows) is on GAME
+  SETUP once hosting. What a player couldn't reach from the screen: the
+  rest of the Options folder (video, audio, HUD, accessibility, key binds,
+  Port Options).
+- CONTROLS is now OPTIONS, and ends with "All Options": the Files menu's
+  Options folder, with the lobby running behind it (coopFrontTick); its
+  PREVIOUS comes back onto the row (port_options_from_coop,
+  coop_lobby_reopen). A mission the host starts meanwhile still takes the
+  player in.
+- Confusing spots fixed: the tab keycaps were "," and "." in a font that
+  draws them as dots, so the bar looked like two blank keys; Tab / Shift+Tab
+  now change tab too (portInputTabStep, not a bind) and the keyboard's bar
+  shows one TAB key (a pad keeps LB / RB). Before hosting, GAME SETUP only
+  had Lobby and Password; it now says the mission rules appear once you
+  host. A host alone sees where to invite from, and Select Mission (Start
+  Match) says "No Players" rather than "Not Ready" with nobody there.
+  "Guards" is "Guard Strength" (it sat beside Guard AI and the mission's
+  own difficulty), with a description that says what Hard and Brutal do.
+  "Check Now" (which showed the version) is "Game Version".
+- Classic: the coop_menu Port Option ([display] coop_menu, "Co-op Menu"
+  Modern / Classic, on Port Options and the OPTIONS tab). Classic draws the
+  same rows (coopLobbyBuildRows) on the folder's paper as one list, each
+  tab under a heading (Hosting / Rules, Options, Chat, Invite a Friend;
+  coopLobbyClassicHeadings), with the old crew strip of photo cards and the
+  next mission, the PREVIOUS tab, frontHintBar's prompts on the felt, and
+  the character select in its paper inks (CS_INK). The layout macros
+  follow coop_lobby_classic, so the scrolling, picking and stepping code is
+  shared; L / R step values there as they used to. Changing the option on
+  either look switches at once with the cursor kept on its row
+  (coopLobbyLayoutTick).
+- Left alone: the rules still can't be set before hosting (coopSetSetting
+  takes only the host's, and a joiner's leftover copy of the last host's
+  would show); the rows themselves and their order; the joiner's read-only
+  GAME SETUP.
+- Checked with two copies over the mock Steam (xdotool keys): every Modern
+  tab as host, joiner and not hosting; Tab, Shift+Tab; All Options and back;
+  the Co-op Menu row to Classic and back; Classic scrolled top to bottom
+  hosting, joined and not hosting; the character select on Classic.
+  Shots: menu-classic/ in the project files.

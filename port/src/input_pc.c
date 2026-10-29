@@ -7626,6 +7626,23 @@ s32 portInputArrowStepLR(void)
     return 0;
 }
 
+/** front.c's CO-OP tabs: Tab +1, Shift+Tab -1, on the press only, 0
+ *  otherwise. Read straight from the keyboard: Tab is not a bind. */
+s32 portInputTabStep(void)
+{
+    static int prev;
+    const Uint8 *keys = SDL_GetKeyboardState(NULL);
+    const int down = keys != NULL && s_WindowFocused && keys[SDL_SCANCODE_TAB];
+    s32 dir = 0;
+
+    if (down && !prev && !keys[SDL_SCANCODE_LALT] && !keys[SDL_SCANCODE_RALT])
+    {   /* not Alt+Tab, which leaves the window */
+        dir = (keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT]) ? -1 : 1;
+    }
+    prev = down;
+    return dir;
+}
+
 /**
  * Give a player to any raphnet channel that has a pad on it and no slot,
  * catching pads that pass 1b (hotplug/menu assigns only) missed. Runs about

@@ -262,6 +262,7 @@ static int s_CfgDistanceFading = 0;    /* 1 = enable distance-based prop/charact
                                        * fogGetPropDistColor); 0 = always fully
                                        * opaque regardless of distance */
 static int s_CfgGuardAi = 0;          /* [display] guard_ai: 0 Classic guards, 1 Smarter (coop_ai.c) */
+static int s_CfgCoopMenu = 0;         /* [display] coop_menu: 0 the Modern CO-OP screen, 1 Classic (the folder, front.c) */
 static int s_CfgTrueEnemyRockets = 1; /* 0 = restore the vanilla Enemy Rockets
                                        * cheat bug (chrai.c AI_TRYGiveMeItem
                                        * is missing a break, so it re-arms
@@ -631,6 +632,12 @@ s32 portDistanceFadingEnabled(void)
 s32 portGuardAiSmarter(void)
 {
     return s_CfgGuardAi;
+}
+
+/** midas.ini [display] coop_menu: the CO-OP screen drawn on the original folder (1) or Modern (0) */
+s32 portCoopMenuClassic(void)
+{
+    return s_CfgCoopMenu;
 }
 
 /** midas.ini [display] true_enemy_rockets: "True Enemy Rockets" fix */
@@ -1152,6 +1159,7 @@ static int videoSetDisplayOption(const char *key, const char *value)
     if (SDL_strcasecmp(key, "distance_fading") == 0) { s_CfgDistanceFading = SDL_atoi(value); return 1; }
     if (SDL_strcasecmp(key, "true_enemy_rockets") == 0) { s_CfgTrueEnemyRockets = SDL_atoi(value); return 1; }
     if (SDL_strcasecmp(key, "guard_ai") == 0)      { s_CfgGuardAi = SDL_atoi(value) != 0; return 1; }
+    if (SDL_strcasecmp(key, "coop_menu") == 0)     { s_CfgCoopMenu = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "show_fps") == 0)      { s_CfgShowFps = SDL_atoi(value); return 1; }
     if (SDL_strcasecmp(key, "classic_saved") == 0)
     {
@@ -1593,6 +1601,7 @@ s32 portVideoOptionGet(const char *key, s32 *out)
     if (SDL_strcasecmp(key, "fix_shootthrough") == 0) { *out = s_CfgFixShootThrough; return 1; }
     if (SDL_strcasecmp(key, "true_enemy_rockets") == 0) { *out = s_CfgTrueEnemyRockets; return 1; }
     if (SDL_strcasecmp(key, "guard_ai") == 0)      { *out = s_CfgGuardAi; return 1; }
+    if (SDL_strcasecmp(key, "coop_menu") == 0)     { *out = s_CfgCoopMenu; return 1; }
     if (SDL_strcasecmp(key, "adzy") == 0)          { *out = s_CfgAdzy;         return 1; }
     if (SDL_strcasecmp(key, "unlock_all") == 0)    { *out = s_CfgUnlockAll;    return 1; }
     return 0;
@@ -2356,6 +2365,7 @@ static void videoWriteDefaultIni(void)
     fprintf(f, "distance_fading=%d\n", s_CfgDistanceFading);
     fprintf(f, "true_enemy_rockets=%d\n", s_CfgTrueEnemyRockets);
     fprintf(f, "guard_ai=%d\n", s_CfgGuardAi);
+    fprintf(f, "coop_menu=%d\n", s_CfgCoopMenu);
     fprintf(f, "hfov_wide=%d\n", (int) videoHfovWide());
     fprintf(f, "weapon_fov=%d\n", s_CfgWeaponFov);
     fprintf(f, "crosshair_color=default\n");
