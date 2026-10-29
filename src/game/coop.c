@@ -546,6 +546,7 @@ static s32 sPendingEnd;      /* end our mission at the next tick: 1 back to the 
 static void coopEndMissionLocal(void);
 static void coopCorpseTick(void);
 static PropRecord *sCorpse;   /* our own body while we are down (coopCorpseTick) */
+static u8 sLeashNear;          /* players who have come to a leash scene this mission (coopLeashBroken) */
 static CoopAiEnt sAiSync[COOP_MAX_CHRS];    /* joiner: the host's AI state per chr slot (COOPPKT_AISYNC) */
 static u8 sAiSyncHave[COOP_MAX_CHRS];
 static void coopSayBye(void);
@@ -1956,6 +1957,7 @@ void coopStageStart(void)
     sLastWeapon = ITEM_UNARMED;
     sTickChr = NULL;
     sCorpse = NULL;     /* the last stage's chrs are gone */
+    sLeashNear = 0;
     g_CoopPropOverride = NULL;
     for (i = 0; i < COOP_MAX_PLAYERS; i++)
     {
@@ -5706,10 +5708,12 @@ static void coopSendWorld(void)
 
 /* chrai.c, "Bond is far from the pad": as a rule every player has to be
  * away (one left behind still counts as Bond being there). A few scenes use it
- * as a leash instead, where one player leaving is what breaks it, and there
- * any player counts:
+ * as a leash instead, where one player leaving is what breaks it:
  *  - Statue's unmasking (background list 0x1000): walk away from the statue
- *    and Janus's guards open fire, which is why Bond can't walk up to Janus */
+ *    and Janus's guards open fire, which is why Bond can't walk up to Janus
+ * Only the players who came to the scene are on the leash: a partner waiting
+ * at the helicopter never set it off by being there, nor by holding a gun
+ * (coopLeashIgnores). With nobody at the scene it breaks, as Bond leaving. */
 s32 coopAnyPlayerLeaves(u8 *list)
 {
     bool global;
@@ -5719,6 +5723,74 @@ s32 coopAnyPlayerLeaves(u8 *list)
         return 0;
     }
     return bossGetStageNum() == LEVELID_STATUE && chraiGetAIListID((AIRecord *) list, &global) == 0x1000;
+}
+
+s32 coopLeashBroken(ChrRecord *self, s32 pad, f32 radius)
+{
+    u8 near = 0;
+    s32 left = 0;
+    s32 p;
+
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        f32 d;
+
+        if (p == 0 ? !coopOwnBondCounts() : !coopRemoteAliveHere(p))
+        {
+            continue;   /* down or gone: not on the leash */
+        }
+        g_CoopPropOverride = (p == 0) ? NULL : sR[p].puppet;
+        d = chrGetDistanceFromBondToPad(self, pad);
+        g_CoopPropOverride = NULL;
+        if (d <= radius)
+        {
+            near |= 1 << p;
+        }
+        else if (sLeashNear & (1 << p))
+        {
+            left = 1;
+        }
+    }
+    if ((near | sLeashNear) != sLeashNear)
+    {
+        portConLogf("ge: coop: leash: players %02x at the scene\n", near | sLeashNear);
+    }
+    sLeashNear |= near;
+    return left || near == 0;
+}
+
+/* a leash scene's other checks: 1 when the player being checked never came
+ * to the scene. Statue's "put your gun away", in Janus's own list (0x0413)
+ * and the background one (0x1000): a partner holding a gun at the helicopter
+ * kept Janus waiting until his guards opened fire */
+s32 coopLeashIgnores(u8 *list)
+{
+    bool global;
+    s32 id;
+    s32 p;
+
+    if (sEnabled <= 0 || !coopNetIsHost() || !coopPartnerHere() || coopVersus()
+        || bossGetStageNum() != LEVELID_STATUE)
+    {
+        return 0;
+    }
+    id = chraiGetAIListID((AIRecord *) list, &global);
+    if (id != 0x1000 && id != 0x0413)
+    {
+        return 0;
+    }
+    if (g_CoopPropOverride == NULL)
+    {
+        return !(sLeashNear & 1);
+    }
+    for (p = 1; p < COOP_MAX_PLAYERS; p++)
+    {
+        if (sR[p].puppet == g_CoopPropOverride)
+        {
+            return !(sLeashNear & (1 << p));
+        }
+    }
+    return 0;
 }
 
 /* objective_status.c, a fail condition's stage flag: a joiner shows the

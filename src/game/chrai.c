@@ -2256,13 +2256,8 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
 #ifndef TARGET_N64
                     far = far || !coopOwnBondCounts(); /* co-op: not a down host's body */
                     if (coopAnyPlayerLeaves(AiListp))
-                    {   /* a scene's "stay here" rule: any one player leaving breaks it */
-                        far = far && coopOwnBondCounts();
-                        for (coopk = 0; !far && coopAltBondBegin(coopk); coopk++)
-                        {
-                            far = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
-                            coopAltBondEnd();
-                        }
+                    {   /* a scene's "stay here" rule: a player who came to it leaving breaks it */
+                        far = coopLeashBroken(ChrEntityp, pad, value);
                     }
                     else
                     {
@@ -2416,16 +2411,17 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     else if (ai->ITEM_NUM == ITEM_FIST || ai->ITEM_NUM == ITEM_UNARMED)
                     {   /* "Bond has put his gun away" (Statue's unmasking: draw
                          * one and the guards open fire) holds only while every
-                         * player has: one partner still armed is the same threat */
-                        has = coopBondHasItem(ai->ITEM_NUM);
+                         * player has: one partner still armed is the same threat.
+                         * On Statue, only the players who came to the statue */
+                        has = coopLeashIgnores(AiListp) || coopBondHasItem(ai->ITEM_NUM);
                         for (coopk = 0; has && coopChrAltBegin(ChrEntityp, coopk); coopk++)
                         {
-                            has = coopBondHasItem(ai->ITEM_NUM);
+                            has = coopLeashIgnores(AiListp) || coopBondHasItem(ai->ITEM_NUM);
                             coopChrAltEnd(ChrEntityp);
                         }
                         for (coopk = 0; has && coopAltBondBegin(coopk); coopk++)
-                        {
-                            has = coopBondHasItem(ai->ITEM_NUM);
+                        {   /* on a leash scene, only the players who came to it */
+                            has = coopLeashIgnores(AiListp) || coopBondHasItem(ai->ITEM_NUM);
                             coopAltBondEnd();
                         }
                     }
