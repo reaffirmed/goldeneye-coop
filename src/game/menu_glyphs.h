@@ -12,7 +12,7 @@ enum
     MENUGLYPH_CHAT,
     MENUGLYPH_ARROWS,   /* a list stepped both ways: the arrow keys, or L and R on a pad */
     MENUGLYPH_TABS,     /* the previous tab (watch_prev's comma, or L); in a hint, both tabs */
-    MENUGLYPH_TABS_R,   /* the next tab (the full stop, or R) */
+    MENUGLYPH_TABS_R,   /* the next tab (Tab on the keyboard, or R) */
     MENUGLYPH_DPAD      /* a row's value stepped both ways: the arrow keys, or the D-pad */
 };
 
