@@ -2416,3 +2416,52 @@ older build drops in coopDesignApply, so no protocol bump.
   drone gun, hostage taker, Natalya).
 - Deferred: a per-user data folder for read-only installs (moves where saves
   live; its own change).
+
+## The CO-OP screen: clearer, and a Classic look (2026-10-29)
+
+Owner's report: testers find the MW2-style screen confusing and think it
+may be missing options; and a way back to the original menu. UI only, no
+protocol change.
+
+- Compared every row against the folder lobby before the MW2 change
+  (339c342^) and the mod's options: no co-op row was lost; every rule
+  (When Down, Respawn / Bleed Out, Lives, Guards, Player Scaling, Guard AI,
+  Friendly Fire, Host Leaves, Lobby, Password, versus rows) is on GAME
+  SETUP once hosting. What a player couldn't reach from the screen: the
+  rest of the Options folder (video, audio, HUD, accessibility, key binds,
+  Port Options such as textures' Classic Mode).
+- CONTROLS is now OPTIONS, and ends with "All Options": the Files menu's
+  Options folder, with the lobby running behind it (coopFrontTick); its
+  PREVIOUS comes back onto the row (port_options_from_coop,
+  coop_lobby_reopen). A mission the host starts meanwhile still takes the
+  player in.
+- Confusing spots fixed: the tab keycaps were "," and "." in a font that
+  draws them as dots, so the bar looked like two blank keys; Tab / Shift+Tab
+  now change tab too (portInputTabStep, not a bind) and the keyboard's bar
+  shows one TAB key (a pad keeps LB / RB). Before hosting, GAME SETUP only
+  had Lobby and Password; it now says the mission rules appear once you
+  host. A host alone sees where to invite from, and Select Mission (Start
+  Match) says "No Players" rather than "Not Ready" with nobody there.
+  "Guards" is "Guard Strength" (it sat beside Guard AI and the mission's
+  own difficulty), with a description that says what Hard and Brutal do.
+  "Check Now" (which showed the version) is "Game Version".
+- Classic: the coop_menu Port Option ([display] coop_menu, "Co-op Menu"
+  Modern / Classic, on Port Options and the OPTIONS tab). Classic draws the
+  same rows (coopLobbyBuildRows) on the folder's paper as one list, each
+  tab under a heading (Hosting / Rules, Options, Chat, Invite a Friend;
+  coopLobbyClassicHeadings), with the old crew strip of photo cards and the
+  next mission, the PREVIOUS tab, frontHintBar's prompts on the felt, and
+  the character select in its paper inks (CS_INK). The layout macros
+  follow coop_lobby_classic, so the scrolling, picking and stepping code is
+  shared; L / R step values there as they used to. Changing the option on
+  either look switches at once with the cursor kept on its row
+  (coopLobbyLayoutTick).
+- Left alone: the rules still can't be set before hosting (coopSetSetting
+  takes only the host's, and a joiner's leftover copy of the last host's
+  would show); the rows themselves and their order; the joiner's read-only
+  GAME SETUP.
+- Checked with two copies over the mock Steam (xdotool keys): every Modern
+  tab as host, joiner and not hosting; Tab, Shift+Tab; All Options and back;
+  the Co-op Menu row to Classic and back; Classic scrolled top to bottom
+  hosting, joined and not hosting; the character select on Classic.
+  Shots: menu-classic/ in the project files.

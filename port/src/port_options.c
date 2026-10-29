@@ -112,6 +112,7 @@ static const s32 sTextSizeVals[] = { 100, 125, 150, 200 };
 static const char *const sTextSizeText[] = { "100%\n", "125%\n", "150%\n", "200%\n" };
 static const char *const sHoldToggleText[] = { "Hold\n", "Toggle\n" };
 static const char *const sGuardAiText[] = { "Classic\n", "Smarter\n" };
+static const char *const sCoopMenuText[] = { "Modern\n", "Classic\n" };
 static const char *const sMsaaText[] = { "OFF\n", "2x\n", "4x\n", "8x\n" };
 
 /* -1 = "hardware": the N64's own frame pacing on the 60 Hz sim (tickhz=hw in the ini) */
@@ -253,6 +254,7 @@ static const struct PortOpt sOpts[] = {
     TOGGLE("fix_shootthrough",   "[display]", "Shoot-Through Fix\n",  PORTOPT_CAT_GAMEPLAY),
     TOGGLE("true_enemy_rockets", "[display]", "True Enemy Rockets\n", PORTOPT_CAT_GAMEPLAY),
     TOGGLET("guard_ai",          "[display]", "Guard AI\n",           PORTOPT_CAT_GAMEPLAY, sGuardAiText),
+    TOGGLET("coop_menu",         "[display]", "Co-op Menu\n",         PORTOPT_CAT_GAMEPLAY, sCoopMenuText),
     /* adzy (play as ssf character) is ini-only */
     TOGGLE("unlock_all",         "[display]", "Unlock All\n",         PORTOPT_CAT_GAMEPLAY),
     TOGGLE("always_crosshair",   "[display]", "Always Crosshair\n",   PORTOPT_CAT_GAMEPLAY),
