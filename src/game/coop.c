@@ -1869,6 +1869,40 @@ s32 coopPropIsGhost(PropRecord *prop)
     return p >= 0 && sR[p].puppetGhost;
 }
 
+/* Guards' heads and the stage's random body: rolled from a stream every
+ * game of the session seeds alike for each mission (the host's session and
+ * mission count), so the setup picks the same faces on every screen, where
+ * the game's own random numbers had each game pick its own. 0: not in a
+ * story session, the game's own randomness as always. */
+static u32 sLookRng;
+
+void coopLookRandomStart(void)
+{
+    u32 seed = 0;
+
+    if (sEnabled > 0 && coopNetHasPeer() && !coopVersus())
+    {
+        seed = coopNetIsHost() ? (coopSelfSession() ^ (sMissionSerial * 0x9E3779B1u))
+                               : (sHostHello.session ^ (sHostHello.mission * 0x9E3779B1u));
+        seed ^= (u32) bossGetStageNum() * 0x85EBCA6Bu;
+        seed = (seed == 0) ? 1 : seed;
+        portConLogf("ge: coop: guard looks from seed %08x\n", seed);
+    }
+    sLookRng = seed;
+}
+
+u32 coopLookRandom(void)
+{
+    if (sLookRng == 0)
+    {
+        return randomGetNext();
+    }
+    sLookRng ^= sLookRng << 13;     /* xorshift32 */
+    sLookRng ^= sLookRng >> 17;
+    sLookRng ^= sLookRng << 5;
+    return sLookRng;
+}
+
 static u32 sWorldHostFlags;
 static u32 sWorldOwnFlags;
 

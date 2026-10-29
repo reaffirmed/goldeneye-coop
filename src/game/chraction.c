@@ -240,7 +240,11 @@ s32 bodyChooseHead(s32 id)
 
     if (c_item_entries[id].isMale)
     {
+#ifndef TARGET_N64
+        ret = coopLookRandom() & 3;    /* co-op: the same face on every game */
+#else
         ret = randomGetNext() & 3;
+#endif
         ret = ((s32)current_random_male_head + ret) % (s32)num_male_heads;
         ret = random_male_heads[ret];
     }
