@@ -2587,7 +2587,7 @@ s32 chrTick(PropRecord *prop)
             headSwitchVisible = posIsOnScreen(prop, &prop->pos, getinstsize(model), 1);
 
 #ifndef TARGET_N64
-            if (headSwitchVisible || (chr->chrflags & CHRFLAG_INIT) || coopChrNearPartner(chr))
+            if (headSwitchVisible || (chr->chrflags & CHRFLAG_INIT) || coopChrAnimForPartner(chr) || coopChrPinned(chr))
 #else
             if (headSwitchVisible || (chr->chrflags & CHRFLAG_INIT))
 #endif
