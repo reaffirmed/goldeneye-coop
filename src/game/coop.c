@@ -514,6 +514,7 @@ static void coopSendGuards(void);
 static void coopReapGuards(void);
 static void coopGuardsInterpTick(void);
 static s32 coopPredictHolds(s32 slot, ChrRecord *chr, ModelAnimation *hostanim, s32 hostdying);
+static void coopPredictForget(s32 slot);
 static void coopPredictShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, u8 *kind, u8 *idx);
 static void coopPredictReset(void);
 static void coopClientGunfire(void);
@@ -4075,6 +4076,10 @@ static ChrRecord *coopMirrorSpawn(CoopGuardEnt *e)
     chrpropEnable(prop);
     chr = prop->chr;
     chr->chrnum = e->chrnum;
+    if (coopChrSlot(chr) >= 0 && coopChrSlot(chr) < COOP_MAX_CHRS)
+    {
+        sChrHostDying[coopChrSlot(chr)] = 0;    /* the slot's last chr's: a new one starts up */
+    }
     chr->bodynum = e->body;
     chr->headnum = e->head;
     /* an out-of-range item or model would put some other prop in its hand */
@@ -4130,6 +4135,19 @@ static void coopApplyGuard(CoopGuardEnt *e)
         coopTrackPush(&sGuardTrack[slot], &smp);
         sChrLastSync[slot] = sTick;
         sGuardStale++;
+        return;
+    }
+    if (!(e->flags & GSF_DYING) && slot >= 0 && slot < COOP_MAX_CHRS && sChrHostDying[slot])
+    {   /* the host never brings a dying chr back: this is a new guard given the dead
+         * one's number (Jungle's respawner, guard_set_chr_num). Reusing the body's
+         * mirror left it dying here, a guard that shot at us and couldn't be aimed
+         * at, with the dead one's head and gun: it gets a mirror of its own */
+        portConLogf("ge: coop: chr %d is a new guard on the host, mirroring it afresh\n", chr->chrnum);
+        sChrHostDying[slot] = 0;
+        coopPredictForget(slot);
+        chr->hidden |= CHRHIDDEN_REMOVE;
+        chr->chrnum = -1;
+        coopApplyGuard(e);
         return;
     }
     if ((e->flags & GSF_DYING) && chr->actiontype != ACT_DIE && chr->actiontype != ACT_DEAD)
@@ -4200,12 +4218,6 @@ placed:
         && coopPredictHolds(slot, chr, (ModelAnimation *) ((u8 *) ptr_animation_table + e->animoff), (e->flags & GSF_DYING) != 0))
     {
         return;     /* our own shot's reaction is playing; the host's catches up (prediction section) */
-    }
-    if (!(e->flags & GSF_DYING) && (chr->actiontype == ACT_DIE || chr->actiontype == ACT_DEAD))
-    {   /* up again on the host (seen on Jungle): left dying here it
-         * shot at us as a body we could walk through and not aim at */
-        chr->actiontype = ACT_INIT;
-        portConLogf("ge: coop: guard %d is up again on the host\n", chr->chrnum);
     }
     if (e->animoff >= 0)
     {
@@ -4399,6 +4411,12 @@ static u32 sAiSyncGot[COOP_MAX_CHRS];  /* AI syncs received per slot */
 static s32 sPredDeaths, sPredConfirmed, sPredWrong;
 static ChrRecord *sForceChr;    /* host: applying a shot whose shooter predicted ... */
 static u8 sForceKind, sForceIdx;
+
+static void coopPredictForget(s32 slot)
+{
+    sPred[slot].kind = COOPPRED_NONE;
+    sPred[slot].prevact = -1;
+}
 
 static void coopPredictReset(void)
 {
