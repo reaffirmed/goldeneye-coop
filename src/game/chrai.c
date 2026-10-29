@@ -3762,7 +3762,9 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
     #endif
 #ifndef TARGET_N64
                     if (coopScriptSpawnsLeftToHost() /* co-op joiner: the host's spawn comes in its snapshots */
-                        || chrSpawnAtPad(ChrEntityp, ai->BODY_NUM, ai->HEAD_NUM, pad, ailist, flags))
+                        || chrSpawnAtPad(ChrEntityp, ai->BODY_NUM, ai->HEAD_NUM, pad, ailist, flags)
+                        || (coopScriptSpawnMayShow(AiListp, Offset + sizeof(AiTRYSpawningChrAtPadRecord), ai->GOTOLABEL)
+                            && chrSpawnAtPad(ChrEntityp, ai->BODY_NUM, ai->HEAD_NUM, pad, ailist, flags | 0x10)))
 #else
                     if (chrSpawnAtPad(ChrEntityp, ai->BODY_NUM, ai->HEAD_NUM, pad, ailist, flags))
 #endif

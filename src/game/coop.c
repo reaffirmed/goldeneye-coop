@@ -9442,6 +9442,18 @@ s32 coopScriptSpawnsLeftToHost(void)
     return sEnabled > 0 && !coopNetIsHost() && coopRemoteHere(0) && !coopVersus();
 }
 
+/* host: a level script that spawns a chr just once (Statue's Natalya at the
+ * helicopter, when Janus's timer starts) spawns it out of the host's view, and
+ * on failure goes on without it: one player at the helicopter while the other
+ * unmasks Janus, and Natalya never exists (her objective fails at once). Such
+ * a spawn, whose failure and success lead to the same label, may happen in
+ * view. A spawn the script retries until it works still waits. */
+s32 coopScriptSpawnMayShow(const u8 *list, s32 next, u8 label)
+{
+    return sEnabled > 0 && coopNetIsHost() && coopPartnerHere() && !coopVersus() && coopInMission()
+        && list[next] == AI_Label && list[next + 1] == label;
+}
+
 static void coopApplyAiCommand(CoopEvent *ev)
 {
     static u8 list[32];
