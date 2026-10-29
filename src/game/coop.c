@@ -2095,6 +2095,11 @@ static void coopCinemaTick(void)
     {
         coopReapGuards();
         coopClientGunfire();
+        if (!sNoInterp)
+        {   /* the host's actors move in its snapshots: without this they stood
+             * where the cinema found them (Train's ending: Natalya never ran) */
+            coopGuardsInterpTick();
+        }
     }
     coopRemotesTick();
 }
