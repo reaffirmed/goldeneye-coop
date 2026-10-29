@@ -132,6 +132,8 @@ static const struct PortWatchRowDef sPortOpts[] = {
     { PWROW_OPT,       "true_enemy_rockets", NULL, 0, 0 },
     { PWROW_OPT,       "guard_ai",           NULL, 0, 0 },   /* Classic or Smarter guards in solo */
     { PWROW_OPT,       "guard_barks",        NULL, 0, 0 },   /* smarter guards' callouts, each player's own */
+    { PWROW_OPT,       "guard_alertness",    NULL, 0, 0 },   /* smarter guards' hearing and noticing (the host's) */
+    { PWROW_OPT,       "guard_budget",       NULL, 0, 0 },   /* smarter guards' escalations a mission (the host's) */
     { PWROW_OPT,       "unlimited_explosions", NULL, 0, 0 }, /* was folder-only */
     { PWROW_OPT,       "watch_static",       NULL, 0, 0 },   /* watch static */
     { PWROW_OPT,       "fast_pause",         NULL, 0, 0 },   /* the watch at Rare's top speed */

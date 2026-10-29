@@ -29,6 +29,8 @@ static const struct PortOptHelp sHelp[] = {
     { "true_enemy_rockets", "Enemy Rockets cheat stops guards keeping their old guns." },
     { "guard_ai",           "Smarter guards investigate noise, call for help, use cover and flank." },
     { "guard_barks",        "Smarter guards call out what they do, in text over their heads and a short sound." },
+    { "guard_alertness",    "How far smarter guards hear and notice things, and how long they stay on edge. The host's in co-op." },
+    { "guard_budget",       "How many times a mission smarter guards may call for help, run for the alarm, throw grenades, sweep, cut you off or regroup. The host's in co-op." },
     { "coop_menu",          "Modern is the dark tabbed CO-OP screen; Classic is the original folder." },
     { "unlimited_explosions", "Up to 100 explosions at once." },
     { "watch_static",       "Shows the watch screen's static." },

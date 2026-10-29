@@ -4629,6 +4629,8 @@ static const struct PortSheetRow port_sheet_rows_portopts[] = {
     { SHROW_OPT, "true_enemy_rockets" },
     { SHROW_OPT, "guard_ai" },               /* Classic or Smarter guards (coop_ai.c); the host's in co-op */
     { SHROW_OPT, "guard_barks" },            /* their callouts and stings, each player's own */
+    { SHROW_OPT, "guard_alertness" },        /* their hearing and noticing, the host's in co-op */
+    { SHROW_OPT, "guard_budget" },           /* their escalations a mission, the host's in co-op */
     { SHROW_OPT, "coop_menu" },              /* the CO-OP screen: Modern, or Classic on the folder */
     { SHROW_OPT, "unlimited_explosions" },   /* default ON */
     { SHROW_OPT, "watch_static" },           /* the watch's fuzz, default ON (vanilla) */
@@ -13584,6 +13586,133 @@ Gfx *constructor_menu08_difficulty(Gfx *DL)
 //007 DIFFICULTY SELECT
 //********************************************************************************************************
 
+#ifndef TARGET_N64
+/* PORT: with Smarter guards picked (the guard_ai Port Option, the host's in
+ * co-op) the 007 screen gets two more sliders, Guard Alertness and Alert
+ * Budget (coop_ai.c), and its six rows close up to fit. They are the
+ * guard_alertness and guard_budget Port Options, so they hold for every
+ * difficulty, and are saved to midas.ini when the slider is let go. */
+extern s32 portGuardAlertness(void);
+extern s32 portGuardBudget(void);
+extern s32 portOptSetValueQuiet(s32 i, s32 v);
+static const s32 port007BudgetVals[] = { 0, 10, 20, 30, 40, 50, 60, 80, 100, 101 };
+#define PORT007_BUDGETS ((s32) (sizeof(port007BudgetVals) / sizeof(port007BudgetVals[0])))
+#define PORT007_TOP     160     /* the first row's label */
+#define PORT007_STEP    26      /* rows this far apart */
+enum { PORT007_HEALTH = 0, PORT007_DAMAGE, PORT007_ACCURACY, PORT007_REACTION, PORT007_ALERTNESS, PORT007_BUDGET, PORT007_ROWS };
+static s32 port007Row = -1;     /* the highlighted row, -1 none */
+static s32 port007Dirty;        /* a slider moved: save on release */
+
+static s32 port007Smarter(void)
+{
+    return coopAiSmarterOption() == COOPAI_SMARTER;
+}
+
+static s32 port007BudgetIndex(void)
+{
+    s32 i, v = portGuardBudget();
+
+    for (i = PORT007_BUDGETS - 1; i > 0 && port007BudgetVals[i] > v; i--)
+    {
+    }
+    return i;
+}
+
+/* the cursor's row; -1 none (above the first) */
+static s32 port007RowAt(f32 v)
+{
+    s32 row = ((s32) v - PORT007_TOP) / PORT007_STEP;
+
+    if ((s32) v < PORT007_TOP)
+    {
+        return -1;
+    }
+    return (row >= PORT007_ROWS) ? PORT007_ROWS - 1 : row;
+}
+
+static void port007Drag(f32 x)
+{
+    s32 i;
+
+    switch (port007Row)
+    {
+        case PORT007_HEALTH:   slider_007_mode_health = x * x * 10.0f;   break;
+        case PORT007_DAMAGE:   slider_007_mode_damage = x * x * 10.0f;   break;
+        case PORT007_ACCURACY: slider_007_mode_accuracy = x * x * 10.0f; break;
+        case PORT007_REACTION: slider_007_mode_reaction = x;             break;
+        case PORT007_ALERTNESS:
+            i = portOptFind("guard_alertness");
+            portOptSetValueQuiet(i, 25 + (s32) (x * 7.0f + 0.5f) * 25);
+            port007Dirty = i + 1;
+            break;
+        case PORT007_BUDGET:
+            i = portOptFind("guard_budget");
+            portOptSetValueQuiet(i, port007BudgetVals[(s32) (x * (PORT007_BUDGETS - 1) + 0.5f)]);
+            port007Dirty = i + 1;
+            break;
+        default:
+            break;
+    }
+}
+
+/* one row: its label, the bar (frac of 300 pixels), the value */
+static Gfx *port007DrawRow(Gfx *DL, s32 row, const char *label, f32 frac, const char *value)
+{
+    s32 textx = 57, texty = PORT007_TOP + row * PORT007_STEP;
+    s32 textwidth = 0, textheight = 0;
+    char text[32];
+
+    DL = microcode_constructor_related_to_menus(DL, 55, texty + 15, 355, texty + 24, 0x00000032);
+    DL = microcode_constructor_related_to_menus(DL, 55, texty + 15, (s32) (frac * 300.0f) + 55, texty + 24, 0x00000064);
+    if (port007Row == row)
+    {
+        DL = microcode_constructor_related_to_menus(DL, 55, texty - 1, 199, texty + 14, 0x00000032);
+    }
+    DL = frontPrintText(DL, &textx, &texty, (s8 *) label, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+    snprintf(text, sizeof(text), "%s", value);
+    textMeasure(&textheight, &textwidth, text, ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+    textx = 285 - textwidth;
+    texty = PORT007_TOP + row * PORT007_STEP;
+    DL = frontPrintText(DL, &textx, &texty, (s8 *) text, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+    return DL;
+}
+
+static Gfx *port007DrawRows(Gfx *DL)
+{
+    char value[32];
+    s32 budget = port007BudgetIndex();
+
+    snprintf(value, sizeof(value), "%d%%\n", (s32) (slider_007_mode_health * 100.0f));
+    DL = port007DrawRow(DL, PORT007_HEALTH, (const char *) langGet(getStringID(LTITLE, TITLE_STR_42_HEALTH)),
+                        sqrtf(slider_007_mode_health / 10.0f), value);
+    snprintf(value, sizeof(value), "%d%%\n", (s32) (slider_007_mode_damage * 100.0f));
+    DL = port007DrawRow(DL, PORT007_DAMAGE, (const char *) langGet(getStringID(LTITLE, TITLE_STR_43_DAMAGE)),
+                        sqrtf(slider_007_mode_damage / 10.0f), value);
+    snprintf(value, sizeof(value), "%d%%\n", (s32) (slider_007_mode_accuracy * 10.0f));    /* (as the original prints it) */
+    DL = port007DrawRow(DL, PORT007_ACCURACY, (const char *) langGet(getStringID(LTITLE, TITLE_STR_44_ACCURACY)),
+                        sqrtf(slider_007_mode_accuracy / 10.0f), value);
+    snprintf(value, sizeof(value), "%d%%\n", (s32) (slider_007_mode_reaction * 100.0f));
+    DL = port007DrawRow(DL, PORT007_REACTION, (const char *) langGet(getStringID(LTITLE, TITLE_STR_41_REACTION)),
+                        slider_007_mode_reaction, value);
+    snprintf(value, sizeof(value), "%d%%\n", portGuardAlertness());
+    DL = port007DrawRow(DL, PORT007_ALERTNESS, "Guard alertness\n", (f32) (portGuardAlertness() - 25) / 175.0f, value);
+    if (port007BudgetVals[budget] > 100)
+    {
+        snprintf(value, sizeof(value), "No limit\n");
+    }
+    else if (port007BudgetVals[budget] == 0)
+    {
+        snprintf(value, sizeof(value), "None\n");
+    }
+    else
+    {
+        snprintf(value, sizeof(value), "%d\n", port007BudgetVals[budget]);
+    }
+    DL = port007DrawRow(DL, PORT007_BUDGET, "Alert budget\n", (f32) budget / (f32) (PORT007_BUDGETS - 1), value);
+    return DL;
+}
+#endif
+
 void init_menu09_007difficultyselect(void)
 {
     tab_start_selected = 0;
@@ -13624,6 +13753,16 @@ void interface_menu09_007options(void)
         highlight_enemy_health = FALSE;
         highlight_enemy_damage = FALSE;
         highlight_enemy_accuracy = FALSE;
+#ifndef TARGET_N64
+        port007Row = -1;
+        if (port007Dirty)
+        {   /* a slider let go: save it */
+            s32 i = port007Dirty - 1;
+
+            portOptSetValue(i, (i == portOptFind("guard_budget")) ? portGuardBudget() : portGuardAlertness());
+            port007Dirty = 0;
+        }
+#endif
 
         if (frontCheckCursorOnPreviousTab())
         {
@@ -13639,6 +13778,17 @@ void interface_menu09_007options(void)
             tab_start_highlight = TRUE;
         }
         else
+#ifndef TARGET_N64
+        if (port007Smarter())
+        {
+            port007Row = port007RowAt(cursor_v_pos);
+            if (port007Row < 0)
+            {
+                tab_next_highlight = TRUE;
+            }
+        }
+        else
+#endif
         {
             temp_y = (s32) cursor_v_pos;
             if (temp_y >= 0x107)
@@ -13705,6 +13855,13 @@ void interface_menu09_007options(void)
             temp_x = 0.0f;
         }
 
+#ifndef TARGET_N64
+        if (port007Smarter())
+        {
+            port007Drag(temp_x);
+        }
+        else
+#endif
         if (highlight_enemy_reaction)
         {
             slider_007_mode_reaction = temp_x;
@@ -13790,6 +13947,17 @@ Gfx *constructor_menu09_007options(Gfx *DL)
 
     DL = frontPrintText(DL, &textx, &texty, (s8 *)labeltext, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
 
+#ifndef TARGET_N64
+    if (port007Smarter())
+    {
+        DL = port007DrawRows(DL);
+        DL = frontAddStartTabText(DL);
+        DL = frontAddPreviousTabText(DL);
+        DL = frontAddNextTabText(DL);
+        DL = frontDrawCursor(DL);
+        return DL;
+    }
+#endif
 
     /**
      * ENEMY HEALTH
@@ -23214,6 +23382,12 @@ static void portMenuHarnessTick(void)
             else if (e[0] == 's') target = MENU_FILE_SELECT;  /* GE_MENU=select: the Files screen */
             else if (e[0] == 'o') target = MENU_PORT_OPTIONS; /* GE_MENU=options: the OPTIONS page */
             else if (e[0] == 'l') target = MENU_COOP_LOBBY;   /* GE_MENU=lobby: the co-op lobby */
+            else if (e[0] == 'z')
+            {   /* GE_MENU=z007: the 007 difficulty's sliders, for Dam (its title needs a mission) */
+                set_selected_difficulty(DIFFICULTY_007);
+                set_solo_and_ptr_briefing(LEVELID_DAM);
+                target = MENU_007_OPTIONS;
+            }
             else if (e[0] == 'x')
             {   /* Multiplayer setup: GE_MENU=xsetup[2-4], xplayers[2-4] or
                  * xoptions, where the digit is the player count (default 2). */

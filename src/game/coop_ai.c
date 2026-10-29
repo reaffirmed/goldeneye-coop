@@ -85,6 +85,8 @@
 extern void portConLogf(const char *fmt, ...);
 extern s32 portGuardAiSmarter(void);    /* video.c: midas.ini guard_ai */
 extern s32 portGuardBarks(void);        /* video.c: midas.ini guard_barks */
+extern s32 portGuardAlertness(void);    /* video.c: midas.ini guard_alertness, percent */
+extern s32 portGuardBudget(void);       /* video.c: midas.ini guard_budget, 101 no limit */
 extern int ge_shot_force;               /* gfx_sdl2.cpp: a screenshot this frame, to ge_shot_path */
 extern char ge_shot_path[512];
 extern s32 portOptFind(const char *key);
@@ -309,8 +311,11 @@ static struct
     s32 at60;
 } sFallen[COOPAI_FALLEN];       /* where our guards died, and when */
 static s32 sNextFallen;
+static s32 sBudget;             /* escalations left this mission, -1 no limit */
+static s32 sBudgetFull;
 
 static void coopAiWreckScan(void);
+static s32 coopAiAlertnessPct(void);
 
 /* ---- the setting -------------------------------------------------------- */
 
@@ -370,9 +375,12 @@ s32 coopAiSmarter(void)
         sNextClue = sNextFallen = 0;
         sNumWrecks = -1;    /* the first scan only notes what was smashed from the start */
         sNextWreckScan60 = 0;
+        sBudgetFull = (getenv("GE_GUARDAI_BUDGET") != NULL) ? atoi(getenv("GE_GUARDAI_BUDGET")) : portGuardBudget();
+        sBudget = (sBudgetFull > 100) ? -1 : sBudgetFull;
         if (sLatchOn)
         {
-            portConLogf("ge: ai: smarter guards on (stage %d)\n", stage);
+            portConLogf("ge: ai: smarter guards on (stage %d, alertness %d%%, alert budget %s%d)\n", stage,
+                        coopAiAlertnessPct(), sBudget < 0 ? "no limit " : "", sBudget < 0 ? 0 : sBudget);
         }
     }
     sLatchTimer = g_GlobalTimer;
@@ -401,6 +409,46 @@ static f32 coopAiDist2(coord3d *a, coord3d *b)
 static s32 coopAiRandom(s32 n)
 {
     return (s32) ((u32) randomGetNext() % (u32) n);
+}
+
+/* the 007 screen's Guard Alertness (the guard_alertness Port Option, the
+ * host's): ranges for hearing and noticing, and how long they stay on edge */
+static s32 coopAiAlertnessPct(void)
+{
+    const char *e = getenv("GE_GUARDAI_ALERTNESS");    /* the harness's stand-in for midas.ini */
+
+    return (e != NULL) ? atoi(e) : portGuardAlertness();
+}
+
+static f32 coopAiAlertness(void)
+{
+    return (f32) coopAiAlertnessPct() / 100.0f;
+}
+
+/* ---- the alert budget ------------------------------------------------------
+ * The 007 screen's Alert Budget (the guard_budget Port Option, the host's):
+ * how many times a mission the guards may escalate. A guard answering a call
+ * for help, an alarm run, a grenade, a lockdown sweep, a cut-off and a regroup
+ * each spend one; with none left the guards still fight, search and take
+ * cover, but bring no one else in and try nothing new. */
+
+/* how many of n it may spend now */
+static s32 coopAiAfford(s32 n)
+{
+    return (sBudget < 0 || n <= sBudget) ? n : sBudget;
+}
+
+static void coopAiSpend(s32 n, const char *what)
+{
+    if (sBudget < 0 || n <= 0)
+    {
+        return;
+    }
+    sBudget -= (n < sBudget) ? n : sBudget;
+    if (sBudget == 0)
+    {
+        portConLogf("ge: ai: alert budget spent (%d, the last on %s)\n", sBudgetFull, what);
+    }
 }
 
 static s32 coopAiArmed(ChrRecord *chr)
@@ -881,7 +929,7 @@ static void coopAiSweepTick(void)
 {
     s32 i, k, n, start, out = 0;
 
-    if (sAlert < AIA_LOCKDOWN || g_GlobalTimer < sNextSweep60 || g_ChrSlots == NULL)
+    if (sAlert < AIA_LOCKDOWN || g_GlobalTimer < sNextSweep60 || g_ChrSlots == NULL || coopAiAfford(1) < 1)
     {
         return;
     }
@@ -924,6 +972,7 @@ static void coopAiSweepTick(void)
         b->sweeping = 1;
         coopAiSetState(b, AIS_SEARCH, 8);
         portConLogf("ge: ai: guard %d sets out on a sweep\n", chr->chrnum);
+        coopAiSpend(1, "a sweep");
         return;
     }
 }
@@ -1009,15 +1058,15 @@ static void coopAiPlayersTick(void)
         coopAiRaise(AIA_LOCKDOWN, "the alarm");
     }
     quiet = g_GlobalTimer - ((sAlertRaised60 > sLastFight60) ? sAlertRaised60 : sLastFight60);
-    if (sAlert == AIA_ALERTED && sAlertFloor < AIA_ALERTED && quiet > 90 * COOPAI_SEC)
+    if (sAlert == AIA_ALERTED && sAlertFloor < AIA_ALERTED && quiet > (s32) (90 * COOPAI_SEC * coopAiAlertness()))
     {
-        portConLogf("ge: ai: alert alerted -> suspicious (quiet 90 s)\n");
+        portConLogf("ge: ai: alert alerted -> suspicious (quiet %d s)\n", quiet / COOPAI_SEC);
         sAlert = AIA_SUSPICIOUS;
         sAlertRaised60 = g_GlobalTimer;
     }
-    else if (sAlert == AIA_SUSPICIOUS && sAlertFloor < AIA_SUSPICIOUS && quiet > 45 * COOPAI_SEC)
+    else if (sAlert == AIA_SUSPICIOUS && sAlertFloor < AIA_SUSPICIOUS && quiet > (s32) (45 * COOPAI_SEC * coopAiAlertness()))
     {
-        portConLogf("ge: ai: alert suspicious -> calm (quiet 45 s)\n");
+        portConLogf("ge: ai: alert suspicious -> calm (quiet %d s)\n", quiet / COOPAI_SEC);
         sAlert = AIA_CALM;
     }
     coopAiSweepTick();
@@ -1062,7 +1111,7 @@ static void coopAiCallForHelp(ChrRecord *caller, CoopAiBrain *cb)
 {
     s32 i, answered = 0;
 
-    s32 most = COOPAI_CALL_MAX + (sAlert >= AIA_ALERTED);
+    s32 most = coopAiAfford(COOPAI_CALL_MAX + (sAlert >= AIA_ALERTED));
 
     for (i = 0; i < g_NumChrSlots && i < COOPAI_MAX_CHRS && answered < most; i++)
     {
@@ -1098,6 +1147,7 @@ static void coopAiCallForHelp(ChrRecord *caller, CoopAiBrain *cb)
     if (answered > 0)
     {
         portConLogf("ge: ai: guard %d calls for help, %d come\n", caller->chrnum, answered);
+        coopAiSpend(answered, "a call for help");
     }
     coopAiBark(caller, cb, answered > 0 ? COOPBARK_HELP : COOPBARK_SPOTTED);
 }
@@ -1139,7 +1189,7 @@ static ChrRecord *coopAiBodyInView(ChrRecord *chr, CoopAiBrain *b)
         {
             continue;
         }
-        if (coopAiDist2(&dead->prop->pos, &chr->prop->pos) > COOPAI_BODY_RANGE * COOPAI_BODY_RANGE)
+        if (coopAiDist2(&dead->prop->pos, &chr->prop->pos) > COOPAI_BODY_RANGE * COOPAI_BODY_RANGE * coopAiAlertness() * coopAiAlertness())
         {
             continue;
         }
@@ -1384,7 +1434,7 @@ static s32 coopAiNotice(ChrRecord *chr, CoopAiBrain *b)
         {   /* old news, or shut again */
             continue;
         }
-        if (coopAiDist2(&sClues[i].pos, &chr->prop->pos) > COOPAI_CLUE_RANGE * COOPAI_CLUE_RANGE
+        if (coopAiDist2(&sClues[i].pos, &chr->prop->pos) > COOPAI_CLUE_RANGE * COOPAI_CLUE_RANGE * coopAiAlertness() * coopAiAlertness()
             || !check_if_position_in_same_room(chr, &sClues[i].pos, sClues[i].stan))
         {
             continue;
@@ -1395,7 +1445,7 @@ static s32 coopAiNotice(ChrRecord *chr, CoopAiBrain *b)
         coopAiInvestigate(chr, b, &sClues[i].pos, sClues[i].stan, 0);
         return 1;
     }
-    range = COOPAI_STEP_RANGE * ((sAlert >= AIA_LOCKDOWN) ? 1.25f : 1.0f);
+    range = COOPAI_STEP_RANGE * ((sAlert >= AIA_LOCKDOWN) ? 1.25f : 1.0f) * coopAiAlertness();
     for (t = 0; t < COOP_MAX_PLAYERS; t++)
     {
         CoopAiPlayer *p = &sPlayers[t];
@@ -1607,7 +1657,7 @@ static s32 coopAiCamperGrenade(ChrRecord *chr, CoopAiBrain *b)
     PropRecord *target = getCurrentPlayerProp();
     f32 d2;
 
-    if (p == NULL || target == NULL || b->threw || g_GlobalTimer < sNextNade60
+    if (p == NULL || target == NULL || b->threw || g_GlobalTimer < sNextNade60 || coopAiAfford(1) < 1
         || g_GlobalTimer - b->fight60 < COOPAI_NADE_FIGHT * COOPAI_SEC
         || (p->nade60 > 0 && g_GlobalTimer - p->nade60 < COOPAI_NADE_AGAIN * COOPAI_SEC)
         || g_GlobalTimer - p->camp60 < COOPAI_CAMP_SECS * COOPAI_SEC
@@ -1622,6 +1672,7 @@ static s32 coopAiCamperGrenade(ChrRecord *chr, CoopAiBrain *b)
         return 0;
     }
     b->threw = 1;
+    coopAiSpend(1, "a grenade");
     p->nade60 = g_GlobalTimer;
     sNextNade60 = g_GlobalTimer + COOPAI_NADE_GAP * COOPAI_SEC;
     chrTrySurprisedOneHand(chr);
@@ -1957,7 +2008,7 @@ static s32 coopAiCombat(ChrRecord *chr, CoopAiBrain *b, s32 seen)
     {
         b->called = 1;
         coopAiCallForHelp(chr, b);
-        if (!alarmIsActive() && g_GlobalTimer > sAlarmRunUntil
+        if (!alarmIsActive() && g_GlobalTimer > sAlarmRunUntil && coopAiAfford(1) >= 1
             && (getenv("GE_GUARDAI_TESTALARM") != NULL || coopAiRandom(4) == 0))
         {
             pad = coopAiFindAlarm(chr);
@@ -1969,6 +2020,7 @@ static s32 coopAiCombat(ChrRecord *chr, CoopAiBrain *b, s32 seen)
             {
                 b->coverpad = pad;
                 sAlarmRunUntil = g_GlobalTimer + 60 * COOPAI_SEC;
+                coopAiSpend(1, "an alarm run");
                 coopAiBark(chr, b, COOPBARK_ALARM);
                 coopAiSetState(b, AIS_ALARM, 12);
                 portConLogf("ge: ai: guard %d runs for the alarm at pad %d\n", chr->chrnum, pad);
@@ -2017,7 +2069,8 @@ static s32 coopAiCombat(ChrRecord *chr, CoopAiBrain *b, s32 seen)
             return 1;
         }
     }
-    if (!b->regrouped && target != NULL && b->role != AIR_RUSHER && sAlert >= AIA_ALERTED && coopAiLosing(chr))
+    if (!b->regrouped && target != NULL && b->role != AIR_RUSHER && sAlert >= AIA_ALERTED && coopAiAfford(1) >= 1
+        && coopAiLosing(chr))
     {   /* two of its own down near it: back to where the others are */
         coord3d spot;
         StandTile *stan = NULL;
@@ -2029,6 +2082,7 @@ static s32 coopAiCombat(ChrRecord *chr, CoopAiBrain *b, s32 seen)
             b->coverpad = -1;
             coopAiBark(chr, b, COOPBARK_RETREAT);
             coopAiSetState(b, AIS_REGROUP, 15);
+            coopAiSpend(1, "a regroup");
             portConLogf("ge: ai: guard %d regroups at (%.0f,%.0f), %.0f m back\n", chr->chrnum, spot.x, spot.z,
                         sqrtf(coopAiDist2(&spot, &chr->prop->pos)) / 100.0f);
             return 1;
@@ -2088,7 +2142,7 @@ static s32 coopAiCombat(ChrRecord *chr, CoopAiBrain *b, s32 seen)
         return 1;
     }
     if (coopEnabled() && target != NULL && target->stan != NULL && b->role != AIR_ANCHOR
-        && coopAiCountState(AIS_CUTOFF) == 0 && (getenv("GE_GUARDAI_TESTCUTOFF") != NULL || coopAiRandom(2) == 0))
+        && coopAiCountState(AIS_CUTOFF) == 0 && coopAiAfford(1) >= 1 && (getenv("GE_GUARDAI_TESTCUTOFF") != NULL || coopAiRandom(2) == 0))
     {   /* a player off on their own: get between them and the others */
         f32 md2;
         PropRecord *mate = coopAiNearestMate(b->target, target, &md2);
@@ -2107,6 +2161,7 @@ static s32 coopAiCombat(ChrRecord *chr, CoopAiBrain *b, s32 seen)
                 portConLogf("ge: ai: guard %d cuts player %d off from the others (%.0f m apart), to pad %d\n", chr->chrnum,
                             b->target + 1, sqrtf(md2) / 100.0f, pad);
                 coopAiSetState(b, AIS_CUTOFF, 10);
+                coopAiSpend(1, "a cut-off");
                 return 1;
             }
         }
@@ -2652,19 +2707,19 @@ f32 coopAiHearScale(ChrRecord *chr, f32 dist, f32 range)
     {
         return 1.0f;
     }
-    keen = (sAlert >= AIA_LOCKDOWN) ? 1.25f : 1.0f;    /* lockdown: listening for it */
+    keen = ((sAlert >= AIA_LOCKDOWN) ? 1.25f : 1.0f) * coopAiAlertness();  /* lockdown: listening for it */
     if (dist < range * COOPAI_MUFFLED)
     {
         return keen;
     }
     if (dist >= range * keen)
-    {
-        return 1.0f;
+    {   /* out of reach either way */
+        return keen;
     }
     bond = getCurrentPlayerProp();
     if (bond == NULL || bond->stan == NULL)
     {
-        return 1.0f;
+        return keen;
     }
     /* walls and shut doors muffle a shot; crates and guards don't */
     st = chr->prop->stan;
@@ -2681,5 +2736,5 @@ f32 coopAiHearScale(ChrRecord *chr, f32 dist, f32 range)
     {
         portConLogf("ge: ai: guard %d hears it through a wall (%.0f of %.0f, tile %p bond %p)\n", chr->chrnum, dist, range, (void *) st, (void *) bond->stan);
     }
-    return COOPAI_MUFFLED;
+    return COOPAI_MUFFLED * coopAiAlertness();
 }

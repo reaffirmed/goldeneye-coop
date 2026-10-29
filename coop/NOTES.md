@@ -2384,6 +2384,44 @@ build drops kinds it doesn't know).
     no stand tile below that point. A harness artifact, but it would hide a
     joiner from the guards if a real one ever stood there.
 
+## Smarter guards: alert budget and alertness, 007 screen sliders (2026-10-29, COOP_VERSION stays 14)
+
+Stage 4 of the dynamic guards plan. Two Port Options ([display], Gameplay,
+under Guard Barks; on the GAMEPLAY sheet and the watch's Port Options page),
+read by the game that runs the guards, so the host's count in co-op and
+nothing goes on the wire:
+
+- guard_budget, "Alert Budget": escalations a mission, None, 10 to 100, or
+  No Limit (101); default 40. Each guard answering a call for help, an alarm
+  run, a grenade, a lockdown sweep, a cut-off and a regroup spends one
+  (coop_ai.c coopAiAfford / coopAiSpend). Spent, the guards still fight,
+  search, take cover, suppress and push, but bring no one else in and try
+  nothing new. "alert budget spent" in the log. The level's own alarm and
+  scripts are untouched.
+- guard_alertness, "Guard Alertness": 25 to 200 %, default 100 (stage 3's
+  behaviour). Scales the smarter guards' hearing (coopAiHearScale, so below
+  100 % they hear less than Classic), the reach for bodies, clues and
+  footsteps, and how long the alert takes to calm down (45 s / 90 s at 100 %).
+- The 007 screen: with Smarter picked (guard_ai, as the lobby row edits it)
+  the screen shows six sliders, its four and Guard alertness and Alert
+  budget, 26 pixels apart from y 160 (the original's four sit 33 apart from
+  164, and two more would run off the paper); with Classic it is the
+  original screen. Dragging sets the option live, letting go saves it
+  (front.c port007*). GE_MENU=z007 opens it for Dam at 007.
+- Harness: GE_GUARDAI_BUDGET and GE_GUARDAI_ALERTNESS stand in for midas.ini.
+- Tested: the 007 screen at Smarter and Classic (screenshots), and a drag
+  on Alert budget set it to 60. Caverns and Frigate with the hunting joiner,
+  budget 0 against No Limit: no call for help, grenade, regroup or cut-off at
+  0; 3 calls, 3 regroups and a cut-off without a limit. Dam with budget 3:
+  a call, a grenade and an alarm run, then "alert budget spent" and nothing
+  more. Alertness 50 % against 200 % with a clue 12 m from guard 28: ignored
+  at 50 % (7.5 m reach), noticed at 200 %.
+- Scripted missions (all 20, Smarter at the defaults, both players acting
+  and invulnerable, 100 s): objective failures within Classic's (Silo 2, of
+  Classic's 4; Statue 10, Bunker 2, Jungle and Caverns 2 each; the rest
+  none), no crashes, 24 desyncs in all (Classic 28). The default budget of
+  40 was never spent in 100 s.
+
 ## Far-away players dropping in mid-mission (2026-10-28)
 
 Tester report: a player from Colombia dropped in to a running co-op mission;
