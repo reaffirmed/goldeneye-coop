@@ -4201,6 +4201,12 @@ placed:
     {
         return;     /* our own shot's reaction is playing; the host's catches up (prediction section) */
     }
+    if (!(e->flags & GSF_DYING) && (chr->actiontype == ACT_DIE || chr->actiontype == ACT_DEAD))
+    {   /* up again on the host (seen on Jungle): left dying here it
+         * shot at us as a body we could walk through and not aim at */
+        chr->actiontype = ACT_INIT;
+        portConLogf("ge: coop: guard %d is up again on the host\n", chr->chrnum);
+    }
     if (e->animoff >= 0)
     {
         ModelAnimation *anim = (ModelAnimation *) ((u8 *) ptr_animation_table + e->animoff);
