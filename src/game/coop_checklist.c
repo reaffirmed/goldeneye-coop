@@ -15,6 +15,8 @@
  *                          appear, vanish, die or move more than 7 m in a
  *                          second (and whether their room is on our screen)
  *   GE_COOP_WATCHWORLD=1   log the alarm and the countdown when they change
+ *   GE_COOP_REVIVE=1       log any chr that leaves ACT_DIE/ACT_DEAD for another action
+ *   GE_COOP_SOLO=1         run the steps with no partner (a host on its own)
  */
 #include <ultra64.h>
 #include <math.h>
@@ -52,6 +54,8 @@ typedef struct
 } ClStep;
 
 static s32    sInit;
+static s32    sRevive, sSolo;
+static u8     sLastAct[256];
 static s32    sDumpAt = -1;
 static ClStep sSteps[CL_MAXSTEPS];
 static s32    sNumSteps, sNextStep;
@@ -87,6 +91,8 @@ static void clInit(void)
         e = strchr(at, ',');
         e = (e != NULL) ? e + 1 : NULL;
     }
+    sRevive = getenv("GE_COOP_REVIVE") != NULL;
+    sSolo = getenv("GE_COOP_SOLO") != NULL;
     e = getenv("GE_COOP_WATCH");
     while (e != NULL && *e != '\0' && sNumWatch < CL_MAXWATCH)
     {
@@ -372,6 +378,39 @@ static void clWatchTick(void)
     }
 }
 
+static void clReviveTick(void)
+{
+    s32 i;
+
+    for (i = 0; i < g_NumChrSlots && i < 256; i++)
+    {
+        ChrRecord *c = &g_ChrSlots[i];
+        u8 was = sLastAct[i];
+
+        if (c->model == NULL || c->prop == NULL)
+        {
+            if (sLastAct[i] != 0)
+            {
+                portConLogf("ge: coop: revive: slot %d freed\n", i);
+            }
+            sLastAct[i] = 0;
+            continue;
+        }
+        if (sLastAct[i] == 0)
+        {
+            portConLogf("ge: coop: revive: slot %d holds chr %d (body %d head %d) health %.1f/%.1f at %.0f %.0f %.0f action %d\n", i,
+                        c->chrnum, c->bodynum, c->headnum, c->maxdamage - c->damage, c->maxdamage, c->prop->pos.f[0],
+                        c->prop->pos.f[1], c->prop->pos.f[2], c->actiontype);
+        }
+        if ((was == ACT_DIE || was == ACT_DEAD) && c->actiontype != ACT_DIE && c->actiontype != ACT_DEAD)
+        {
+            portConLogf("ge: coop: revive: chr %d from action %d to %d, health %.1f\n", c->chrnum, was, c->actiontype,
+                        c->maxdamage - c->damage);
+        }
+        sLastAct[i] = c->actiontype ? c->actiontype : 0xff;
+    }
+}
+
 void coopChecklistTick(void)
 {
     u32 t = coopExtMissionTicks();
@@ -384,12 +423,17 @@ void coopChecklistTick(void)
     {   /* a new mission */
         sNextStep = 0;
         memset(sWatchSeen, 0, sizeof(sWatchSeen));
+        memset(sLastAct, 0, sizeof(sLastAct));
         sLastAlarm = sLastClockRun = -1;
     }
     sLastTicks = t;
-    if (!coopLobbyHasPartner() || t < 2)
+    if ((!sSolo && !coopLobbyHasPartner()) || t < 2)
     {
         return;
+    }
+    if (sRevive)
+    {
+        clReviveTick();
     }
     if (sDumpAt >= 0 && t >= (u32) sDumpAt)
     {

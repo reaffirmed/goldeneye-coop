@@ -13,6 +13,9 @@ Data/baserom.u.z64 and mock/libsteam_api.so), then from the repo root:
       JOINENV="GE_CHEATS=invuln GE_COOP_STEPS=p11@10,c79@25" coop/ci/checklist/pair.sh out/doak
     # 3 or 4 players
     PLAYERS=3 STAGE=dam P3ENV="GE_COOP_STEPS=p330@10" coop/ci/checklist/party.sh out/dam3
+    # a host on its own (is it the same in solo?); GE_COOP_REVIVE=1 logs chr
+    # slots freed and filled and any chr leaving ACT_DIE
+    STAGE=jungle HOSTENV="GE_COOP_REVIVE=1 GE_COOP_STEPS=o0@12,b0@14" coop/ci/checklist/solo.sh out/jsolo
     # every mission: the joiner breaks or collects each objective target
     python3 coop/ci/checklist/objs.py > objectives.txt
     python3 coop/ci/checklist/sweep.py objectives.txt   # lines for batch.sh
