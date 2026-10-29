@@ -85,7 +85,7 @@ u32 randomGetNext(void);
 extern void portConLogf(const char *fmt, ...);
 
 #define COOP_MAGIC   0x50434547u /* "GECP" */
-#define COOP_VERSION 14 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
+#define COOP_VERSION 15 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
                           6: host migration (AI sync, bye, addresses in the roster);
                           7: pings, chat, objective credit, team times, cross-save (COOPEV 16, 20..31, COOPPKT 10);
                           8: versus (COOPEV 32..36, COOPPKT 16);
@@ -98,7 +98,8 @@ extern void portConLogf(const char *fmt, ...);
                           13: Player Scaling (COOPSET 11), Friendly Fire Reduced and blasts, the victim scales a
                               partner's hit (HIT friendly), a blast's owner (EXPLODE), Friendly hits stat;
                           14: the host's mission countdown in WORLD, its blast relayed (COOPEV_AICMD); versus shares
-                              the arena's pickups (COOPEV 37), thrown items, dropped guns, object damage and knocks */
+                              the arena's pickups (COOPEV 37), thrown items, dropped guns, object damage and knocks;
+                          15: where a guard's animation loops (GUARDS endframe) */
 
 enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7, COOPPKT_AISYNC = 8, COOPPKT_BYE = 9 };
 /* 10 and 11 (COOPPKT_EXT_FIRST..LAST in coop.h) are coop_ext.c's features' own packets;
@@ -264,6 +265,7 @@ typedef struct
     s32 animoff;    /* byte offset into ptr_animation_table, -1 none */
     f32 frame;
     f32 speed;
+    f32 endframe;   /* where it loops or stops, -1 at its end (modelSetAnimEndFrame) */
 } CoopGuardEnt;
 
 #define COOP_GUARDS_PER_PKT 32
@@ -1735,6 +1737,28 @@ s32 coopChrPinned(ChrRecord *chr)
     }
     slot = coopChrSlot(chr);
     return slot >= 0 && slot < COOP_MAX_CHRS && sGuardTrack[slot].n > 0 && sGuardTrackNum[slot] == chr->chrnum;
+}
+
+/* host: a standing guard keeps its idle going wherever it is while a
+ * partner plays. Vanilla stills one nobody here can see, but a partner far
+ * off may be looking at it (Dam's tower guard): their copy then played the
+ * idle on its own and snapped back to our frozen frame every second or two. */
+s32 coopChrAnimForPartner(ChrRecord *chr)
+{
+    s32 p;
+
+    if (sEnabled <= 0 || !coopNetIsHost() || chr == NULL || chr->prop == NULL || coopIsPlayerChr(chr))
+    {
+        return 0;
+    }
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        if (coopRemoteAliveHere(p))
+        {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 s32 coopChrNearPartner(ChrRecord *chr)
@@ -4093,6 +4117,7 @@ static void coopSendGuards(void)
         e->animoff = (anim != NULL) ? (s32) ((u8 *) anim - (u8 *) ptr_animation_table) : -1;
         e->frame = chr->model->animframe1;
         e->speed = chr->model->speed;
+        e->endframe = chr->model->endframe;
 
         if (pkt.count == COOP_GUARDS_PER_PKT)
         {
@@ -4311,6 +4336,7 @@ placed:
             {
                 modelSetAnimLooping(chr->model, 0, 8.0f);
             }
+            modelSetAnimEndFrame(chr->model, e->endframe);
         }
         else
         {   /* the same animation: keep ours playing and steer its speed
@@ -4320,8 +4346,15 @@ placed:
              * and jumped back a whole step at each loop, the choppy guards
              * (a dying guard's animation doesn't loop, so it played smooth) */
             f32 d = chr->model->animframe1 - e->frame;
-            f32 len = (f32) anim->unk04 - chr->model->animloopframe;
             f32 speed = e->speed;
+            f32 len;
+
+            if (chr->model->endframe != e->endframe)
+            {   /* the same animation, told to loop or stop somewhere else */
+                modelSetAnimEndFrame(chr->model, e->endframe);
+            }
+            /* the host's loop runs to its end frame (an idle's 120 of 163), not the animation's last */
+            len = ((chr->model->endframe >= 0.0f) ? chr->model->endframe : (f32) anim->unk04 - 1.0f) - chr->model->animloopframe;
 
             if ((e->flags & GSF_LOOP) && len > 1.0f)
             {
@@ -4341,6 +4374,7 @@ placed:
                 {
                     modelSetAnimLooping(chr->model, 0, 0.0f);
                 }
+                modelSetAnimEndFrame(chr->model, e->endframe);
             }
             else
             {
