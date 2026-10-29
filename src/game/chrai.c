@@ -3733,7 +3733,12 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                         osSyncPrintf("ai_createchrheadthenjumpf : Flag set CHRSTART_FORCENOBLOOD\n");
                     }
     #endif
+#ifndef TARGET_N64
+                    if (coopScriptSpawnsLeftToHost() /* co-op joiner: the host's spawn comes in its snapshots */
+                        || chrSpawnAtPad(ChrEntityp, ai->BODY_NUM, ai->HEAD_NUM, pad, ailist, flags))
+#else
                     if (chrSpawnAtPad(ChrEntityp, ai->BODY_NUM, ai->HEAD_NUM, pad, ailist, flags))
+#endif
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -3749,7 +3754,12 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     CHRFLAG                          flags    = ntohl(ai->BITFIELD);
                     u16                              ailistid = ntohs(ai->AI_LIST_ID);
                     AIRecord                        *ailist   = ailistFindById(ailistid);
+#ifndef TARGET_N64
+                    if (coopScriptSpawnsLeftToHost() /* co-op joiner: the host's spawn comes in its snapshots */
+                        || chrSpawnAtChr(ChrEntityp, ai->BODY_NUM, ai->HEAD_NUM, ai->CHR_NUM_TARGET, ailist, flags))
+#else
                     if (chrSpawnAtChr(ChrEntityp, ai->BODY_NUM, ai->HEAD_NUM, ai->CHR_NUM_TARGET, ailist, flags))
+#endif
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -3882,6 +3892,13 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     PropRecord            *hatprop;
                     ObjectRecord          *hatobj;
                     // bool tryhat;
+#ifndef TARGET_N64
+                    if (chr && (chr->chrflags & CHRFLAG_CLONE) && coopScriptSpawnsLeftToHost())
+                    {   /* co-op joiner: the host's clone comes in its snapshots */
+                        pass = TRUE;
+                    }
+                    else
+#endif
                     if (chr && (chr->chrflags & CHRFLAG_CLONE))
                     {
                         cloneprop = chrSpawnAtChr(ChrEntityp, chr->bodynum, -1, chr->chrnum, ailist, 0);

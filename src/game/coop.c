@@ -9026,6 +9026,17 @@ s32 coopKeepBodyList(ChrRecord *chr, AIRecord *list)
         && chr == g_CurrentPlayer->prop->chr && chr->ailist == list;
 }
 
+/* joiner: our copy of the level scripts spawns guards too (Surface 2's
+ * reinforcements), numbered by our own count, which drifts from the host's.
+ * The host's spawns reach us in its snapshots, so ours were extras the reaper
+ * freed 5 s later and the script spawned again: the chrs never matched the
+ * host's (repl "unresolved desync"). chrai.c takes the spawn's success branch
+ * without making a chr. */
+s32 coopScriptSpawnsLeftToHost(void)
+{
+    return sEnabled > 0 && !coopNetIsHost() && coopRemoteHere(0) && !coopVersus();
+}
+
 static void coopApplyAiCommand(CoopEvent *ev)
 {
     static u8 list[32];
