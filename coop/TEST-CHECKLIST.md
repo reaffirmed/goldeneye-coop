@@ -43,9 +43,18 @@ the players with `GE_COOP_STEPS` and the `GE_COOP_TEST*` switches. Results below
 from the bug-fix branch on 2026-10-29 (heads 620f526 to 93ea314), US cart, Linux
 build, mock Steam. A blank result was not run.
 
-**Open: intermittent desync.** In joiner-heavy runs where a blast kills guards
-(Caverns, Jungle, Depot), the joiner sometimes logs "repl: unresolved desync: the
-chrs here are not the host's". Missions still complete. Being fixed on the bug-fix branch.
+**Fixed: intermittent desync.** In joiner-heavy runs where a blast kills guards
+(Caverns, Jungle, Depot), the joiner sometimes logged "repl: unresolved desync: the
+chrs here are not the host's". The bug-fix branch fixed it in 7dfb28e and c4237cd. On
+c4237cd, 29 pair runs (the sweep, plus Jungle, Caverns and Depot run 4 times each) had
+none.
+
+**Open: Jungle's respawned guards.** Jungle's own respawner (vanilla script) spawns a new
+guard when guard 29, 30, 34, 39, 40 or 41 is gone, and gives it the dead guard's number.
+The joiner matches guards by number, so it reuses the old, dying copy for the new guard.
+c4237cd stands that copy back up. Whether it should be replaced with a fresh one (new
+head and gun) is with the bug-fix branch. It is the same in solo: a host on its own
+never had a guard leave ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 
 ---
 
