@@ -661,6 +661,9 @@ static void portDebugPosApply(void)
 s32 g_PortGotoActive = 0;
 s32 g_PortGotoStickX = 0;
 s32 g_PortGotoStickY = 0;
+s32 g_PortGotoSet = 0;        /* set with g_PortGotoTo: steer there from now on */
+s32 g_PortGotoPace = 70;      /* the stick forward: 70 runs */
+coord3d g_PortGotoTo;
 
 static void portGotoTick(void)
 {
@@ -682,6 +685,14 @@ static void portGotoTick(void)
         {
             state = 0;
         }
+    }
+    if (g_PortGotoSet)
+    {   /* a harness asked for a new run (coop.c GE_COOP_TESTSNEAK) */
+        g_PortGotoSet = 0;
+        tx = g_PortGotoTo.x;
+        ty = g_PortGotoTo.y;
+        tz = g_PortGotoTo.z;
+        state = 0;
     }
     if (state != 0)
     {
@@ -720,7 +731,7 @@ static void portGotoTick(void)
     g_PortGotoStickX = (s32) (err * 2.0f);
     if (g_PortGotoStickX > 60)  { g_PortGotoStickX = 60;  }
     if (g_PortGotoStickX < -60) { g_PortGotoStickX = -60; }
-    g_PortGotoStickY = (err < 30.0f && err > -30.0f) ? 70 : 0;
+    g_PortGotoStickY = (err < 30.0f && err > -30.0f) ? g_PortGotoPace : 0;
     g_PortGotoActive = 1;
 
     if ((dbgtick++ % 60) == 0)

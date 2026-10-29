@@ -171,6 +171,7 @@ enum { COOPAI_CLASSIC = 0, COOPAI_SMARTER = 1 };
 s32  coopAiSmarter(void); s32 coopAiSmarterOption(void); void coopAiSetSmarterOption(s32 mode);                   /* this mission's guards are the smarter ones */
 s32  coopAiTick(ChrRecord *chr);            /* chrai.c ai(): 1 when the smarter AI ran the chr's tick */
 f32  coopAiHearScale(ChrRecord *chr, f32 dist, f32 range);  /* chr.c: hearing through walls */
+void coopAiDoorOpened(DoorRecord *door, s32 state);    /* propobj.c doorSetOpenState: a clue, if a player opened it */
 s32  coopGuardAiCount(void);
 const char *coopGuardAiName(s32 mode);
 s32  coopChrCurrentTarget(void);            /* host, in a guard's tick: the player that is Bond, 0 ours */
@@ -192,7 +193,7 @@ u8   coopLookShotSeq(void);                 /* coop_look.c: our shots so far (Co
 enum
 {
     COOPBARK_SPOTTED = 0, COOPBARK_LOST, COOPBARK_HELP, COOPBARK_COVER, COOPBARK_GRENADE,
-    COOPBARK_BODY, COOPBARK_ALARM, COOPBARK_RETREAT, COOPBARK_COUNT
+    COOPBARK_BODY, COOPBARK_ALARM, COOPBARK_RETREAT, COOPBARK_CLUE, COOPBARK_GIVEUP, COOPBARK_COUNT
 };
 typedef struct
 {

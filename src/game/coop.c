@@ -2632,6 +2632,72 @@ static void coopHarnessTick(void)
             testpad = -1;
         }
     }
+    if (coopPartnerHere() && coopInMission())
+    {   /* GE_COOP_TESTSNEAK=<chrnum>:<s>:<m>[:<stick>]: <s> seconds into the
+         * mission, stand on the waypoint nearest a point <m> metres behind that
+         * guard, on its floor, then run (GE_GOTO's steering; <stick> forward,
+         * 70 a run, 25 a walk) to 1.5 m beside it: a player coming up behind
+         * a guard (harness only) */
+        static s32 sneakchr = -2, sneakat;
+        static f32 sneakm;
+        if (sneakchr == -2)
+        {
+            extern s32 g_PortGotoPace;
+            const char *e = getenv("GE_COOP_TESTSNEAK");
+            s32 pace = 70;
+            if (e == NULL || sscanf(e, "%d:%d:%f:%d", &sneakchr, &sneakat, &sneakm, &pace) < 3)
+            {
+                sneakchr = -1;
+            }
+            g_PortGotoPace = pace;
+        }
+        if (sneakchr >= 0 && sMissionTicks >= (u32) sneakat * 60 && g_CurrentSetup.pathwaypoints != NULL)
+        {
+            extern s32 g_PortGotoSet;
+            extern coord3d g_PortGotoTo;
+            ChrRecord *c = chrFindByLiteralId(sneakchr);
+
+            if (c != NULL && c->prop != NULL && c->model != NULL)
+            {
+                f32 rot = getsubroty(c->model);
+                f32 fx = sinf(rot), fz = cosf(rot);
+                f32 bx = c->prop->pos.f[0] - fx * sneakm * 100.0f, bz = c->prop->pos.f[2] - fz * sneakm * 100.0f;
+                waypoint *wp;
+                s32 best = -1;
+                f32 bestd2 = 1.0e30f;
+
+                for (wp = g_CurrentSetup.pathwaypoints; wp->padID >= 0; wp++)
+                {
+                    PadRecord *pad = &g_CurrentSetup.pads[wp->padID];
+                    f32 dx = pad->pos.f[0] - bx, dz = pad->pos.f[2] - bz, dy = pad->pos.f[1] - c->prop->pos.f[1];
+
+                    if (pad->stan != NULL && dy > -200.0f && dy < 200.0f && dx * dx + dz * dz < bestd2)
+                    {
+                        bestd2 = dx * dx + dz * dz;
+                        best = wp->padID;
+                    }
+                }
+                if (best >= 0)
+                {
+                    PadRecord *pad = &g_CurrentSetup.pads[best];
+                    coord3d pos = pad->pos;
+
+                    coopRespawnPlayerAt(&pos, pad->stan, 0.0f, sLastWeapon);
+                    g_PortGotoTo.f[0] = c->prop->pos.f[0] + fz * 150.0f;    /* beside it, not into it */
+                    g_PortGotoTo.f[1] = c->prop->pos.f[1];
+                    g_PortGotoTo.f[2] = c->prop->pos.f[2] - fx * 150.0f;
+                    g_PortGotoSet = 1;
+                    portConLogf("ge: coop: testsneak: pad %d (%.0f m from the spot behind guard %d), running to it\n", best,
+                                sqrtf(bestd2) / 100.0f, sneakchr);
+                }
+                else
+                {
+                    portConLogf("ge: coop: testsneak: no waypoint near guard %d\n", sneakchr);
+                }
+            }
+            sneakchr = -1;
+        }
+    }
     if (coopInMission())
     {   /* GE_COOP_TESTHOLD=<item>:<s>: <s> seconds into the mission, switch to that
          * item (1 the fists, holstered; harness only) */

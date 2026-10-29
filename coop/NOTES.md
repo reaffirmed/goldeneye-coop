@@ -2303,6 +2303,87 @@ the game's own sounds (CONTRIBUTING: no made audio).
   Archives clean this time), no crashes, 25 desyncs in all (Classic 28).
   The host barked 176 times; the joiner logged all 176.
 
+## Smarter guards: clues, roles, wounds, regrouping, cut-offs (2026-10-29, COOP_VERSION stays 14)
+
+Stage 3 of the dynamic guards plan, all in src/game/coop_ai.c (Smarter only;
+Classic never reaches it; only plain armed guards on the shared lists, as
+before). Nothing new on the wire: the host already had every player's
+position, and the two new barks are COOPEV_BARK kinds 8 and 9 (a stage-2
+build drops kinds it doesn't know).
+
+- Clues. A calm guard on post looks round once a second (with its look for
+  bodies) and goes to see (WHO'S THERE?, then the usual look, walk, search,
+  walk back) when, within 15 m and in sight:
+  - a door a player opened is still open (propobj.c doorSetOpenState calls
+    coopAiDoorOpened: a shut door starting to open with a player within 3 m
+    and no chr within 2.5 m; a joiner's door reaches the host through
+    coopApplyDoor, which calls the same function), for 60 s;
+  - something was smashed in the last 60 s (once a second the active objects
+    are scanned; what was already smashed at the start doesn't count; doors,
+    guns, ammo, keys and armour are left out). GoldenEye has no lights to
+    shoot out, so a smashed window, camera or monitor stands in for them.
+  - Footsteps: a player moving over 4 units a tick (a full-stick run is about
+    7.5) within 5 m (2.5 m through a wall, 6.25 m in lockdown).
+  Seeing a guard shot was already there (Classic's reaction, investigated).
+  Clues a guard walked past while fighting or searching don't count after.
+- Roles, from the chrnum and the stage (the same guard fights the same way):
+  1 in 4 a rusher (cover only after 3 to 4 bursts, no pause before chasing,
+  flanks 2 times in 3, never regroups or surrenders), 1 in 4 an anchor
+  (cover after 1 to 2 bursts, crouches longer, waits 3 s before moving, never
+  flanks or cuts off, always holds where its search ended when alerted), the
+  rest riflemen (stage 1's behaviour). "guard N fights as <role>" in the log.
+- Wounds: half its health gone, a guard walks wherever it would have run
+  (GoldenEye has no limp animation). Three quarters gone, no other guard of
+  ours fighting within 15 m and the player within 6 m and in sight: 1 in 2
+  (GE_GUARDAI_TESTGIVEUP: always) it surrenders: DON'T SHOOT!, Classic's
+  surrender (hands up, the gun dropped, mirrored to joiners by COOPEV_DROP).
+  The brain then holds it there (its list doesn't run), puts the hands back
+  up after a hit, and lets go if it dies or a level script gives it a list.
+  Shooting it still kills it.
+- Regrouping: two of our guards dead within 20 m of a fighting guard in the
+  last 20 s (alerted or higher): once a fight it runs (FALL BACK!) to the
+  biggest group of calm guards of ours within 40 m that is farther from the
+  target and at least 12 m from it, and makes its stand there (no chasing;
+  when it gives the target up it searches round there).
+- Cutting off: co-op, the guard's target 15 m or more from every partner,
+  out of sight: 1 in 2 (GE_GUARDAI_TESTCUTOFF: always) a guard that isn't an
+  anchor runs to the waypoint by the target on the side towards the nearest
+  partner; one guard at a time.
+- Harness: GE_COOP_TESTSNEAK=<chr>:<s>:<m>[:<stick>] (joiner: stand on the
+  waypoint nearest <m> metres behind a guard, then run up beside it, by
+  GE_GOTO's steering; lv.c g_PortGotoSet/g_PortGotoPace),
+  GE_GUARDAI_TESTCLUE=<chr>:<s> (a smashed-object clue in sight of a guard),
+  GE_GUARDAI_TESTHURT=<chr>:<s>:<part>, GE_GUARDAI_LISTCHRS=<s> (our guards
+  and the shut doors near them), GE_GUARDAI_STEPDBG=1 (player speeds).
+- Tested on Dam (2 players, mock Steam, host Smarter):
+  - Footsteps: joiner run up behind guard 4 from 4 to 6 m, four runs: guard 4
+    heard them at 2 to 3 m three times (WHO'S THERE!, turned, fought), and
+    once guard 5 saw them first. A slow walk could not be driven from the
+    harness (the stick values tried all moved Bond at run speed on the
+    host's view), so "walking is quiet" is untested.
+  - Doors: the joiner's TESTDOOR at pads 173, 180, 257 logged "player 2
+    opened a door" on the host. No guard was placed to see those doors, so a
+    guard reacting to a real opened door is untested; the reaction itself was
+    tested with TESTCLUE: guards 22, 28 and 41 each noticed the clue 6 to 12
+    m off, looked, walked there, searched and went back, and the joiner got
+    the WHO'S THERE? bark.
+  - Guard 39 at 80% hurt (TESTHURT) with the joiner running up: it walked
+    instead of running, fell back, cut player 2 off (57 m from the host) and
+    then surrendered; the gun it dropped landed on both games. A second run
+    the same way fell back three times and never surrendered (the joiner was
+    never within 6 m in its sight when it decided).
+  - Scripted missions (all 20, Smarter, both players acting and
+    invulnerable, 100 s): objective failures the same as Classic's (Silo 4,
+    as in stage 1's Classic run; Statue 10, Bunker 2, Jungle and Caverns 2
+    each; the rest none), no crashes, 28 desyncs in all (Classic 28).
+    Regroups 58, cut-offs 8, guards walking hurt 6, footsteps heard 3, no
+    surrenders; the hunting joiner moves by teleport and opens no doors, so
+    doors and clues saw no use there.
+  - On the host's side, a joiner standing at a pad 1 m below the floor (Dam
+    pad 196 by TESTPAD) kept its puppet at the spawn: coopPuppetUpdate finds
+    no stand tile below that point. A harness artifact, but it would hide a
+    joiner from the guards if a real one ever stood there.
+
 ## Far-away players dropping in mid-mission (2026-10-28)
 
 Tester report: a player from Colombia dropped in to a running co-op mission;
