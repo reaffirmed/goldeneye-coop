@@ -2372,6 +2372,18 @@ void chrUpdateAnim(ChrRecord *chr, chranimticks_t tickamount)
         getsuboffset(model, &chr->prevpos);
         chrModelTickAnim(model, tickamount, 1);
         subcalcpos(model);
+#ifndef TARGET_N64
+        if (coopChrPinned(chr))
+        {   /* co-op joiner: the host's snapshots place this guard. Its run's
+             * own steps on top, uneven from tick to tick, made it lurch. */
+            coord3d at;
+
+            getsuboffset(model, &at);
+            at.x = chr->prevpos.x;
+            at.z = chr->prevpos.z;
+            setsuboffset(model, &at);
+        }
+#endif
         set_color_shading_from_tile(prop, &chr->nextcol);
         getsuboffset(model, &prop->pos);
         chrDetectRooms(chr);

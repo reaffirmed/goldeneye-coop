@@ -7,6 +7,7 @@ void coopStageStart(void);
 void coopTick(void);
 s32  coopPropIsGhost(PropRecord *prop);
 s32  coopChrNearPartner(ChrRecord *chr);     /* host: keep animating a guard a partner may see */
+s32  coopChrPinned(ChrRecord *chr);          /* joiner: a guard placed from the host's snapshots */
 
 extern PropRecord *g_CoopPropOverride;
 s32  coopChrTickBegin(ChrRecord *chr); /* 0: skip (client mirrors the host) */

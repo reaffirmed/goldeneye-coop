@@ -1723,6 +1723,20 @@ s32 coopChrSlot(const ChrRecord *chr)
     return (s32) (off / sizeof(ChrRecord));
 }
 
+/* joiner: a guard drawn where the host's was (coopGuardsInterpTick), so its
+ * animation's own steps must not move it as well */
+s32 coopChrPinned(ChrRecord *chr)
+{
+    s32 slot;
+
+    if (sEnabled <= 0 || sNoInterp || !coopIsMirroringClient() || chr == NULL || chr->prop == NULL || coopIsPuppet(chr->prop))
+    {
+        return 0;
+    }
+    slot = coopChrSlot(chr);
+    return slot >= 0 && slot < COOP_MAX_CHRS && sGuardTrack[slot].n > 0 && sGuardTrackNum[slot] == chr->chrnum;
+}
+
 s32 coopChrNearPartner(ChrRecord *chr)
 {
     s32 p;
