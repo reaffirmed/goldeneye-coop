@@ -4627,6 +4627,10 @@ static void coopHostApplyShot(CoopEvent *ev)
     g_CoopPropOverride = sR[ev->from].puppet; /* the stimulus belongs to that player */
     coopStatsBlameBegin(ev->from);            /* and so do the hit and the kill */
     coopObjNoteActor(ev->from, 1);
+    chr->chrflags |= CHRFLAG_NEAR_MISS;       /* as chrTestHit flags a shot that reaches it: a script's "Bond
+                                               * shot at me" sees a partner's hit too (Statue's Janus: the
+                                               * mission fails and he runs off, invincible) */
+    chr->numclosearghs++;
     sForceChr = chr;                          /* the reaction their game already played, if it can be the same */
     sForceKind = ev->u.shot.predicted;
     sForceIdx = ev->u.shot.predidx;
