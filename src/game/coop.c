@@ -677,6 +677,7 @@ static s32 coopIsPlayerChr(ChrRecord *chr)
 static s32 coopRespawnEta(void);
 static s32 coopLocalCalm(void);
 static void coopRemotesTick(void);
+static void coopSubFieldTick(void);
 static void coopCinemaTick(void);
 static void coopQueueEventTo(CoopEvent *ev, s32 to);
 
@@ -1517,7 +1518,8 @@ static void coopPuppetSpawn(CoopRemote *r)
     coopFeedToast("A partner is here", r->st.player);
 }
 
-static void coopPuppetUpdate(CoopRemote *r)
+/* the puppet where the partner was a moment ago: 0 when no floor is found there */
+static s32 coopPuppetPlace(CoopRemote *r)
 {
     ChrRecord *chr = r->puppet->chr;
     coord3d pos;
@@ -1538,7 +1540,7 @@ static void coopPuppetUpdate(CoopRemote *r)
     stan = coopFindStan(&pos, r->puppet->stan, &r->puppet->pos);
     if (stan == NULL)
     {
-        return;
+        return 0;
     }
     r->puppetPrev = pos;
 
@@ -1548,7 +1550,17 @@ static void coopPuppetUpdate(CoopRemote *r)
     setsubroty(chr->model, yaw);
     sub_GAME_7F01FC10(chr->model, &r->puppet->pos, &r->puppet->pos, &chr->ground);
     chrDetectRooms(chr);
+    return 1;
+}
 
+static void coopPuppetUpdate(CoopRemote *r)
+{
+    ChrRecord *chr = r->puppet->chr;
+
+    if (!coopPuppetPlace(r))
+    {
+        return;
+    }
     if (coopCutsceneActive())
     {   /* our Bond's cinema animation, no guns; the MP animations start over after */
         coopCutscenePuppetAnim(chr);
@@ -2015,6 +2027,10 @@ static void coopTickBody(void)
             coopHoldTick(); /* the mission card: everyone loads in first */
             return;
         }
+        if (g_GlobalTimerDelta > 0.0f)
+        {
+            coopSubFieldTick();
+        }
         coopKeepAlive();    /* paused, or a cutscene has the controls: still here */
         return;
     }
@@ -2387,6 +2403,36 @@ static void coopRemotesTick(void)
     }
 }
 
+
+/* A tick between two 60ths (tickhz above 60, coopTick's g_ClockTimer 0): the
+ * game moves its own guards and Bond on every tick, but the host's guards and
+ * the partners were placed only on the 60ths, so above 60 fps they looked to
+ * run at a lower frame rate than everything round them (a dying guard, which
+ * stays put, looked smooth). Their spots between samples come from the clock,
+ * so each tick can place them again; what they do stays on the 60ths. */
+static void coopSubFieldTick(void)
+{
+    s32 p;
+
+    if (sNoInterp || !coopInStage())
+    {
+        return;
+    }
+    if (coopIsMirroringClient())
+    {
+        coopGuardsInterpTick();
+    }
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        CoopRemote *r = &sR[p];
+
+        if (p != coopSelf() && coopRemoteHere(p) && r->puppet != NULL && r->puppet->chr != NULL
+            && r->puppet->chr->bodynum == r->st.bodynum && r->puppet->chr->headnum == r->st.headnum)
+        {
+            coopPuppetPlace(r);
+        }
+    }
+}
 
 /* ---- test harness hooks (env vars, see coop/NOTES.md) ------------------ */
 
