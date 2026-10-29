@@ -2863,3 +2863,8 @@ multiplayer) is done, then developed further. Paused, not deleted.
   joiners (only the host runs guards); the release notes say so.
 - No mission runs for this release (owner's call, the change only turns
   Smarter off); smoke check below.
+- Smoke check (US cart, Linux i686, mock Steam), with GE_GUARDAI=1 set to
+  ask for Smarter: solo Dam and a two-player Dam through the lobby boot and
+  play, no "smarter guards on" in any log; Port Options sheet without the
+  four rows, the 007 screen with its four sliders, the host's GAME SETUP
+  without Guard AI. Shots: smart-ai-paused/ in the project files.
