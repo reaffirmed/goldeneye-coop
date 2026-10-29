@@ -49,12 +49,12 @@ chrs here are not the host's". The bug-fix branch fixed it in 7dfb28e and c4237c
 c4237cd, 29 pair runs (the sweep, plus Jungle, Caverns and Depot run 4 times each) had
 none.
 
-**Open: Jungle's respawned guards.** Jungle's own respawner (vanilla script) spawns a new
+**Fixed: Jungle's respawned guards.** Jungle's own respawner (vanilla script) spawns a new
 guard when guard 29, 30, 34, 39, 40 or 41 is gone, and gives it the dead guard's number.
-The joiner matches guards by number, so it reuses the old, dying copy for the new guard.
-c4237cd stands that copy back up. Whether it should be replaced with a fresh one (new
-head and gun) is with the bug-fix branch. It is the same in solo: a host on its own
-never had a guard leave ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
+The joiner reused the old, dying copy for it. 118ab73 on the bug-fix branch makes the
+joiner spawn a fresh copy instead. In 4 Jungle pairs, the respawned guard's head and spot
+matched the host's. It is the same in solo: a host on its own never had a guard leave
+ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 
 ---
 
