@@ -173,6 +173,8 @@ enum { COOPAI_CLASSIC = 0, COOPAI_SMARTER = 1 };
 s32  coopAiSmarter(void); s32 coopAiSmarterOption(void); void coopAiSetSmarterOption(s32 mode);                   /* this mission's guards are the smarter ones */
 s32  coopAiTick(ChrRecord *chr);            /* chrai.c ai(): 1 when the smarter AI ran the chr's tick */
 f32  coopAiHearScale(ChrRecord *chr, f32 dist, f32 range);  /* chr.c: hearing through walls */
+void coopAiShotLoud(s32 loud);
+f32  coopAiWhizMargin(ChrRecord *chr);  /* chr.c chrTestHit, coop.c: how wide a near miss is */  /* around chrCheckGuardsHeardSound: 1 an unsilenced gun's shot */
 void coopAiDoorOpened(DoorRecord *door, s32 state);    /* propobj.c doorSetOpenState: a clue, if a player opened it */
 s32  coopGuardAiCount(void);
 const char *coopGuardAiName(s32 mode);

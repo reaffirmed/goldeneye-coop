@@ -8140,7 +8140,27 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
             noiseRadius = getCurrentPlayerNoise(GUNLEFT);
         }
 
+#ifndef TARGET_N64
+        {   /* smarter guards: an unsilenced gun carries further (coop_ai.c) */
+            s32 h, loud = 0;
+
+            for (h = GUNRIGHT; h <= GUNLEFT; h++)
+            {
+                WeaponStats *ws = get_ptr_item_statistics(getCurrentPlayerWeaponId(h));
+
+                if (get_hands_firing_status(h) && getCurrentPlayerWeaponId(h) != ITEM_UNARMED && ws != NULL
+                    && ws->LoudnessMin > 0.0f)
+                {
+                    loud = 1;
+                }
+            }
+            coopAiShotLoud(loud);
+        }
+#endif
         chrCheckGuardsHeardSound(noiseRadius);
+#ifndef TARGET_N64
+        coopAiShotLoud(0);
+#endif
     }
 
     gunSetSightVisible(GUNSIGHTREASON_NOTAIMING, moveData.aiming);

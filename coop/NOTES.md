@@ -2842,3 +2842,43 @@ protocol change.
   Classic's (Statue, Bunker 2, Jungle, Caverns); Train once showed
   objective B failed on the joiner for a moment after it shot guard 4,
   and the host's state put it back (the host never failed it).
+
+## Smarter guards: posts, memory, low cover, hearing (2026-10-29, paused, draft)
+
+From a tester's Dam run: the pillbox guards saw the player, never left, and
+seemed to forget them; shots only woke a guard when they passed its head.
+Paused with the Smart AI option; nothing here runs with Classic guards.
+
+- Why: Dam's level lists 0x040c (trench) and 0x040d (pillbox) are "posts":
+  they wait for sight or a hit, then shoot or kneel from where they stand
+  forever and never check hearing. The brain only owned guards on global
+  lists, so these were Classic guards even with Smarter on.
+- coop_ai.c coopAiPostListScan classifies a level list as a post when every
+  command is on an allowlist (waits, fire, kneel, animations, jumps to
+  itself or a global list); cached per setup. A post guard leaves its list
+  for a fight once it sees, is hit, or attacks; hears a shot and aims that
+  way for 6 s (listen), then goes to look after the third shot; and won't
+  throw a grenade within 2.5 m of its post (one from the pillbox slit
+  killed both guards).
+- Memory: in a fight a guard that hears the target updates its last known
+  position; losing the target counts from the later of sight and hearing.
+  Out of sight, a non-rusher holds an aimed watch on that spot (moving to a
+  waypoint within 8 m with a line to it first), 3 to 8 s.
+- Low cover: coopAiFindCover also returns the nearest pad that hides a body
+  80 units up but not standing; a non-rusher takes it when it is much nearer
+  than full cover, stays down its duck time, then stands and fires.
+- Hearing: unsilenced shots carry at least 20 m (10 m through a wall); a
+  round passing within 150 units of a smarter guard counts as a near miss
+  (chr.c chrTestHit, coop.c partners' shots).
+- Harness: GE_GUARDAI_V060=1 (v0.6.0 behaviour), GE_GUARDAI_TRACE=<chrs>,
+  GE_GUARDAI_TESTPEEK=<chr>:<s>:<hide s>[:<m>[:<look>[:<deg>]]], GE_GOTO's
+  4th number (start delay).
+- Tested: Dam pillbox, guard 0, 3 runs each. v0.6.0: never more than 0.3 m
+  from its post, 30 s without seeing the player at t=40. Now: leaves,
+  flanks by the crates, 3 to 4 m from the player and fighting at t=40.
+- Not done: low cover never triggered in a run; a joiner check at the
+  pillbox; the all-missions comparison. A harsh two-player run (both players
+  invulnerable, hunting and firing for 90 s, Smarter on, 2 missions at once)
+  gave "unresolved desync: the chrs here are not the host's" on 11 of 13
+  missions with the v0.6.0 build itself, so that desync predates this work
+  and is worth chasing on its own.

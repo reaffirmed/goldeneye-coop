@@ -3656,6 +3656,14 @@ void chrTestHit(PropRecord *prop, ShotData *shotdata)
         chr->chrflags |= CHRFLAG_NEAR_MISS;
         chr->numclosearghs++;
     }
+#ifndef TARGET_N64
+    else if (coopAiWhizMargin(chr) > 0.0f && prop->zDepth <= shotdata->maxdist + coopAiWhizMargin(chr)
+             && projectileTestPropBoundingSphere(&shotdata->viewOrigin, &shotdata->viewDir, (coord3d *) &submatrix->m[3][0],
+                                                 modelsize + coopAiWhizMargin(chr)))
+    {   /* smarter guards: a round past its ear, or into the wall by it */
+        chr->chrflags |= CHRFLAG_NEAR_MISS;
+    }
+#endif
 }
 
 #ifndef TARGET_N64
@@ -3976,6 +3984,24 @@ void sub_GAME_7F022EE0(s32 param_1){
 void chrCheckGuardsHeardSound(f32 noise)
 {
     s32 i;
+
+#ifndef TARGET_N64
+    {   /* GE_GUARDAIDBG: how far a shot carries (at most once a second) */
+        static s32 dbg = -1, last;
+        extern char *getenv(const char *);
+        extern void portConLogf(const char *fmt, ...);
+
+        if (dbg < 0)
+        {
+            dbg = getenv("GE_GUARDAIDBG") != NULL;
+        }
+        if (dbg && (g_GlobalTimer - last > 60 || g_GlobalTimer < last))
+        {
+            last = g_GlobalTimer;
+            portConLogf("ge: ai: a shot heard out to %.0f m (noise %.1f)\n", noise, noise);
+        }
+    }
+#endif
 
     for (i=0; i<g_NumChrSlots; i++)
     {
