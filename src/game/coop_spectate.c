@@ -44,12 +44,14 @@ extern f32 bondviewYPositionRelated(StandTile *stan, f32 x, f32 z);
 extern s32 portJoyPortUseMenuPressed(s32 pad);
 extern char *getenv(const char *);
 extern int atoi(const char *);
+extern s32 portReturnStartThisTick(void); /* video.c: START came from Return alone; weak 0 headless */
 
 #define COOPSPEC_FADE   30.0f   /* ticks back in from black */
 #define FREE_SPEED      6.0f    /* units a tick at full stick */
 #define FREE_PITCH      1.48f   /* about 85 degrees up or down */
 #define FREE_DEADZONE   10      /* stick units of 70 that don't move it */
 #define DEG             0.017453292f
+#define COOPSPEC_ENDASK 240     /* ticks to press Start a second time */
 
 static s32 sTarget = -1;        /* the partner we watch, -1: none */
 static s32 sLive;              /* we came back in on a partner */
@@ -58,6 +60,7 @@ static coord3d sPos;            /* their eyes */
 static coord3d sPos3;           /* their feet, for the portal walk */
 static f32 sYaw, sPitch;
 static u8 sRoom;
+static s32 sEndAsk;            /* ticks left to press Start again and end the mission */
 
 /* the free camera: the same yaw convention as a partner's view */
 static s32 sFree;
@@ -301,6 +304,35 @@ void coopSpectateTick(void)
     {
         step = -1;
     }
+    if (sEndAsk > 0)
+    {
+        sEndAsk--;
+    }
+    {   /* GE_COOP_TESTDOWNEND=<s>: press Start <s> seconds into watching, and again 1 s later (harness only) */
+        static s32 endat = -2, n;
+
+        if (endat == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTDOWNEND");
+            endat = (e != NULL) ? atoi(e) * 60 : -1;
+        }
+        n++;
+        if (endat > 0 && (n == endat || n == endat + 60))
+        {
+            portJoyInjectPressed(0, START_BUTTON);
+        }
+    }
+    if (!sDropIn && joyGetButtonsPressedThisFrame(0, START_BUTTON) && !portReturnStartThisTick())
+    {   /* down, the watch can't open: Start, then Start again, is its Abort */
+        if (sEndAsk > 0)
+        {
+            sEndAsk = 0;
+            portConLogf("ge: coop: spectate: ending the mission\n");
+            coopDownEndMission();
+            return;
+        }
+        sEndAsk = COOPSPEC_ENDASK;
+    }
     use = portJoyPortUseMenuPressed(0) || joyGetButtonsPressedThisFrame(0, B_BUTTON);
     coopSpectateTest(&use, &step, &tturn, &tfwd, &tside);
     if (use)
@@ -343,6 +375,7 @@ void coopSpectateTick(void)
 /* coopDeadTick: we are back, or nobody is left standing */
 void coopSpectateStop(void)
 {
+    sEndAsk = 0;
     sLive = 0;
     sTarget = -1;
     sFree = 0;
@@ -375,6 +408,17 @@ static s32 coopSpectateOn(void)
 s32 coopSpectateTarget(void)
 {
     return (coopSpectateOn() && !sFree) ? sTarget : -1;
+}
+
+/* coop_hud.c: 2 Start was pressed once and a second press ends the mission,
+ * 1 Start can end it, 0 not (dropping in) */
+s32 coopSpectateEndAsked(void)
+{
+    if (sDropIn || !coopSpectateOn())
+    {
+        return 0;
+    }
+    return (sEndAsk > 0) ? 2 : 1;
 }
 
 /* coop_hud.c: 1 watching *who, 2 the free camera (*who the one we left), 0 neither */

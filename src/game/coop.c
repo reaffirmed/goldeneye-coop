@@ -7748,6 +7748,18 @@ static void coopEndMissionLocal(void)
     portConLogf("ge: coop: mission ended, back to the lobby\n");
 }
 
+/* coop_spectate.c, Start twice while we are down and the watch can't open:
+ * a host with partners ends the mission for everyone (the watch's END ALL),
+ * anyone else aborts their own (the watch's Abort) */
+void coopDownEndMission(void)
+{
+    if (coopHostAbortAsks())
+    {
+        coopHostAbort(0);
+    }
+    coopEndMissionLocal();
+}
+
 static void coopPendingEndTick(void)
 {
     if (sPendingEnd)

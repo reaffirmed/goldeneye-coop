@@ -426,6 +426,8 @@ Gfx *coopPhotoRender(Gfx *gdl);
 /* watching a partner while we are down (coop_spectate.c) */
 void coopSpectateTick(void);
 void coopSpectateStop(void);
+s32  coopSpectateEndAsked(void);   /* 2 Start pressed once while down (again ends the mission), 1 Start can end it, 0 not */
+void coopDownEndMission(void);    /* down: the host ends it for everyone, a joiner leaves it */
 void coopRestoreMusic(void);   /* bondview2.c: the level music after a death */
 void coopSpectateDropIn(s32 on);
 s32  coopSpectateTarget(void);     /* whose eyes we look out of, -1 none (or the free camera) */
