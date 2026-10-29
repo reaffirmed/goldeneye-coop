@@ -4146,20 +4146,47 @@ placed:
             }
         }
         else
-        {
+        {   /* the same animation: keep ours playing and steer its speed
+             * toward the host's frame, jumping only when far out. The
+             * difference of a looping one is taken round the loop: a walk's
+             * frame 1 just after the host's 39 of 40 counted as 38 frames out
+             * and jumped back a whole step at each loop, the choppy guards
+             * (a dying guard's animation doesn't loop, so it played smooth) */
             f32 d = chr->model->animframe1 - e->frame;
+            f32 len = (f32) anim->unk04 - chr->model->animloopframe;
+            f32 speed = e->speed;
 
-            if (d > 6.0f || d < -6.0f)
+            if ((e->flags & GSF_LOOP) && len > 1.0f)
             {
-                modelSetAnimation(chr->model, anim, flip, e->frame, e->speed, 0.0f);
+                while (d > len * 0.5f)
+                {
+                    d -= len;
+                }
+                while (d < -len * 0.5f)
+                {
+                    d += len;
+                }
+            }
+            if (d > 12.0f || d < -12.0f)
+            {
+                modelSetAnimation(chr->model, anim, flip, e->frame, e->speed, 4.0f);
                 if (e->flags & GSF_LOOP)
                 {
                     modelSetAnimLooping(chr->model, 0, 0.0f);
                 }
             }
-            else if (chr->model->speed != e->speed)
+            else
             {
-                modelSetAnimSpeed(chr->model, e->speed, 0.0f);
+                if (d > 2.0f || d < -2.0f)
+                {   /* ahead: slower, behind: faster, by up to a quarter */
+                    f32 k = 1.0f - d / 24.0f;
+
+                    speed *= (k < 0.75f) ? 0.75f : (k > 1.25f) ? 1.25f : k;
+                }
+                if (chr->model->speed != speed)
+                {
+                    modelSetAnimSpeed(chr->model, speed, 0.0f);
+                }
             }
         }
     }
