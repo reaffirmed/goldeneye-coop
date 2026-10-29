@@ -1546,7 +1546,17 @@ static s32 coopPuppetPlace(CoopRemote *r)
 
     r->puppet->stan = stan;
     r->puppet->pos = pos;
-    setsuboffset(chr->model, &pos);
+    {   /* x and z only, as bondview's own MP bodies do: the model's height is
+         * the animation's root over the ground, and a loop of the idle seeds
+         * the root from it (model.c), so the partner's eye height here made
+         * the body hop each time the idle came round */
+        coord3d off;
+
+        getsuboffset(chr->model, &off);
+        off.f[0] = pos.f[0];
+        off.f[2] = pos.f[2];
+        setsuboffset(chr->model, &off);
+    }
     setsubroty(chr->model, yaw);
     sub_GAME_7F01FC10(chr->model, &r->puppet->pos, &r->puppet->pos, &chr->ground);
     chrDetectRooms(chr);
