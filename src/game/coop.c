@@ -485,6 +485,7 @@ static void coopApplyGuard(CoopGuardEnt *e);
 static void coopApplyEvent(CoopEvent *ev);
 static void coopQueueEvent(CoopEvent *ev);
 static void coopFlushEvents(void);
+static void coopDoorFlush(void);
 static void coopApplyDoor(s32 doorofs, s32 state);
 static void coopApplyObjDamage(CoopEvent *ev);
 static void coopApplyObjKnock(CoopEvent *ev);
@@ -4720,6 +4721,7 @@ static void coopFlushEvents(void)
 {
     s32 c;
 
+    coopDoorFlush();
     for (c = 0; c < COOP_NET_MAX_PEERS; c++)
     {
         coopFlushChan(c);
@@ -5000,23 +5002,94 @@ void coopPingSend(CoopPing *ping)
 
 static s32 sApplyingRemoteDoor;
 
-void coopDoorStateChanged(DoorRecord *door, s32 state)
+/* A door's changes are sent once a tick, its last state of the tick, and the
+ * same state again only after a second. A door that wants to close on
+ * someone standing in it closes and reopens every tick (Bunker 1's six-door
+ * gate with a player in it): one event each way per door per tick filled the
+ * reliable queue in seconds, and every event after that was dropped, the
+ * guards' hits on the joiner among them, so the joiner took no damage. */
+#define COOP_DOOR_PENDING 32
+#define COOP_DOOR_RESEND  60
+static struct
+{
+    s32 ofs;
+    s8 state;
+} sDoorPending[COOP_DOOR_PENDING];
+static s32 sNumDoorPending;
+static struct
+{
+    s32 ofs;
+    s8 state;
+    u32 tick;
+} sDoorSent[COOP_DOOR_PENDING];
+static s32 sDoorSentNext;
+
+static void coopDoorSend(s32 ofs, s32 state)
 {
     CoopEvent ev;
+    s32 i;
+
+    for (i = 0; i < COOP_DOOR_PENDING && !(sDoorSent[i].ofs == ofs && sDoorSent[i].tick != 0); i++)
+    {
+    }
+    if (i < COOP_DOOR_PENDING && sDoorSent[i].state == state && sTick - sDoorSent[i].tick < COOP_DOOR_RESEND)
+    {
+        return;     /* the same as a moment ago: the peer has it */
+    }
+    if (i == COOP_DOOR_PENDING)
+    {
+        i = sDoorSentNext;
+        sDoorSentNext = (sDoorSentNext + 1) % COOP_DOOR_PENDING;
+    }
+    sDoorSent[i].ofs = ofs;
+    sDoorSent[i].state = (s8) state;
+    sDoorSent[i].tick = sTick | 1;
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = COOPEV_DOOR;
+    ev.u.door.doorofs = ofs;
+    ev.u.door.state = state;
+    coopQueueEvent(&ev);
+}
+
+/* the tick's door changes go out (coopFlushEvents) */
+static void coopDoorFlush(void)
+{
+    s32 i;
+
+    for (i = 0; i < sNumDoorPending; i++)
+    {
+        coopDoorSend(sDoorPending[i].ofs, sDoorPending[i].state);
+    }
+    sNumDoorPending = 0;
+}
+
+void coopDoorStateChanged(DoorRecord *door, s32 state)
+{
+    s32 ofs, i;
 
     if (!sEnabled || sApplyingRemoteDoor || !coopNetHasPeer() || !coopPartnerHere() || g_CurrentSetup.propDefs == NULL)
     {
         return;
     }
-    memset(&ev, 0, sizeof(ev));
-    ev.kind = COOPEV_DOOR;
-    ev.u.door.doorofs = coopSetupOfs(door);
-    if (ev.u.door.doorofs < 0)
+    ofs = coopSetupOfs(door);
+    if (ofs < 0)
     {
         return;
     }
-    ev.u.door.state = state;
-    coopQueueEvent(&ev);
+    for (i = 0; i < sNumDoorPending && sDoorPending[i].ofs != ofs; i++)
+    {
+    }
+    if (i == COOP_DOOR_PENDING)
+    {
+        coopDoorSend(ofs, state);   /* a crowded tick: straight out */
+        return;
+    }
+    sDoorPending[i].ofs = ofs;
+    sDoorPending[i].state = (s8) state;
+    if (i == sNumDoorPending)
+    {
+        sNumDoorPending++;
+    }
 }
 
 static void coopApplyDoor(s32 doorofs, s32 state)
