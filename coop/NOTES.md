@@ -2120,7 +2120,7 @@ and team times). All of it is in src/game/coop_ai.c; Classic runs none of it.
   body. Each has its own GE_GUARDAIDBG line to look for. (All three seen
   since, see the next section.)
 
-## Smarter guards: code review and the three unseen moves (2026-10-29, COOP_VERSION stays 13)
+## Smarter guards: code review and the three unseen moves (2026-10-29, COOP_VERSION stays 14)
 
 The module had only been play-tested. Read end to end, then the three moves
 never seen were driven in two-player Dam runs (Smarter on the host, Classic
