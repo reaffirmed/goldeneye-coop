@@ -4403,6 +4403,11 @@ static void coopPredictShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 we
         sPred[slot].kind = COOPPRED_NONE;
         sPred[slot].confirmed = 0;
     }
+    if ((sAiSyncHave[slot] && sAiSync[slot].chrnum == chr->chrnum) ? (sAiSync[slot].chrflags & CHRFLAG_INVINCIBLE)
+                                                                   : (chr->chrflags & CHRFLAG_INVINCIBLE))
+    {
+        return;     /* the host's only twitches (handles_shot_actors): Cradle's Trevelyan took a guard's flinch here */
+    }
     /* the host's arithmetic (handles_shot_actors) */
     dmg = gunItemGetDestructionAmount(weaponid) * g_AiHealthModifier;
     if (hitpart == HIT_GENERAL || hitpart == HIT_GENERALHALF)
