@@ -9472,6 +9472,7 @@ typedef struct
     u8 isobj;       /* runs on: 0 a chr (who = chrnum), 1 a vehicle or aircraft (who = its setup offset) */
     u8 pad;
     s32 who;
+    u32 ownflags;   /* stage flags our copy set that the host's hasn't: the list's own, just before (Dam's bungee objective) */
 } CoopEndingMsg;
 
 extern void *g_CoopAiEntity;
@@ -9510,6 +9511,7 @@ static s32 coopEndingHold(u8 *list, s32 offset, ChrRecord *self)
             m.isobj = 1;
             m.who = coopSetupOfs(g_CoopAiEntity);
         }
+        m.ownflags = (u32) objectiveregisters1 & ~sWorldHostFlags;
         coopDesignSend(COOPEV_ENDING, 0, &m, sizeof(m));
         portConLogf("ge: coop: our script reached an ending first (list %04x at %d): asking the host to start it\n", m.list, offset);
     }
@@ -9537,6 +9539,11 @@ static void coopEndingApply(const u8 *raw, s32 from)
     {
         portConLogf("ge: coop: player %d's ending (list %04x at %d) is not one here\n", from + 1, m.list, m.offset);
         return;
+    }
+    if (m.ownflags & ~(u32) objectiveregisters1)
+    {   /* what their copy set on the way in (Dam: the bungee objective, then damage off), which ours now skips */
+        portConLogf("ge: coop: player %d's ending brings stage flags %08x\n", from + 1, m.ownflags & ~(u32) objectiveregisters1);
+        objectiveregisters1 |= (s32) m.ownflags;
     }
     if (!m.isobj)
     {
