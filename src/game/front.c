@@ -12804,8 +12804,20 @@ static Gfx *coopDebriefVote(Gfx *DL, s32 pitch)
     char buf[64];
     const s32 rp = coopDebriefVotePitch(pitch);
     const s32 outcome = coopVoteOutcome();
-    s32 x, y, c, p, voted = 0, here = 0;
+    s32 x, y, c, p, n, fit, voted = 0, here = 0;
 
+    if (coopVoteWaiting())
+    {   /* our mission ended first: the host's vote opens when theirs does */
+        x = 0x37;
+        y = COOP_VOTE_Y0;
+        DL = frontPrintText(DL, &x, &y, "Waiting for the host's mission to end...\n", ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF,
+                            viGetX(), viGetY(), 0, 0);
+        x = 0x37;
+        y += pitch + 2;
+        DL = frontPrintText(DL, &x, &y, "The vote opens here when it does.\n", ptrFontZurichBoldChars, ptrFontZurichBold, PORT_SHEET_COL_DIM,
+                            viGetX(), viGetY(), 0, 0);
+        return DL;
+    }
     for (c = 0; c < COOPVOTE_COUNT; c++)
     {
         const s32 off = (c == COOPVOTE_NEXT && coopVoteNext() < 0);
@@ -12821,9 +12833,19 @@ static Gfx *coopDebriefVote(Gfx *DL, s32 pitch)
         x = 0x37;
         DL = frontPrintText(DL, &x, &y, buf, ptrFontZurichBoldChars, ptrFontZurichBold, off ? PORT_SHEET_COL_DIM : (hot ? 0xA00000FF : 0xFF),
                             viGetX(), viGetY(), 0, 0);
+        for (p = n = 0; p < COOP_MAX_PLAYERS; p++)
+        {
+            n += coopVoteOf(p) == c;
+        }
+        /* the voters share the row: each gets a square and a name cut to its share */
+        fit = (n > 0) ? (COOP_VOTE_X1 - 0xD8) / n - 15 : 0;
+        fit = (fit > 0x40) ? 0x40 : fit;
         x = 0xD8;
         for (p = 0; p < COOP_MAX_PLAYERS; p++)
         {   /* who voted for it: their colour, then their name */
+            const char *name;
+            s32 tx, th = 0, tw = 0;
+
             if (coopVoteOf(p) != c)
             {
                 continue;
@@ -12831,11 +12853,13 @@ static Gfx *coopDebriefVote(Gfx *DL, s32 pitch)
             y = COOP_VOTE_Y0 + c * rp;
             DL = microcode_constructor_related_to_menus(DL, x, y + 2, x + 6, y + 8, coopPlayerColour(p));
             DL = microcode_constructor(DL);
-            x += 9;
             coopLobbyCopyName(buf, sizeof(buf), coopPlayerName(p));
-            DL = frontPrintText(DL, &x, &y, (char *) portSheetFitText(buf, 0x40), ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF,
+            name = portSheetFitText(buf, fit);
+            textMeasure(&th, &tw, (char *) name, ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+            tx = x + 9;
+            DL = frontPrintText(DL, &tx, &y, (char *) name, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF,
                                 viGetX(), viGetY(), 0, 0);
-            x += 6;
+            x += 9 + tw + 6; /* the printer's own x isn't the name's end */
         }
     }
     for (p = 0; p < COOP_MAX_PLAYERS; p++)

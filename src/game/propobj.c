@@ -3433,6 +3433,7 @@ void propExplode(PropRecord *prop, s32 /* enum EXPLOSION_DEF */ explosionType)
     playernum = (prop_obj->runtime_bitflags & RUNTIMEBITFLAG_OWNER) >> RUNTIMEBITSHIFT_OWNER;
 #ifndef TARGET_N64
     coopItemsExplodeBegin(prop);    /* co-op: a thrown item's copies go off together (coop_items.c) */
+    g_CoopObjExploding = 1;         /* co-op: the host's damage events replay it (coop.c coopExplosionCreated) */
 #endif
 
     if (prop->parent)
@@ -3496,6 +3497,7 @@ void propExplode(PropRecord *prop, s32 /* enum EXPLOSION_DEF */ explosionType)
     }
 #ifndef TARGET_N64
     coopItemsExplodeEnd();
+    g_CoopObjExploding = 0;
 #endif
 
 #if defined(VERSION_JP) || defined(VERSION_EU)

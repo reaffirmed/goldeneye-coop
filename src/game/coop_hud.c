@@ -852,7 +852,12 @@ static Gfx *coopHudSpectating(Gfx *gdl, s32 mode, s32 who)
     else
     {
         snprintf(text, sizeof(text), "WATCHING %s\n", name);
-        snprintf(keys, sizeof(keys), others ? "FIRE / AIM: NEXT / BACK   USE: FREE CAMERA\n" : "USE: FREE CAMERA\n");
+        snprintf(keys, sizeof(keys), others ? "FIRE / AIM: NEXT / BACK   USE: FREE CAMERA%s\n" : "USE: FREE CAMERA%s\n",
+                 coopSpectateEndAsked() ? "   START: END" : "");
+    }
+    if (coopSpectateEndAsked() == 2)
+    {
+        snprintf(keys, sizeof(keys), coopHostAbortAsks() ? "START AGAIN: END THE MISSION FOR EVERYONE\n" : "START AGAIN: LEAVE THE MISSION\n");
     }
     textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
     x = viGetViewLeft() + (viGetViewWidth() - tw) / 2;

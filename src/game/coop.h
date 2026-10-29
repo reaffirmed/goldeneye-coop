@@ -19,6 +19,11 @@ void coopChrAltKeep(ChrRecord *chr, s32 stimulus);  /* it passed: that player is
 s32  coopChrAimedAtByBond(ChrRecord *chr);       /* sub_GAME_7F0333F8 for whoever is Bond in this tick */
 s32  coopChrOnPartnerScreen(ChrRecord *chr);     /* host: a partner can see this chr (chrai.c "if I'm on screen") */
 void coopCollideMover(PropRecord *prop, s32 on); /* chrSetMoving: prop is being moved or tested from */
+void coopLookRandomStart(void);   /* initguards.c bodiesReset: seed the guards' looks for this mission */
+u32  coopLookRandom(void);         /* the next roll for a guard's look (randomGetNext outside a story session) */
+s32  coopAnyPlayerLeaves(u8 *list);  /* chrai.c: a scene's leash, where one player leaving breaks it */
+s32  coopFailFlagSet(s32 flag);      /* objective_status.c: a fail condition's flag, the host's word on a joiner */
+s32  coopPropIsCorpse(PropRecord *prop);         /* our own body lying where we fell (only on our game) */
 s32  coopCollideSkip(PropRecord *prop);          /* 1: prop blocks nothing right now (down, or inside the mover) */
 s32  coopTargetIsRemote(void);
 void coopGuardTankFlags(s32 flag);
@@ -51,13 +56,15 @@ void coopAltBondCredit(void *script, s32 k);   /* a script's "either player" che
 void coopObjActivatedPass(void *script, void *obj);   /* that script found obj activated: its flags are the presser's */
 void coopScriptSetsFlags(void *script, void *chr);     /* that script (a chr's, or chr NULL) sets stage flags: it was whoever passed its last check */
 void coopAiCommand(u8 *list, s32 offset, ChrRecord *self);
-s32  coopAiSkip(u8 *list, s32 offset, ChrRecord *self);   /* joiner: step over our late copy of the host's ending commands */
+s32  coopAiSkip(u8 *list, s32 offset, ChrRecord *self);   /* joiner: step over our late copy of the host's ending commands (1), or wait at an ending for the host's (2) */
 s32  coopDeadTick(void); /* 1: co-op owns this death (waiting or respawned) */
 void coopRespawnPlayerAt(coord3d *pos, StandTile *stan, f32 yaw, s32 weapon);
 void coopTeleportPlayerTo(coord3d *pos, StandTile *stan, f32 yaw);    /* bondview2.c */
 s32  coopCinemaFocus(coord3d *out);                                     /* bondview2.c: a scripted cinema's pad */
 s32  coopKeepBodyList(ChrRecord *chr, AIRecord *list);  /* joiner: the host's ending list already runs on our body */
+extern s32 g_CoopObjExploding;   /* propobj.c propExplode: an object is going off */
 s32  coopScriptSpawnsLeftToHost(void);  /* joiner: a level script's spawn is the host's, mirrored from its snapshots */
+s32  coopScriptSpawnMayShow(const u8 *list, s32 next, u8 label); /* host: a one-shot script spawn may happen in view */
 s32  coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid);
 s32  coopShotPuppet(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, s32 isPlayer);
 
@@ -99,7 +106,8 @@ enum
     COOPEV_CINEMA = 56,     /* host -> all: CoopCinemaMsg, the host's intro is over */
     COOPEV_VOTE = 57,       /* to the host: a vote; host -> all: the count (coop_vote.c) */
     COOPEV_LIVES = 58,      /* to the host: our lives this mission; host -> a returning joiner: what it had left (coop.c) */
-    COOPEV_SEEN = 59        /* to the host: guards our screen has drawn (CHRFLAG_HAS_BEEN_ON_SCREEN, coop.c) */
+    COOPEV_SEEN = 59,       /* to the host: guards our screen has drawn (CHRFLAG_HAS_BEEN_ON_SCREEN, coop.c) */
+    COOPEV_ENDING = 60      /* to the host: our copy of the level script reached an ending first (coop.c coopAiSkip) */
 };
 #define COOP_ALL_PLAYERS 0xFF   /* coopDesignSend's `to`: everyone */
 void coopDesignSend(s32 kind, s32 to, const void *payload, s32 len);
@@ -123,6 +131,7 @@ enum { COOPSKIP_INTRO = 1, COOPSKIP_ENDING };
 void coopVoteTick(s32 inmission);
 void coopVoteApply(const u8 *raw, s32 from);
 s32  coopVoteShown(void);           /* the debrief's WHAT NEXT page is up */
+s32  coopVoteWaiting(void);         /* joiner: up, but the host's vote isn't open yet */
 void coopVotePick(s32 choice);
 s32  coopVoteOf(s32 player);        /* COOPVOTE_*, 0xFF none */
 s32  coopVoteOutcome(void);         /* -1 open */
@@ -321,6 +330,7 @@ s32  coopLobbyIsHost(void);
 s32  coopLobbyHasPartner(void);
 s32  coopLobbyPartnerReady(void);
 s32  coopLobbyPartnerOnScreen(void);
+s32  coopLobbyPlayerOnLobbyScreen(s32 p);   /* player p (not us) is on the lobby screen */
 s32  coopLobbySelfReady(void);
 void coopLobbySetReady(s32 ready);
 const char *coopLobbySelfName(void);
@@ -421,6 +431,8 @@ Gfx *coopPhotoRender(Gfx *gdl);
 /* watching a partner while we are down (coop_spectate.c) */
 void coopSpectateTick(void);
 void coopSpectateStop(void);
+s32  coopSpectateEndAsked(void);   /* 2 Start pressed once while down (again ends the mission), 1 Start can end it, 0 not */
+void coopDownEndMission(void);    /* down: the host ends it for everyone, a joiner leaves it */
 void coopRestoreMusic(void);   /* bondview2.c: the level music after a death */
 void coopSpectateDropIn(s32 on);
 s32  coopSpectateTarget(void);     /* whose eyes we look out of, -1 none (or the free camera) */
@@ -429,6 +441,7 @@ void coopSpectateMouse(f32 *dx, f32 *dy, s32 *direct, f32 *yawdeg, f32 *pitchdeg
 s32  coopSpectateCamera(struct coord3d *pos, struct coord3d *look, struct coord3d *up);
 s32  coopSpectateRoom(u8 *room);
 struct coord3d *coopSpectatePos(s32 three);
+void coopFreeCamStep(coord3d *pos, coord3d *pos3, StandTile **tile, const coord3d *want);   /* free cameras: through anything */
 
 /* how partners look (coop_look.c): the character they picked in the lobby,
  * the guns in their hands with the multiplayer body animations, and their

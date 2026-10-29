@@ -44,14 +44,14 @@ extern f32 bondviewYPositionRelated(StandTile *stan, f32 x, f32 z);
 extern s32 portJoyPortUseMenuPressed(s32 pad);
 extern char *getenv(const char *);
 extern int atoi(const char *);
+extern s32 portReturnStartThisTick(void); /* video.c: START came from Return alone; weak 0 headless */
 
 #define COOPSPEC_FADE   30.0f   /* ticks back in from black */
 #define FREE_SPEED      6.0f    /* units a tick at full stick */
-#define FREE_UP         400.0f  /* the most above the floor */
-#define FREE_DOWN       15.0f   /* the least */
 #define FREE_PITCH      1.48f   /* about 85 degrees up or down */
 #define FREE_DEADZONE   10      /* stick units of 70 that don't move it */
 #define DEG             0.017453292f
+#define COOPSPEC_ENDASK 240     /* ticks to press Start a second time */
 
 static s32 sTarget = -1;        /* the partner we watch, -1: none */
 static s32 sLive;              /* we came back in on a partner */
@@ -60,6 +60,7 @@ static coord3d sPos;            /* their eyes */
 static coord3d sPos3;           /* their feet, for the portal walk */
 static f32 sYaw, sPitch;
 static u8 sRoom;
+static s32 sEndAsk;            /* ticks left to press Start again and end the mission */
 
 /* the free camera: the same yaw convention as a partner's view */
 static s32 sFree;
@@ -123,39 +124,49 @@ static void coopSpectateFreeStart(void)
     portConLogf("ge: coop: spectate: free camera at %.0f %.0f %.0f\n", sFPos.f[0], sFPos.f[1], sFPos.f[2]);
 }
 
-/* the free camera flies the way it looks; xz only over floor it can walk to
- * from where it is, as photo mode's */
+/* A free camera's step, through walls, floors and ceilings (photo mode's too).
+ * Nothing stops it; the floor tile under it is only followed for the room the
+ * level is drawn from: along the floor while the floor goes on, else whatever
+ * floor is below the new spot, else (over the void, out past the walls) the
+ * last one, until it comes back over floor. *pos3 is that floor under it, for
+ * the portal walk. The camera used to slide only over floor it could walk to
+ * and stay 15 cm to 4 m above it, so it caught on every wall and ledge. */
+void coopFreeCamStep(coord3d *pos, coord3d *pos3, StandTile **tile, const coord3d *want)
+{
+    StandTile *t = *tile;
+
+    if (t == NULL || !walkTilesBetweenPoints_NoCallback(&t, pos->f[0], pos->f[2], want->f[0], want->f[2]) || t == NULL
+        || want->f[1] < bondviewYPositionRelated(t, want->f[0], want->f[2]))
+    {   /* off this floor, or gone down through it */
+        coord3d probe = *want;
+
+        t = stanFindTileBelowPos(&probe, NULL, NULL);
+    }
+    if (t != NULL)
+    {
+        *tile = t;
+    }
+    *pos = *want;
+    *pos3 = *want;
+    if (*tile != NULL)
+    {
+        pos3->f[1] = bondviewYPositionRelated(*tile, want->f[0], want->f[2]);
+    }
+}
+
+/* the free camera flies the way it looks, through anything (coopFreeCamStep) */
 static void coopSpectateFreeMove(f32 fwd, f32 side)
 {
     const f32 cy = cosf(sFYaw), sy = sinf(sFYaw);
     const f32 cp = cosf(sFPitch), sp = sinf(sFPitch);
     coord3d want = sFPos;
-    StandTile *tile = sFTile;
-    f32 floor;
 
     /* the view's right is (-cos, sin) of the yaw: the world's x runs to the
      * left of a camera looking along +z */
     want.f[0] += (sy * cp * fwd - cy * side) * FREE_SPEED;
     want.f[1] += sp * fwd * FREE_SPEED;
     want.f[2] += (cy * cp * fwd + sy * side) * FREE_SPEED;
-    if (tile != NULL && walkTilesBetweenPoints_NoCallback(&tile, sFPos.f[0], sFPos.f[2], want.f[0], want.f[2]) && tile != NULL)
-    {
-        sFTile = tile;
-        sFPos.f[0] = want.f[0];
-        sFPos.f[2] = want.f[2];
-    }
-    floor = bondviewYPositionRelated(sFTile, sFPos.f[0], sFPos.f[2]);
-    sFPos.f[1] = want.f[1];
-    if (sFPos.f[1] < floor + FREE_DOWN)
-    {
-        sFPos.f[1] = floor + FREE_DOWN;
-    }
-    if (sFPos.f[1] > floor + FREE_UP)
-    {
-        sFPos.f[1] = floor + FREE_UP;
-    }
-    sFPos3 = sFPos;
-    sFPos3.f[1] = floor;
+    coopFreeCamStep(&sFPos, &sFPos3, &sFTile, &want);
 }
 
 /* GE_COOP_TESTFREECAM=<s>: <s> seconds into watching, free the camera, back
@@ -293,6 +304,35 @@ void coopSpectateTick(void)
     {
         step = -1;
     }
+    if (sEndAsk > 0)
+    {
+        sEndAsk--;
+    }
+    {   /* GE_COOP_TESTDOWNEND=<s>: press Start <s> seconds into watching, and again 1 s later (harness only) */
+        static s32 endat = -2, n;
+
+        if (endat == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTDOWNEND");
+            endat = (e != NULL) ? atoi(e) * 60 : -1;
+        }
+        n++;
+        if (endat > 0 && (n == endat || n == endat + 60))
+        {
+            portJoyInjectPressed(0, START_BUTTON);
+        }
+    }
+    if (!sDropIn && joyGetButtonsPressedThisFrame(0, START_BUTTON) && !portReturnStartThisTick())
+    {   /* down, the watch can't open: Start, then Start again, is its Abort */
+        if (sEndAsk > 0)
+        {
+            sEndAsk = 0;
+            portConLogf("ge: coop: spectate: ending the mission\n");
+            coopDownEndMission();
+            return;
+        }
+        sEndAsk = COOPSPEC_ENDASK;
+    }
     use = portJoyPortUseMenuPressed(0) || joyGetButtonsPressedThisFrame(0, B_BUTTON);
     coopSpectateTest(&use, &step, &tturn, &tfwd, &tside);
     if (use)
@@ -335,6 +375,7 @@ void coopSpectateTick(void)
 /* coopDeadTick: we are back, or nobody is left standing */
 void coopSpectateStop(void)
 {
+    sEndAsk = 0;
     sLive = 0;
     sTarget = -1;
     sFree = 0;
@@ -367,6 +408,17 @@ static s32 coopSpectateOn(void)
 s32 coopSpectateTarget(void)
 {
     return (coopSpectateOn() && !sFree) ? sTarget : -1;
+}
+
+/* coop_hud.c: 2 Start was pressed once and a second press ends the mission,
+ * 1 Start can end it, 0 not (dropping in) */
+s32 coopSpectateEndAsked(void)
+{
+    if (sDropIn || !coopSpectateOn())
+    {
+        return 0;
+    }
+    return (sEndAsk > 0) ? 2 : 1;
 }
 
 /* coop_hud.c: 1 watching *who, 2 the free camera (*who the one we left), 0 neither */

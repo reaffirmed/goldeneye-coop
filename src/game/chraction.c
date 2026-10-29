@@ -240,7 +240,11 @@ s32 bodyChooseHead(s32 id)
 
     if (c_item_entries[id].isMale)
     {
+#ifndef TARGET_N64
+        ret = coopLookRandom() & 3;    /* co-op: the same face on every game */
+#else
         ret = randomGetNext() & 3;
+#endif
         ret = ((s32)current_random_male_head + ret) % (s32)num_male_heads;
         ret = random_male_heads[ret];
     }
@@ -6982,6 +6986,16 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
                     sp258.f[2] = sp240.f[2] + (sp220.f[2] * M_U16_MAX_VALUE_F);
 
                     chrSetMoving(self, 0);
+#ifndef TARGET_N64
+                    /* co-op: a partner's body is a chr, and the shot's line
+                     * stopped on it short of where the hit test looks for
+                     * them, so most shots at a partner missed; the host's
+                     * own Bond is no chr and never got in the way */
+                    if (g_CoopPropOverride != NULL && g_CoopPropOverride->type == PROP_TYPE_CHR && g_CoopPropOverride->chr != NULL)
+                    {
+                        chrSetMoving(g_CoopPropOverride->chr, 0);
+                    }
+#endif
                     stanResetHits();
                     self_stan = sp238;
 
@@ -6995,6 +7009,12 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
                     }
 
                     chrSetMoving(self, 1);
+#ifndef TARGET_N64
+                    if (g_CoopPropOverride != NULL && g_CoopPropOverride->type == PROP_TYPE_CHR && g_CoopPropOverride->chr != NULL)
+                    {
+                        chrSetMoving(g_CoopPropOverride->chr, 1);
+                    }
+#endif
 
                     dx = sp258.f[0] - sp240.f[0];
                     dy = sp258.f[1] - sp240.f[1];
@@ -11110,7 +11130,11 @@ bool sub_GAME_7F033B38(ChrRecord *self, f32 distance)
     {
         chr = &g_ChrSlots[i];
 
-        if ((chr != self) && chr->model && !chrIsDead(chr))
+        if ((chr != self) && chr->model && !chrIsDead(chr)
+#ifndef TARGET_N64
+            && !coopPropIsPartner(chr->prop) /* co-op: a partner's body is no guard (Jungle's Natalya shot at it) */
+#endif
+            )
         {
             coord3d *pos = &chr->prop->pos;
 

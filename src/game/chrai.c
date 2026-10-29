@@ -38,6 +38,7 @@
 #endif
 
 #ifndef TARGET_N64
+void *g_CoopAiEntity;  /* the chr or object whose list ai() runs */
 static s32 coopk;  /* the partner a level script check is asking about (coopAltBondBegin) */
 s32 coopLevelFallCheckOff(f32 y);  /* coop.h comes in later: undeclared, the f32 would go as a double */
 /* the end of one coopChrAltBegin try: keep that player as the guard's target
@@ -899,6 +900,9 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
     AircraftRecord *AircraftEntityp = NULL;
     AIRecord       *AiListp         = NULL;
     s32             Offset;
+#ifndef TARGET_N64
+    s32             coopskip;
+#endif
 
     if (EntityType == PROP_TYPE_CHR)
     {
@@ -916,6 +920,9 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
         }
     }
 
+#ifndef TARGET_N64
+    g_CoopAiEntity = (void *) Entityp;    /* co-op: whose list this is (coop.c coopEndingHold) */
+#endif
     // Load ailist
     if (ChrEntityp)
     {
@@ -955,7 +962,27 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
              */
 #ifndef TARGET_N64
             coopAiCommand((u8 *) AiListp, Offset, ChrEntityp); /* co-op: cutscene and HUD commands reach the joiner */
-            if (coopAiSkip((u8 *) AiListp, Offset, ChrEntityp))
+            coopskip = coopAiSkip((u8 *) AiListp, Offset, ChrEntityp);
+            if (coopskip == 2)
+            {   /* wait at this command, as a yield that stays put */
+                if (ChrEntityp)
+                {
+                    ChrEntityp->ailist   = AiListp;
+                    ChrEntityp->aioffset = Offset;
+                }
+                else if (VehichleEntityp)
+                {
+                    VehichleEntityp->ailist   = AiListp;
+                    VehichleEntityp->aioffset = Offset;
+                }
+                else if (AircraftEntityp)
+                {
+                    AircraftEntityp->ailist   = AiListp;
+                    AircraftEntityp->aioffset = Offset;
+                }
+                return;
+            }
+            if (coopskip)
             {
                 Offset += chraiitemsize((u8 *) AiListp, Offset);
                 continue;
@@ -2228,10 +2255,22 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     s32                                              far   = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
 #ifndef TARGET_N64
                     far = far || !coopOwnBondCounts(); /* co-op: not a down host's body */
-                    for (coopk = 0; far && coopAltBondBegin(coopk); coopk++) /* co-op: both players must be away */
+                    if (coopAnyPlayerLeaves(AiListp))
+                    {   /* a scene's "stay here" rule: any one player leaving breaks it */
+                        far = far && coopOwnBondCounts();
+                        for (coopk = 0; !far && coopAltBondBegin(coopk); coopk++)
+                        {
+                            far = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
+                            coopAltBondEnd();
+                        }
+                    }
+                    else
                     {
-                        far = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
-                        coopAltBondEnd();
+                        for (coopk = 0; far && coopAltBondBegin(coopk); coopk++) /* co-op: both players must be away */
+                        {
+                            far = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
+                            coopAltBondEnd();
+                        }
                     }
 #endif
                     if (far)
@@ -2373,6 +2412,22 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     else if (g_PlayerInvincible)
                     {
                         has = ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNRIGHT) || ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNLEFT);
+                    }
+                    else if (ai->ITEM_NUM == ITEM_FIST || ai->ITEM_NUM == ITEM_UNARMED)
+                    {   /* "Bond has put his gun away" (Statue's unmasking: draw
+                         * one and the guards open fire) holds only while every
+                         * player has: one partner still armed is the same threat */
+                        has = coopBondHasItem(ai->ITEM_NUM);
+                        for (coopk = 0; has && coopChrAltBegin(ChrEntityp, coopk); coopk++)
+                        {
+                            has = coopBondHasItem(ai->ITEM_NUM);
+                            coopChrAltEnd(ChrEntityp);
+                        }
+                        for (coopk = 0; has && coopAltBondBegin(coopk); coopk++)
+                        {
+                            has = coopBondHasItem(ai->ITEM_NUM);
+                            coopAltBondEnd();
+                        }
                     }
                     else if (!(has = coopBondHasItem(ai->ITEM_NUM)))
                     {
@@ -3735,7 +3790,9 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
     #endif
 #ifndef TARGET_N64
                     if (coopScriptSpawnsLeftToHost() /* co-op joiner: the host's spawn comes in its snapshots */
-                        || chrSpawnAtPad(ChrEntityp, ai->BODY_NUM, ai->HEAD_NUM, pad, ailist, flags))
+                        || chrSpawnAtPad(ChrEntityp, ai->BODY_NUM, ai->HEAD_NUM, pad, ailist, flags)
+                        || (coopScriptSpawnMayShow(AiListp, Offset + sizeof(AiTRYSpawningChrAtPadRecord), ai->GOTOLABEL)
+                            && chrSpawnAtPad(ChrEntityp, ai->BODY_NUM, ai->HEAD_NUM, pad, ailist, flags | 0x10)))
 #else
                     if (chrSpawnAtPad(ChrEntityp, ai->BODY_NUM, ai->HEAD_NUM, pad, ailist, flags))
 #endif

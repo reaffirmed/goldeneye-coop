@@ -3560,6 +3560,12 @@ void chrTestHit(PropRecord *prop, ShotData *shotdata)
     {
         return;
     }
+#ifndef TARGET_N64
+    if (coopPropIsCorpse(prop))
+    {
+        return; /* co-op: our own body while we are down, only for us to see */
+    }
+#endif
 
     model = chr->model;
     modelsize = getinstsize(model);

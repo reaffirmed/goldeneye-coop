@@ -69,9 +69,17 @@ void bodiesReset(u32 stagenum)
             rnext >>= 1;
         };
     }
+#elif !defined(TARGET_N64)
+    coopLookRandomStart();  /* co-op: the same looks on every game */
+    current_random_male_head = coopLookRandom() % num_male_heads;
+    current_random_female_head = coopLookRandom() % num_female_heads;
 #else
     current_random_male_head = randomGetNext() % num_male_heads;
     current_random_female_head = randomGetNext() % num_female_heads;
 #endif
+#if !defined(TARGET_N64) && !defined(ISGOLDFINGER) && !defined(IS_NSNA)
+    current_random_body = coopLookRandom() % num_bodies;
+#else
     current_random_body = randomGetNext() % num_bodies;
+#endif
 }

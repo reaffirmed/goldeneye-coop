@@ -38,6 +38,7 @@ extern void portConLogf(const char *fmt, ...);
 #define VOTE_WAIT       (30 * 60)   /* after the first vote, decide with the votes in */
 #define VOTE_ACT_AFTER  90          /* host: show the outcome this long, then act on it */
 #define VOTE_RESEND     60          /* host: the count again this often while a vote is open (a joiner back late) */
+#define VOTE_HOST_WAIT  (20 * 60)   /* joiner: wait this long on WHAT NEXT for the host's vote to open */
 
 enum { VOTEMSG_RESULT = 1, VOTEMSG_TALLY, VOTEMSG_SKIP, VOTEMSG_SKIPTALLY };
 
@@ -84,15 +85,21 @@ static s32 coopVoteCount(const u8 *votes, s32 choice)
     return n;
 }
 
-/* players still talking to us, us included: one who crashed or lost the line
- * stops counting after 3 s, not after the 30 s their connection is kept */
+/* a player who votes: us, or one still talking to us (one who crashed or
+ * lost the line stops counting after 3 s, not after the 30 s their connection
+ * is kept) and not already back in the lobby (they went there without the vote) */
+static s32 coopVoter(s32 p)
+{
+    return p == coopDesignSelf() || (coopLobbyPlayerHere(p) && !coopLobbyPlayerOnLobbyScreen(p));
+}
+
 static s32 coopVotePresent(void)
 {
     s32 p, n = 0;
 
     for (p = 0; p < COOP_MAX_PLAYERS; p++)
     {
-        n += (p == coopDesignSelf() || coopLobbyPlayerHere(p));
+        n += coopVoter(p);
     }
     return (n < 1) ? 1 : n;
 }
@@ -148,7 +155,7 @@ static void coopVoteHere(const u8 *votes, u8 *out)
 
     for (p = 0; p < COOP_MAX_PLAYERS; p++)
     {
-        out[p] = (p == coopDesignSelf() || coopLobbyPlayerHere(p)) ? votes[p] : 0xFF;
+        out[p] = coopVoter(p) ? votes[p] : 0xFF;
     }
 }
 
@@ -244,10 +251,38 @@ static void coopVoteHarness(void)
     }
 }
 
+/* joiner: our mission ended before the host's (the host was down when we
+ * left, say): WHAT NEXT waits for the host's vote, rather than our Next going
+ * straight to the lobby and leaving the host to vote alone. Not for ever: a
+ * host still playing on leaves us the lobby after VOTE_HOST_WAIT. */
+s32 coopVoteWaiting(void)
+{
+    static s32 stage = -1;
+    static u32 from;
+    const s32 now = coopVoteThisStage();
+
+    if (now < 0 || sStage == now)
+    {
+        stage = -1;     /* the next early end waits afresh, the same mission again too */
+    }
+    if (coopDesignIsHost() || !coopSessionActive() || (coopSetting(COOPSET_VSMODE) & 1) || now < 0 || sStage == now
+        || !coopLobbyPlayerHere(0) || coopLobbyPlayerOnLobbyScreen(0))
+    {
+        return 0;
+    }
+    if (stage != now)
+    {
+        stage = now;
+        from = sTick;
+    }
+    return sTick - from < VOTE_HOST_WAIT;
+}
+
 /* front.c's debrief: a vote is open for the mission just played */
 s32 coopVoteShown(void)
 {
-    return coopSessionActive() && !(coopSetting(COOPSET_VSMODE) & 1) && coopVoteThisStage() >= 0 && sStage == coopVoteThisStage();
+    return coopSessionActive() && !(coopSetting(COOPSET_VSMODE) & 1) && coopVoteThisStage() >= 0
+        && (sStage == coopVoteThisStage() || coopVoteWaiting());
 }
 
 /* front.c: our vote */
@@ -255,7 +290,7 @@ void coopVotePick(s32 choice)
 {
     CoopVoteMsg m;
 
-    if (!coopVoteShown() || sOutcome >= 0 || choice < 0 || choice >= COOPVOTE_COUNT || (choice == COOPVOTE_NEXT && sNext < 0))
+    if (!coopVoteShown() || coopVoteWaiting() || sOutcome >= 0 || choice < 0 || choice >= COOPVOTE_COUNT || (choice == COOPVOTE_NEXT && sNext < 0))
     {
         return;
     }
@@ -602,7 +637,7 @@ void coopVoteTick(s32 inmission)
     sTick++;
     if (instage && !wasin)
     {
-        sStage = -1;    /* a mission starts: its debrief has its own vote */
+        coopVoteReset(-1);  /* a mission starts: its debrief has its own vote (and no last one's outcome while we wait for it) */
     }
     wasin = instage;
     if (instage)
