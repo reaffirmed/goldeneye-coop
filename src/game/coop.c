@@ -2388,8 +2388,10 @@ static void coopRemotesTick(void)
 
 /* ---- test harness hooks (env vars, see coop/NOTES.md) ------------------ */
 
+void coopChecklistTick(void);   /* coop_checklist.c (harness only) */
 static void coopHarnessTick(void)
 {
+    coopChecklistTick();
     if (coopNetIsHost() && coopPartnerHere())
     {   /* GE_COOP_TESTFADE=1: the host's "script" fades to black at 15 s and back at 18 s (harness only) */
         static s32 testfade = -1;
