@@ -147,6 +147,11 @@ void coopAudioPuppetCue(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look
     }
 }
 
+void coopAudioAtPos(s32 sfx, coord3d *pos)
+{
+    coopAudioAt(sfx, pos);
+}
+
 /* ---- pings ---- */
 
 void coopAudioPing(coord3d *pos, s32 self)

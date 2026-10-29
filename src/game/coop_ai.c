@@ -54,6 +54,7 @@
  * remembers (last seen, last heard), which is enough to pick the fight up.
  */
 #include <ultra64.h>
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
@@ -74,6 +75,9 @@
 
 extern void portConLogf(const char *fmt, ...);
 extern s32 portGuardAiSmarter(void);    /* video.c: midas.ini guard_ai */
+extern s32 portGuardBarks(void);        /* video.c: midas.ini guard_barks */
+extern int ge_shot_force;               /* gfx_sdl2.cpp: a screenshot this frame, to ge_shot_path */
+extern char ge_shot_path[512];
 extern s32 portOptFind(const char *key);
 extern s32 portOptSetValue(s32 i, s32 v);
 extern int coopNetIsHost(void);
@@ -112,6 +116,23 @@ extern waypoint *chrlvStanPathRelated(coord3d *pos, StandTile *stan);
 #define COOPAI_SWEEPERS     2           /* ... and at most this many out at once */
 
 enum { AIA_CALM = 0, AIA_SUSPICIOUS, AIA_ALERTED, AIA_LOCKDOWN, AIA_COUNT };
+
+/* barks (COOPBARK_*): what a guard calls out, and the game's own sound that goes with it */
+static const char *const sBarkText[COOPBARK_COUNT] = {
+    "OVER THERE!\n", "WHERE DID THEY GO?\n", "NEED BACKUP!\n", "COVER ME!\n", "GRENADE!\n",
+    "MAN DOWN!\n", "SOUND THE ALARM!\n", "FALL BACK!\n",
+};
+
+static const s16 sBarkSting[COOPBARK_COUNT] = {
+    CAMERA_BEEP1_SFX, BEEP_QUIET_SFX, RADIO_SFX, GUN_RIFLECOCK_SFX, BING_SFX,
+    RADIO_SFX, ALARM_SWITCH_SFX, BEEP_QUIET_SFX,
+};
+
+#define COOPAI_BARKS        6           /* barks on show at once */
+#define COOPAI_BARK_TICKS   120         /* each shows 2 s */
+#define COOPAI_BARK_FADE    30          /* the last half second fading */
+#define COOPAI_BARK_GAP     3           /* seconds between one guard's barks */
+#define COOPAI_BARK_RANGE   4000.0f     /* shown out to 40 m */
 
 static const char *const sAlertNames[AIA_COUNT] = { "calm", "suspicious", "alerted", "lockdown" };
 
@@ -180,6 +201,7 @@ typedef struct
     s32 pushed60;           /* the target's reload it last pushed on */
     s32 nextrevive60;       /* next look for a player reviving a partner */
     s32 fight60;            /* when this fight began */
+    s32 bark60;             /* when it may bark again */
 } CoopAiBrain;
 
 /* the players, as the guards keep track of them (indexes as coopChrCurrentTarget) */
@@ -213,6 +235,14 @@ static s32 sLastFight60;        /* the last tick a guard of ours was fighting */
 static s32 sBodiesFound;
 static s32 sNextSweep60;
 static s32 sNextNade60;         /* no guard throws before this */
+static struct
+{
+    s16 chrnum;
+    u8 kind;
+    s32 until;      /* g_GlobalTimer */
+} sBarks[COOPAI_BARKS];         /* the callouts on show (every game) */
+static s32 sBarkShotAt;         /* GE_GUARDAI_BARKSHOT: a screenshot then */
+static s32 sBarkShots;
 
 /* ---- the setting -------------------------------------------------------- */
 
@@ -261,6 +291,7 @@ s32 coopAiSmarter(void)
         sLatchOn = coopAiDecideOn();
         memset(sBrain, 0, sizeof(sBrain));
         memset(sPlayers, 0, sizeof(sPlayers));
+        memset(sBarks, 0, sizeof(sBarks));
         sPlayersTick = -1;
         sAlarmRunUntil = 0;
         sAlert = sAlertFloor = AIA_CALM;
@@ -585,6 +616,117 @@ static s32 coopAiFindCover(ChrRecord *chr, s32 away)
     return best;
 }
 
+/* ---- barks ------------------------------------------------------------------
+ * The host decides them (only it runs guards) and sends each to the joiners
+ * as COOPEV_BARK; every game, the host's too, shows the callout over the
+ * guard's head and plays the sting at it, unless its own Guard Barks is off.
+ * The text is the port's; the stings are the game's own sounds. */
+
+const char *coopAiBarkText(s32 kind)
+{
+    return (kind >= 0 && kind < COOPBARK_COUNT) ? sBarkText[kind] : "\n";
+}
+
+static void coopAiBarkShow(s32 chrnum, s32 kind)
+{
+    ChrRecord *chr = chrFindByLiteralId(chrnum);
+    PropRecord *bond = getCurrentPlayerProp();
+    s32 i, slot = 0;
+
+    if (kind < 0 || kind >= COOPBARK_COUNT || !portGuardBarks() || chr == NULL || chr->prop == NULL)
+    {
+        return;
+    }
+    for (i = 0; i < COOPAI_BARKS; i++)
+    {   /* the guard's own slot, else a free one, else the oldest */
+        if (sBarks[i].chrnum == chrnum && sBarks[i].until > g_GlobalTimer)
+        {
+            slot = i;
+            break;
+        }
+        if (sBarks[i].until < sBarks[slot].until)
+        {
+            slot = i;
+        }
+    }
+    sBarks[slot].chrnum = (s16) chrnum;
+    sBarks[slot].kind = (u8) kind;
+    sBarks[slot].until = g_GlobalTimer + COOPAI_BARK_TICKS;
+    if (getenv("GE_GUARDAI_BARKSHOT") != NULL && sBarkShotAt == 0 && sBarkShots < 12)
+    {   /* harness: a screenshot a quarter second into each of the first 12 */
+        sBarkShotAt = g_GlobalTimer + 15;
+    }
+    if (bond == NULL || coopAiDist2(&bond->pos, &chr->prop->pos) < COOPAI_BARK_RANGE * COOPAI_BARK_RANGE)
+    {
+        coopAudioAtPos(sBarkSting[kind], &chr->prop->pos);
+    }
+}
+
+/* host (or solo): a guard calls out, at most once in COOPAI_BARK_GAP s */
+static void coopAiBark(ChrRecord *chr, CoopAiBrain *b, s32 kind)
+{
+    u8 raw[4];
+
+    if (g_GlobalTimer < b->bark60)
+    {
+        return;
+    }
+    b->bark60 = g_GlobalTimer + COOPAI_BARK_GAP * COOPAI_SEC;
+    portConLogf("ge: ai: guard %d barks %.*s\n", chr->chrnum, (int) strlen(sBarkText[kind]) - 1, sBarkText[kind]);
+    coopAiBarkShow(chr->chrnum, kind);
+    if (coopEnabled() && coopNetIsHost())
+    {
+        raw[0] = (u8) (chr->chrnum & 0xFF);
+        raw[1] = (u8) ((chr->chrnum >> 8) & 0xFF);
+        raw[2] = (u8) kind;
+        raw[3] = 0;
+        coopExtSend(COOPEV_BARK, COOP_ALL, raw, sizeof(raw));
+    }
+}
+
+void coopAiBarkApply(const u8 *raw, s32 from)
+{
+    s32 chrnum = (s16) (raw[0] | (raw[1] << 8));
+
+    (void) from;
+    if (coopNetIsHost())
+    {
+        return;     /* the host made it */
+    }
+    if (getenv("GE_GUARDAIDBG") != NULL)
+    {
+        portConLogf("ge: ai: host's guard %d barks %d\n", chrnum, raw[2]);
+    }
+    coopAiBarkShow(chrnum, raw[2]);
+}
+
+s32 coopAiBarkAt(s32 i, CoopBarkMark *out)
+{
+    s32 k, n = 0;
+
+    if (i == 0 && sBarkShotAt != 0 && g_GlobalTimer >= sBarkShotAt)
+    {
+        sBarkShotAt = 0;
+        snprintf(ge_shot_path, sizeof(ge_shot_path), "bark_p%d_%02d.bmp", coopEnabled() ? coopExtSelf() + 1 : 1, sBarkShots++);
+        ge_shot_force = 1;
+    }
+
+    for (k = 0; k < COOPAI_BARKS; k++)
+    {
+        s32 left = sBarks[k].until - g_GlobalTimer;
+
+        if (left <= 0 || left > COOPAI_BARK_TICKS || n++ != i)
+        {
+            continue;
+        }
+        out->chrnum = sBarks[k].chrnum;
+        out->kind = sBarks[k].kind;
+        out->alpha = (left < COOPAI_BARK_FADE) ? (f32) left / COOPAI_BARK_FADE : 1.0f;
+        return 1;
+    }
+    return 0;
+}
+
 /* ---- the mission's alert level, and the players ---------------------------- */
 
 static void coopAiRaise(s32 level, const char *why)
@@ -832,6 +974,7 @@ static void coopAiCallForHelp(ChrRecord *caller, CoopAiBrain *cb)
     {
         portConLogf("ge: ai: guard %d calls for help, %d come\n", caller->chrnum, answered);
     }
+    coopAiBark(caller, cb, answered > 0 ? COOPBARK_HELP : COOPBARK_SPOTTED);
 }
 
 static s32 coopAiKnowsBody(CoopAiBrain *b, ChrRecord *dead)
@@ -1136,6 +1279,8 @@ static s32 coopAiCamperGrenade(ChrRecord *chr, CoopAiBrain *b)
     p->nade60 = g_GlobalTimer;
     sNextNade60 = g_GlobalTimer + COOPAI_NADE_GAP * COOPAI_SEC;
     chrTrySurprisedOneHand(chr);
+    b->bark60 = 0;      /* the warning always gets said */
+    coopAiBark(chr, b, COOPBARK_GRENADE);
     portConLogf("ge: ai: guard %d points out player %d (held one spot %d s, %.0f m off)\n", chr->chrnum, b->target + 1,
                 (g_GlobalTimer - p->camp60) / COOPAI_SEC, sqrtf(d2) / 100.0f);
     coopAiSetState(b, AIS_GRENADE, 2);
@@ -1338,6 +1483,7 @@ static s32 coopAiCombat(ChrRecord *chr, CoopAiBrain *b, s32 seen)
             {
                 b->coverpad = pad;
                 sAlarmRunUntil = g_GlobalTimer + 60 * COOPAI_SEC;
+                coopAiBark(chr, b, COOPBARK_ALARM);
                 coopAiSetState(b, AIS_ALARM, 12);
                 portConLogf("ge: ai: guard %d runs for the alarm at pad %d\n", chr->chrnum, pad);
                 return 1;
@@ -1360,6 +1506,7 @@ static s32 coopAiCombat(ChrRecord *chr, CoopAiBrain *b, s32 seen)
             b->coverpad = pad;
             b->firestan = NULL;     /* it stays back */
             coopAiSetState(b, AIS_FALLBACK, 6);
+            coopAiBark(chr, b, COOPBARK_RETREAT);
             portConLogf("ge: ai: guard %d falls back to pad %d\n", chr->chrnum, pad);
             return 1;
         }
@@ -1384,6 +1531,10 @@ static s32 coopAiCombat(ChrRecord *chr, CoopAiBrain *b, s32 seen)
                 if (coopAiGoPad(chr, pad, SPEED_RUN))
                 {
                     b->coverpad = pad;
+                    if (coopAiRandom(2) == 0)
+                    {
+                        coopAiBark(chr, b, COOPBARK_COVER);
+                    }
                     coopAiSetState(b, AIS_COVER, 5);
                     return 1;
                 }
@@ -1422,6 +1573,10 @@ static s32 coopAiCombat(ChrRecord *chr, CoopAiBrain *b, s32 seen)
     }
     if (b->laststan != NULL && coopAiGo(chr, &b->lastpos, b->laststan, SPEED_RUN))
     {
+        if (coopAiRandom(2) == 0)
+        {
+            coopAiBark(chr, b, COOPBARK_LOST);
+        }
         coopAiSetState(b, AIS_ADVANCE, 10);
         return 1;
     }
@@ -1648,6 +1803,7 @@ s32 coopAiTick(ChrRecord *chr)
             if (dead != NULL)
             {
                 portConLogf("ge: ai: guard %d found a body (guard %d)\n", chr->chrnum, dead->chrnum);
+                coopAiBark(chr, b, COOPBARK_BODY);
                 b->heard60 = chr->lastheartarget60;
                 coopAiInvestigate(chr, b, &dead->prop->pos, dead->prop->stan, 0);
                 coopAiRaise(++sBodiesFound >= 2 ? AIA_LOCKDOWN : AIA_ALERTED, sBodiesFound >= 2 ? "a second body" : "a body");
@@ -1727,6 +1883,7 @@ s32 coopAiTick(ChrRecord *chr)
             b->searchleft = (u8) coopAiSearchCount();
             b->delegated = 0;
             coopAiParkList(chr, b->origin);
+            coopAiBark(chr, b, COOPBARK_LOST);
             coopAiSetState(b, AIS_SEARCH, 8);
             return 1;
         }

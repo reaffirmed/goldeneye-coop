@@ -2264,6 +2264,45 @@ any of it when the mission's guards are Classic).
   Dam run above repeated on the rebased build (lockdown, sweeps, holds, a
   grenade that went off on both games).
 
+## Smarter guards: barks (2026-10-29, COOP_VERSION stays 14)
+
+Stage 2: a smarter guard calls out what it is doing, as text over its head
+and a short sting. No voice: the text is the port's, every sting is one of
+the game's own sounds (CONTRIBUTING: no made audio).
+
+- What and when (host or solo, coop_ai.c coopAiBark): OVER THERE! (first
+  sight, nobody came) or NEED BACKUP! (its call brought help), WHERE DID
+  THEY GO? (lost them: 1 in 2 advances, and giving up), COVER ME! (1 in 2
+  moves to cover), GRENADE! (the point before a throw, always), MAN DOWN!
+  (found a body), SOUND THE ALARM! (runs for one), FALL BACK! (hurt, falls
+  back). One guard barks at most once in 3 s, the grenade warning excepted.
+- Stings, played at the guard as its other sounds (coopAudioAtPos, out to
+  40 m): the security camera's beep (spotted), the quiet beep (lost, fall
+  back), the radio (backup, man down), the rifle cock (cover me), the bing
+  (grenade), the alarm switch (alarm). Picked by name, not tuned by ear yet.
+- Sync: COOPEV_BARK (30, the last free EXT kind) host -> all: the chrnum and
+  the bark. An older v14 joiner's coopExtApply has no case for it and drops
+  it, so the version stays 14 and mixed builds still play (no barks there).
+- Showing (every game): up to 6 at once, 2 s each, the last half second
+  fading, sized like a name tag (coop_hud.c coopHudBark); GRENADE! red, the
+  rest amber. Not hidden by walls: a shout carries.
+- Port Option "Guard Barks" ([display] guard_barks, default on), each
+  player's own: off shows and plays nothing on that game. On the PORT
+  OPTIONS sheet and the watch's Port Options page, under Guard AI.
+- Harness: GE_GUARDAI_BARKSHOT=1 saves bark_p<player>_<n>.bmp a quarter
+  second into each of the first 12 barks shown. Logs: "guard N barks <text>"
+  on the host, "host's guard N barks <kind>" on a joiner (GE_GUARDAIDBG).
+- Tested (Dam, 2 players, mock Steam, host Smarter, the joiner at pad 179
+  facing guard 41, GE_COOP_TESTAIMCHR=41:12:10:70): the host barked 9 times
+  in 80 s, the joiner got all of them; its shots show OVER THERE! over guard
+  41, then a red GRENADE! as it pointed. With guard_barks=0 in midas.ini the
+  host still decided and sent 8, both games showed none (no shots taken).
+- Scripted missions again (all 20, Smarter, both players acting and
+  invulnerable, 100 s): objective failures the same as Classic's on every
+  mission (Statue 10, Bunker 2, Jungle and Caverns 2 each, the rest none;
+  Archives clean this time), no crashes, 25 desyncs in all (Classic 28).
+  The host barked 176 times; the joiner logged all 176.
+
 ## Far-away players dropping in mid-mission (2026-10-28)
 
 Tester report: a player from Colombia dropped in to a running co-op mission;

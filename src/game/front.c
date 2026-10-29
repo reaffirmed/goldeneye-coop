@@ -4628,6 +4628,7 @@ static const struct PortSheetRow port_sheet_rows_portopts[] = {
     { SHROW_OPT, "fix_shootthrough" }, { SHROW_OPT, "distance_fading" },
     { SHROW_OPT, "true_enemy_rockets" },
     { SHROW_OPT, "guard_ai" },               /* Classic or Smarter guards (coop_ai.c); the host's in co-op */
+    { SHROW_OPT, "guard_barks" },            /* their callouts and stings, each player's own */
     { SHROW_OPT, "coop_menu" },              /* the CO-OP screen: Modern, or Classic on the folder */
     { SHROW_OPT, "unlimited_explosions" },   /* default ON */
     { SHROW_OPT, "watch_static" },           /* the watch's fuzz, default ON (vanilla) */

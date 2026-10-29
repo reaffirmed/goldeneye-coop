@@ -187,6 +187,23 @@ typedef struct
 } CoopAiPlayerView;
 s32  coopAiPlayerView(s32 t, CoopAiPlayerView *out);    /* host or solo: player t for the smarter guards, 0 not in the fight */
 u8   coopLookShotSeq(void);                 /* coop_look.c: our shots so far (CoopLook.shotseq) */
+/* smarter guards' barks: a callout over the guard's head and a sting, shown
+ * on every game that has Guard Barks on */
+enum
+{
+    COOPBARK_SPOTTED = 0, COOPBARK_LOST, COOPBARK_HELP, COOPBARK_COVER, COOPBARK_GRENADE,
+    COOPBARK_BODY, COOPBARK_ALARM, COOPBARK_RETREAT, COOPBARK_COUNT
+};
+typedef struct
+{
+    s16 chrnum;
+    u8 kind;        /* COOPBARK_* */
+    f32 alpha;      /* fades out at the end */
+} CoopBarkMark;
+s32  coopAiBarkAt(s32 i, CoopBarkMark *out);    /* coop_hud.c: the i-th bark on show, 0 past the last */
+const char *coopAiBarkText(s32 kind);
+void coopAiBarkApply(const u8 *raw, s32 from);  /* COOPEV_BARK from the host */
+void coopAudioAtPos(s32 sfx, coord3d *pos);     /* coop_audio.c: a sound from there, as a guard's */
 
 /* co-op difficulty (coop_difficulty.c): COOPSET_DIFFICULTY's modes */
 s32  coopLobbyPlayerCount(void);          /* players in the session, us included */
@@ -559,7 +576,8 @@ enum
     COOPEV_THROWMORE = 26,  /* its second half */
     COOPEV_ITEMGONE = 27,   /* to all: a thrown or dropped item went off or was picked up */
     COOPEV_DROP = 28,       /* host -> all: a guard dropped its gun */
-    COOPEV_ITEMSTUCK = 29   /* to all: where our thrown item stuck or landed (coop_items.c) */
+    COOPEV_ITEMSTUCK = 29,  /* to all: where our thrown item stuck or landed (coop_items.c) */
+    COOPEV_BARK = 30        /* host -> all: a smarter guard's callout (coop_ai.c; an older joiner ignores it) */
 };
 typedef struct
 {

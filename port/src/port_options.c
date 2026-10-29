@@ -254,6 +254,7 @@ static const struct PortOpt sOpts[] = {
     TOGGLE("fix_shootthrough",   "[display]", "Shoot-Through Fix\n",  PORTOPT_CAT_GAMEPLAY),
     TOGGLE("true_enemy_rockets", "[display]", "True Enemy Rockets\n", PORTOPT_CAT_GAMEPLAY),
     TOGGLET("guard_ai",          "[display]", "Guard AI\n",           PORTOPT_CAT_GAMEPLAY, sGuardAiText),
+    TOGGLE("guard_barks",        "[display]", "Guard Barks\n",        PORTOPT_CAT_GAMEPLAY),
     TOGGLET("coop_menu",         "[display]", "Co-op Menu\n",         PORTOPT_CAT_GAMEPLAY, sCoopMenuText),
     /* adzy (play as ssf character) is ini-only */
     TOGGLE("unlock_all",         "[display]", "Unlock All\n",         PORTOPT_CAT_GAMEPLAY),
