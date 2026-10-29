@@ -3608,11 +3608,31 @@ f32 coopTargetDuckingHeight(void)
     return bondviewGetPlayerDuckingHeightRelated(g_CurrentPlayer);
 }
 
+/* A guard's shots don't add up on a player while their screen still shows
+ * the last hit (damageshowtime: a second, less at low health). The host's
+ * own Bond had that pause; a partner had none, so a guard's hits on them came
+ * as often as the shots added up. The host now holds each partner's for as
+ * long as their own game shows the hit, by their health as it last heard. */
+static u32 sHitShowUntil[COOP_MAX_PLAYERS];
+
+static s32 coopHitShowTicks(s32 p)
+{
+    s32 type = (s32) (sR[p].st.health * 8.0f);
+    s32 a, b;
+
+    type = (type > 7) ? 7 : (type < 0) ? 0 : type;
+    a = (s32) g_DamageTypes[type].field_0x8;
+    b = (s32) g_DamageTypes[type].flashEndFrame;
+    return (a > b) ? a : b;
+}
+
 s32 coopTargetDamageShowTime(void)
 {
     if (g_CoopPropOverride != NULL)
     {
-        return 0;
+        s32 p = coopPlayerOfProp(g_CoopPropOverride);
+
+        return p >= 0 && p < COOP_MAX_PLAYERS && (s32) (sHitShowUntil[p] - sTick) > 0;
     }
     return bondviewGetIfCurrentPlayerDamageShowTime();
 }
@@ -3758,6 +3778,10 @@ s32 coopTargetRecordDamage(f32 damage, f32 angle)
     ev.u.hit.angle = angle;
     ev.u.hit.chrnum = (sTickChr != NULL) ? (s16) sTickChr->chrnum : -1;
     coopQueueEventTo(&ev, coopPlayerOfProp(g_CoopPropOverride));
+    if (coopPlayerOfProp(g_CoopPropOverride) >= 0 && coopPlayerOfProp(g_CoopPropOverride) < COOP_MAX_PLAYERS)
+    {
+        sHitShowUntil[coopPlayerOfProp(g_CoopPropOverride)] = sTick + coopHitShowTicks(coopPlayerOfProp(g_CoopPropOverride));
+    }
     portConLogf("ge: coop: guard %d hit player %d: %.3f\n", sTickChr ? sTickChr->chrnum : -1,
                 coopPlayerOfProp(g_CoopPropOverride) + 1, damage);
     return 1;
