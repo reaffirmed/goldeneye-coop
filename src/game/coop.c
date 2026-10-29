@@ -2501,12 +2501,18 @@ static void coopHarnessTick(void)
     }
 
     if (coopIsMirroringClient())
-    {   /* GE_COOP_TESTSHOT=<chrnum>: a chest shot every 2 s (harness only) */
-        static s32 testchr = -2;
+    {   /* GE_COOP_TESTSHOT=<chrnum>[,<hitpart>]: a shot every 2 s, in the chest
+         * unless a part is given (201, HIT_GENERALHALF: a quarter of the chest's
+         * damage) (harness only) */
+        static s32 testchr = -2, testpart = HIT_CHEST;
         if (testchr == -2)
         {
             const char *e = getenv("GE_COOP_TESTSHOT");
             testchr = (e != NULL) ? atoi(e) : -1;
+            if (e != NULL && strchr(e, ',') != NULL)
+            {
+                testpart = atoi(strchr(e, ',') + 1);
+            }
         }
         if (testchr >= 0 && (sTick % 120) == 0)
         {
@@ -2514,7 +2520,7 @@ static void coopHarnessTick(void)
             coord3d v = { 0.0f, 0.0f, 1.0f };
             if (c != NULL && c->prop != NULL)
             {
-                coopClientForwardShot(c, HIT_CHEST, &v, ITEM_WPPK);
+                coopClientForwardShot(c, testpart, &v, ITEM_WPPK);
             }
         }
     }

@@ -2106,7 +2106,8 @@ and team times). All of it is in src/game/coop_ai.c; Classic runs none of it.
   searches a tick); one small brain per chr slot (256).
 - Harness: GE_GUARDAI=0|1 (the option without midas.ini), GE_GUARDAIDBG=1
   (state changes, calls, splits, muffled shots), GE_GUARDAI_TESTNOISE=<s>[,<loudness>]
-  (one gunshot from Bond at <s> seconds).
+  (one gunshot from Bond at <s> seconds), GE_GUARDAI_TESTALARM=1 (a first
+  sighting always looks for an alarm).
 - Tested with the US cart: Dam (solo, a test shot: look, investigate,
   search, return; Classic in the same run walks straight to Bond; a fight
   from 18892,1,17060: cover, duck, peek in cycles), Archives (solo and two
@@ -2116,7 +2117,57 @@ and team times). All of it is in src/game/coop_ai.c; Classic runs none of it.
   and Classic against the build before it in the same Dam run (differences
   within run-to-run noise). Shots: smart-ai/ in the project files.
 - Not seen in a run yet: the alarm run, the fall back, a guard finding a
-  body. Each has its own GE_GUARDAIDBG line to look for.
+  body. Each has its own GE_GUARDAIDBG line to look for. (All three seen
+  since, see the next section.)
+
+## Smarter guards: code review and the three unseen moves (2026-10-29, COOP_VERSION stays 13)
+
+The module had only been play-tested. Read end to end, then the three moves
+never seen were driven in two-player Dam runs (Smarter on the host, Classic
+on the joiner's own option):
+
+- Alarm run: the joiner stood by guard 41 (GE_COOP_TESTPAD=179:3,
+  GE_COOP_TESTHUNT); 41 ran down the tower to the alarm at pad 10070 and set
+  it off, the joiner logged "alarm on (host)" and saw it run past. With
+  GE_GUARDAI_TESTALARM=1 (the 1 in 4 roll always passes) and without it in a
+  longer run (guard 22, same alarm). Facility and Bunker have no alarm
+  objects; Surface's one has no guard of ours within 30 m.
+- Fall back: GE_COOP_TESTSHOT=41,201 on the joiner (a quarter-damage shot
+  every 2 s); after the third (75%) 41 fell back to pad 190/191/177, ducked,
+  fought on, and died to the fourth.
+- Body: GE_COOP_TESTSHOT=12,8 on the joiner (one silent head shot from the
+  start, out of sight); guards 10, 11 and 45 each found it once, looked,
+  walked over, searched two waypoints and went back to post.
+
+Fixed:
+- A guard never found a body: the once-a-second check was
+  (g_GlobalTimer + slot * 7) % 60 == 0, and g_GlobalTimer steps by the
+  frames since the last tick (2 at 30 Hz), so many guards never hit 0.
+  Before/after on the same run: 0 finds, 3. Now a per-guard timer.
+- Once that works, a guard would have walked back out to the same body every
+  time it got back to post. Each guard remembers 8 bodies: one it found, one
+  it saw fall, and the ones in view when it gets back to post.
+- SEARCH went straight home: in its first 2 ticks the state didn't wait, so
+  both waypoints were picked (and dropped) at once. It now waits for the walk
+  (coopAiArrived already skips the first 10 ticks).
+- A host migration switched the guards to the new host's own Guard AI
+  option mid-mission (joiners latch at the mission start, before the first
+  snapshot, from their own option). A joiner now latches COOPSET_GUARDAI,
+  the host's. Before/after: host (Smarter) leaves at 40 s, the joiner
+  (Classic) hosts, a test gunshot at 50 s: no smarter moves, 36.
+
+Checked and fine: the joiner runs no brain while it mirrors (its chr ticks
+are skipped), the host's brain uses the guard's own target in co-op
+(g_CoopPropOverride), partners' shots are muffled from the partner's spot,
+alarms and the guards' moves reach joiners in the usual snapshots. A
+three-player Dam run (host Smarter, both joiners fighting): no unresolved
+desync; the one "objects corrected" per joiner is a crate shot near the
+host's start, and a Classic run shows the same.
+
+Left as design, not bugs: cover is only out of sight of the guard's own
+target (another player may see it); the alarm run checks straight-line
+distance, not path length; the brain's state isn't sent, so after a
+migration guards start over from their chr records.
 
 ## Far-away players dropping in mid-mission (2026-10-28)
 
