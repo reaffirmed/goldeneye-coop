@@ -126,6 +126,7 @@ enum { COOPSKIP_INTRO = 1, COOPSKIP_ENDING };
 void coopVoteTick(s32 inmission);
 void coopVoteApply(const u8 *raw, s32 from);
 s32  coopVoteShown(void);           /* the debrief's WHAT NEXT page is up */
+s32  coopVoteWaiting(void);         /* joiner: up, but the host's vote isn't open yet */
 void coopVotePick(s32 choice);
 s32  coopVoteOf(s32 player);        /* COOPVOTE_*, 0xFF none */
 s32  coopVoteOutcome(void);         /* -1 open */
@@ -324,6 +325,7 @@ s32  coopLobbyIsHost(void);
 s32  coopLobbyHasPartner(void);
 s32  coopLobbyPartnerReady(void);
 s32  coopLobbyPartnerOnScreen(void);
+s32  coopLobbyPlayerOnLobbyScreen(s32 p);   /* player p (not us) is on the lobby screen */
 s32  coopLobbySelfReady(void);
 void coopLobbySetReady(s32 ready);
 const char *coopLobbySelfName(void);

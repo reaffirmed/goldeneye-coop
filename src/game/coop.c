@@ -2419,6 +2419,20 @@ static void coopHarnessTick(void)
             bossReturnTitleStage();
         }
     }
+    {   /* GE_COOP_TESTLEAVE=<ticks>: Abort our own mission from the watch that far in, as a joiner does (harness only) */
+        static s32 testleave = -1;
+        if (testleave == -1)
+        {
+            const char *e = getenv("GE_COOP_TESTLEAVE");
+            testleave = (e == NULL) ? 0 : atoi(e);
+        }
+        if (testleave > 0 && sMissionTicks >= (u32) testleave && coopPartnerHere())
+        {
+            testleave = 0;
+            portConLogf("ge: coop: testleave\n");
+            coopEndMissionLocal();
+        }
+    }
     {   /* GE_COOP_TESTWORLD=1: host raises the alarm and a stage flag at 15 s (harness only) */
         static s32 testworld = -1;
         if (testworld == -1)
@@ -7286,6 +7300,18 @@ s32 coopLobbyPartnerReady(void)
         }
     }
     return 1;
+}
+
+s32 coopLobbyPlayerOnLobbyScreen(s32 p)
+{
+    s32 c;
+
+    if (p == coopSelf() || !coopLobbyPlayerHere(p))
+    {
+        return 0;
+    }
+    c = coopChanOfPlayer(p);
+    return (c >= 0) ? sChan[c].hello.inlobby : sHostHello.roster[p].inlobby;
 }
 
 s32 coopLobbyPartnerOnScreen(void)

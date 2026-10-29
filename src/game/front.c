@@ -12806,6 +12806,18 @@ static Gfx *coopDebriefVote(Gfx *DL, s32 pitch)
     const s32 outcome = coopVoteOutcome();
     s32 x, y, c, p, n, fit, voted = 0, here = 0;
 
+    if (coopVoteWaiting())
+    {   /* our mission ended first: the host's vote opens when theirs does */
+        x = 0x37;
+        y = COOP_VOTE_Y0;
+        DL = frontPrintText(DL, &x, &y, "Waiting for the host's mission to end...\n", ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF,
+                            viGetX(), viGetY(), 0, 0);
+        x = 0x37;
+        y += pitch + 2;
+        DL = frontPrintText(DL, &x, &y, "The vote opens here when it does.\n", ptrFontZurichBoldChars, ptrFontZurichBold, PORT_SHEET_COL_DIM,
+                            viGetX(), viGetY(), 0, 0);
+        return DL;
+    }
     for (c = 0; c < COOPVOTE_COUNT; c++)
     {
         const s32 off = (c == COOPVOTE_NEXT && coopVoteNext() < 0);
