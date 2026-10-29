@@ -3178,13 +3178,17 @@ static s32 coopNearestTarget(ChrRecord *chr)
 }
 
 /* Passive guards may rotate candidates; once a player-relative action runs,
- * changing Bond under it makes the retail AI list contradict itself. */
+ * changing Bond under it makes the retail AI list contradict itself. A chr
+ * standing to face Bond (Statue's Janus at the statue, told to face the
+ * player he talks to) is one: Bond swapped five times a second, he turned
+ * from one player to the other in his walking turn and walked off. */
 static s32 coopActionAllowsScan(ChrRecord *chr)
 {
     switch (chr->actiontype)
     {
-        case ACT_INIT:
         case ACT_STAND:
+            return chr->act_stand.face_entitytype <= 0 || (chr->act_stand.face_entitytype & (2 | 4 | 8 | 0x10)) != 0;
+        case ACT_INIT:
         case ACT_PATROL:
             return TRUE;
         default:
