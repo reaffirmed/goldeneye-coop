@@ -11126,7 +11126,11 @@ bool sub_GAME_7F033B38(ChrRecord *self, f32 distance)
     {
         chr = &g_ChrSlots[i];
 
-        if ((chr != self) && chr->model && !chrIsDead(chr))
+        if ((chr != self) && chr->model && !chrIsDead(chr)
+#ifndef TARGET_N64
+            && !coopPropIsPartner(chr->prop) /* co-op: a partner's body is no guard (Jungle's Natalya shot at it) */
+#endif
+            )
         {
             coord3d *pos = &chr->prop->pos;
 
