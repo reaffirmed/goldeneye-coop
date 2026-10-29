@@ -19,6 +19,7 @@ void coopChrAltKeep(ChrRecord *chr, s32 stimulus);  /* it passed: that player is
 s32  coopChrAimedAtByBond(ChrRecord *chr);       /* sub_GAME_7F0333F8 for whoever is Bond in this tick */
 s32  coopChrOnPartnerScreen(ChrRecord *chr);     /* host: a partner can see this chr (chrai.c "if I'm on screen") */
 void coopCollideMover(PropRecord *prop, s32 on); /* chrSetMoving: prop is being moved or tested from */
+s32  coopPropIsCorpse(PropRecord *prop);         /* our own body lying where we fell (only on our game) */
 s32  coopCollideSkip(PropRecord *prop);          /* 1: prop blocks nothing right now (down, or inside the mover) */
 s32  coopTargetIsRemote(void);
 void coopGuardTankFlags(s32 flag);

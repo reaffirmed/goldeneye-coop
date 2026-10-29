@@ -543,6 +543,8 @@ static s32 sHostWaiting;    /* joiner: the host went quiet or left; see coopSess
 static s32 sMigrated;        /* this session has been through a migration: stay in the lobby after */
 static s32 sPendingEnd;      /* end our mission at the next tick: 1 back to the lobby */
 static void coopEndMissionLocal(void);
+static void coopCorpseTick(void);
+static PropRecord *sCorpse;   /* our own body while we are down (coopCorpseTick) */
 static CoopAiEnt sAiSync[COOP_MAX_CHRS];    /* joiner: the host's AI state per chr slot (COOPPKT_AISYNC) */
 static u8 sAiSyncHave[COOP_MAX_CHRS];
 static void coopSayBye(void);
@@ -663,10 +665,11 @@ static s32 coopIsPuppet(PropRecord *prop)
 }
 
 /* a puppet, or our own Bond's body (the intro swirl and cutscenes give it a
- * chr slot): never a guard to mirror, send or remove */
+ * chr slot, and coopCorpseTick one while we are down): never a guard to
+ * mirror, send or remove */
 static s32 coopIsPlayerChr(ChrRecord *chr)
 {
-    return coopIsPuppet(chr->prop) || (g_CurrentPlayer != NULL && chr->prop == g_CurrentPlayer->prop);
+    return coopIsPuppet(chr->prop) || (g_CurrentPlayer != NULL && chr->prop == g_CurrentPlayer->prop) || coopPropIsCorpse(chr->prop);
 }
 
 static s32 coopRespawnEta(void);
@@ -1828,6 +1831,10 @@ s32 coopCollideSkip(PropRecord *prop)
     {
         return 0;
     }
+    if (coopPropIsCorpse(prop))
+    {
+        return 1;
+    }
     p = coopBodyPlayer(prop);
     if (p >= 0 && coopBodyDown(prop, p))
     {
@@ -1913,6 +1920,7 @@ void coopStageStart(void)
     sLastHealth = 1.0f;
     sLastWeapon = ITEM_UNARMED;
     sTickChr = NULL;
+    sCorpse = NULL;     /* the last stage's chrs are gone */
     g_CoopPropOverride = NULL;
     for (i = 0; i < COOP_MAX_PLAYERS; i++)
     {
@@ -1987,6 +1995,10 @@ static void coopTickBody(void)
     coopFlushEvents();
     coopSendHello();
     coopPendingEndTick();
+    if (coopInMission())
+    {
+        coopCorpseTick();
+    }
 
     if (!coopInMission())
     {
@@ -6370,6 +6382,79 @@ static s32 coopLocalCalm(void)
 static coord3d sDeathPos;
 static StandTile *sDeathStan;
 static f32 sDeathYaw;
+
+/* Our own body where we fell, while we are down and watching: the partners
+ * see our puppet lie there, and now we do too. Only on our game, a body
+ * nothing walks into or shoots (coopCollideSkip, chrTestHit), gone when we
+ * are back on our feet. */
+#define COOP_CORPSE_CHRNUM  (COOP_PUPPET_CHRNUM + COOP_MAX_PLAYERS)
+static CoopLookPuppet sCorpseLook;
+
+s32 coopPropIsCorpse(PropRecord *prop)
+{
+    return prop != NULL && prop == sCorpse;
+}
+
+static void coopCorpseRemove(void)
+{
+    if (sCorpse != NULL && sCorpse->chr != NULL)
+    {
+        sCorpse->chr->hidden |= CHRHIDDEN_REMOVE;
+    }
+    sCorpse = NULL;
+}
+
+static void coopCorpseTick(void)
+{
+    static const CoopLook none;
+    ChrRecord *chr;
+    s32 who;
+
+    if (g_CurrentPlayer == NULL || !g_CurrentPlayer->bonddead || coopVersus())
+    {
+        coopCorpseRemove();
+        return;
+    }
+    if (sCorpse == NULL)
+    {
+        Model *header;
+        PropRecord *prop;
+        s32 head = HEAD_Male_Brosnan_Default;
+        s32 body = coopLocalBody();
+
+        if (sDeathStan == NULL || coopSpectateHud(&who) == 0)
+        {
+            return; /* not watching yet: our own death's view is still up */
+        }
+        coopCharacterBody(coopCharacter(), &head);
+        header = retrieve_header_for_body_and_head(body, head, 0);
+        prop = (header != NULL) ? chrAllocate(header, &sDeathPos, 6.2831855f - sDeathYaw, sDeathStan, (s32) ailistFindById(GAILIST_DEAD_AI)) : NULL;
+        if (prop == NULL)
+        {
+            return;
+        }
+        chrpropActivateThisFrame(prop);
+        chrpropEnable(prop);
+        prop->chr->bodynum = body;
+        prop->chr->headnum = head;
+        prop->chr->actiontype = ACT_BONDMULTI; /* not dispatched by chrlvActionTick */
+        prop->chr->chrnum = COOP_CORPSE_CHRNUM;
+        prop->chr->sleep = 0;
+        sCorpse = prop;
+        coopLookReset(&sCorpseLook);
+        portConLogf("ge: coop: our body at %.0f %.0f %.0f\n", sDeathPos.f[0], sDeathPos.f[1], sDeathPos.f[2]);
+    }
+    chr = sCorpse->chr;
+    if (chr == NULL)
+    {
+        return;
+    }
+    setsuboffset(chr->model, &sCorpse->pos);
+    setsubroty(chr->model, 6.2831855f - sDeathYaw);
+    sub_GAME_7F01FC10(chr->model, &sCorpse->pos, &sCorpse->pos, &chr->ground);
+    chrDetectRooms(chr);
+    coopLookPuppetTick(&sCorpseLook, chr, &none, 1, COOP_PUPPET_CHRNUM + coopSelf());   /* a death fall, then lying there */
+}
 
 
 /* A lobby setting (COOPSET_*): the host sets them on the lobby screen, the

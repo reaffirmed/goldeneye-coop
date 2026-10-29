@@ -391,7 +391,7 @@ static u32 coopReplChrHash(void)
         ChrRecord *chr = &g_ChrSlots[i];
 
         if (chr->model == NULL || chr->prop == NULL
-            || (chr->chrnum >= COOP_PUPPET_CHRNUM && chr->chrnum < COOP_PUPPET_CHRNUM + COOP_MAX_PLAYERS))
+            || (chr->chrnum >= COOP_PUPPET_CHRNUM && chr->chrnum <= COOP_PUPPET_CHRNUM + COOP_MAX_PLAYERS))   /* and our own body while down */
         {
             continue;
         }
