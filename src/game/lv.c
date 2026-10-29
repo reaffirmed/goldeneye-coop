@@ -653,7 +653,7 @@ static void portDebugPosApply(void)
     }
 }
 
-/* GE_GOTO="x,y,z" (test harness): steer Bond in a straight line to a position,
+/* GE_GOTO="x,y,z[,s]" (test harness): steer Bond in a straight line to a position (from s seconds in),
  * turning toward it, walking when roughly facing it, and stopping inside the
  * arrival radius. The stick values set here are injected on pad 0 by
  * input_pc.c's portInputPadMerge; indoor routes would need the guard pad graph
@@ -673,6 +673,7 @@ static void portGotoTick(void)
     extern float atan2f(float, float);
     static s32 state = -2; /* -2 unparsed, -1 off, 0 steering, 1 arrived */
     static f32 tx, ty, tz;
+    static f32 after;      /* GE_GOTO's 4th number: seconds into the mission it sets off */
     static s32 dbgtick;
     PropRecord *p;
     f32 dx, dz, dist, want, err;
@@ -681,7 +682,7 @@ static void portGotoTick(void)
     {
         const char *e = getenv("GE_GOTO");
         state = -1;
-        if (e != NULL && e[0] != '\0' && sscanf(e, "%f,%f,%f", &tx, &ty, &tz) == 3)
+        if (e != NULL && e[0] != '\0' && sscanf(e, "%f,%f,%f,%f", &tx, &ty, &tz, &after) >= 3)
         {
             state = 0;
         }
@@ -694,7 +695,7 @@ static void portGotoTick(void)
         tz = g_PortGotoTo.z;
         state = 0;
     }
-    if (state != 0)
+    if (state != 0 || g_GlobalTimer < (s32) (after * 60.0f))
     {
         return;
     }

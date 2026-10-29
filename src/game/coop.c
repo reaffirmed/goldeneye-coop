@@ -1596,7 +1596,7 @@ static void coopPuppetUpdateGhost(CoopRemote *r)
 static void coopPuppetNoise(CoopRemote *r, s32 p)
 {
     f32 loudest = 0.0f;
-    s32 fired = 0;
+    s32 fired = 0, loud = 0;
     s32 newshot;
     s32 h;
 
@@ -1635,6 +1635,10 @@ static void coopPuppetNoise(CoopRemote *r, s32 p)
             {
                 loudest = r->noise[h];
             }
+            if (ws->LoudnessMin > 0.0f)
+            {   /* unsilenced: smarter guards hear it further (coop_ai.c) */
+                loud = 1;
+            }
             fired = 1;
         }
         down = (ws->NoiseIncreasePerShot * g_GlobalTimerDelta) / (ws->NoiseDecayLinearTime * 60.0f);
@@ -1655,7 +1659,9 @@ static void coopPuppetNoise(CoopRemote *r, s32 p)
             portConLogf("ge: coop: guards hear player %d's gunfire (loudness %.1f)\n", p + 1, loudest);
         }
         g_CoopPropOverride = r->puppet;
+        coopAiShotLoud(loud);
         chrCheckGuardsHeardSound(loudest);
+        coopAiShotLoud(0);
         g_CoopPropOverride = NULL;
     }
 }
@@ -3727,7 +3733,7 @@ void coopPartnerShotNearMiss(ChrRecord *shooter, coord3d *from, coord3d *end)
                 }
             }
         }
-        size = getinstsize(chr->model) + held;
+        size = getinstsize(chr->model) + held + coopAiWhizMargin(chr);  /* (smarter guards notice a wider miss) */
         d2 = off.f[0] * off.f[0] + off.f[1] * off.f[1] + off.f[2] * off.f[2] - t * t;
         if (d2 >= size * size)
         {
