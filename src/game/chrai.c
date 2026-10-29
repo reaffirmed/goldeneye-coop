@@ -2401,6 +2401,22 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     {
                         has = ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNRIGHT) || ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNLEFT);
                     }
+                    else if (ai->ITEM_NUM == ITEM_FIST || ai->ITEM_NUM == ITEM_UNARMED)
+                    {   /* "Bond has put his gun away" (Statue's unmasking: draw
+                         * one and the guards open fire) holds only while every
+                         * player has: one partner still armed is the same threat */
+                        has = coopBondHasItem(ai->ITEM_NUM);
+                        for (coopk = 0; has && coopChrAltBegin(ChrEntityp, coopk); coopk++)
+                        {
+                            has = coopBondHasItem(ai->ITEM_NUM);
+                            coopChrAltEnd(ChrEntityp);
+                        }
+                        for (coopk = 0; has && coopAltBondBegin(coopk); coopk++)
+                        {
+                            has = coopBondHasItem(ai->ITEM_NUM);
+                            coopAltBondEnd();
+                        }
+                    }
                     else if (!(has = coopBondHasItem(ai->ITEM_NUM)))
                     {
                         for (coopk = 0; !has && coopChrAltBegin(ChrEntityp, coopk); coopk++)
