@@ -3,8 +3,8 @@
  * frees the camera from Bond's eyes; P or Escape gives the view back.
  *
  *   - mouse (or the look stick) turns the camera, movement flies it the way
- *     it looks; it stays over floor Bond could walk on, up to 4 m above it,
- *     and within 8 m of Bond, so it is for framing a shot, not scouting
+ *     it looks, through walls and floors, within 8 m of Bond, so it is for
+ *     framing a shot, not scouting
  *   - Fire saves the view as a .bmp in Photos next to the game (the hint is
  *     off the screen for the frames around it)
  *   - Bond's controls are locked meanwhile, but the world keeps going (in
@@ -63,8 +63,6 @@ extern s32 ge_shot_force;       /* gfx_sdl2.cpp: save the next presented frame *
 extern char ge_shot_path[512];
 
 #define PHOTO_SPEED     5.0f    /* units a tick at full stick */
-#define PHOTO_UP        400.0f  /* the most above the floor */
-#define PHOTO_DOWN      15.0f   /* the least */
 #define PHOTO_REACH     800.0f  /* from Bond's eyes */
 #define PHOTO_HIDE      4       /* ticks the hint is off before the shot */
 #define PHOTO_AFTER     4       /* and after */
@@ -168,15 +166,15 @@ static void coopPhotoSnap(void)
     portConLogf("ge: photo: saved Photos/%s\n", sLast);
 }
 
-/* the camera flies; xz only over floor it can walk to from where it is */
+/* the camera flies through anything (coop_spectate.c coopFreeCamStep), up to
+ * 8 m from Bond's eyes */
 static void coopPhotoMove(f32 fwd, f32 side)
 {
     const f32 ct = cosf(sTheta * DEG), st = sinf(sTheta * DEG);
     const f32 cp = cosf(sPitch * DEG), sp = sinf(sPitch * DEG);
     coord3d want = sPos;
     coord3d *eye = &g_CurrentPlayer->field_488.pos;
-    StandTile *tile = sTile;
-    f32 floor, dx, dy, dz;
+    f32 dx, dy, dz;
 
     /* the view's right is (-cos, -sin) of theta: the world's x runs to the
      * left of a camera looking along +z */
@@ -190,24 +188,7 @@ static void coopPhotoMove(f32 fwd, f32 side)
     {
         return;
     }
-    if (tile != NULL && walkTilesBetweenPoints_NoCallback(&tile, sPos.f[0], sPos.f[2], want.f[0], want.f[2]) && tile != NULL)
-    {
-        sTile = tile;
-        sPos.f[0] = want.f[0];
-        sPos.f[2] = want.f[2];
-    }
-    floor = bondviewYPositionRelated(sTile, sPos.f[0], sPos.f[2]);
-    sPos.f[1] = want.f[1];
-    if (sPos.f[1] < floor + PHOTO_DOWN)
-    {
-        sPos.f[1] = floor + PHOTO_DOWN;
-    }
-    if (sPos.f[1] > floor + PHOTO_UP)
-    {
-        sPos.f[1] = floor + PHOTO_UP;
-    }
-    sPos3 = sPos;
-    sPos3.f[1] = floor;
+    coopFreeCamStep(&sPos, &sPos3, &sTile, &want);
 }
 
 /* GE_PHOTO_TEST=<s>: <s> seconds into a mission, photo mode on; turn and fly

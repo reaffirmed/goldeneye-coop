@@ -429,6 +429,7 @@ void coopSpectateMouse(f32 *dx, f32 *dy, s32 *direct, f32 *yawdeg, f32 *pitchdeg
 s32  coopSpectateCamera(struct coord3d *pos, struct coord3d *look, struct coord3d *up);
 s32  coopSpectateRoom(u8 *room);
 struct coord3d *coopSpectatePos(s32 three);
+void coopFreeCamStep(coord3d *pos, coord3d *pos3, StandTile **tile, const coord3d *want);   /* free cameras: through anything */
 
 /* how partners look (coop_look.c): the character they picked in the lobby,
  * the guns in their hands with the multiplayer body animations, and their
