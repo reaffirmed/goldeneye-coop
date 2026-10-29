@@ -23,6 +23,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <bondaicommands.h>
 #include <bondgame.h>
@@ -1671,6 +1672,25 @@ static void coopPuppetRemove(CoopRemote *r)
 
 /* host: a guard a partner may be looking at. The game stops animating guards
  * off the host's screen, and the partners see the frozen pose. */
+/* the chr's index in g_ChrSlots, or -1: a chr that isn't one of the slots
+ * (g_ActiveChrs, the level scripts' own) can sit just past them, where
+ * chr - g_ChrSlots is garbage */
+s32 coopChrSlot(const ChrRecord *chr)
+{
+    uintptr_t off;
+
+    if (chr == NULL || g_ChrSlots == NULL || (uintptr_t) chr < (uintptr_t) g_ChrSlots)
+    {
+        return -1;
+    }
+    off = (uintptr_t) chr - (uintptr_t) g_ChrSlots;
+    if (off % sizeof(ChrRecord) != 0 || off / sizeof(ChrRecord) >= (uintptr_t) g_NumChrSlots)
+    {
+        return -1;
+    }
+    return (s32) (off / sizeof(ChrRecord));
+}
+
 s32 coopChrNearPartner(ChrRecord *chr)
 {
     s32 p;
@@ -2148,7 +2168,7 @@ static s32 coopHitBehindCover(CoopEvent *ev)
         return 0;
     }
     from = chr->prop->pos;
-    slot = chr - g_ChrSlots;
+    slot = coopChrSlot(chr);
     if (slot >= 0 && slot < COOP_MAX_CHRS && sGuardTrack[slot].n > 0 && sGuardTrackNum[slot] == chr->chrnum)
     {   /* where it fired from: its newest snapshot, not where it is drawn */
         const CoopSample *nw = &sGuardTrack[slot].s[sGuardTrack[slot].n - 1];
@@ -2776,7 +2796,7 @@ static void coopHarnessTick(void)
         static u32 since, downs, tries;
         PropRecord *bond = g_CurrentPlayer->prop;
         ChrRecord *c = (target >= 0) ? chrFindByLiteralId(target) : NULL;
-        s32 slot = (c != NULL) ? (s32) (c - g_ChrSlots) : -1;
+        s32 slot = coopChrSlot(c);
 
         if (testhunt == -2)
         {
@@ -3110,7 +3130,7 @@ static CoopChrTarget *coopChrState(ChrRecord *chr)
     {
         return NULL;
     }
-    slot = chr - g_ChrSlots;
+    slot = coopChrSlot(chr);
     if (slot < 0 || slot >= g_NumChrSlots || slot >= COOP_MAX_CHRS)
     {
         return NULL;
@@ -3992,7 +4012,7 @@ static void coopApplyGuard(CoopGuardEnt *e)
         return;
     }
     prop = chr->prop;
-    slot = chr - g_ChrSlots;
+    slot = coopChrSlot(chr);
     if (slot >= 0 && slot < COOP_MAX_CHRS && sGuardTrackNum[slot] == chr->chrnum && sGuardTrack[slot].n > 0
         && (s32) (sGuardTrack[slot].s[sGuardTrack[slot].n - 1].ms - sGuardPktMs) > 0)
     {   /* an older snapshot than one we applied (jitter reorders them): its spot goes in the
@@ -4290,7 +4310,7 @@ static struct ChrHitReaction *coopHitReaction(s32 hitpart)
 
 static void coopPredictShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, u8 *kind, u8 *idx)
 {
-    s32 slot = chr - g_ChrSlots;
+    s32 slot = coopChrSlot(chr);
     struct ChrHitReaction *hr;
     struct StruckAnim *sa;
     f32 dmg;
@@ -7801,7 +7821,7 @@ static void coopRecvAiSync(CoopAiPkt *p)
         {
             continue;
         }
-        slot = chr - g_ChrSlots;
+        slot = coopChrSlot(chr);
         if (slot >= 0 && slot < COOP_MAX_CHRS)
         {
             sAiSync[slot] = p->ent[k];

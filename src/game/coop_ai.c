@@ -534,8 +534,8 @@ static CoopAiBrain *coopAiBrainOf(ChrRecord *chr)
     {
         return NULL;
     }
-    slot = chr - g_ChrSlots;
-    if (slot < 0 || slot >= g_NumChrSlots || slot >= COOPAI_MAX_CHRS)
+    slot = coopChrSlot(chr);
+    if (slot < 0 || slot >= COOPAI_MAX_CHRS)
     {
         return NULL;
     }
