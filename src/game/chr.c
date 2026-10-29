@@ -2524,6 +2524,18 @@ s32 chrTick(PropRecord *prop)
             goto after_position_update;
         }
 
+#ifndef TARGET_N64
+        if (coopChrPinned(chr))
+        {   /* co-op joiner: the host plays this guard. Our copy's action is
+             * whatever it held when the host took over (a patrol left in magic
+             * mode never animates), so play the host's animation every tick
+             * rather than only when a snapshot jumps it along */
+            chrUpdateAnim(chr, tickamount);
+            headSwitchVisible = posIsOnScreen(prop, &prop->pos, getinstsize(model), 1);
+            goto after_position_update;
+        }
+#endif
+
         if ((chr->actiontype == ACT_PATROL) || (chr->actiontype == ACT_GOPOS))
         {
             if (((chr->actiontype == ACT_PATROL) && (chr->act_patrol.waydata.mode == WAYMODE_MAGIC)) || ((chr->actiontype == ACT_GOPOS) && (chr->act_gopos.waydata.mode == WAYMODE_MAGIC)))
@@ -2587,7 +2599,7 @@ s32 chrTick(PropRecord *prop)
             headSwitchVisible = posIsOnScreen(prop, &prop->pos, getinstsize(model), 1);
 
 #ifndef TARGET_N64
-            if (headSwitchVisible || (chr->chrflags & CHRFLAG_INIT) || coopChrAnimForPartner(chr) || coopChrPinned(chr))
+            if (headSwitchVisible || (chr->chrflags & CHRFLAG_INIT) || coopChrAnimForPartner(chr))
 #else
             if (headSwitchVisible || (chr->chrflags & CHRFLAG_INIT))
 #endif
