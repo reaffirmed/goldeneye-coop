@@ -62,6 +62,7 @@ extern void portConLogf(const char *fmt, ...);
 extern s32 portGuardAiSmarter(void);    /* video.c: midas.ini guard_ai */
 extern s32 portOptFind(const char *key);
 extern s32 portOptSetValue(s32 i, s32 v);
+extern int coopNetIsHost(void);
 
 extern s32 plot_course_for_actor(ChrRecord *self, coord3d *pos, StandTile *stan, SPEED speed);
 extern s32 chrIsNotDeadOrShot(ChrRecord *chr);
@@ -80,6 +81,7 @@ extern waypoint *chrlvStanPathRelated(coord3d *pos, StandTile *stan);
 #define COOPAI_COVER_TESTS  40          /* sight tests per cover search */
 #define COOPAI_SEARCHES     2           /* cover searches per tick, every guard together */
 #define COOPAI_MUFFLED      0.5f        /* hearing through walls */
+#define COOPAI_BODIES       8           /* bodies a guard remembers having seen */
 
 enum
 {
@@ -135,6 +137,9 @@ typedef struct
     StandTile *laststan;
     coord3d firepos;        /* where it fired from before taking cover */
     StandTile *firestan;
+    s32 nextbody60;         /* next look round for bodies */
+    s16 bodies[COOPAI_BODIES];  /* chrnum + 1 of the bodies it has seen, 0 none */
+    u8 nextbodyslot;
 } CoopAiBrain;
 
 static CoopAiBrain sBrain[COOPAI_MAX_CHRS];
@@ -152,6 +157,11 @@ static s32 coopAiDecideOn(void)
     if (coopVersus())
     {
         return 0;
+    }
+    if (coopSessionActive() && !coopNetIsHost())
+    {   /* a joiner goes by the host's choice, so a migration mid-mission
+         * carries on with the guards the mission started with */
+        return coopSetting(COOPSET_GUARDAI) == COOPAI_SMARTER;
     }
     /* only the host (or a solo game) runs guards, so its own option decides */
     return coopAiSmarterOption() == COOPAI_SMARTER;
@@ -318,6 +328,7 @@ static CoopAiBrain *coopAiBrainOf(ChrRecord *chr)
         b->origin = GAILIST_STANDARD_GUARD;
         b->seen60 = chr->lastseetarget60;
         b->arghs = chr->numarghs;
+        b->nextbody60 = g_GlobalTimer + (slot * 7) % COOPAI_SEC;   /* spread the guards' looks over a second */
     }
     return b;
 }
@@ -554,21 +565,40 @@ static void coopAiCallForHelp(ChrRecord *caller, CoopAiBrain *cb)
     }
 }
 
-/* a calm guard of ours looking at a body: once a second, round robin */
-static s32 coopAiFindBody(ChrRecord *chr, coord3d *pos, StandTile **stan)
+static s32 coopAiKnowsBody(CoopAiBrain *b, ChrRecord *dead)
+{
+    s32 k;
+
+    for (k = 0; k < COOPAI_BODIES; k++)
+    {
+        if (b->bodies[k] == dead->chrnum + 1)
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void coopAiNoteBody(CoopAiBrain *b, ChrRecord *dead)
+{
+    if (!coopAiKnowsBody(b, dead))
+    {
+        b->bodies[b->nextbodyslot] = (s16) (dead->chrnum + 1);
+        b->nextbodyslot = (u8) ((b->nextbodyslot + 1) % COOPAI_BODIES);
+    }
+}
+
+/* a body within 15 m that the guard can see from where it stands; NULL none */
+static ChrRecord *coopAiBodyInView(ChrRecord *chr, CoopAiBrain *b)
 {
     s32 i;
 
-    if (((g_GlobalTimer + (chr - g_ChrSlots) * 7) % COOPAI_SEC) != 0)
-    {
-        return 0;
-    }
     for (i = 0; i < g_NumChrSlots; i++)
     {
         ChrRecord *dead = &g_ChrSlots[i];
 
         if (dead == chr || dead->model == NULL || dead->prop == NULL || dead->actiontype != ACT_DEAD
-            || dead->chrnum >= 30000 || dead->prop->stan == NULL)
+            || dead->chrnum >= 30000 || dead->prop->stan == NULL || coopAiKnowsBody(b, dead))
         {
             continue;
         }
@@ -578,12 +608,29 @@ static s32 coopAiFindBody(ChrRecord *chr, coord3d *pos, StandTile **stan)
         }
         if (check_if_position_in_same_room(chr, &dead->prop->pos, dead->prop->stan))
         {
-            *pos = dead->prop->pos;
-            *stan = dead->prop->stan;
-            return 1;
+            return dead;
         }
     }
-    return 0;
+    return NULL;
+}
+
+/* a calm guard of ours looking round for a body it hasn't seen yet: once a
+ * second (a timer, as g_GlobalTimer can step over any one tick) */
+static ChrRecord *coopAiFindBody(ChrRecord *chr, CoopAiBrain *b)
+{
+    ChrRecord *dead;
+
+    if (g_GlobalTimer < b->nextbody60)
+    {
+        return NULL;
+    }
+    b->nextbody60 = g_GlobalTimer + COOPAI_SEC;
+    dead = coopAiBodyInView(chr, b);
+    if (dead != NULL)
+    {
+        coopAiNoteBody(b, dead);
+    }
+    return dead;
 }
 
 static s32 coopAiFindAlarm(ChrRecord *chr)
@@ -809,9 +856,14 @@ static s32 coopAiCombat(ChrRecord *chr, CoopAiBrain *b, s32 seen)
     {
         b->called = 1;
         coopAiCallForHelp(chr, b);
-        if (!alarmIsActive() && g_GlobalTimer > sAlarmRunUntil && coopAiRandom(4) == 0)
+        if (!alarmIsActive() && g_GlobalTimer > sAlarmRunUntil
+            && (getenv("GE_GUARDAI_TESTALARM") != NULL || coopAiRandom(4) == 0))
         {
             pad = coopAiFindAlarm(chr);
+            if (pad < 0 && getenv("GE_GUARDAIDBG") != NULL)
+            {
+                portConLogf("ge: ai: guard %d would run for an alarm, none working within 30 m\n", chr->chrnum);
+            }
             if (pad >= 0 && coopAiGoPad(chr, pad, SPEED_RUN))
             {
                 b->coverpad = pad;
@@ -907,6 +959,8 @@ static s32 coopAiCombat(ChrRecord *chr, CoopAiBrain *b, s32 seen)
 
 static void coopAiCalmDown(ChrRecord *chr, CoopAiBrain *b)
 {
+    s32 k;
+
     chr->lastheartarget60 = 0;
     chr->lastseetarget60 = 0;
     chr->hidden &= ~CHRHIDDEN_ALERT_GUARD_RELATED;
@@ -916,6 +970,18 @@ static void coopAiCalmDown(ChrRecord *chr, CoopAiBrain *b)
     b->arghs = chr->numarghs;
     coopAiSetState(b, AIS_POST, 0);
     coopAiParkList(chr, b->origin);
+    for (k = 0; k < COOPAI_BODIES; k++)
+    {   /* back on post: what it can see from here it has seen (no walking
+         * back out to a body it just stood beside in the fight or search) */
+        ChrRecord *dead = coopAiBodyInView(chr, b);
+
+        if (dead == NULL)
+        {
+            break;
+        }
+        coopAiNoteBody(b, dead);
+    }
+    b->nextbody60 = g_GlobalTimer + COOPAI_SEC;
 }
 
 static s32 coopAiLookInto(ChrRecord *chr, CoopAiBrain *b)
@@ -960,8 +1026,9 @@ static s32 coopAiLookInto(ChrRecord *chr, CoopAiBrain *b)
             coopAiSetState(b, AIS_SEARCH, 8);
             /* fall through */
         case AIS_SEARCH:
-            if (!coopAiArrived(chr, b) && g_GlobalTimer <= b->until60 && g_GlobalTimer > b->since60 + 2)
-            {
+            if (!coopAiArrived(chr, b) && g_GlobalTimer <= b->until60)
+            {   /* (not arrived in its first ticks either, so a new waypoint
+                 * isn't picked before the walk to the last one has begun) */
                 return 1;
             }
             if (b->searchleft > 0 && b->goalstan != NULL)
@@ -1077,9 +1144,6 @@ s32 coopAiTick(ChrRecord *chr)
 
     if (b->state == AIS_POST)
     {
-        coord3d pos;
-        StandTile *stan;
-
         if ((id == GAILIST_STANDARD_GUARD || id == GAILIST_SIMPLE_GUARD)
             && (chr->lastseetarget60 > b->seen60 || chr->numarghs > b->arghs))
         {   /* Classic saw them, or was shot, and its Attack Bond call already
@@ -1090,12 +1154,15 @@ s32 coopAiTick(ChrRecord *chr)
         }
         else if (id == GAILIST_STANDARD_GUARD || id == GAILIST_SIMPLE_GUARD)
         {
+            ChrRecord *dead;
+
             b->origin = (u8) id;
-            if (coopAiStopped(chr) && coopAiFindBody(chr, &pos, &stan))
+            dead = coopAiStopped(chr) ? coopAiFindBody(chr, b) : NULL;
+            if (dead != NULL)
             {
-                portConLogf("ge: ai: guard %d found a body\n", chr->chrnum);
+                portConLogf("ge: ai: guard %d found a body (guard %d)\n", chr->chrnum, dead->chrnum);
                 b->heard60 = chr->lastheartarget60;
-                coopAiInvestigate(chr, b, &pos, stan, 0);
+                coopAiInvestigate(chr, b, &dead->prop->pos, dead->prop->stan, 0);
                 return 1;
             }
             return 0;   /* calm: Classic's own checks run */
@@ -1135,6 +1202,7 @@ s32 coopAiTick(ChrRecord *chr)
                 coopAiParkList(chr, b->origin);
                 if (other != NULL && other->prop != NULL && other->prop->stan != NULL)
                 {
+                    coopAiNoteBody(b, other);   /* it saw this one fall: not a body to find later */
                     coopAiInvestigate(chr, b, &other->prop->pos, other->prop->stan, 0);
                     return 1;
                 }
