@@ -2548,3 +2548,14 @@ protocol change.
   three-row folder and the two-row AUDIO VISUAL hub keep 0x20.
 - Checked: no other folder, hub, sheet or lobby row lies below the
   crosshair's reach. Shots: accessibility/ in the project files.
+
+## Surface 2: chrs out of step on the joiner (v0.5.3 release runs)
+
+- In the local mission runs for v0.5.3 (US cart, mock Steam, PAR=4),
+  surface2 failed on "repl: unresolved desync: the chrs here are not the
+  host's" in about half its runs, each time around the joiner's "chr 50xx
+  gone on the host, removing" lines for the spawned guards. Every other
+  stage passed. A v0.5.2 build (7238ac0) fails the same way on the same
+  runs (1 of 4 vs 2 of 4 for v0.5.3), so it predates #59 and #60. The
+  mission still completes on both copies. Not fixed yet: listed as a known
+  issue in the v0.5.3 notes.
