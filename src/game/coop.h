@@ -176,6 +176,17 @@ const char *coopGuardAiName(s32 mode);
 s32  coopChrCurrentTarget(void);            /* host, in a guard's tick: the player that is Bond, 0 ours */
 s32  coopTargetablePlayer(s32 t);           /* host: player t is in the mission and alive */
 PropRecord *coopTargetablePlayerProp(s32 t); /* host: that player's body while coopTargetablePlayer, else NULL */
+typedef struct
+{
+    PropRecord *prop;
+    u8 shotseq;     /* CoopLook.shotseq: a change is a shot */
+    u8 flash;       /* the muzzle flash shows (CoopLook.flash) */
+    u8 cue;         /* CoopLook.cue: draws and reloads */
+    u8 reviving;    /* holding Use over a downed partner */
+    f32 yaw;        /* where they face, radians, model convention */
+} CoopAiPlayerView;
+s32  coopAiPlayerView(s32 t, CoopAiPlayerView *out);    /* host or solo: player t for the smarter guards, 0 not in the fight */
+u8   coopLookShotSeq(void);                 /* coop_look.c: our shots so far (CoopLook.shotseq) */
 
 /* co-op difficulty (coop_difficulty.c): COOPSET_DIFFICULTY's modes */
 s32  coopLobbyPlayerCount(void);          /* players in the session, us included */

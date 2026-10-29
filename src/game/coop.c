@@ -3323,6 +3323,40 @@ PropRecord *coopTargetablePlayerProp(s32 t)
     return coopTargetablePlayer(t) ? coopTargetProp(t) : NULL;
 }
 
+/* host, or solo: what the smarter guards (coop_ai.c) watch of player t (where
+ * they stand, their shots and gun cues, a revive under way); 0 when t is not
+ * in the fight */
+s32 coopAiPlayerView(s32 t, CoopAiPlayerView *out)
+{
+    memset(out, 0, sizeof(*out));
+    if (t == COOPTGT_LOCAL && (sEnabled <= 0 || coopNetIsHost()))
+    {
+        if (g_CurrentPlayer == NULL || g_CurrentPlayer->prop == NULL || g_CurrentPlayer->bonddead)
+        {
+            return 0;
+        }
+        out->prop = g_CurrentPlayer->prop;
+        out->shotseq = coopLookShotSeq();
+        out->flash = (g_CurrentPlayer->hands[GUNRIGHT].field_87D ? 1 : 0) | (g_CurrentPlayer->hands[GUNLEFT].field_87D ? 2 : 0);
+        out->cue = coopAudioCueByte();
+        out->reviving = sEnabled > 0 && coopReviveTarget() != 0;
+        out->yaw = bondviewGetPlayerYawRadians();
+        return 1;
+    }
+    if (sEnabled <= 0 || !coopNetIsHost() || coopVersus() || t <= COOPTGT_LOCAL || t >= COOPTGT_COUNT
+        || !coopRemoteAliveHere(t))
+    {
+        return 0;
+    }
+    out->prop = sR[t].puppet;
+    out->shotseq = sR[t].st.look.shotseq;
+    out->flash = sR[t].st.look.flash;
+    out->cue = sR[t].st.look.cue;
+    out->reviving = sR[t].st.revive != 0;
+    out->yaw = sR[t].st.yaw;
+    return 1;
+}
+
 /* host: "Bond is aiming at me" (sub_GAME_7F0333F8) for whoever Bond is in
  * this guard's tick. That test reads our own crosshair, so for a partner it
  * is their facing against the chr's body, with the same line of sight. */
