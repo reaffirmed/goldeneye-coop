@@ -2829,3 +2829,16 @@ protocol change.
 - "chr N gone on the host" on the joiner: Streets 5 (civilians 39 and 40,
   as expected), Surface 2 2, Hostage 1. Before #63 the stage 3 scripted
   runs had 428.
+- The two-player scripted check with Smarter (both acting, 100 s a
+  stage) crashed once on Statue as the mission started: coopAiBrainOf
+  read past sBrain. `chr - g_ChrSlots` was trusted after a range check,
+  but chrlvAllChrTick also ticks g_ActiveChrs, which can sit just past
+  the slots at an offset that isn't a whole number of ChrRecords, so the
+  index was garbage. coopChrSlot() checks the byte offset; every lookup
+  by slot in coop.c and coop_ai.c uses it. The same code was in v0.5.3.
+- Rerun on the fixed build: mission runs 20/20, late joins 3/3, joiner
+  checks 4/4, Smarter mission runs 20/20; scripted check with Smarter on
+  all 20 plus Statue 3 more times, no crashes. Objective failures as
+  Classic's (Statue, Bunker 2, Jungle, Caverns); Train once showed
+  objective B failed on the joiner for a moment after it shot guard 4,
+  and the host's state put it back (the host never failed it).
