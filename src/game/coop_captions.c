@@ -388,7 +388,7 @@ Gfx *coopSubtitlesRender(Gfx *gdl)
 }
 
 /* harness: GE_SUBTEST=<s> shows a scripted exchange <s> s (wall clock) after
- * the first caption frame, one line every 1.6 s, for the recordings */
+ * the first caption frame, one line every 2.2 s, for the recordings */
 static void coopSubtitlesHarness(void)
 {
     static const char *const lines[] = {
@@ -410,7 +410,7 @@ static void coopSubtitlesHarness(void)
         at = (e != NULL) ? atoi(e) : -1;
         base = now;
     }
-    if (at < 0 || step >= (s32) (sizeof(lines) / sizeof(lines[0])) || now - base < (u32) at * 1000u + (u32) step * 1600u)
+    if (at < 0 || step >= (s32) (sizeof(lines) / sizeof(lines[0])) || now - base < (u32) at * 1000u + (u32) step * 2200u)
     {
         return;
     }
