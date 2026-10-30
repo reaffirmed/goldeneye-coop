@@ -13041,6 +13041,9 @@ Gfx *maybe_mp_interface(Gfx *gdl)
         gdl = hudmsgBottomRender(gdl);
         bondviewUpperTextWindowTimerTick();
         gdl = sub_GAME_7F08AAE8(gdl);
+#ifndef TARGET_N64
+        gdl = coopSubtitlesRender(gdl);   /* Modern captions (coop_captions.c) */
+#endif
         gdl = countdownTimerRender(gdl);
 #ifndef TARGET_N64
         gdl = portPillarOverlayDraw(gdl);   /* Classic Mode's pillars stay up in the cutscenes */
@@ -13248,6 +13251,9 @@ blood_frame_held:;
     gdl = hudmsgBottomRender(gdl);
     bondviewUpperTextWindowTimerTick();
     gdl = sub_GAME_7F08AAE8(gdl);
+#ifndef TARGET_N64
+    gdl = coopSubtitlesRender(gdl);   /* Modern captions (coop_captions.c) */
+#endif
     gunDrawSight(&gdl);
     gdl = generate_ammo_total_microcode(gdl);
     gdl = countdownTimerRender(gdl);
@@ -14009,6 +14015,9 @@ void bondviewResetIntroCameraMessageDialogs(void)
     g_CurrentPlayer->bondmesscnt = -1;
     display_statusbar = 0;
     status_bar_text_buffer_index = 0;
+#ifndef TARGET_N64
+    coopSubtitlesClear();
+#endif
 
 #ifdef BUGFIX_R0
     copy_1stfonttable = ptrFontBankGothic;
@@ -14098,9 +14107,9 @@ void hudmsgBottomShow(char *mess)
         assert(strlen(mess)<=MAXMESSAGELEN);
     #endif
 #ifndef TARGET_N64
-    if (g_PortHudMsgQuiet)
+    if (g_PortHudMsgQuiet || coopSubtitleShow(mess))
     {
-        return;
+        return;     /* or a Modern caption now (coop_captions.c) */
     }
 #endif
     if (getPlayerCount() == 1)
@@ -14325,6 +14334,12 @@ void hudmsgTopShow(char* mess)
     #ifdef DEBUG
         assert(strlen(mess)<=MAXTALKMESSLEN);
     #endif
+#ifndef TARGET_N64
+    if (coopSubtitleShow(mess))
+    {
+        return;     /* a Modern caption (coop_captions.c) */
+    }
+#endif
     if (display_upper_text_window >= 2) { return; }
 
     index = (upper_text_buffer_index + display_upper_text_window) % 2;

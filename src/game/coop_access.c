@@ -224,7 +224,42 @@ static Gfx *coopCapPrint(Gfx *gdl, s32 x, s32 y, char *text, u32 colour)
                               (colour & 0xFF) * 5 / 8, (s32) viGetX(), viGetY(), 0, 0);
 }
 
-/* above the mission message line, centred, newest lowest */
+static void coopCapExpire(u32 now)
+{
+    while (sCapCount > 0 && now - sCap[0].ms >= COOPCAP_SHOW_MS)
+    {
+        memmove(&sCap[0], &sCap[1], sizeof(sCap[0]) * (COOPCAP_LINES - 1));
+        sCapCount--;
+    }
+}
+
+/* Modern captions (coop_captions.c) draw these in their own stack, oldest
+ * first: "[Gunfire - behind]", and "[Alarm]" while it sounds */
+s32 coopCaptionSoundLines(char lines[][48], s32 max)
+{
+    static const char *const text[COOPCAP_COUNT] = { "Gunfire", "Explosion", "Door opens", "Alarm" };
+    static const char *const sides[4] = { "ahead", "right", "behind", "left" };
+    s32 n = 0;
+    s32 i;
+
+    coopCapExpire(coopCapNowMs());
+    if (!portAccessCaptions())
+    {
+        return 0;
+    }
+    for (i = 0; i < sCapCount && n < max; i++)
+    {
+        snprintf(lines[n++], 48, "[%s - %s]", text[(s32) sCap[i].kind], sides[(s32) sCap[i].side]);
+    }
+    if (alarmIsActive() && n < max)
+    {
+        snprintf(lines[n++], 48, "[%s]", text[COOPCAP_ALARM]);
+    }
+    return n;
+}
+
+/* above the mission message line, centred, newest lowest (Modern captions
+ * draw them instead, coop_captions.c) */
 Gfx *coopCaptionsRender(Gfx *gdl)
 {
     static const char *const sides[4] = { "AHEAD", "RIGHT", "BEHIND", "LEFT" };
@@ -235,13 +270,9 @@ Gfx *coopCaptionsRender(Gfx *gdl)
     s32 rows = 0;
     s32 i;
 
-    while (sCapCount > 0 && now - sCap[0].ms >= COOPCAP_SHOW_MS)
-    {
-        memmove(&sCap[0], &sCap[1], sizeof(sCap[0]) * (COOPCAP_LINES - 1));
-        sCapCount--;
-    }
+    coopCapExpire(now);
     alarm = portAccessCaptions() && alarmIsActive();
-    if (!portAccessCaptions() || (sCapCount == 0 && !alarm))
+    if (!portAccessCaptions() || (sCapCount == 0 && !alarm) || coopSubtitlesOn())
     {
         return gdl;
     }

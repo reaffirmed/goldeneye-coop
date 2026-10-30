@@ -772,6 +772,14 @@ void coopCaptionChrGunfire(ChrRecord *chr);     /* chraction.c: a chr's gun went
 Gfx *coopCaptionsRender(Gfx *gdl);
 void coopCaptionHarness(void);
 
+s32  coopCaptionSoundLines(char lines[][48], s32 max);   /* Sound Captions as Modern caption text */
+
+/* Modern captions: Rare's speech and messages as subtitle lines (coop_captions.c) */
+s32  coopSubtitlesOn(void);
+s32  coopSubtitleShow(const char *mess);    /* bondview2.c hudmsgTopShow / hudmsgBottomShow: 1 taken */
+void coopSubtitlesClear(void);
+Gfx *coopSubtitlesRender(Gfx *gdl);
+
 /* story co-op: a partner up close fades out (coop_fade.c) */
 s32  coopFadePartnerAlpha(PropRecord *prop, s32 alpha);    /* chr.c chrRenderProp */
 void coopFadeHarness(void);
