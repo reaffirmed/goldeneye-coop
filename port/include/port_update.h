@@ -43,6 +43,15 @@ void portUpdateRestart(void);         /* start the new build and quit this one *
 const char *portUpdateJustUpdated(void); /* the release an update's restart brought us to, else "" */
 int  portUpdateEnabled(void);         /* [display] auto_update */
 
+/* the launch prompt (front.c, on the Files screen): asked once a run, never for a skipped release */
+enum {
+    PORTUPD_ANSWER_UPDATE = 0,  /* Update Now: download and install, then restart */
+    PORTUPD_ANSWER_LATER,       /* Not Now: ask again next launch */
+    PORTUPD_ANSWER_SKIP         /* Skip This Version: not again until a newer one */
+};
+int  portUpdatePromptWanted(void);    /* 1: a newer release with a download, not skipped, not answered yet */
+void portUpdatePromptAnswer(int answer);
+
 /* ---- no game, files or network (port_update_util.c) ---------------------- */
 
 #define PORTUPD_MAX_ASSETS 16

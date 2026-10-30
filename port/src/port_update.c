@@ -4,8 +4,12 @@
  * Asks GitHub for the newest release of the co-op build (releases/latest,
  * which skips the rolling coop-latest prerelease), once at startup unless
  * [display] auto_update=0, again when a host turns us away for another co-op
- * version, and when the player picks Check Now. A newer release shows on the
- * CO-OP screen (front.c coopLobbyAddUpdate); picking it:
+ * version, and when the player picks Check Now. A newer release the startup
+ * check finds is put to the player once on the Files screen (front.c
+ * portUpdPromptTick): Update Now, Not Now, or Skip This Version, which keeps
+ * the prompt quiet until a newer one than that comes out. Nothing downloads
+ * unless they say so. It also shows on the CO-OP screen (front.c
+ * coopLobbyAddUpdate) whatever they answered; picking it there or Update Now:
  *
  *   1. downloads the release's zip for this system to Data/Update/<name>.part
  *      (WinHTTP on Windows, curl elsewhere), checks its size and the SHA-256
@@ -72,6 +76,7 @@ extern void portRequestQuit(void);      /* video.c: the close box's quit */
 #define UPD_API_DEFAULT "https://api.github.com/repos/reaffirmed/goldeneye-coop/releases/latest"
 #define UPD_AGENT       "GoldenEye-Coop-Updater"
 #define UPD_DIR         "Data/Update"
+#define UPD_SKIPFILE    UPD_DIR "/skip.txt"
 #define UPD_MAX_ZIP     (64L * 1024 * 1024)
 #define UPD_MAX_FILES   64
 
@@ -92,6 +97,8 @@ static unsigned sTicks;
 static char sOwn[48];
 static char sLatest[48];
 static char sError[96];
+static char sSkipped[48];               /* Data/Update/skip.txt: the release Skip This Version passed over */
+static int sPrompted;                   /* the launch prompt has had its answer this run */
 static char sExe[260];                  /* the exe's own name beside the root, taken at boot */
 static struct PortUpdRelease sRelease;
 static int sAsset = -1;                 /* sRelease.assets index for this system */
@@ -986,7 +993,21 @@ void portUpdateBoot(int argc, char **argv)
             snprintf(sUpdatedTo, sizeof(sUpdatedTo), "%s", to);
         }
     }
-    portConLogf("ge: update: this is %s (%s), checks %s\n", sOwn[0] != '\0' ? sOwn : "an unknown release", sExe, apiUrl());
+    {   /* the release the player said to skip, if any */
+        FILE *f = fopen(rootPathCopy(UPD_SKIPFILE), "r");
+
+        if (f != NULL)
+        {
+            if (fgets(sSkipped, sizeof(sSkipped), f) == NULL)
+            {
+                sSkipped[0] = '\0';
+            }
+            sSkipped[strcspn(sSkipped, " \r\n")] = '\0';
+            fclose(f);
+        }
+    }
+    portConLogf("ge: update: this is %s (%s), checks %s%s%s\n", sOwn[0] != '\0' ? sOwn : "an unknown release", sExe, apiUrl(),
+                sSkipped[0] != '\0' ? ", skipping " : "", sSkipped);
 }
 
 /* boss.c, once a frame (the ini is read by now) */
@@ -1121,6 +1142,43 @@ void portUpdateInstall(void)
         return;
     }
     startJob(JOB_INSTALL);
+}
+
+int portUpdatePromptWanted(void)
+{
+    if (sPrompted || sState != PORTUPD_AVAILABLE || !portUpdateHasDownload())
+    {
+        return 0;
+    }
+    return strcmp(portUpdateLatest(), sSkipped) != 0;
+}
+
+void portUpdatePromptAnswer(int answer)
+{
+    const char *latest = portUpdateLatest();
+
+    sPrompted = 1;
+    portConLogf("ge: update: launch prompt for %s: %s\n", latest,
+                answer == PORTUPD_ANSWER_UPDATE ? "update now" : answer == PORTUPD_ANSWER_SKIP ? "skip this version" : "not now");
+    if (answer == PORTUPD_ANSWER_UPDATE)
+    {
+        portUpdateInstall();
+    }
+    else if (answer == PORTUPD_ANSWER_SKIP && latest[0] != '\0')
+    {
+        char *path = rootPathCopy(UPD_SKIPFILE);
+        FILE *f;
+
+        makeDir(rootPathCopy("Data"));
+        makeDir(rootPathCopy(UPD_DIR));
+        f = fopen(path, "w");
+        if (f != NULL)
+        {
+            fprintf(f, "%s\n", latest);
+            fclose(f);
+        }
+        snprintf(sSkipped, sizeof(sSkipped), "%s", latest);
+    }
 }
 
 const char *portUpdateJustUpdated(void)
