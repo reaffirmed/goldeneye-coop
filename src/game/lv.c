@@ -1607,6 +1607,10 @@ void lvlTick(void)
             {
                 s32 on = g_CheatActivated[i] && (!cheatIsEnemyRockets(i) || portTrueEnemyRocketsEnabled());
 
+                if (coopVersus() && i != CHEAT_NO_RADAR_MP)
+                {
+                    on = FALSE;     /* online versus: no cheat menu picks, the host's rules only (coop_versus.c) */
+                }
                 if (getPlayerCount() >= 2)
                 {
                     s32 w;

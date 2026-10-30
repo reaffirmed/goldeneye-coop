@@ -300,7 +300,7 @@ Gfx *coopScreensRender(Gfx *gdl)
     char l1[56], l2[56];
 
     sFrames++;
-    if (bossGetStageNum() == LEVELID_TITLE || getPlayerCount() != 1)
+    if (bossGetStageNum() == LEVELID_TITLE || (getPlayerCount() != 1 && !coopVersus()))   /* versus: the reconnecting panel */
     {
         sCardUp = 0;
         sCardFade = 0;

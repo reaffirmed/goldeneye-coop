@@ -915,6 +915,7 @@ void mpwatchMenuTick(void)
                         g_CurrentPlayer->healthdisplaytime = 0;
 #ifndef TARGET_N64
                         portMpStatsAbandoned();   /* the stats count it as played and abandoned, never won */
+                        coopVersusQuit();         /* online versus: a joiner leaves; the others play on (coop_versus.c) */
 #endif
                         mpCalculateAwards(FALSE);
                     }

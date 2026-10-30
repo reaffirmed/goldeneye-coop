@@ -31,6 +31,11 @@
  *   - shots on glass, crates and other setup objects: the shooter's game
  *     sends each hit (OBJDMG) and every game applies it.
  *   - the end: any game whose limits end the match ends it for all (VSEND).
+ *   - leaving: a joiner who picks Quit leaves alone (VSLEFT) and the others
+ *     play on; so does one whose game stops answering. Their body leaves the
+ *     arena and the radar, and once one player (or one team) is left the
+ *     match ends. The host's Quit still ends it for everyone, since the
+ *     others' packets go through the host.
  *
  * Player numbers on the wire are the session's (0 the host); g_playerPointers
  * indices are local, and differ per game. sVsNet / sVsLocal map between them.
@@ -88,6 +93,7 @@ extern void portJoyInjectHeld(s8 contpadnum, u16 mask);
 
 #define VS_DEAD_SETTLE  120     /* ticks a remote death plays before the game counts it as finished */
 #define VS_PKT_EVERY    12      /* ticks between our VERSUS packets (5 a second) */
+#define VS_GONE_AFTER   120     /* ticks without their STATE before a player counts as gone */
 #ifdef VERSION_EU
 #define CHROBJ_REGEN_TICKS 1000 /* chrprop.c propExecuteTickOperation: a taken pickup's wait */
 #else
@@ -117,6 +123,10 @@ static s32 sVsDeadTicks[MAX_PLAYER_COUNT];  /* a remote's death, ticks so far */
 static s32 sVsSpawned[MAX_PLAYER_COUNT];    /* the first start pad was handed out */
 static s32 sVsHeard[MAX_PLAYER_COUNT];      /* their STATE has come in this match */
 static s32 sVsEnded;
+static s32 sVsGone[MAX_PLAYER_COUNT];       /* left the match: quit, or stopped answering */
+static s32 sVsAbsent[MAX_PLAYER_COUNT];     /* ticks their STATE has been missing */
+static s32 sVsQuit;                         /* we quit: our end is ours alone */
+static char sVsName[MAX_PLAYER_COUNT][24];  /* their name as the match began (a renumbering loses it) */
 static s32 sVsInBlast;                  /* explosion.c: damage from a blast is being dealt */
 static s32 sVsApplying;                 /* a remote event is being applied */
 static u32 sVsTick;
@@ -153,6 +163,14 @@ s32 coopVsLocalOfNet(s32 p)
 s32 coopVsPlayers(void)
 {
     return sVsCount;
+}
+
+/* The host's versus rules (the lobby's Radar and Body Armour rows). Every PC
+ * plays these, not its own Multiplayer Options sheet (port/src/video.c), so
+ * nobody's game has rules the others' don't. */
+s32 coopVersusRule(s32 bit)
+{
+    return (coopSetting(COOPSET_VSRULES) & bit) != 0;
 }
 
 /* Set up who plays: the session's players in `mask` (bit p = player p), we
@@ -239,8 +257,11 @@ void coopVersusStageStart(void)
         coopLookReset(&sVsLook[i]);
         sVsDeadTicks[i] = 0;
         sVsHeard[i] = 0;
+        sVsGone[i] = 0;
+        sVsAbsent[i] = 0;
     }
     sVsEnded = 0;
+    sVsQuit = 0;
     sVsTick = 0;
     sVsHuntAt = -2;     /* (the harness reads its settings again) */
 }
@@ -255,6 +276,93 @@ s32 coopVersusStartPad(s32 li, s32 count)
     }
     sVsSpawned[li] = 1;
     return (s32) ((sVsSerial * 5u + (u32) sVsNet[li] * ((count >= 8) ? (u32) (count / 4) : 1u)) % (u32) count);
+}
+
+static s32 coopVsScenarioItem(void);
+static void coopVsDropAt(s32 li, s32 item);
+static void coopVsSend(s32 kind, s32 to, const void *payload, s32 len);
+
+/* one player (or one team) is all that is left: the match is over */
+static void coopVsLastStanding(void)
+{
+    s32 li, n = 0, teams = 0;
+
+    if (sVsEnded || g_gameOverFlag)
+    {
+        return;
+    }
+    for (li = 0; li < sVsCount; li++)
+    {
+        if (!sVsGone[li])
+        {
+            n++;
+            teams |= 1 << (portMpTeamScenario() ? portMpTeamOf(li) : li);
+        }
+    }
+    if (n >= 2 && (teams & (teams - 1)) != 0)
+    {
+        return;     /* two sides still play */
+    }
+    portConLogf("ge: versus: only %s left, the match is over\n", (n >= 2) ? "one team is" : "we are");
+    mpCalculateAwards(FALSE);   /* (coopVersusMatchOver tells any team-mates) */
+}
+
+/* local player li left the match: their body leaves the arena and the radar */
+static void coopVsGone(s32 li)
+{
+    struct player *pl = g_playerPointers[li];
+    const s32 p = sVsNet[li];
+    const s32 item = coopVsScenarioItem();
+    char msg[64];
+
+    if (li <= 0 || li >= sVsCount || sVsGone[li])
+    {
+        return;
+    }
+    sVsGone[li] = 1;
+    if (pl != NULL && pl->prop != NULL && pl->prop->chr != NULL)
+    {
+        if (item >= 0 && g_playerPlayerData[li].have_token_or_goldengun && !pl->bonddead)
+        {
+            coopVsDropAt(li, item);     /* the flag or the Golden Gun stays in play */
+        }
+        pl->prop->chr->chrflags |= CHRFLAG_HIDDEN;  /* not drawn, not in anyone's way */
+        pl->bonddead = TRUE;                        /* off the radar; the end checks count them finished */
+        pl->redbloodfinished = TRUE;
+        pl->deathanimfinished = TRUE;
+        pl->colourfadetimemax60 = -1.0f;
+    }
+    g_playerPlayerData[li].have_token_or_goldengun = 0;
+    if (sVsName[li][0] != '\0')
+    {
+        snprintf(msg, sizeof(msg), "%s|LEFT THE MATCH", sVsName[li]);
+    }
+    else
+    {
+        snprintf(msg, sizeof(msg), "A PLAYER|LEFT THE MATCH");
+    }
+    coopFeedToast(msg, (p < COOP_MAX_PLAYERS) ? p : -1);
+    portConLogf("ge: versus: local player %d (player %d) left the match\n", li + 1, p + 1);
+    coopVsLastStanding();
+}
+
+/* mpmenu.c: our Quit leaves the match to the others, unless we host it */
+s32 coopVersusQuitAlone(void)
+{
+    return coopVersus() && !coopNetIsHost();
+}
+
+/* mpmenu.c, Quit on the pause menu: a joiner tells the others it is going,
+ * and its own end (coopVersusMatchOver) stays its own */
+void coopVersusQuit(void)
+{
+    if (!coopVersusQuitAlone())
+    {
+        return;
+    }
+    sVsQuit = 1;
+    coopVsSend(COOPEV_VSLEFT, COOP_ALL, NULL, 0);
+    portConLogf("ge: versus: we quit the match\n");
 }
 
 /* the body of local player li moves to where their game says it is */
@@ -283,7 +391,16 @@ static void coopVsMoveBody(s32 li, const CoopRemoteInfo *info)
     prop->pos = pos;
     if (chr->model != NULL)
     {
-        setsuboffset(chr->model, &pos);
+        coord3d off;
+
+        /* x and z only, as Rare's own MP bodies and co-op's partners do
+         * (coop.c coopPuppetPlace): the model's height is the animation's
+         * root over the ground, and a loop of the idle seeds the root from
+         * it, so the player's eye height here made the body hop */
+        getsuboffset(chr->model, &off);
+        off.f[0] = pos.f[0];
+        off.f[2] = pos.f[2];
+        setsuboffset(chr->model, &off);
         setsubroty(chr->model, info->yaw);
         sub_GAME_7F01FC10(chr->model, &prop->pos, &prop->pos, &chr->ground);
     }
@@ -339,15 +456,28 @@ static void coopVsRemoteTick(s32 li)
     {
         return;
     }
-    pl->cameramode = 0;     /* normal first-person play: the body is drawn for us (chr.c), as another player's */
-    pl->prop->chr->chrnum = COOP_PUPPET_CHRNUM + p;
-    if (!coopRemoteInfo(p, &info))
+    if (sVsGone[li])
     {
         return;
     }
+    pl->cameramode = 0;     /* normal first-person play: the body is drawn for us (chr.c), as another player's */
+    pl->prop->chr->chrnum = COOP_PUPPET_CHRNUM + p;
+    if (!coopRemoteInfo(p, &info))
+    {   /* left the session or the match, or a renumbering after the host left
+         * gave them no number: gone once it lasts (a lost line still counts as
+         * here until coop.c gives up on it) */
+        if ((sVsHeard[li] && ++sVsAbsent[li] > VS_GONE_AFTER) || p >= COOP_MAX_PLAYERS)
+        {
+            coopVsGone(li);
+        }
+        return;
+    }
+    sVsAbsent[li] = 0;
     if (!sVsHeard[li])
     {
         sVsHeard[li] = 1;
+        snprintf(sVsName[li], sizeof(sVsName[li]), "%s", (coopPlayerName(p) != NULL) ? coopPlayerName(p) : "");
+        sVsName[li][strcspn(sVsName[li], "\n")] = '\0';
         portConLogf("ge: versus: player %d (local %d) is in the arena\n", p + 1, li + 1);
     }
     coopVsMoveBody(li, &info);
@@ -377,6 +507,33 @@ static void coopVsRemoteTick(s32 li)
     }
     coopVsFeedPlayer(pl, &info);
     coopLookBodyTick(&sVsLook[li], pl->prop->chr, &info.look, info.dead, COOP_PUPPET_CHRNUM + sVsNet[0]);
+}
+
+/* coop.c coopSubFieldTick: a tick between two 60ths (tickhz above 60). The
+ * game moves our own Bond on every tick, but the others' bodies were placed
+ * only on the 60ths, so above 60 fps they stepped. Their spots between
+ * samples come from the clock, so each tick places them again; the rest of
+ * their state stays on the 60ths. */
+void coopVersusSubFieldTick(void)
+{
+    s32 li;
+
+    if (!coopVersus())
+    {
+        return;
+    }
+    for (li = 1; li < sVsCount; li++)
+    {
+        struct player *pl = g_playerPointers[li];
+        CoopRemoteInfo info;
+
+        if (pl != NULL && pl->prop != NULL && pl->prop->chr != NULL && sVsHeard[li]
+            && coopRemoteInfo(sVsNet[li], &info) && !info.dead)
+        {
+            coopVsMoveBody(li, &info);
+            coopVsFeedPlayer(pl, &info);
+        }
+    }
 }
 
 /* ---- events -------------------------------------------------------------------- */
@@ -737,6 +894,9 @@ void coopVersusApplyEvent(s32 kind, s32 from, const void *raw)
         case COOPEV_VSKILL:
             coopVsApplyKill((const VsKill *) raw);
             break;
+        case COOPEV_VSLEFT:
+            coopVsGone(coopVsLocalOfNet(from));
+            break;
         case COOPEV_VSEND:
             if (!sVsEnded && !g_gameOverFlag)
             {
@@ -766,6 +926,11 @@ void coopVersusMatchOver(void)
         return;
     }
     sVsEnded = 1;
+    if (sVsQuit)
+    {
+        portConLogf("ge: versus: we left; the others play on\n");
+        return;
+    }
     coopVsSend(COOPEV_VSEND, COOP_ALL, NULL, 0);
     portConLogf("ge: versus: the match is over\n");
 }
@@ -835,6 +1000,12 @@ static void coopVsHarness(void)
         sVsHuntDone = 0;
     }
     coopLookTestTick((s32) sVsTick);    /* GE_COOP_TESTFIRE: draw a gun, hold fire */
+    if (getenv("GE_VS_QUIT") != NULL && sVsTick == (u32) atoi(getenv("GE_VS_QUIT")) * 60 && !sVsEnded)
+    {   /* GE_VS_QUIT=<s>: Quit on the pause menu that far in */
+        coopVersusQuit();
+        mpCalculateAwards(FALSE);
+        return;
+    }
     if (sVsRespawn && me->bonddead && (sVsTick % 30) == 0)
     {   /* GE_VS_RESPAWN: press Start to come back */
         portJoyInjectHeld(PLAYER_1, START_BUTTON);

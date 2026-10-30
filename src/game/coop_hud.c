@@ -1016,6 +1016,27 @@ Gfx *coopHudSkipVote(Gfx *gdl)
     return combiner_bayer_lod_perspective(gdl);
 }
 
+/* Online versus (coop_versus.c): every PC has two to four players in the
+ * match, so the rest of this file, which is about partners, stays off. What
+ * isn't: the chat line and toasts, Sound Captions, our own voice and the
+ * weapon menu. Rare's MP HUD has the radar, names and scores. */
+static Gfx *coopHudVersus(Gfx *gdl)
+{
+    if (coopVoiceSelfOpen())
+    {
+        gdl = coopHudSelfVoice(gdl);
+    }
+    coopCaptionHarness();
+    gdl = coopCaptionsRender(gdl);
+    gdl = coopFeedRender(gdl);
+    gdl = coopChatGridRender(gdl);
+    if (!g_CurrentPlayer->mpmenuon)
+    {
+        gdl = weapmenuRender(gdl);   /* not under Rare's pause menu */
+    }
+    return gdl;
+}
+
 Gfx *coopHudRender(Gfx *gdl)
 {
     CoopHudPartner p;
@@ -1023,6 +1044,10 @@ Gfx *coopHudRender(Gfx *gdl)
     s32 eta;
     s32 i;
 
+    if (coopVersus())
+    {
+        return coopHudVersus(gdl);   /* one player per PC: the parts that aren't about partners */
+    }
     if (getPlayerCount() != 1 || g_CurrentPlayer->watch_animation_state != 0)
     {
         return gdl;   /* solo missions only, and not over the watch */

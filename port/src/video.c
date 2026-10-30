@@ -605,6 +605,13 @@ s32 portFixShootThrough(void)
  * does not include). */
 s32 portMpCheatSetting(s32 which)
 {
+    extern s32 coopVersus(void);
+    extern s32 coopVersusRule(s32 bit);
+
+    if (coopVersus())
+    {   /* online versus: the host's rules on every PC, not this PC's sheet (coop_versus.c) */
+        return which == 4 && coopVersusRule(1 /* COOPVSRULE_NORADAR */);
+    }
     switch (which)
     {
         case 6: return s_CfgMpUnlimitedAmmo != 0;
@@ -5942,7 +5949,10 @@ s32 portExplosionCap(void)
 {
     extern s32 getPlayerCount(void);
     extern s32 get_is_ramrom_flag(void);
-    const s32 on = (getPlayerCount() >= 2) ? s_CfgMpUnlimitedExplosions : s_CfgUnlimitedExplosions;
+    extern s32 coopVersus(void);
+    /* online versus: always the full buffer, since every blast is set off on every
+     * PC and one capped at 6 would drop a blast the others show (coop_versus.c) */
+    const s32 on = coopVersus() || ((getPlayerCount() >= 2) ? s_CfgMpUnlimitedExplosions : s_CfgUnlimitedExplosions);
 
     return (on && get_is_ramrom_flag() == 0) ? 100 : 6;
 }
@@ -5972,25 +5982,38 @@ s32 portMpLtkHealthActive(void)
 }
 
 /** midas.ini [display] mp_no_armor: prop.c leaves the body armour pickups out of
- * an MP stage's setup. 2+ players only, never in demo playback. */
+ * an MP stage's setup. 2+ players only, never in demo playback. Online versus
+ * takes the host's Body Armour row instead, so every arena has the same pickups. */
 s32 portMpNoArmorActive(void)
 {
     extern s32 getPlayerCount(void);
     extern s32 get_is_ramrom_flag(void);
+    extern s32 coopVersus(void);
+    extern s32 coopVersusRule(s32 bit);
 
+    if (coopVersus())
+    {
+        return coopVersusRule(2 /* COOPVSRULE_NOARMOUR */);
+    }
     return s_CfgMpNoArmor && getPlayerCount() >= 2 && get_is_ramrom_flag() == 0;
 }
 
-/** midas.ini [display] mp_spawn_weapon - bondview2.c portMpSpawnWithWeapon, 2+ players. */
+/** midas.ini [display] mp_spawn_weapon - bondview2.c portMpSpawnWithWeapon, 2+ players.
+ * Never in online versus, where it would arm one player and not the others. */
 s32 portMpSpawnWeapon(void)
 {
-    return s_CfgMpSpawnWeapon != 0;
+    extern s32 coopVersus(void);
+
+    return s_CfgMpSpawnWeapon != 0 && !coopVersus();
 }
 
-/** midas.ini [display] mp_random_spawns - bondview.c bondviewGetRandomSpawnPadIndex, 2+ players. */
+/** midas.ini [display] mp_random_spawns - bondview.c bondviewGetRandomSpawnPadIndex, 2+ players.
+ * Never in online versus, where everyone respawns by Rare's rule. */
 s32 portMpRandomSpawns(void)
 {
-    return s_CfgMpRandomSpawns != 0;
+    extern s32 coopVersus(void);
+
+    return s_CfgMpRandomSpawns != 0 && !coopVersus();
 }
 
 /** midas.ini [display] p1_ends_match (GE_P1ENDSMATCH=0/1 forces): player 1's START

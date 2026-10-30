@@ -176,9 +176,12 @@ enum
     COOPSET_RESPAWN,        /* the timer's wait, a coopRespawnName index (0 3-20 s, sooner when it is quiet) */
     COOPSET_SCALING,        /* guards by player count: COOPSCALE_* (0 auto) */
     COOPSET_GUARDAI,        /* the guards' AI: COOPAI_CLASSIC (0) or COOPAI_SMARTER (coop_ai.c) */
+    COOPSET_VSRULES,        /* versus: COOPVSRULE_* bits, the host's in place of each PC's Multiplayer Options */
     COOPSET_MAX = 16
 };
+enum { COOPVSRULE_NORADAR = 1, COOPVSRULE_NOARMOUR = 2 };
 s32  coopSetting(s32 which);
+s32  coopVersusRule(s32 bit);   /* coop_versus.c: the host's versus rule is on */
 void coopSetSetting(s32 which, s32 value);
 
 /* smarter guards (coop_ai.c): COOPSET_GUARDAI in co-op, the guard_ai Port Option in solo.
@@ -547,7 +550,7 @@ Gfx *coopFigureDraw(Gfx *DL, s32 pick, s32 x, s32 y, s32 w, s32 h, f32 yaw, s32 
 #define COOPPKT_VERSUS 16
 #define COOP_ALL 0xFF               /* as coop.c: an event for everyone */
 #define COOP_PUPPET_CHRNUM 30000    /* as coop.c: + player number, a player's body's chrnum on the others' games */
-enum { COOPEV_VSHIT = 32, COOPEV_VSKILL, COOPEV_VSEND, COOPEV_VSITEM, COOPEV_VSBOOM, COOPEV_VSPICK };
+enum { COOPEV_VSHIT = 32, COOPEV_VSKILL, COOPEV_VSEND, COOPEV_VSITEM, COOPEV_VSBOOM, COOPEV_VSPICK, COOPEV_VSLEFT };
 typedef struct
 {
     f32 pos[3];
@@ -584,6 +587,9 @@ void coopVersusMatchOver(void);
 s32  coopVersusPktSize(void);
 void coopVersusRecvPkt(void *buf, s32 player);
 void coopVersusTick(void);
+void coopVersusSubFieldTick(void);
+void coopVersusQuit(void);       /* mpmenu.c: we picked Quit on the pause menu */
+s32  coopVersusQuitAlone(void);  /* mpmenu.c: our Quit leaves the match to the others */   /* the others' bodies on the ticks between 60ths */
 void coopVsStartMatch(s32 stage);          /* front.c: this PC's half of the match, then into the arena */
 
 /* ---- the feature batch: chat, spectating, objective credit, team times,
