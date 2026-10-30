@@ -608,7 +608,8 @@ enum
     COOPEV_ITEMGONE = 27,   /* to all: a thrown or dropped item went off or was picked up */
     COOPEV_DROP = 28,       /* host -> all: a guard dropped its gun */
     COOPEV_ITEMSTUCK = 29,  /* to all: where our thrown item stuck or landed (coop_items.c) */
-    COOPEV_BARK = 30        /* host -> all: a smarter guard's callout (coop_ai.c; an older joiner ignores it) */
+    COOPEV_BARK = 30,       /* host -> all: a smarter guard's callout (coop_ai.c; an older joiner ignores it) */
+    COOPEV_ITEMKNOCK = 31   /* to all: our shot knocked a thrown or dropped item about (coop_items.c; an older build ignores it) */
 };
 typedef struct
 {
@@ -691,6 +692,8 @@ s32  coopItemsIsPartners(ObjectRecord *obj);            /* a partner's remote mi
 s32  coopItemsEmbedPending(ObjectRecord *obj);          /* propobj.c: stuck by a partner's word, matrix still to work out */
 s32  coopItemsUnsettled(PropRecord *prop);             /* propobj.c weaponFindThrown: a partner's throw, still in the air for them */
 void coopItemsPickedUp(ObjectRecord *obj);
+void coopItemsBounced(ObjectRecord *obj);               /* propobj.c objHit: our shot sent a thrown or dropped item flying */
+void coopItemsParentKnocked(PropRecord *parent);        /* propobj.c objHit: our shot is knocking loose what sits on parent */
 void coopItemsPlayerDropped(PropRecord *prop);   /* propobj.c drop_inventory: versus, what our death dropped */
 s32  coopInMissionNow(void);
 void coopObjKnockChildren(s32 haschildren);             /* propobj.c objHit */
