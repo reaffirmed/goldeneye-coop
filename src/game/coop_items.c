@@ -1131,6 +1131,43 @@ static void coopItemsRestTick(void)
     }
 }
 
+/* The tile an item at rest is in. It can lie where no floor tile is straight
+ * below it: on a ledge, a railing or the top of a wall (Dam's modem, thrown
+ * short of the satellite link, came to rest on the parapet). Then the floor
+ * a little higher up, or up to 2.5 m around, gives it its room; without one
+ * our copy kept falling through the level forever. */
+static StandTile *coopItemsRestStan(coord3d *at)
+{
+    static const f32 up[3] = { 0.0f, 70.0f, 170.0f };
+    coord3d p;
+    StandTile *stan;
+    s32 h, r, k;
+
+    for (h = 0; h < 3; h++)
+    {
+        p = *at;
+        p.f[1] += up[h];
+        if ((stan = stanFindTileBelowPos(&p, NULL, NULL)) != NULL)
+        {
+            return stan;
+        }
+    }
+    for (r = 50; r <= 250; r += 50)
+    {
+        for (k = 0; k < 8; k++)
+        {
+            p.f[0] = at->f[0] + r * cosf(k * 0.7853982f);
+            p.f[1] = at->f[1] + 70.0f;
+            p.f[2] = at->f[2] + r * sinf(k * 0.7853982f);
+            if ((stan = stanFindTileBelowPos(&p, NULL, NULL)) != NULL)
+            {
+                return stan;
+            }
+        }
+    }
+    return NULL;
+}
+
 static void coopItemsApplyRest(const CoopDropRestMsg *r)
 {
     CoopItem *it = coopItemById(r->id);
@@ -1155,9 +1192,10 @@ static void coopItemsApplyRest(const CoopDropRestMsg *r)
     pos.f[0] = r->pos[0];
     pos.f[1] = r->pos[1] + 30.0f;   /* the floor under it, from a little above */
     pos.f[2] = r->pos[2];
-    stan = stanFindTileBelowPos(&pos, NULL, NULL);
+    stan = coopItemsRestStan(&pos);
     if (stan == NULL)
     {
+        portConLogf("ge: coop: drop %04x: no floor near where it came to rest\n", r->id);
         return;
     }
     for (k = 0; k < 4; k++)
