@@ -2119,6 +2119,12 @@ static void coopTickBody(void)
         {
             coopSubFieldTick();
         }
+        if (coopVersus())
+        {   /* a versus end screen: the others' end-screen stats and last kills still come and go */
+            sTick++;
+            coopPollNet();
+            coopFlushEvents();
+        }
         coopKeepAlive();    /* paused, or a cutscene has the controls: still here */
         return;
     }

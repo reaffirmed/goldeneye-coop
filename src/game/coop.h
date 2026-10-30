@@ -552,7 +552,7 @@ Gfx *coopFigureDraw(Gfx *DL, s32 pick, s32 x, s32 y, s32 w, s32 h, f32 yaw, s32 
 #define COOPPKT_VERSUS 16
 #define COOP_ALL 0xFF               /* as coop.c: an event for everyone */
 #define COOP_PUPPET_CHRNUM 30000    /* as coop.c: + player number, a player's body's chrnum on the others' games */
-enum { COOPEV_VSHIT = 32, COOPEV_VSKILL, COOPEV_VSEND, COOPEV_VSITEM, COOPEV_VSBOOM, COOPEV_VSPICK, COOPEV_VSLEFT };
+enum { COOPEV_VSHIT = 32, COOPEV_VSKILL, COOPEV_VSEND, COOPEV_VSITEM, COOPEV_VSBOOM, COOPEV_VSPICK, COOPEV_VSLEFT, COOPEV_VSSTATS };
 typedef struct
 {
     f32 pos[3];
@@ -586,6 +586,10 @@ void coopVersusExplosion(PropRecord *source, coord3d *pos, s32 type, u8 *rooms);
 void coopVersusPickedUp(ObjectRecord *obj);   /* coop.c coopPickedUp: we took something in a versus arena */
 void coopVersusApplyEvent(s32 kind, s32 from, const void *raw);
 void coopVersusMatchOver(void);
+void coopVersusAwardStats(s32 duration);   /* mpmenu.c: the end screen's stats, before awards are picked */
+u32  coopVersusAwardRandom(s32 reset);     /* mpmenu.c: the award picks' dice, the same on every PC */
+struct AwardMetrics;
+void coopVersusAwardMetrics(s32 count, struct AwardMetrics *metrics, s32 *seat);   /* mpmenu.c: rows in session order */
 s32  coopVersusPktSize(void);
 void coopVersusRecvPkt(void *buf, s32 player);
 void coopVersusTick(void);

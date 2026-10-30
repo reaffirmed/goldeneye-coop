@@ -139,6 +139,21 @@ void mpwatchUnpauseGame(void)
 }
 
 
+#ifdef TARGET_N64
+#define mpAwardRandom randomGetNext
+#else
+/* the awards' dice: the game's own, but in online versus the same on every
+ * PC (coop_versus.c), so ties and the two picks come out alike */
+static u32 mpAwardRandom(void)
+{
+    if (coopVersus())
+    {
+        return coopVersusAwardRandom(FALSE);
+    }
+    return randomGetNext();
+}
+#endif
+
 /**
  * Returns the index (0-3) of the player with the highest value.
  */
@@ -147,7 +162,7 @@ s32 mpFindMaxInt(s32 numplayers, s32 value0, s32 value1, s32 value2, s32 value3)
     s32 aux;
     s32 result;
  
-    if ((value0 < value1) || ((value1 == value0 && ((randomGetNext() & 1))))) 
+    if ((value0 < value1) || ((value1 == value0 && ((mpAwardRandom() & 1))))) 
     {
         result = 1;
         aux = value1;
@@ -161,7 +176,7 @@ s32 mpFindMaxInt(s32 numplayers, s32 value0, s32 value1, s32 value2, s32 value3)
     if (numplayers >= 3) 
     {
  
-        if ((aux < value2) || ((value2 == aux && ((randomGetNext() & 1))))) 
+        if ((aux < value2) || ((value2 == aux && ((mpAwardRandom() & 1))))) 
         {
             result = 2;
             aux = value2;
@@ -169,7 +184,7 @@ s32 mpFindMaxInt(s32 numplayers, s32 value0, s32 value1, s32 value2, s32 value3)
  
         if (numplayers >= 4) 
         {
-            if ((aux < value3) || ((value3 == aux && ((randomGetNext() & 1))))) {
+            if ((aux < value3) || ((value3 == aux && ((mpAwardRandom() & 1))))) {
                 result = 3;
             }
         }
@@ -187,7 +202,7 @@ s32 mpFindMinInt(s32 numplayers, s32 value0, s32 value1, s32 value2, s32 value3)
     s32 aux;
     s32 result;
  
-    if ((value1 < value0) || ((value1 == value0 && ((randomGetNext() & 1))))) 
+    if ((value1 < value0) || ((value1 == value0 && ((mpAwardRandom() & 1))))) 
     {
         result = 1;
         aux = value1;
@@ -200,7 +215,7 @@ s32 mpFindMinInt(s32 numplayers, s32 value0, s32 value1, s32 value2, s32 value3)
  
     if (numplayers >= 3) 
     {
-        if ((value2 < aux) || ((value2 == aux && ((randomGetNext() & 1)))))
+        if ((value2 < aux) || ((value2 == aux && ((mpAwardRandom() & 1)))))
         {
             result = 2;
             aux = value2;
@@ -208,7 +223,7 @@ s32 mpFindMinInt(s32 numplayers, s32 value0, s32 value1, s32 value2, s32 value3)
  
         if (numplayers >= 4) 
         {
-            if ((value3 < aux) || ((value3 == aux && ((randomGetNext() & 1))))) 
+            if ((value3 < aux) || ((value3 == aux && ((mpAwardRandom() & 1))))) 
             {
                 result = 3;
             }
@@ -230,7 +245,7 @@ s32 mpFindMaxFloat(s32 numplayers, f32 value0, f32 value1, f32 value2, f32 value
     s32 aux;
     s32 result;
  
-    if ((value0 < value1) || ((value1 == value0 && ((randomGetNext() & 1))))) 
+    if ((value0 < value1) || ((value1 == value0 && ((mpAwardRandom() & 1))))) 
     {
         aux = (s32) value1;
         result = 1;
@@ -243,7 +258,7 @@ s32 mpFindMaxFloat(s32 numplayers, f32 value0, f32 value1, f32 value2, f32 value
  
     if (numplayers >= 3)
     {
-        if ((aux < value2) || ((value2 == aux && ((randomGetNext() & 1))))) 
+        if ((aux < value2) || ((value2 == aux && ((mpAwardRandom() & 1))))) 
         {
             aux = (s32) value2;
             result = 2;
@@ -251,7 +266,7 @@ s32 mpFindMaxFloat(s32 numplayers, f32 value0, f32 value1, f32 value2, f32 value
  
         if (numplayers >= 4)
         {
-            if ((aux < value3) || ((value3 == aux && ((randomGetNext() & 1))))) 
+            if ((aux < value3) || ((value3 == aux && ((mpAwardRandom() & 1))))) 
             {
                 result = 3;
             }
@@ -272,7 +287,7 @@ s32 mpFindMinFloat(s32 numplayers, f32 value0, f32 value1, f32 value2, f32 value
     s32 aux;
     s32 result;
  
-    if ((value1 < value0) || ((value1 == value0 && ((randomGetNext() & 1))))) 
+    if ((value1 < value0) || ((value1 == value0 && ((mpAwardRandom() & 1))))) 
     {
         aux = (s32) value1;
         result = 1;
@@ -285,7 +300,7 @@ s32 mpFindMinFloat(s32 numplayers, f32 value0, f32 value1, f32 value2, f32 value
  
     if (numplayers >= 3)
     {
-        if ((value2 < aux) || ((value2 == aux && ((randomGetNext() & 1))))) 
+        if ((value2 < aux) || ((value2 == aux && ((mpAwardRandom() & 1))))) 
         {
             aux = (s32) value2;
             result = 2;
@@ -293,7 +308,7 @@ s32 mpFindMinFloat(s32 numplayers, f32 value0, f32 value1, f32 value2, f32 value
  
         if (numplayers >= 4)
         {
-            if ((value3 < aux) || ((value3 == aux && ((randomGetNext() & 1))))) 
+            if ((value3 < aux) || ((value3 == aux && ((mpAwardRandom() & 1))))) 
             {
                 result = 3;
             }
@@ -436,17 +451,21 @@ static void portMpStatsGather(s32 player_count, s32 duration, const struct Award
 }
 #endif
 
+static void mpChooseAwards(s32 player_count, s32 duration);
+#ifdef TARGET_N64
+#define MP_AWARD_SEAT(i) (i)
+#else
+static s32 sAwardsDuration;
+static s32 sAwardSeat[4] = { 0, 1, 2, 3 };  /* award row -> player (versus: session order) */
+#define MP_AWARD_SEAT(i) (sAwardSeat[i])
+#endif
+
 void mpCalculateAwards(bool gameoverdelay)
 {
     s32 player_count;
     s32 i;
-    s32 j;
-    s32 weapon_choice_2;
-    s32 weapon_choice_1;
     s32 prev_player_num;
     s32 duration;
-
-    struct AwardMetrics metrics[4];
 
     player_count = getPlayerCount();
     duration = getMissiontimer();
@@ -487,11 +506,48 @@ void mpCalculateAwards(bool gameoverdelay)
 
     for (i = 0; i < player_count; i++)
     {
-
         set_cur_player(i);
 
         g_CurrentPlayer->mpmenuon = TRUE;
         g_CurrentPlayer->mpmenumode = MENU_SCORES;
+    }
+
+    set_cur_player(prev_player_num);
+    mpChooseAwards(player_count, duration);
+}
+
+#ifndef TARGET_N64
+/* online versus: another PC's end-screen stats came in after ours were
+ * picked; pick again from them, so every PC shows the same awards */
+void mpVersusRechooseAwards(void)
+{
+    if (g_gameOverFlag)
+    {
+        mpChooseAwards(getPlayerCount(), sAwardsDuration);
+    }
+}
+#endif
+
+static void mpChooseAwards(s32 player_count, s32 duration)
+{
+    s32 i;
+    s32 j;
+    s32 weapon_choice_2;
+    s32 weapon_choice_1;
+    s32 prev_player_num;
+    struct AwardMetrics metrics[4];
+
+#ifndef TARGET_N64
+    sAwardsDuration = duration;
+    coopVersusAwardStats(duration);     /* the other PCs' columns (coop_versus.c) */
+    coopVersusAwardRandom(TRUE);
+#endif
+    prev_player_num = get_cur_playernum();
+
+    for (i = 0; i < player_count; i++)
+    {
+        set_cur_player(i);
+
         g_CurrentPlayer->ptr_text_first_mp_award = 0;
         g_CurrentPlayer->ptr_text_second_mp_award = 0;
 
@@ -529,6 +585,9 @@ void mpCalculateAwards(bool gameoverdelay)
     }
 
     set_cur_player(prev_player_num);
+#ifndef TARGET_N64
+    coopVersusAwardMetrics(player_count, metrics, sAwardSeat);  /* versus: picked in session order, so every PC agrees */
+#endif
 
     // Choose which players are eligible for which awards
     i = mpFindMaxInt(player_count, metrics[0].num_suicides, metrics[1].num_suicides, metrics[2].num_suicides, metrics[3].num_suicides);
@@ -619,22 +678,30 @@ void mpCalculateAwards(bool gameoverdelay)
 
     for (i = 0; i < player_count; i++)
     {
-        if (g_playerPlayerData[i].most_killed_one_time == 4)
+        if (g_playerPlayerData[MP_AWARD_SEAT(i)].most_killed_one_time == 4)
         {
             metrics[i].awards |= AWARD_QUADKILL;
         }
-        else if (g_playerPlayerData[i].most_killed_one_time == 3)
+        else if (g_playerPlayerData[MP_AWARD_SEAT(i)].most_killed_one_time == 3)
         {
             metrics[i].awards |= AWARD_TRIPLEKILL;
         }
-        else if (g_playerPlayerData[i].most_killed_one_time == 2)
+        else if (g_playerPlayerData[MP_AWARD_SEAT(i)].most_killed_one_time == 2)
         {
             metrics[i].awards |= AWARD_DOUBLEKILL;
         }
     }
 
 #ifndef TARGET_N64
-    portMpStatsGather(player_count, duration, metrics);
+    {
+        struct AwardMetrics seats[4];
+
+        for (i = 0; i < player_count; i++)
+        {
+            seats[MP_AWARD_SEAT(i)] = metrics[i];
+        }
+        portMpStatsGather(player_count, duration, seats);
+    }
 #endif
 
     // For each player, choose which two awards to actually give them.
@@ -652,7 +719,7 @@ void mpCalculateAwards(bool gameoverdelay)
             if (metrics[i].awards & (1 << awardindex))
             {
                 metrics[i].awards &= ~(1 << awardindex);
-                g_playerPointers[i]->ptr_text_first_mp_award = langGet(g_AwardNames[awardindex]);
+                g_playerPointers[MP_AWARD_SEAT(i)]->ptr_text_first_mp_award = langGet(g_AwardNames[awardindex]);
                 numdone = 1;
             }
 
@@ -661,17 +728,17 @@ void mpCalculateAwards(bool gameoverdelay)
                 numdone = 1;
             }
 
-            awardindex = randomGetNext() % 17;
+            awardindex = mpAwardRandom() % 17;
         }
 
         while (numdone < 2)
         {
-            awardindex = randomGetNext() % 17;
+            awardindex = mpAwardRandom() % 17;
 
             if (metrics[i].awards & (1 << awardindex))
             {
                 metrics[i].awards &= ~(1 << awardindex);
-                g_playerPointers[i]->ptr_text_second_mp_award = langGet(g_AwardNames[awardindex]);
+                g_playerPointers[MP_AWARD_SEAT(i)]->ptr_text_second_mp_award = langGet(g_AwardNames[awardindex]);
                 numdone = 2;
             }
 
@@ -681,6 +748,23 @@ void mpCalculateAwards(bool gameoverdelay)
             }
         }
     }
+#ifndef TARGET_N64
+    if (coopVersus())
+    {   /* what each PC picked, to set beside the others' logs */
+        extern void portConLogf(const char *fmt, ...);
+
+        for (i = 0; i < player_count; i++)
+        {
+            struct player *pl = g_playerPointers[MP_AWARD_SEAT(i)];
+
+            portConLogf("ge: versus: awards for player %d: %d shots, %d head, %.1f km/h, backside %d: '%s' '%s'\n",
+                        coopVsNetOfLocal(MP_AWARD_SEAT(i)) + 1, metrics[i].num_shots, metrics[i].num_headshots, metrics[i].avg_km_per_hour,
+                        metrics[i].damage_to_backside,
+                        pl->ptr_text_first_mp_award ? pl->ptr_text_first_mp_award : "",
+                        pl->ptr_text_second_mp_award ? pl->ptr_text_second_mp_award : "");
+        }
+    }
+#endif
 }
 
 

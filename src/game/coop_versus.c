@@ -61,6 +61,7 @@
 #include "propobj.h"
 #include "explosion.h"
 #include "front.h"
+#include "mpmenu.h"
 #include "coop.h"
 #include "coop_net.h"
 #include "math_atan2f.h"
@@ -130,6 +131,26 @@ static char sVsName[MAX_PLAYER_COUNT][24];  /* their name as the match began (a 
 static s32 sVsInBlast;                  /* explosion.c: damage from a blast is being dealt */
 static s32 sVsApplying;                 /* a remote event is being applied */
 static u32 sVsTick;
+typedef struct
+{   /* COOPEV_VSSTATS: one PC's own column of the end screen, what only it counts */
+    u16 shots;          /* SHOT_REGISTER_TOTAL */
+    u16 head;           /* SHOT_REGISTER_HEAD */
+    u32 onscreen;       /* time_other_players_on_screen */
+    f32 kmh;            /* its average speed, from its own clock */
+    u16 armour;         /* body_armor_pickups x 100 */
+    u16 longest;        /* longest_inning / 4, 0xFFFF for S32_MAX */
+    u16 shortest;       /* shortest_inning / 4, the same */
+    u8 multikill;       /* most_killed_one_time */
+    u8 pad;
+    u8 backside[MAX_PLAYER_COUNT];  /* hits it took from behind, by the shooter's session number */
+    u8 pad2[2];
+} VsStats;
+
+static VsStats sVsCol[COOP_MAX_PLAYERS];    /* by session number, ours included */
+static s32 sVsColHave[COOP_MAX_PLAYERS];
+static s32 sVsBackLocal[MAX_PLAYER_COUNT];  /* hits from behind on our player, by local index, before the columns */
+static s32 sVsColSent;
+static u32 sVsAwardDice;
 static s32 sVsHuntAt = -2;    /* harness (coopVsHarness) */
 static s32 sVsHuntHits;     /* harness: hits we dealt since its last look round */
 
@@ -263,6 +284,8 @@ void coopVersusStageStart(void)
     sVsEnded = 0;
     sVsQuit = 0;
     sVsTick = 0;
+    sVsColSent = 0;
+    memset(sVsColHave, 0, sizeof(sVsColHave));
     sVsHuntAt = -2;     /* (the harness reads its settings again) */
 }
 
@@ -281,6 +304,7 @@ s32 coopVersusStartPad(s32 li, s32 count)
 static s32 coopVsScenarioItem(void);
 static void coopVsDropAt(s32 li, s32 item);
 static void coopVsSend(s32 kind, s32 to, const void *payload, s32 len);
+static void coopVsApplyStats(const VsStats *c, s32 from);
 
 /* one player (or one team) is all that is left: the match is over */
 static void coopVsLastStanding(void)
@@ -890,7 +914,7 @@ void coopVersusApplyEvent(s32 kind, s32 from, const void *raw)
             const VsHit *h = (const VsHit *) raw;
             s32 lk = coopVsLocalOfNet(from);
 
-            if (lk > 0 && get_cur_playernum() == 0 && !g_playerPointers[0]->bonddead)
+            if (lk > 0 && get_cur_playernum() == 0 && !g_playerPointers[0]->bonddead && !g_gameOverFlag)
             {
                 portConLogf("ge: versus: hit by player %d for %.3f\n", from + 1, h->damage);
                 record_damage_kills(h->damage, h->vx, h->vz, lk, h->armour);
@@ -899,6 +923,11 @@ void coopVersusApplyEvent(s32 kind, s32 from, const void *raw)
         }
         case COOPEV_VSKILL:
             coopVsApplyKill((const VsKill *) raw);
+            if (g_gameOverFlag)
+            {   /* it came after the end here: the table it changes is on the end screen */
+                extern void mpVersusRechooseAwards(void);
+                mpVersusRechooseAwards();
+            }
             break;
         case COOPEV_VSLEFT:
             coopVsGone(coopVsLocalOfNet(from));
@@ -920,6 +949,14 @@ void coopVersusApplyEvent(s32 kind, s32 from, const void *raw)
         case COOPEV_VSPICK:
             coopVsApplyPick((const VsPick *) raw, from);
             break;
+        case COOPEV_VSSTATS:
+        {
+            VsStats c;
+
+            memcpy(&c, raw, sizeof(c));
+            coopVsApplyStats(&c, from);
+            break;
+        }
     }
     sVsApplying = 0;
 }
@@ -939,6 +976,169 @@ void coopVersusMatchOver(void)
     }
     coopVsSend(COOPEV_VSEND, COOP_ALL, NULL, 0);
     portConLogf("ge: versus: the match is over\n");
+}
+
+/* ---- the end screen's stats -------------------------------------------------------
+ * Each PC counts only some of the stats the awards are picked from: its own
+ * player's shots, speed, armour, time alive and multi-kills, and the hits from
+ * behind its own player took. Left as they were, the awards and accuracy came
+ * out differently on every screen. At the end each PC sends its column, every
+ * PC fills the table from them (its own through the same packing, so all agree)
+ * and picks again, with dice seeded by the match. */
+
+static u16 coopVsPackInning(s32 v)
+{
+    return (v == S32_MAX || v / 4 >= 0xFFFF) ? 0xFFFF : (u16) ((v < 0 ? 0 : v) / 4);
+}
+
+static s32 coopVsUnpackInning(u16 v)
+{
+    return (v == 0xFFFF) ? S32_MAX : (s32) v * 4;
+}
+
+static void coopVsOwnColumn(VsStats *c, s32 duration)
+{
+    struct player_data *pd = &g_playerPlayerData[0];
+    s32 li, b;
+
+    memset(c, 0, sizeof(*c));
+    c->shots = (u16) ((pd->shot_count[SHOT_REGISTER_TOTAL] > 0xFFFF) ? 0xFFFF : pd->shot_count[SHOT_REGISTER_TOTAL]);
+    c->head = (u16) ((pd->shot_count[SHOT_REGISTER_HEAD] > 0xFFFF) ? 0xFFFF : pd->shot_count[SHOT_REGISTER_HEAD]);
+    c->onscreen = (u32) pd->time_other_players_on_screen;
+    c->kmh = pd->distance_traveled / 100000.0f / ((duration + 1) / (3600.0f * 60.0f));
+    c->armour = (u16) ((pd->body_armor_pickups * 100.0f > 65535.0f) ? 65535.0f : pd->body_armor_pickups * 100.0f + 0.5f);
+    c->longest = coopVsPackInning(pd->longest_inning);
+    c->shortest = coopVsPackInning(pd->shortest_inning);
+    c->multikill = (u8) pd->most_killed_one_time;
+    for (li = 0; li < sVsCount; li++)
+    {
+        if (sVsNet[li] < MAX_PLAYER_COUNT)
+        {
+            b = sVsBackLocal[li];
+            c->backside[sVsNet[li]] = (u8) ((b > 255) ? 255 : b);
+        }
+    }
+}
+
+/* mpmenu.c mpChooseAwards, before it reads the table: our column goes out
+ * once, and every column we have goes into the table */
+void coopVersusAwardStats(s32 duration)
+{
+    s32 li, p;
+
+    if (!coopVersus())
+    {
+        return;
+    }
+    if (!sVsColSent)
+    {   /* the hits from behind counted here, before the columns are added to them */
+        for (li = 0; li < MAX_PLAYER_COUNT; li++)
+        {
+            sVsBackLocal[li] = (li < sVsCount) ? g_playerPlayerData[li].damage_to_backside : 0;
+        }
+        coopVsOwnColumn(&sVsCol[sVsNet[0]], duration);
+        sVsColHave[sVsNet[0]] = 1;
+        sVsColSent = 1;
+        coopVsSend(COOPEV_VSSTATS, COOP_ALL, &sVsCol[sVsNet[0]], sizeof(VsStats));
+        portConLogf("ge: versus: our end-screen stats sent (%d shots, %d head)\n", sVsCol[sVsNet[0]].shots, sVsCol[sVsNet[0]].head);
+    }
+    for (li = 0; li < sVsCount; li++)
+    {
+        struct player_data *pd = &g_playerPlayerData[li];
+        const s32 net = sVsNet[li];
+        s32 back = sVsBackLocal[li];
+
+        for (p = 0; p < COOP_MAX_PLAYERS; p++)
+        {
+            if (sVsColHave[p] && p != sVsNet[0] && net < MAX_PLAYER_COUNT)
+            {
+                back += sVsCol[p].backside[net];
+            }
+        }
+        pd->damage_to_backside = back;
+        if (net >= COOP_MAX_PLAYERS || !sVsColHave[net])
+        {
+            continue;   /* (theirs has not come; ours is always here) */
+        }
+        pd->shot_count[SHOT_REGISTER_TOTAL] = sVsCol[net].shots;
+        pd->shot_count[SHOT_REGISTER_HEAD] = sVsCol[net].head;
+        pd->time_other_players_on_screen = (s32) sVsCol[net].onscreen;
+        pd->distance_traveled = sVsCol[net].kmh * 100000.0f * ((duration + 1) / (3600.0f * 60.0f));
+        pd->body_armor_pickups = sVsCol[net].armour / 100.0f;
+        pd->longest_inning = coopVsUnpackInning(sVsCol[net].longest);
+        pd->shortest_inning = coopVsUnpackInning(sVsCol[net].shortest);
+        pd->most_killed_one_time = sVsCol[net].multikill;
+    }
+}
+
+/* mpmenu.c mpChooseAwards, the table read: each PC's own row index is 0, so
+ * the rows go into session order (seat[k] the player of row k) for the ties
+ * and the dice to fall alike; and the speed is the one its PC sent, as is */
+void coopVersusAwardMetrics(s32 count, struct AwardMetrics *metrics, s32 *seat)
+{
+    struct AwardMetrics local[MAX_PLAYER_COUNT];
+    s32 k, li, p;
+
+    for (k = 0; k < MAX_PLAYER_COUNT; k++)
+    {
+        seat[k] = k;
+    }
+    if (!coopVersus() || count != sVsCount)
+    {
+        return;
+    }
+    memcpy(local, metrics, sizeof(local[0]) * count);
+    k = 0;
+    for (p = 0; p <= COOP_MAX_PLAYERS && k < count; p++)
+    {   /* (a player renumbered away after a host change sits at COOP_MAX_PLAYERS, last) */
+        for (li = 0; li < count; li++)
+        {
+            if (sVsNet[li] == p)
+            {
+                seat[k] = li;
+                metrics[k] = local[li];
+                if (p < COOP_MAX_PLAYERS && sVsColHave[p])
+                {
+                    metrics[k].avg_km_per_hour = sVsCol[p].kmh;
+                }
+                k++;
+            }
+        }
+    }
+    if (k != count)
+    {   /* (cannot happen: every player has a number) */
+        memcpy(metrics, local, sizeof(local[0]) * count);
+        for (k = 0; k < MAX_PLAYER_COUNT; k++)
+        {
+            seat[k] = k;
+        }
+    }
+}
+
+/* mpmenu.c: the awards' dice, seeded by the match each time they are picked */
+u32 coopVersusAwardRandom(s32 reset)
+{
+    if (reset)
+    {
+        sVsAwardDice = sVsSerial * 2654435761u + 0x5EEDu;
+        return 0;
+    }
+    sVsAwardDice = sVsAwardDice * 1103515245u + 12345u;
+    return sVsAwardDice >> 8;
+}
+
+static void coopVsApplyStats(const VsStats *c, s32 from)
+{
+    extern void mpVersusRechooseAwards(void);
+
+    if (from < 0 || from >= COOP_MAX_PLAYERS || from == sVsNet[0] || coopVsLocalOfNet(from) <= 0)
+    {
+        return;
+    }
+    memcpy(&sVsCol[from], c, sizeof(*c));
+    sVsColHave[from] = 1;
+    portConLogf("ge: versus: player %d's end-screen stats came (%d shots, %d head)\n", from + 1, c->shots, c->head);
+    mpVersusRechooseAwards();   /* (once the match is over here; else the end picks with it) */
 }
 
 /* ---- the VERSUS packet ----------------------------------------------------------- */
