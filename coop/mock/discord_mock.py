@@ -13,6 +13,8 @@ A test plays Discord's side by dropping files in <dir>:
     join          the secret, sent as ACTIVITY_JOIN (a Join clicked in Discord)
     ask           "<user id> <name>", sent as ACTIVITY_JOIN_REQUEST (Ask to Join)
 Each is sent once and deleted.
+    refuse        while it exists, a handshake gets Discord's answer to a bad
+                  application id (close 4000 "Invalid Client ID")
 """
 import json
 import os
@@ -56,7 +58,10 @@ def main():
                 msg = json.loads(buf[8:8 + n].decode() or "{}")
                 buf = buf[8 + n:]
                 log.write(json.dumps({"op": op, "msg": msg, "t": time.time()}) + "\n")
-                if op == 0:
+                if op == 0 and os.path.exists(os.path.join(d, "refuse")):
+                    conn.sendall(frame(2, {"code": 4000, "message": "Invalid Client ID"}))
+                    alive = False
+                elif op == 0:
                     conn.sendall(frame(1, {"cmd": "DISPATCH", "evt": "READY", "data": {
                         "v": 1, "user": {"id": "1000", "username": "mockuser", "global_name": "Mock User"}}}))
                 elif op == 1:

@@ -3319,3 +3319,28 @@ nobody. Three causes:
   (GE_COOP_TESTFIRE=32:30:6) at chr 23 put where they land: before, no
   blast reaches the host and chr 23 stands; after, "peer explosion (type
   13)" for each, chr 23 hurt, dies and fades on both.
+## Discord presence on (2026-10-30)
+
+- GoldenEye Coop has its own Discord application now: id
+  1565798461310246992, built in as DISCORD_APPID (port/src/coop_discord.c).
+  GE_DISCORD_APPID or discord_appid.txt beside the exe still replace it (a
+  value without digits turns Discord off); GE_NO_DISCORD turns it off and
+  says so in the log. The zip ships no discord_appid.txt.
+- Without Discord nothing changed: "Discord isn't running" once, a look for
+  the socket every 15 s, no waiting. New: Discord turning the game away
+  before READY (close 4000 "Invalid Client ID", or the socket dropping)
+  used to log "closed" every 15 s for ever; now it is logged once and the
+  retries wait 30 s, 60 s ... up to 5 min, back to 15 s after a READY.
+- Art: the activity asks for large_image "logo" (large_text "GoldenEye 007
+  co-op"); upload a Rich Presence art asset named logo (512x512 or larger)
+  in the Discord app. Without it Discord shows the status without a picture.
+- Mock Discord: a file "refuse" in its folder answers the handshake the way
+  Discord answers a bad id. Test: coop/docker/discord_off.sh (Discord absent,
+  refusing, accepting, quitting; then GE_NO_DISCORD). presence.sh now runs
+  with the built-in id unless APPID is set.
+- presence.sh today: the Discord side passes (handshake with the built-in
+  id, Ask to Join let in, p2 joins the lobby past the password), but p3
+  joins from the Steam invite and then leaves ("said goodbye (leaving)"),
+  so the host never has 3 and Dam never starts. main does the same, so it
+  is the script's GE_COOP_LOBBY=wait driving falling behind the menus, not
+  Discord.

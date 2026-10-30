@@ -7,9 +7,11 @@
  * opcode and length, then JSON: 0 handshake, 1 frame, 2 close, 3 ping, 4 pong.
  * This is the protocol discord-rpc and the Game SDK's presence speak.
  *
- * The application id comes from GE_DISCORD_APPID, else discord_appid.txt
- * beside the exe; with neither, Discord stays off. Nothing here blocks: when
- * Discord isn't running the game looks for it again every 15 s.
+ * The application id is GoldenEye Coop's own (DISCORD_APPID); GE_DISCORD_APPID
+ * or discord_appid.txt beside the exe replace it, and one without digits (or
+ * GE_NO_DISCORD) turns Discord off. Nothing here blocks: when Discord isn't
+ * running the game looks for it again every 15 s, and when Discord turns the
+ * game away before READY (a bad id) it waits longer each time, up to 5 min.
  *
  * The activity carries a party (the Steam lobby) and a join secret, so
  * friends see Ask to Join / Join and the "invite to play" chat button. The
@@ -48,7 +50,9 @@ extern char *strstr(const char *, const char *);
 extern void portConLogf(const char *fmt, ...);
 extern const char *portRootPath(const char *name);
 
+#define DISCORD_APPID "1565798461310246992"     /* GoldenEye Coop on discord.com/developers */
 #define DISCORD_RETRY_MS 15000
+#define DISCORD_RETRY_MAX_MS 300000
 #define DISCORD_BUF 16384
 #define DISCORD_ASK_MS 30000
 #define DISCORD_ACTIVITY_MS 4000    /* Discord takes 5 activity updates per 20 s */
@@ -65,6 +69,7 @@ static int sAppChecked;     /* the id was looked for */
 static int sReady;          /* READY came back: presence goes through */
 static unsigned int sNextTry;
 static int sToldMissing;    /* "not running" logged once */
+static int sRefused;        /* connections closed before READY, in a row */
 static unsigned int sNonce;
 static char sIn[DISCORD_BUF];
 static int sInLen;
@@ -98,8 +103,23 @@ static int isOpen(void)
 #endif
 }
 
+/* 15 s, doubling with each refusal up to 5 min */
+static unsigned int retryMs(void)
+{
+    unsigned int ms = DISCORD_RETRY_MS;
+    int i;
+
+    for (i = 0; i < sRefused && ms < DISCORD_RETRY_MAX_MS; i++)
+    {
+        ms *= 2;
+    }
+    return ms < DISCORD_RETRY_MAX_MS ? ms : DISCORD_RETRY_MAX_MS;
+}
+
 static void closeIpc(void)
 {
+    const int wasOpen = isOpen();
+
 #ifdef _WIN32
     if (sPipe != INVALID_HANDLE_VALUE)
     {
@@ -117,10 +137,14 @@ static void closeIpc(void)
     {
         portConLogf("ge: discord: disconnected\n");
     }
+    else if (wasOpen)
+    {
+        sRefused++;     /* Discord was there but never said READY */
+    }
     sReady = 0;
     sInLen = 0;
     sNumAsk = 0;
-    sNextTry = nowMs() + DISCORD_RETRY_MS;
+    sNextTry = nowMs() + retryMs();
 }
 
 /* the whole buffer, or 0 (and the connection is closed) */
@@ -306,7 +330,7 @@ static void loadAppId(void)
     int i;
 
     sAppChecked = 1;
-    sAppId[0] = '\0';
+    snprintf(sAppId, sizeof(sAppId), "%s", DISCORD_APPID);
     if (e != NULL)
     {
         snprintf(sAppId, sizeof(sAppId), "%s", e);
@@ -326,6 +350,10 @@ static void loadAppId(void)
     if (sAppId[0] == '\0')
     {
         portConLogf("ge: discord: no application id (discord_appid.txt or GE_DISCORD_APPID); Discord presence is off\n");
+    }
+    else if (getenv("GE_NO_DISCORD") != NULL)
+    {
+        portConLogf("ge: discord: GE_NO_DISCORD; Discord presence is off\n");
     }
 }
 
@@ -477,6 +505,7 @@ static void onReady(void)
 
     sReady = 1;
     sToldMissing = 0;
+    sRefused = 0;
     portConLogf("ge: discord: connected (application %s)\n", sAppId);
     sendCmd("SUBSCRIBE", "{}", "ACTIVITY_JOIN");
     sendCmd("SUBSCRIBE", "{}", "ACTIVITY_JOIN_REQUEST");
@@ -531,7 +560,10 @@ static void onFrame(int op, char *json)
     }
     if (op == OP_CLOSE)
     {
-        portConLogf("ge: discord: closed: %s\n", jsonString(json, "message", buf, sizeof(buf)) ? buf : "?");
+        if (sReady || sRefused == 0)
+        {   /* a refusal (a bad id) only once: it comes back on every retry */
+            portConLogf("ge: discord: closed: %s\n", jsonString(json, "message", buf, sizeof(buf)) ? buf : "?");
+        }
         closeIpc();
         return;
     }
