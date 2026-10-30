@@ -2162,6 +2162,7 @@ static void coopTickBody(void)
         coopSendState();
         coopVersusTick();
         coopItemsTick((s32) sMissionTicks);     /* thrown things and dropped guns settle as the thrower's did */
+        coopPingTick();         /* a team-mate's ping fades, and ours can be pressed again (coop_ping.c) */
         return;
     }
     coopStatsMissionTick(coopPartnerHere());
@@ -5823,6 +5824,16 @@ void coopPingSend(CoopPing *ping)
     ev.kind = COOPEV_PING;
     ev.u.ping = *ping;
     coopQueueEvent(&ev);
+}
+
+void coopPingSendTo(CoopPing *ping, s32 to)
+{
+    CoopEvent ev;
+
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = COOPEV_PING;
+    ev.u.ping = *ping;
+    coopQueueEventTo(&ev, to);
 }
 
 

@@ -370,6 +370,28 @@ static void coopVsGone(s32 li)
     coopVsLastStanding();
 }
 
+/* coop_ping.c: the session numbers a ping of ours is for (bit p = player p),
+ * our team-mates in a team scenario; none in a free-for-all, where a ping
+ * only told the opponents where we were looking */
+u32 coopVersusTeamMates(void)
+{
+    u32 mates = 0;
+    s32 li;
+
+    if (!coopVersus() || !portMpTeamScenario())
+    {
+        return 0;
+    }
+    for (li = 1; li < sVsCount; li++)
+    {
+        if (!sVsGone[li] && sVsNet[li] < COOP_MAX_PLAYERS && portMpTeamOf(li) == portMpTeamOf(0))
+        {
+            mates |= 1u << sVsNet[li];
+        }
+    }
+    return mates;
+}
+
 /* mpmenu.c: our Quit leaves the match to the others, unless we host it */
 s32 coopVersusQuitAlone(void)
 {
@@ -1180,7 +1202,8 @@ void coopVersusRecvPkt(void *buf, s32 player)
  * GE_VS_GOTO=<s>: at <s> seconds walk onto the first opponent's spot (pickups).
  * GE_VS_GRAB=<s>: at <s> seconds walk onto the scenario's item (Flag Tag, Golden Gun).
  * GE_VS_RESPAWN=1: press Start when dead, and at the end screen.
- * GE_VS_TESTBOOM=<s>[:<dy>]: a blast on the first opponent (see below). */
+ * GE_VS_TESTBOOM=<s>[:<dy>]: a blast on the first opponent (see below).
+ * GE_VS_PING=<s>: from <s> seconds press ping every 5 s. */
 static s32 sVsHuntDone;
 static s32 sVsHuntAlive;
 static s32 sVsHuntDir;
@@ -1222,6 +1245,11 @@ static void coopVsHarness(void)
         at.f[1] += (strchr(e, ':') != NULL) ? (f32) atof(strchr(e, ':') + 1) : 0.0f;
         portConLogf("ge: versus: harness: blast on player %d at %.0f %.0f %.0f\n", sVsNet[1] + 1, at.f[0], at.f[1], at.f[2]);
         explosionCreate(NULL, &at, them->stan, 2, 0, 0, them->rooms, 0);
+    }
+    if (getenv("GE_VS_PING") != NULL && sVsTick >= (u32) atoi(getenv("GE_VS_PING")) * 60 && (sVsTick % 300) == 0)
+    {   /* GE_VS_PING=<s>: from <s> seconds, press ping every 5 s */
+        extern void coopPingPress(void);
+        coopPingPress();
     }
     if (sVsRespawn && me->bonddead && (sVsTick % 30) == 0)
     {   /* GE_VS_RESPAWN: press Start to come back */

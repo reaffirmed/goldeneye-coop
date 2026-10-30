@@ -317,6 +317,7 @@ typedef struct
 } CoopPingMark;
 void coopPingPress(void);       /* the ping key (bondview2.c) */
 void coopPingSend(CoopPing *ping);
+void coopPingSendTo(CoopPing *ping, s32 to);   /* to one session player (versus: a team-mate) */
 void coopPingReceive(CoopPing *ping, s32 from);
 void coopPingStageStart(void);
 void coopPingTick(void);
@@ -595,6 +596,7 @@ void coopVersusRecvPkt(void *buf, s32 player);
 void coopVersusTick(void);
 void coopVersusSubFieldTick(void);
 void coopVersusQuit(void);       /* mpmenu.c: we picked Quit on the pause menu */
+u32  coopVersusTeamMates(void);  /* coop_ping.c: who our pings are for (bits by session number) */
 s32  coopVersusQuitAlone(void);  /* mpmenu.c: our Quit leaves the match to the others */   /* the others' bodies on the ticks between 60ths */
 void coopVsStartMatch(s32 stage);          /* front.c: this PC's half of the match, then into the arena */
 
