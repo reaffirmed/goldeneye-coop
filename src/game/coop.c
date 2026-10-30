@@ -2548,12 +2548,16 @@ static void coopHarnessTick(void)
         }
     }
     if (coopIsMirroringClient())
-    {   /* GE_COOP_TESTBOOM=<chrnum>: at 20 s, a grenade-sized blast on that chr (harness only) */
+    {   /* GE_COOP_TESTBOOM=<chrnum>[:<dy>]: at 20 s, a grenade-sized blast on that chr,
+         * or <dy> above it (below its floor when negative: no floor under it anywhere
+         * a joiner looks; harness only) */
         static s32 testboom = -2;
+        static f32 testboomdy = 0.0f;
         if (testboom == -2)
         {
             const char *e = getenv("GE_COOP_TESTBOOM");
             testboom = (e != NULL) ? atoi(e) : -1;
+            testboomdy = (e != NULL && strchr(e, ':') != NULL) ? (f32) atof(strchr(e, ':') + 1) : 0.0f;
         }
         if (testboom >= 0 && sTick >= 1200)
         {
@@ -2561,8 +2565,10 @@ static void coopHarnessTick(void)
             testboom = -1;
             if (c != NULL && c->prop != NULL)
             {
-                portConLogf("ge: coop: testboom on chr %d\n", c->chrnum);
-                explosionCreate(NULL, &c->prop->pos, c->prop->stan, 2, 0, 0, c->prop->rooms, 0);
+                coord3d at = c->prop->pos;
+                at.f[1] += testboomdy;
+                portConLogf("ge: coop: testboom on chr %d (%.0f up)\n", c->chrnum, testboomdy);
+                explosionCreate(NULL, &at, c->prop->stan, 2, 0, 0, c->prop->rooms, 0);
             }
         }
     }
@@ -9859,6 +9865,41 @@ s32 coopInMissionNow(void)
     return sEnabled > 0 && coopInMission();
 }
 
+/* a floor tile for a blast that came from another game. The tile only anchors
+ * the blast's prop (its rooms come with the event and place it), so one that
+ * is near enough will do: a rocket that hit a cliff face or a wall's top, or a
+ * blast in mid-air, has no floor straight below it, and was dropped here */
+static StandTile *coopBoomStan(coord3d *pos)
+{
+    static const f32 ring[][2] = { { 0.0f, 0.0f }, { 80.0f, 0.0f }, { -80.0f, 0.0f }, { 0.0f, 80.0f }, { 0.0f, -80.0f },
+                                   { 200.0f, 0.0f }, { -200.0f, 0.0f }, { 0.0f, 200.0f }, { 0.0f, -200.0f } };
+    static const f32 lift[] = { 0.0f, 150.0f, 600.0f };
+    StandTile *stan;
+    s32 r, l;
+
+    for (r = 0; r < (s32) (sizeof(ring) / sizeof(ring[0])); r++)
+    {
+        for (l = 0; l < (s32) (sizeof(lift) / sizeof(lift[0])); l++)
+        {
+            coord3d at = *pos;
+
+            at.f[0] += ring[r][0];
+            at.f[1] += lift[l];
+            at.f[2] += ring[r][1];
+            if ((stan = stanFindTileBelowPos(&at, NULL, NULL)) != NULL)
+            {
+                return stan;
+            }
+        }
+    }
+    if (g_CurrentPlayer != NULL && g_CurrentPlayer->prop != NULL && g_CurrentPlayer->prop->stan != NULL)
+    {   /* nothing near: ours stands in, as an anchor only */
+        portConLogf("ge: coop: explosion at %.0f %.0f %.0f has no floor near it here: anchored to ours\n", pos->f[0], pos->f[1], pos->f[2]);
+        return g_CurrentPlayer->prop->stan;
+    }
+    return NULL;
+}
+
 static void coopApplyExplosion(CoopEvent *ev)
 {
     coord3d pos;
@@ -9871,14 +9912,7 @@ static void coopApplyExplosion(CoopEvent *ev)
     pos.f[0] = ev->u.boom.pos[0];
     pos.f[1] = ev->u.boom.pos[1];
     pos.f[2] = ev->u.boom.pos[2];
-    stan = stanFindTileBelowPos(&pos, NULL, NULL);
-    if (stan == NULL)
-    {   /* on a ceiling or a wall's top: look from a little higher */
-        coord3d up = pos;
-
-        up.f[1] += 150.0f;
-        stan = stanFindTileBelowPos(&up, NULL, NULL);
-    }
+    stan = coopBoomStan(&pos);
     if (stan == NULL || ev->u.boom.rooms[0] == 0xFF)
     {
         portConLogf("ge: coop: player %d's explosion at %.0f %.0f %.0f has no floor here, dropped\n", ev->from + 1, pos.f[0], pos.f[1], pos.f[2]);
