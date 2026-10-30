@@ -111,7 +111,10 @@ typedef struct
     s16 model;          /* PROP_ */
     s32 stage;
     f32 pos[3];         /* where it was, for a guard we do not have */
-} CoopDropMsg;          /* COOPEV_DROP */
+    s16 fuse;           /* 1 + the fuse a live grenade has, 0 none (an older host sends 0) */
+    s8 droptype;        /* DROPTYPE_*: a thrown grenade flies, a gun falls; 0 default */
+    u8 pad2;
+} CoopDropMsg;          /* COOPEV_DROP (28 bytes) */
 
 typedef struct
 {
@@ -436,9 +439,19 @@ void coopItemsChrDropped(ChrRecord *chr, PropRecord *prop)
     m.pos[0] = chr->prop->pos.f[0];
     m.pos[1] = chr->prop->pos.f[1];
     m.pos[2] = chr->prop->pos.f[2];
+    if (prop->type == PROP_TYPE_WEAPON && ((WeaponObjRecord *) obj)->timer >= 0)
+    {   /* a grenade it threw: live, not a pickup */
+        s32 t = ((WeaponObjRecord *) obj)->timer;
+
+        m.fuse = (s16) (1 + ((t > 32766) ? 32766 : t));
+    }
+    if ((obj->runtime_bitflags & RUNTIMEBITFLAG_HASPROJECTILE) && obj->projectile != NULL)
+    {
+        m.droptype = (s8) obj->projectile->droptype;
+    }
     coopItemAdd(m.id, COOPITEM_DROP, obj);
     coopExtSend(COOPEV_DROP, 0xFF, &m, sizeof(m));
-    portConLogf("ge: coop: guard %d dropped item %d (id %04x)\n", m.chrnum, m.item, m.id);
+    portConLogf("ge: coop: guard %d dropped item %d (id %04x)%s\n", m.chrnum, m.item, m.id, m.fuse ? ", a live grenade" : "");
 }
 
 /* propobj.c drop_inventory, versus: our player died and dropped prop; the
@@ -505,6 +518,10 @@ static void coopItemsApplyDrop(const CoopDropMsg *m)
             sApplying = 0;
             return;
         }
+        if (m->fuse > 0)
+        {   /* armed before it leaves the hand, as chrlvTickThrowGrenade does */
+            ((WeaponObjRecord *) obj)->timer = m->fuse - 1;
+        }
         if (chr != NULL && chr->prop != NULL)
         {
             chrpropReparent(obj->prop, chr->prop);
@@ -535,7 +552,11 @@ static void coopItemsApplyDrop(const CoopDropMsg *m)
             return;
         }
     }
-    propobjSetDropped(found, DROPTYPE_DEFAULT);
+    if (found->type == PROP_TYPE_WEAPON && m->fuse > 0)
+    {   /* the guard's grenade: live, thrown the way the host's guard faces, and no pickup (objTickPlayer) */
+        found->weapon->timer = m->fuse - 1;
+    }
+    propobjSetDropped(found, (m->droptype == DROPTYPE_THROWGRENADE) ? DROPTYPE_THROWGRENADE : DROPTYPE_DEFAULT);
     /* drop it at the guard's feet, not its hand: our stand-in's hand is where our copy of the
      * model was last drawn, and a gun dropped from there could miss the floor and fall for ever */
     found->flags &= ~PROPFLAG_ONSCREEN;
@@ -1318,7 +1339,11 @@ void coopItemsApply(s32 kind, const u8 *raw, s32 from)
  * GE_COOP_TESTKNOCK=<s>[:<every>[:<times>]]: from <s> seconds, every <every>
  * s (5), <times> times (3), knock the nearest thrown or dropped item about
  * as a shot from where we look would (objHit's bounce).
- * GE_COOP_TESTITEMLOG=1: every 2 s, log where each thrown or dropped item is. */
+ * GE_COOP_TESTITEMLOG=1: every 2 s, log where each thrown or dropped item is.
+ * GE_COOP_TESTGRENADE=<s>[:<every>]: host, from <s> seconds, every <every> s
+ * (6), the nearest guard throws a grenade.
+ * GE_COOP_TESTSTEPON=<s>: from <s> seconds, each second, stand on the nearest
+ * thrown or dropped item lying still, as walking onto it would. */
 static s32 sTestAimAt = -2;
 static f32 sTestAimYaw, sTestAimPitch, sTestAimBase = -1.0f;
 static s32 sTestAtTag = -1, sTestAtAt = -1;
@@ -1397,8 +1422,8 @@ static void coopItemsTestKnock(s32 missionticks)
             {
                 PropRecord *p = sItems[i].obj->prop;
 
-                portConLogf("ge: coop: itemlog t=%d id %04x item %d at %.0f %.0f %.0f%s%s\n", missionticks / 60, sItems[i].id,
-                            sItems[i].item, p->pos.f[0], p->pos.f[1], p->pos.f[2],
+                portConLogf("ge: coop: itemlog t=%d id %04x item %d at %.0f %.0f %.0f fuse %d%s%s\n", missionticks / 60, sItems[i].id,
+                            sItems[i].item, p->pos.f[0], p->pos.f[1], p->pos.f[2], ((WeaponObjRecord *) sItems[i].obj)->timer,
                             coopItemsAirborne(sItems[i].obj) ? " airborne" : "", p->parent != NULL ? " parented" : "");
             }
         }
@@ -1439,6 +1464,95 @@ static void coopItemsTestKnock(s32 missionticks)
     }
 }
 
+extern bool actor_draws_throws_grenade_at_player_if_possible(ChrRecord *self);
+extern s32 chrIsNotDeadOrShot(ChrRecord *chr);
+
+static void coopItemsTestGrenade(s32 missionticks)
+{
+    static s32 at = -2, every = 6, stepat = -2;
+    PropRecord *p, *best = NULL;
+    f32 bestd = 1e30f;
+
+    if (at == -2)
+    {
+        const char *e = getenv("GE_COOP_TESTGRENADE");
+
+        at = -1;
+        if (e != NULL && sscanf(e, "%d:%d", &at, &every) >= 1)
+        {
+            at *= 60;
+        }
+        e = getenv("GE_COOP_TESTSTEPON");
+        stepat = (e != NULL) ? atoi(e) * 60 : -1;
+    }
+    if (g_CurrentPlayer->prop == NULL)
+    {
+        return;
+    }
+    if (at >= 0 && missionticks >= at && ((missionticks - at) % (every * 60)) == 0 && coopExtIsHost())
+    {
+        for (p = g_ActivePropsHead; p != NULL; p = p->next)
+        {
+            f32 dx, dz;
+
+            if (p->type != PROP_TYPE_CHR || p->chr == NULL || coopPropIsPartner(p) || !chrIsNotDeadOrShot(p->chr))
+            {
+                continue;
+            }
+            dx = p->pos.f[0] - g_CurrentPlayer->prop->pos.f[0];
+            dz = p->pos.f[2] - g_CurrentPlayer->prop->pos.f[2];
+            if (dx * dx + dz * dz < bestd)
+            {
+                bestd = dx * dx + dz * dz;
+                best = p;
+            }
+        }
+        if (best != NULL)
+        {
+            u8 prob = best->chr->grenadeprob;
+            s32 thrown;
+
+            best->chr->grenadeprob = 0xFF;
+            thrown = actor_draws_throws_grenade_at_player_if_possible(best->chr);
+            best->chr->grenadeprob = prob;
+            portConLogf("ge: coop: testgrenade: guard %d %s (dist %.0f)\n", best->chr->chrnum, thrown ? "throws" : "could not throw", sqrtf(bestd));
+        }
+    }
+    if (stepat >= 0 && missionticks >= stepat && (missionticks % 60) == 0)
+    {
+        CoopItem *it = NULL;
+        s32 i;
+
+        for (i = 0; i < COOP_ITEMS_MAX; i++)
+        {
+            f32 dx, dz;
+
+            if (!coopItemLive(&sItems[i]) || (p = sItems[i].obj->prop)->parent != NULL || coopItemsAirborne(sItems[i].obj) || p->stan == NULL)
+            {
+                continue;
+            }
+            dx = p->pos.f[0] - g_CurrentPlayer->prop->pos.f[0];
+            dz = p->pos.f[2] - g_CurrentPlayer->prop->pos.f[2];
+            if (dx * dx + dz * dz < 4.0f)
+            {
+                it = NULL;  /* already on one */
+                break;
+            }
+            if (it == NULL || dx * dx + dz * dz < bestd)
+            {
+                bestd = dx * dx + dz * dz;
+                it = &sItems[i];
+            }
+        }
+        if (it != NULL)
+        {
+            p = it->obj->prop;
+            portConLogf("ge: coop: teststepon: item %04x (item %d, fuse %d)\n", it->id, it->item, ((WeaponObjRecord *) it->obj)->timer);
+            coopTeleportPlayerTo(&p->pos, p->stan, g_CurrentPlayer->vv_theta * 0.01745329f);
+        }
+    }
+}
+
 void coopItemsTick(s32 missionticks)
 {
     coopItemsRestTick();
@@ -1459,6 +1573,7 @@ void coopItemsTick(s32 missionticks)
     }
     coopItemsTestThrowAt(missionticks);
     coopItemsTestKnock(missionticks);
+    coopItemsTestGrenade(missionticks);
     if (coopItemsOn())
     {
         coopItemsSettleTick();
