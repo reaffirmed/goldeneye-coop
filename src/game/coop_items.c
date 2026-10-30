@@ -133,6 +133,17 @@ typedef struct
 typedef struct
 {
     u16 id;
+    s16 rot[3];         /* how it left the hand: x y z of a quaternion with w >= 0, x 32767 */
+    s16 spin[3];        /* its tumble per tick, the same way */
+    s16 speed[3];       /* x 1000 */
+    s16 ofs[3];         /* where it starts, from the guard's position in the DROP before it */
+    u8 stage;           /* low byte */
+    u8 pad;
+} CoopDropStartMsg;     /* COOPEV_DROPSTART, right after its COOPEV_DROP (28 bytes) */
+
+typedef struct
+{
+    u16 id;
     s16 rot[4];         /* the orientation as a quaternion, x 32767 */
     u16 pad;
     s32 objofs;         /* the setup object it stuck to, -1 it landed loose */
@@ -536,6 +547,116 @@ static void coopItemsApplyThrow(const CoopThrowMoreMsg *b, s32 from)
 
 /* ---- guns the host's guards drop -------------------------------------------- */
 
+static void coopItemsMtxToQuat(Mtxf *mtx, f32 scale, f32 q[4]);
+static void coopItemsQuatToMtx(const f32 q[4], f32 scale, Mtxf *mtx);
+static f32 coopItemsMtxScale(Mtxf *mtx);
+static s16 coopItemsPackSpeed(f32 v);
+static s32 coopItemsAirborne(ObjectRecord *obj);
+
+static f32 sDropAt[3];      /* joiner: the guard's position in the last DROP (COOPEV_DROPSTART's origin) */
+static u16 sDropAtId;
+
+/* a rotation as three shorts: the quaternion's x y z with w >= 0 */
+static void coopItemsPackRot(Mtxf *mtx, f32 scale, s16 out[3])
+{
+    f32 q[4];
+    s32 k;
+
+    coopItemsMtxToQuat(mtx, scale, q);
+    for (k = 0; k < 3; k++)
+    {
+        out[k] = (s16) (((q[3] < 0.0f) ? -q[k] : q[k]) * 32767.0f);
+    }
+}
+
+static void coopItemsUnpackRot(const s16 in[3], f32 scale, Mtxf *mtx)
+{
+    f32 q[4];
+    f32 w;
+    s32 k;
+
+    for (k = 0; k < 3; k++)
+    {
+        q[k] = (f32) in[k] / 32767.0f;
+    }
+    w = 1.0f - q[0] * q[0] - q[1] * q[1] - q[2] * q[2];
+    q[3] = (w > 0.0f) ? sqrtf(w) : 0.0f;
+    coopItemsQuatToMtx(q, scale, mtx);
+}
+
+/* host (versus: the dropper): how the drop just left the hand (objDrop's own rolls, and the hand
+ * where the host's screen drew it), so every copy falls the same way rather than
+ * each game's own until the host's resting place comes (COOPEV_DROPREST) */
+static void coopItemsSendDropStart(u16 id, ObjectRecord *obj, const f32 *at)
+{
+    CoopDropStartMsg d;
+    Projectile *pr = obj->projectile;
+    s32 k;
+
+    if (!(obj->runtime_bitflags & RUNTIMEBITFLAG_HASPROJECTILE) || pr == NULL || obj->prop == NULL)
+    {
+        return;
+    }
+    memset(&d, 0, sizeof(d));
+    d.id = id;
+    coopItemsPackRot(&obj->mtx, coopItemsMtxScale(&obj->mtx), d.rot);
+    coopItemsPackRot(&pr->mtx, coopItemsMtxScale(&pr->mtx), d.spin);
+    for (k = 0; k < 3; k++)
+    {
+        f32 o = obj->prop->pos.f[k] - at[k];
+
+        d.speed[k] = coopItemsPackSpeed(pr->speed.f[k]);
+        d.ofs[k] = (s16) ((o > 32767.0f) ? 32767.0f : (o < -32767.0f) ? -32767.0f : o);
+    }
+    d.stage = (u8) bossGetStageNum();
+    coopDesignSend(COOPEV_DROPSTART, COOP_ALL_PLAYERS, &d, sizeof(d));
+}
+
+/* joiner (versus: everyone else): start our copy where and how theirs did */
+void coopItemsApplyDropStart(const u8 *raw)
+{
+    CoopDropStartMsg d;
+    CoopItem *it;
+    ObjectRecord *obj;
+    PropRecord *prop;
+    Projectile *pr;
+    coord3d pos;
+    StandTile *stan;
+    s32 k;
+
+    memcpy(&d, raw, sizeof(d));
+    if ((coopVersus() ? (d.id >> 14) == (u16) (coopExtSelf() & 3) : coopExtIsHost()) || d.stage != (u8) bossGetStageNum() || d.id != sDropAtId || (it = coopItemById(d.id)) == NULL || !coopItemLive(it))
+    {
+        return;
+    }
+    obj = it->obj;
+    prop = obj->prop;
+    if (prop->parent != NULL || !coopItemsAirborne(obj) || (pr = obj->projectile) == NULL)
+    {
+        return;     /* in someone's hands already, or it never left ours */
+    }
+    for (k = 0; k < 3; k++)
+    {
+        pos.f[k] = sDropAt[k] + (f32) d.ofs[k];
+    }
+    stan = stanFindTileBelowPos(&pos, NULL, NULL);
+    if (stan == NULL)
+    {
+        return;     /* no floor under the host's spot here: ours falls from the feet */
+    }
+    coopItemsUnpackRot(d.rot, coopItemsMtxScale(&obj->mtx), &obj->mtx);
+    coopItemsUnpackRot(d.spin, 1.0f, &pr->mtx);
+    for (k = 0; k < 3; k++)
+    {
+        pr->speed.f[k] = (f32) d.speed[k] / 1000.0f;
+    }
+    prop->pos = pos;
+    prop->stan = stan;
+    obj->runtime_pos = pos;
+    setupUpdateObjectRoomPosition(obj);
+    portConLogf("ge: coop: drop %04x leaves the hand as the %s did\n", d.id, coopVersus() ? "dropper's" : "host's");
+}
+
 /* chr.c: a guard is about to drop what it holds (CHRHIDDEN_DROP_HELD_ITEMS).
  * 1: keep it in hand, the host says what drops */
 s32 coopItemsChrDropping(ChrRecord *chr)
@@ -584,6 +705,7 @@ void coopItemsChrDropped(ChrRecord *chr, PropRecord *prop)
     }
     coopItemAdd(m.id, COOPITEM_DROP, obj);
     coopExtSend(COOPEV_DROP, 0xFF, &m, sizeof(m));
+    coopItemsSendDropStart(m.id, obj, m.pos);
     portConLogf("ge: coop: guard %d dropped item %d (id %04x)%s\n", m.chrnum, m.item, m.id, m.fuse ? ", a live grenade" : "");
 }
 
@@ -611,6 +733,7 @@ void coopItemsPlayerDropped(PropRecord *prop)
     m.pos[2] = g_CurrentPlayer->prop->pos.f[2];
     coopItemAdd(m.id, COOPITEM_DROP, obj);
     coopExtSend(COOPEV_DROP, 0xFF, &m, sizeof(m));
+    coopItemsSendDropStart(m.id, obj, m.pos);
     portConLogf("ge: coop: we dropped item %d (id %04x)\n", m.item, m.id);
 }
 
@@ -625,6 +748,10 @@ static void coopItemsApplyDrop(const CoopDropMsg *m)
     {
         return;
     }
+    sDropAtId = m->id;
+    sDropAt[0] = m->pos[0];
+    sDropAt[1] = m->pos[1];
+    sDropAt[2] = m->pos[2];
     chr = chrFindByLiteralId(m->chrnum);
     if (chr != NULL && chr->prop != NULL)
     {
@@ -1011,6 +1138,7 @@ static void coopItemsApplyRest(const CoopDropRestMsg *r)
     coord3d pos;
     StandTile *stan;
     f32 q[4];
+    f32 off;
     s32 k;
 
     if (it == NULL || !coopItemLive(it) || (prop = it->obj->prop)->parent != NULL)
@@ -1018,6 +1146,11 @@ static void coopItemsApplyRest(const CoopDropRestMsg *r)
         return;     /* picked up, or gone */
     }
     obj = it->obj;
+    {
+        f32 dx = prop->pos.f[0] - r->pos[0], dy = prop->pos.f[1] - r->pos[1], dz = prop->pos.f[2] - r->pos[2];
+
+        off = sqrtf(dx * dx + dy * dy + dz * dz);
+    }
     pos.f[0] = r->pos[0];
     pos.f[1] = r->pos[1] + 30.0f;   /* the floor under it, from a little above */
     pos.f[2] = r->pos[2];
@@ -1041,7 +1174,7 @@ static void coopItemsApplyRest(const CoopDropRestMsg *r)
     prop->stan = stan;
     obj->runtime_pos = pos;
     setupUpdateObjectRoomPosition(obj);
-    portConLogf("ge: coop: drop %04x put where the %s came to rest\n", r->id, coopVersus() ? "dropper's" : "host's");
+    portConLogf("ge: coop: drop %04x put where the %s came to rest (ours was %.0f away)\n", r->id, coopVersus() ? "dropper's" : "host's", off);
 }
 
 /* ---- where a throw ended up ---------------------------------------------------

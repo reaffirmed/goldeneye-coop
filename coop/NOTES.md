@@ -3079,3 +3079,70 @@ older build ignores it.
   guard's script sound heard on the joiner. mission_runs.sh (dam,
   facility, runway, surface, streets, frigate), the three late joins and
   joiner_spots.sh pass.
+
+## Host sync leftovers: floorless blasts, guard shot landings, left hands, aircraft (COOP_VERSION stays 16)
+
+What testing the audit's fixes turned up:
+
+- **A blast with no floor straight below it** (a rocket on a cliff face, a
+  wall's top, mid-air) was dropped by the receiving game. coopBoomStan
+  now looks higher and up to 2 m around it, and failing that anchors the
+  blast to our own Bond's tile; the tile only anchors the blast's prop,
+  its rooms come with the event. GE_COOP_TESTBOOM=<chrnum>:<dy> (joiner).
+- **Where the host's guards' shots land.** chrlvFireWeaponRelated hands
+  each shot's end point to coopGuardShotLanded; the host sends the tick's
+  lot as COOPPKT_IMPACTS (13, unreliable). A joiner makes the spark, plays
+  the ricochet off a wall and draws the tracer from the guard's gun.
+- **A guard's left-hand gun.** CoopAiEnt's spare byte is the left hand's
+  item (0xFF empty, 0 from an older host: left alone). A joiner's copy
+  gets it when its hand is empty and puts its own away after two syncs
+  of the host's being empty. GE_COOP_TESTLEFT=<chrnum>:<s>.
+- **Aircraft.** The vehicle records carry aircraft (kind 1): animation
+  (animation_table_ptrs2 index), frame, speed, end frame, rotor aim. A
+  joiner's that flies another animation or none is put on the host's
+  and its list moved on; the frame of the same flight is left alone (on
+  Runway the host's plane stood at frame 0 while the joiner's flew, so
+  frame correction would fight it). GE_COOP_TESTAIR=<s>:<anim>.
+- Checked with two copies over the mock Steam; mission_runs.sh (six
+  missions), the three late joins and joiner_spots.sh pass.
+
+## Second pass: guard actions and script commands that only run on the host (COOP_VERSION stays 16)
+
+A joiner never ticks the host's guards (chrlvActionTick, so their AI lists
+and actions), while the level's background lists (0x1000 up, and the lists
+they jump to on themselves, which include every ending) run in every game.
+Every story setup's AI lists were sorted that way; each command a guard's
+own list uses was checked against what reaches a joiner. All of them were
+already covered: doors (any state change), object damage and script
+destroys (OBJDMG), flags, locks and moves (replication), drops of every kind
+(DROP), alarms (WORLD), spawns, clones, removals and teleports (snapshots),
+text, music, camera, fade and sound commands (relayed), objective flags.
+What the guards' own action tick does was the gap:
+
+- **Bodies fade on a joiner.** chrlvTickDead fades a dead guard (and one a
+  script removes with guard_remove_fade) over CHRLV_TICK_DEAD_CHECK ticks
+  and then frees it; a joiner's copy stood at full strength until the
+  host's chr left the snapshots and then vanished 5 s later. GSF_FADING
+  (the snapshot's last flag bit, 128) says the host's chr is ACT_DEAD; a
+  joiner fades its copy the same way (coopGuardsFadeTick) and leaves it
+  undrawn until the host frees it. An older joiner ignores the bit.
+- **Dropped guns and hats fall the same way.** objDrop rolls its own speed
+  and tumble, and a joiner's copy fell from the guard's feet, upright,
+  while the host's left the hand it was drawn in; COOPEV_DROPREST then
+  moved it, often a metre or more. COOPEV_DROPSTART (design range, 61)
+  follows each DROP with how the host's left the hand: orientation, tumble
+  and speed (three-short quaternions, speed x 1000) and where it started
+  (from the guard's position in the DROP). The joiner starts its copy
+  there. Versus: the dropper's game sends it for a dead player's guns.
+  Dam, GE_COOP_TESTDROP=6:20: the joiner's copy came to rest 4 units from
+  the host's (162 without), a knocked-off beret 28. Versus on Temple: 0.
+- **A guard's idle sneeze** (chrlvTickKneel, host only) plays on a joiner
+  from the host's animation (coopGuardSneezes). Not seen in a run: no
+  harness makes a guard sneeze on cue.
+- **Versus blasts** with no floor straight below them now use coopBoomStan,
+  as co-op's do since the last batch, instead of being dropped.
+- Left alone: blood and the helmet ricochet when someone else's shot or a
+  guard's hits a guard; a script's health or armour change reaching a
+  joiner's hit prediction up to a second late (AISYNC); the civilian kill
+  count, which only the host's level script acts on.
+- Harness: GE_COOP_TESTDROP=<chrnum>:<s> (host: that chr drops its gun).

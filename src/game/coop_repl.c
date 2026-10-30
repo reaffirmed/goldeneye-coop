@@ -80,6 +80,7 @@ extern StandTile *stanFindTileBelowPos(coord3d *pos, u8 *rooms, f32 *yRtn);
 extern s32 sub_GAME_7F044B38(ObjectRecord *obj);   /* propobj.c: a vehicle's matrix from its yaw, on the floor */
 extern PathRecord *pathFindById(s32 ID);
 extern s32 chraiGetAIListID(AIRecord *list, bool *global);
+extern struct ModelAnimation *animation_table_ptrs2[];
 
 #define COOPREPL_MAX            1024    /* setup objects tracked per stage (Dam has ~300) */
 #define COOPREPL_PER_PKT        16
@@ -1052,10 +1053,15 @@ static void coopReplHarness(u32 missionticks)
  * (COOPPKT_VEHICLE). A joiner takes the path, the next step and the speeds,
  * and puts a vehicle more than COOPVEH_SNAP away where the host's is; the
  * first time that happens (a drop-in) its list also goes to where the host's
- * is. Aircraft follow their own animations closely enough, and the tank is
- * coop_tank.c's. */
+ * is. An aircraft (the Runway plane, the helicopters) flies an animation its
+ * list starts: the same record carries which one, its frame and speed, and a
+ * joiner's that flies another (or none: a drop-in, or a list that never got
+ * there) is put on the host's at its frame, its list moved along the same way.
+ * The frame of the same flight is left alone (coopReplFollowAircraft). The tank
+ * is coop_tank.c's. */
 #define COOPVEH_MAX   8
 #define COOPVEH_SNAP  150.0f    /* units: a vehicle further out than this is put where the host's is */
+enum { COOPVEH_TRUCK = 0, COOPVEH_AIRCRAFT = 1 };
 
 typedef struct
 {
@@ -1064,13 +1070,13 @@ typedef struct
     s16 nextstep;
     u16 ailist;     /* chraiGetAIListID, 0xFFFF none */
     u16 aioffset;
-    u16 pad;
+    u16 kind;       /* COOPVEH_*: an aircraft's path is its animation_table_ptrs2 index (-1 none), and */
     f32 pos[3];
     f32 roty;
-    f32 speed;
-    f32 speedaim;
-    f32 speedtime60;
-    f32 turnrot60;
+    f32 speed;      /* ... its animation frame */
+    f32 speedaim;   /* ... the animation's speed */
+    f32 speedtime60;/* ... where it stops (endframe) */
+    f32 turnrot60;  /* ... its rotor's aimed speed */
 } CoopVehicleRec;
 
 typedef struct
@@ -1103,8 +1109,38 @@ static void coopReplSendVehicles(void)
         bool global;
         s32 id;
 
-        if (obj->type != PROPDEF_VEHICHLE || obj->prop == NULL)
+        if ((obj->type != PROPDEF_VEHICHLE && obj->type != PROPDEF_AIRCRAFT) || obj->prop == NULL)
         {
+            continue;
+        }
+        if (obj->type == PROPDEF_AIRCRAFT)
+        {
+            AircraftRecord *a = (AircraftRecord *) obj;
+            ModelAnimation *anim = (obj->model != NULL) ? objecthandlerGetModelAnim(obj->model) : NULL;
+            s32 n;
+
+            id = (a->ailist != NULL) ? chraiGetAIListID(a->ailist, &global) : -1;
+            r->idx = (u16) i;
+            r->kind = COOPVEH_AIRCRAFT;
+            r->path = -1;
+            for (n = 0; anim != NULL && animation_table_ptrs2[n] != NULL; n++)
+            {
+                if (animation_table_ptrs2[n] == anim)
+                {
+                    r->path = (s16) n;
+                }
+            }
+            r->ailist = (id >= 0) ? (u16) id : 0xFFFF;
+            r->aioffset = a->aioffset;
+            r->pos[0] = obj->prop->pos.f[0];
+            r->pos[1] = obj->prop->pos.f[1];
+            r->pos[2] = obj->prop->pos.f[2];
+            r->roty = a->yrot;
+            r->speed = (obj->model != NULL) ? obj->model->animframe1 : 0.0f;
+            r->speedaim = (obj->model != NULL) ? obj->model->speed : 0.0f;
+            r->speedtime60 = (obj->model != NULL) ? obj->model->endframe : -1.0f;
+            r->turnrot60 = a->rotaryspeedaim;
+            k++;
             continue;
         }
         id = (v->ailist != NULL) ? chraiGetAIListID(v->ailist, &global) : -1;
@@ -1137,6 +1173,44 @@ static void coopReplSendVehicles(void)
     }
 }
 
+static void coopReplFollowAircraft(s32 idx, AircraftRecord *a, const CoopVehicleRec *r)
+{
+    Model *model = a->model;
+    ModelAnimation *want, *ours = objecthandlerGetModelAnim(model);
+    bool global;
+    s32 n;
+
+    a->rotaryspeedaim = r->turnrot60;
+    if (r->path < 0)
+    {
+        return;     /* the host's isn't flying one */
+    }
+    for (n = 0; animation_table_ptrs2[n] != NULL && n < r->path; n++)
+    {
+    }
+    if (n != r->path || (want = animation_table_ptrs2[n]) == NULL)
+    {
+        return;
+    }
+    if (ours == want)
+    {   /* the same flight: its frame is left alone. An aircraft only moves on while
+         * it is in a room some game's player has active, so the host's can stand
+         * still at its start while ours, near our Bond, flies on */
+        return;
+    }
+    if (a->ailist != NULL && r->ailist != 0xFFFF && chraiGetAIListID(a->ailist, &global) == r->ailist)
+    {   /* its list goes on from where the host's is, past the command that started it */
+        a->aioffset = r->aioffset;
+    }
+    modelSetAnimation(model, want, 0, r->speed, r->speedaim, 0.0f);
+    if (r->speedtime60 >= 0.0f)
+    {
+        modelSetAnimEndFrame(model, r->speedtime60);
+    }
+    sVehMoved[idx] = 1;
+    portConLogf("ge: coop: aircraft %d flew another animation: put on the host's, frame %.0f\n", idx, r->speed);
+}
+
 void coopReplVehiclePacket(const void *buf, s32 len, s32 from)
 {
     const CoopVehiclePkt *p = (const CoopVehiclePkt *) buf;
@@ -1156,6 +1230,14 @@ void coopReplVehiclePacket(const void *buf, s32 len, s32 from)
         PathRecord *path;
         f32 dx, dz;
 
+        if (r->kind == COOPVEH_AIRCRAFT)
+        {
+            if (r->idx < sNum && (obj = coopReplObj(r->idx))->type == PROPDEF_AIRCRAFT && obj->prop != NULL && obj->model != NULL)
+            {
+                coopReplFollowAircraft(r->idx, (AircraftRecord *) obj, r);
+            }
+            continue;
+        }
         if (r->idx >= sNum || (obj = coopReplObj(r->idx))->type != PROPDEF_VEHICHLE || obj->prop == NULL)
         {
             continue;
@@ -1227,6 +1309,41 @@ void coopReplStageStart(void)
     sSnapId = 0;
 }
 
+/* GE_COOP_TESTAIR=<s>:<anim>: <s> seconds in, the host's first aircraft starts
+ * flying animation_table_ptrs2[anim] with no list telling the joiners (as their
+ * copy would be after a drop-in; harness only) */
+static void coopReplTestAir(u32 missionticks)
+{
+    static s32 at = -2, anim;
+    s32 i;
+
+    if (at == -2)
+    {
+        const char *e = getenv("GE_COOP_TESTAIR");
+
+        at = -1;
+        if (e != NULL && sscanf(e, "%d:%d", &at, &anim) != 2)
+        {
+            at = -1;
+        }
+    }
+    if (at < 0 || missionticks != (u32) at * 60)
+    {
+        return;
+    }
+    for (i = 0; i < sNum; i++)
+    {
+        ObjectRecord *obj = coopReplObj(i);
+
+        if (obj->type == PROPDEF_AIRCRAFT && obj->prop != NULL && obj->model != NULL)
+        {
+            portConLogf("ge: coop: testair aircraft %d flies animation %d\n", i, anim);
+            modelSetAnimation(obj->model, animation_table_ptrs2[anim], 0, 0.0f, 0.5f, 0.0f);
+            return;
+        }
+    }
+}
+
 void coopReplTick(u32 missionticks)
 {
     sTick++;
@@ -1237,6 +1354,7 @@ void coopReplTick(u32 missionticks)
     if (coopNetIsHost())
     {
         coopReplHarness(missionticks);
+        coopReplTestAir(missionticks);
         coopReplHostTick();
         if ((sTick % 60) == 45)
         {
