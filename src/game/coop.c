@@ -52,6 +52,7 @@
 #include "port_save.h"
 
 extern s32 chrlvCurrentPlayerCall7F0B0E24(ChrRecord *self);
+extern PROP getPropForHeldItem(ITEM_IDS item);
 
 void doorSetOpenState(DoorRecord *door, s32 newstate);
 bool doorIsClosed(DoorRecord *door);
@@ -479,6 +480,8 @@ static CoopTrack sGuardTrack[COOP_MAX_CHRS];   /* joiner: each mirrored chr's re
 static s16 sGuardTrackNum[COOP_MAX_CHRS];      /* the chrnum its track is of */
 static u32 sGuardPktMs;                         /* the guard packet being applied: its clock */
 static u32 sGuardStale;                         /* joiner: guard entries that came after a newer one (counted for the log) */
+static u32 sChrGunOffSince[COOP_MAX_CHRS];     /* joiner: sTick our copy's gun first differed from the host's, 0 same */
+#define COOP_GUN_OFF_TICKS 90   /* that long before we take it away: a drop's event comes first */
 static u8 sChrHostDying[COOP_MAX_CHRS];         /* the host's says this chr is dying or dead */
 static u8 sChrFireSeen[COOP_MAX_CHRS][2]; /* host: firecount at the last snapshot */
 static u8 sChrFiring[COOP_MAX_CHRS];      /* client: GSF_FIRE_* from the last snapshot */
@@ -3242,6 +3245,37 @@ static void coopHarnessTick(void)
         }
     }
 
+    if (coopNetIsHost() && coopPartnerHere())
+    {   /* GE_COOP_TESTUNARM=<chrnum>:<s>: <s> seconds in, that chr puts its gun away
+         * as an ending's chr_remove_item_in_hand does; 3 s later its script gives
+         * it a D5K, which it puts away 5 s after that (harness only) */
+        static s32 testunarm = -1, unarmchr;
+        if (testunarm == -1)
+        {
+            const char *e = getenv("GE_COOP_TESTUNARM");
+            testunarm = 0;
+            if (e != NULL && sscanf(e, "%d:%d", &unarmchr, &testunarm) != 2)
+            {
+                testunarm = 0;
+            }
+        }
+        if (testunarm > 0 && coopInMission()
+            && (sMissionTicks == (u32) testunarm * 60 || sMissionTicks == (u32) testunarm * 60 + 180 || sMissionTicks == (u32) testunarm * 60 + 480))
+        {
+            ChrRecord *c = chrFindByLiteralId(unarmchr);
+            if (c != NULL && sMissionTicks == (u32) testunarm * 60 + 180)
+            {
+                portConLogf("ge: coop: testunarm chr %d gets a D5K\n", unarmchr);
+                chrGiveWeapon(c, getPropForHeldItem(ITEM_MP5K), ITEM_MP5K, 0);
+            }
+            else if (c != NULL)
+            {
+                portConLogf("ge: coop: testunarm chr %d\n", unarmchr);
+                chrSetWeaponFlag4(c, GUNRIGHT);
+            }
+        }
+    }
+
     if (coopPartnerHere())
     {   /* GE_COOP_TESTDOOR=1: toggle the door nearest Bond every 10 s (harness only) */
         static s32 testdoor = -1;
@@ -4280,6 +4314,31 @@ static void coopApplyGuard(CoopGuardEnt *e)
     else
     {
         chr->chrflags &= ~CHRFLAG_HIDDEN;
+    }
+    if (slot >= 0 && slot < COOP_MAX_CHRS)
+    {   /* the host's guard put its gun away or holds another (an ending's
+         * chr_remove_item_in_hand): ours goes too, once that has lasted long
+         * enough that it isn't a drop whose DROP event is still on its way.
+         * The new one, if any, is given below once the hand is empty */
+        PropRecord *held = chrGetEquippedWeaponProp(chr, GUNRIGHT);
+        s32 differs = held != NULL && held->type == PROP_TYPE_WEAPON && held->weapon != NULL
+            && !(held->weapon->runtime_bitflags & RUNTIMEBITFLAG_REMOVE) && !(e->flags & GSF_DYING)
+            && held->weapon->weaponnum != (e->gunitem > 0 ? e->gunitem : ITEM_UNARMED);
+
+        if (!differs)
+        {
+            sChrGunOffSince[slot] = 0;
+        }
+        else if (sChrGunOffSince[slot] == 0)
+        {
+            sChrGunOffSince[slot] = sTick;
+        }
+        else if (sTick - sChrGunOffSince[slot] >= COOP_GUN_OFF_TICKS)
+        {
+            portConLogf("ge: coop: host chr %d put away gun %d (now %d)\n", e->chrnum, held->weapon->weaponnum, e->gunitem);
+            chrSetWeaponFlag4(chr, GUNRIGHT);
+            sChrGunOffSince[slot] = 0;
+        }
     }
     if (e->gunitem > 0 && e->gunitem < ITEM_IDS_MAX && e->gunmodel >= 0 && e->gunmodel < PROP_MAX
         && !(e->flags & GSF_DYING) && chrGetEquippedWeaponProp(chr, GUNRIGHT) == NULL)
