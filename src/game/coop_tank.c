@@ -14,7 +14,9 @@
  *   - a tank a partner is driving can't be entered (bondview2.c)
  *
  * The tank's shells are the driver's own shots and explosions, which co-op
- * already shares.
+ * already shares. Running guards over is the host's: the driver's game
+ * leaves guard damage to it, so the host runs the same crush against its
+ * copy of a partner's tank (coopTankCrush).
  */
 #include <ultra64.h>
 #include <string.h>
@@ -30,6 +32,11 @@
 #include "propobj.h"
 #include "stan.h"
 #include "chrai.h"
+#include "chraction.h"
+#include "chr.h"
+#include "model.h"
+#include <music.h>
+#include <snd.h>
 #include "coop.h"
 
 extern void portConLogf(const char *fmt, ...);
@@ -176,6 +183,127 @@ void coopTankPacket(const void *raw, s32 len, s32 from)
     chrobjCollisionRelated(obj);
 }
 
+/* GE_COOP_TESTTANKCHR=<chrnum>: host, once a partner has driven a tank for
+ * 2 s, stand that chr in front of it, where its turning sweeps (harness only) */
+static void coopTankTestChr(s32 player)
+{
+    static s32 chrnum = -2;
+    static u32 since;
+    ObjectRecord *obj;
+    ChrRecord *chr;
+    coord3d pos;
+    StandTile *stan;
+
+    if (chrnum == -2)
+    {
+        const char *e = getenv("GE_COOP_TESTTANKCHR");
+
+        chrnum = (e != NULL) ? atoi(e) : -1;
+    }
+    if (chrnum < 0)
+    {
+        return;
+    }
+    if (since == 0)
+    {
+        since = sNow;
+    }
+    if (sNow - since < 120 || (chr = chrFindByLiteralId(chrnum)) == NULL || chr->prop == NULL)
+    {
+        return;
+    }
+    obj = (ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + sOfs[player]);
+    pos = obj->prop->pos;
+    pos.f[0] += 150.0f * sinf(((TankRecord *) obj)->tank_orientation_angle);
+    pos.f[2] += 150.0f * cosf(((TankRecord *) obj)->tank_orientation_angle);
+    stan = stanFindTileBelowPos(&pos, NULL, NULL);
+    if (stan != NULL)
+    {
+        pos.f[1] = stanGetPositionYValue(stan, pos.f[0], pos.f[2]) + 1.0f;
+        chr->prop->pos = pos;
+        chr->prop->stan = stan;
+        setsuboffset(chr->model, &pos);
+        chrDetectRooms(chr);
+        portConLogf("ge: coop: testtankchr: chr %d stands at %.0f %.0f %.0f by player %d's tank\n", chrnum, pos.f[0], pos.f[1], pos.f[2],
+            player + 1);
+    }
+    chrnum = -1;
+}
+
+/* host: a partner's tank runs over what is under it, as bondview2.c does for
+ * the driver's own (a joiner's game skips the damage, coopSkipExplosionDamage):
+ * the tank's box on the ground, turned its way, around where its packets put
+ * it; a chr inside or touching it is hurt, a dying one makes the crush sounds */
+static void coopTankCrush(s32 player)
+{
+    ObjectRecord *obj = (ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + sOfs[player]);
+    TankRecord *tank = (TankRecord *) obj;
+    struct ModelRoData_BoundingBoxRecord *bbox;
+    struct rect4f box;
+    s32 rooms[8];
+    s16 *ix;
+    f32 c, sn, x0, x1, z0, z1;
+    coord3d at;
+
+    if (obj->type != PROPDEF_TANK || obj->prop == NULL || obj->model == NULL
+        || (bbox = chrobjGetBboxFromObjectRecord(obj)) == NULL)
+    {
+        return;
+    }
+    at = obj->prop->pos;
+    x0 = bbox->Bounds.xmin;
+    x1 = bbox->Bounds.xmax;
+    z0 = bbox->Bounds.zmin;
+    z1 = bbox->Bounds.zmax;
+    c = obj->model->scale * cosf(tank->tank_orientation_angle);
+    sn = obj->model->scale * sinf(tank->tank_orientation_angle);
+    box.points[0].f[0] = at.f[0] - z0 * sn + x0 * c;
+    box.points[0].f[1] = at.f[2] + z0 * c + x0 * sn;
+    box.points[1].f[0] = at.f[0] - z0 * sn + x1 * c;
+    box.points[1].f[1] = at.f[2] + z0 * c + x1 * sn;
+    box.points[2].f[0] = at.f[0] - z1 * sn + x1 * c;
+    box.points[2].f[1] = at.f[2] + z1 * c + x1 * sn;
+    box.points[3].f[0] = at.f[0] - z1 * sn + x0 * c;
+    box.points[3].f[1] = at.f[2] + z1 * c + x0 * sn;
+
+    chraiGetPropRoomIds(obj->prop, rooms);
+    roomGetProps(rooms);
+    for (ix = ptr_list_object_lookup_indices; *ix >= 0; ix++)
+    {
+        PropRecord *prop = &g_Props[*ix];
+        ChrRecord *chr;
+        f32 radius, height, zb;
+        s32 under;
+
+        if (prop == obj->prop || prop->type != PROP_TYPE_CHR || (chr = prop->chr) == NULL
+            || coopPropIsPartner(prop) || chr->chrnum >= COOP_PUPPET_CHRNUM)
+        {
+            continue;
+        }
+        chrpropGetCollisionBounds(prop, &radius, &height, &zb);
+        under = chrpropTestPointInPolygon(&prop->pos, &box, 4);
+        if (under && chr->actiontype == ACT_DIE && !(chr->chrflags & CHRFLAG_01000000))
+        {
+            chr->chrflags |= CHRFLAG_01000000;
+            chrobjSndCreatePostEventDefault(sndPlaySfx((struct ALBankAlt_s *) g_musicSfxBufferPtr, CRUSHED_YELL_SFX, NULL), &prop->pos);
+            chrobjSndCreatePostEventDefault(sndPlaySfx((struct ALBankAlt_s *) g_musicSfxBufferPtr, TANK_CRUSH_MAN_SFX, NULL), &prop->pos);
+        }
+        if (under || chrobjTestPointPolygonCollision(&prop->pos, radius, &box, 4))
+        {
+            coord3d from;
+
+            if (chr->actiontype != ACT_DIE && chr->actiontype != ACT_DEAD)
+            {
+                portConLogf("ge: coop: player %d's tank runs over chr %d\n", player + 1, chr->chrnum);
+            }
+            from.f[0] = at.f[0];
+            from.f[1] = prop->pos.f[1];
+            from.f[2] = at.f[2];
+            chrlvExplosionDamage(chr, &from, 3.0f, 1);
+        }
+    }
+}
+
 /* GE_COOP_TESTTANK=<s>: <s> seconds into the mission stand on the tank, get
  * in, and turn it for 10 s (harness only) */
 s32 coopTankTestTap(void)
@@ -248,6 +376,19 @@ void coopTankTick(s32 inmission)
     if (!coopLobbyHasPartner())
     {
         return;
+    }
+    if (coopExtIsHost() && g_CurrentSetup.propDefs != NULL)
+    {
+        s32 p;
+
+        for (p = 1; p < COOP_MAX_PLAYERS; p++)
+        {
+            if (coopTankDriving(p))
+            {
+                coopTankTestChr(p);
+                coopTankCrush(p);
+            }
+        }
     }
     if (g_PlayerIsInTank == 1 && g_PlayerTankProp != NULL && g_PlayerTankProp->type == PROP_TYPE_OBJ)
     {
