@@ -69,6 +69,7 @@ static s32 sMyOfs = -1;     /* the tank we drove, for the packets after we got o
 static s32 sOutFor;
 static s32 sTestAt = -2;    /* GE_COOP_TESTTANK */
 static s32 sTestSpin = 1;
+static s32 sParkedOfs = -1; /* the last tank anyone drove: the host sends where it stands while nobody does */
 
 s32 coopTankDriving(s32 player)
 {
@@ -176,6 +177,7 @@ void coopTankPacket(const void *raw, s32 len, s32 from)
     }
     sOfs[player] = p.driving ? p.tankofs : -1;
     sSeen[player] = sNow;
+    sParkedOfs = p.tankofs;
     if (g_PlayerIsInTank == 1 && g_PlayerTankProp == prop)
     {
         return;     /* we got in at the same moment: ours wins here */
@@ -392,6 +394,7 @@ void coopTankTick(s32 inmission)
         memset(sOfs, 0xFF, sizeof(sOfs));
         sMyOfs = -1;
         sOutFor = 0;
+        sParkedOfs = -1;
         return;
     }
     coopTankTestTick();
@@ -419,6 +422,7 @@ void coopTankTick(s32 inmission)
             portConLogf("ge: coop: we are driving tank %d\n", coopExtSetupOfs(g_PlayerTankProp->obj));
         }
         sMyOfs = coopExtSetupOfs(g_PlayerTankProp->obj);
+        sParkedOfs = sMyOfs;
         sOutFor = 0;
         if ((sNow & 1) == 0)
         {
@@ -434,6 +438,38 @@ void coopTankTick(s32 inmission)
         if (sOutFor > 60)
         {
             sMyOfs = -1;
+        }
+    }
+    else if (coopExtIsHost() && sParkedOfs >= 0 && sNow % 60 == 0 && g_CurrentSetup.propDefs != NULL)
+    {   /* a tank left where nobody drives it: the vehicles' replication leaves
+         * tanks out, and a player who dropped in or came back since had it
+         * where the level put it. Once a second, where it stands. */
+        ObjectRecord *obj = (ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + sParkedOfs);
+
+        if (obj->type == PROPDEF_TANK && obj->prop != NULL && !coopTankTaken(obj->prop))
+        {
+            coopTankSend(obj, 0);
+        }
+    }
+}
+
+/* coop.c coopRenumber: host migration renumbered the players, newof[old] = new, -1 gone */
+void coopTankRenumber(const s32 *newof)
+{
+    s32 ofs[COOP_MAX_PLAYERS];
+    u32 seen[COOP_MAX_PLAYERS];
+    s32 p;
+
+    memcpy(ofs, sOfs, sizeof(ofs));
+    memcpy(seen, sSeen, sizeof(seen));
+    memset(sOfs, 0xFF, sizeof(sOfs));
+    memset(sSeen, 0, sizeof(sSeen));
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        if (newof[p] >= 0 && newof[p] < COOP_MAX_PLAYERS)
+        {
+            sOfs[newof[p]] = ofs[p];
+            sSeen[newof[p]] = seen[p];
         }
     }
 }

@@ -420,6 +420,7 @@ void coopReplSendSnapshot(s32 player)
     sOut[player].snapAt = 0;
     sOut[player].snapid = ++sSnapSerial;
     portConLogf("ge: coop: repl: full snapshot to player %d (%d objects)\n", player + 1, sNum);
+    coopItemsSendAllTo(player);     /* and what has been thrown and dropped (coop_items.c) */
 }
 
 static void coopReplSend(s32 player, s32 from, s32 snap, u32 snapid)

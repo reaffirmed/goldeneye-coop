@@ -879,6 +879,15 @@ static void coopRecvEvents(s32 c, CoopEventsPkt *e)
     u32 k;
 
     coopChanSession(c, e->session);
+    if ((s32) (e->ack - (ch->outNext - 1)) > 0)
+    {   /* it acks events we never sent: it is still talking to the game we were
+         * before we restarted (a rejoin), and hasn't seen our new session yet.
+         * Taking that ack put ours past everything we had queued, so the
+         * queue read as full for the rest of the mission and every event we
+         * sent after a rejoin was dropped; its events are its old numbering
+         * too. It starts again once it hears from us (coopChanSession). */
+        return;
+    }
     if ((s32) (e->ack - ch->outAcked) > 0)
     {
         ch->outAcked = e->ack;
@@ -2639,6 +2648,21 @@ static void coopHarnessTick(void)
             testend = 0;
             portConLogf("ge: coop: testend\n");
             bossReturnTitleStage();
+        }
+    }
+    {   /* GE_COOP_TESTDETONATE=<s>: press the watch's detonator that far in (harness only) */
+        static s32 testdet = -1;
+        if (testdet == -1)
+        {
+            const char *e = getenv("GE_COOP_TESTDETONATE");
+            testdet = (e == NULL) ? 0 : atoi(e) * 60;
+        }
+        if (testdet > 0 && sMissionTicks >= (u32) testdet)
+        {
+            extern void trigger_remote_mine_detonation(void);
+            testdet = 0;
+            portConLogf("ge: coop: testdetonate: we are player %d\n", coopSelf() + 1);
+            trigger_remote_mine_detonation();
         }
     }
     {   /* GE_COOP_TESTLEAVE=<ticks>: Abort our own mission from the watch that far in, as a joiner does (harness only) */
@@ -9463,6 +9487,8 @@ static void coopRenumber(const s32 *newof)
         sChan[c].heardMs = now;
     }
     coopStatsRemap(newof);
+    coopItemsRenumber(newof);
+    coopTankRenumber(newof);
     coopVoiceRenumber(newof);
     coopVoteRenumber(newof);
 }
