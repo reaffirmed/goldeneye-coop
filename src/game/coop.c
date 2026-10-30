@@ -49,6 +49,7 @@
 #include "file.h"
 #include "gun.h"
 #include "glass.h"
+#include "bg.h"
 #include "math_atan2f.h"   /* the game's math.h has no atan2f: undeclared, it returned garbage (-w hides it) */
 #include "port_save.h"
 #include <music.h>
@@ -537,6 +538,10 @@ static void coopSendGuards(void);
 static void coopReapGuards(void);
 static void coopGuardThuds(void);
 static void coopGuardsFadeTick(void);
+static void coopMirrorSlotFresh(ChrRecord *chr);
+static void coopMirrorMakeRoom(s32 chrnum);
+static void coopMirrorMissed(const CoopGuardEnt *e, const char *why);
+static void coopGuardsWatch(void);
 static void coopGuardSneezes(void);
 static void coopFlushImpacts(void);
 static u32 sImpactsGot;     /* joiner: guards' shots whose landing the host sent */
@@ -2228,6 +2233,10 @@ static void coopTickBody(void)
         if (!sNoInterp)
         {
             coopGuardsInterpTick();
+        }
+        if ((sTick % 60) == 45)
+        {
+            coopGuardsWatch();
         }
     }
 
@@ -4430,9 +4439,26 @@ static ChrRecord *coopMirrorSpawn(CoopGuardEnt *e)
         sMirrorSpawnTick = sTick;
         sMirrorSpawnsThisTick = 0;
     }
-    if (sMirrorSpawnsThisTick >= 4 || chrGetNumFree() < 3)
+    if (sMirrorSpawnsThisTick >= 4)
     {
         return NULL; /* try again on the next snapshot */
+    }
+    if (chrGetNumFree() < 3)
+    {   /* the host spawned this one with 3 free (chrSpawnAtCoord), but we hold
+         * bodies for a few seconds after the host frees them, so we often have
+         * fewer: Surface 1 has 19 chr slots and respawns four guards over and
+         * over, and its respawns came up with nothing here until a body went.
+         * A living guard outranks a body; a body waits for room to spare */
+        if (e->flags & GSF_DYING)
+        {
+            return NULL;
+        }
+        coopMirrorMakeRoom(e->chrnum);
+        if (chrGetNumFree() < 1)
+        {
+            coopMirrorMissed(e, "no free chr slot");
+            return NULL;
+        }
     }
     pos.f[0] = e->pos[0];
     pos.f[1] = e->pos[1];
@@ -4440,16 +4466,19 @@ static ChrRecord *coopMirrorSpawn(CoopGuardEnt *e)
     stan = stanFindTileBelowPos(&pos, NULL, NULL);
     if (stan == NULL)
     {
+        coopMirrorMissed(e, "no floor below its spot");
         return NULL;
     }
     header = retrieve_header_for_body_and_head(e->body, e->head, 0);
     if (header == NULL)
     {
+        coopMirrorMissed(e, "no model for its body");
         return NULL;
     }
     prop = chrAllocate(header, &pos, e->yaw, stan, (s32) ailistFindById(GAILIST_DEAD_AI));
     if (prop == NULL)
     {
+        coopMirrorMissed(e, "no free prop");
         return NULL;
     }
     sMirrorSpawnsThisTick++;
@@ -4457,10 +4486,7 @@ static ChrRecord *coopMirrorSpawn(CoopGuardEnt *e)
     chrpropEnable(prop);
     chr = prop->chr;
     chr->chrnum = e->chrnum;
-    if (coopChrSlot(chr) >= 0 && coopChrSlot(chr) < COOP_MAX_CHRS)
-    {
-        sChrHostDying[coopChrSlot(chr)] = 0;    /* the slot's last chr's: a new one starts up */
-    }
+    coopMirrorSlotFresh(chr);   /* the slot's last chr's state: a new one starts up */
     chr->bodynum = e->body;
     chr->headnum = e->head;
     /* an out-of-range item or model would put some other prop in its hand */
@@ -4744,6 +4770,112 @@ static void coopGuardsInterpTick(void)
             chrDetectRooms(chr);
         }
         setsubroty(chr->model, at.yaw);
+    }
+}
+
+/* one chr as this game has it: where it is drawn, what it stands on, its
+ * rooms (r: being drawn this frame), fade and hidden bits, and on a joiner
+ * the host's newest spot for it. For F8 reports (coop.txt) and coopGuardsWatch */
+static s32 coopGuardLine(char *buf, s32 cap, ChrRecord *chr, s32 i)
+{
+    PropRecord *prop = chr->prop;
+    s32 n, k, shown = 0;
+    char rooms[48];
+    s32 rn = 0;
+
+    rooms[0] = '\0';
+    for (k = 0; k < PROPRECORD_STAN_ROOM_LEN && prop->rooms[k] != 0xFF && rn < (s32) sizeof(rooms) - 6; k++)
+    {
+        s32 r = getROOMID_isRendered(prop->rooms[k]) != 0;
+
+        shown |= r;
+        rn += snprintf(rooms + rn, sizeof(rooms) - rn, "%s%d%s", k ? "," : "", (int) prop->rooms[k], r ? "r" : "");
+    }
+    n = snprintf(buf, cap, "chr %d slot %d act %d pos %.0f %.0f %.0f ground %.0f stan %s rooms %s%s alpha %d hidden %s%x prop %x",
+                 chr->chrnum, i, (int) chr->actiontype, prop->pos.f[0], prop->pos.f[1], prop->pos.f[2], chr->ground,
+                 prop->stan != NULL ? "yes" : "NONE", rn ? rooms : "NONE", shown ? "" : " (none drawn)",
+                 (int) chr->fadealpha, (chr->chrflags & CHRFLAG_HIDDEN) ? "FLAG " : "", (unsigned) chr->hidden,
+                 (unsigned) prop->flags);
+    if (n < cap && !coopNetIsHost() && i < COOP_MAX_CHRS && sGuardTrackNum[i] == chr->chrnum && sGuardTrack[i].n > 0)
+    {
+        const CoopSample *h = &sGuardTrack[i].s[sGuardTrack[i].n - 1];
+        f32 dx = prop->pos.f[0] - h->pos[0], dy = prop->pos.f[1] - h->pos[1], dz = prop->pos.f[2] - h->pos[2];
+
+        n += snprintf(buf + n, cap - n, ", host's %.0f %.0f %.0f (%.0f away), synced %u ticks ago",
+                      h->pos[0], h->pos[1], h->pos[2], sqrtf(dx * dx + dy * dy + dz * dz), (unsigned) (sTick - sChrLastSync[i]));
+    }
+    else if (n < cap && !coopNetIsHost())
+    {
+        n += snprintf(buf + n, cap - n, ", no host track");
+    }
+    return n < cap ? n : cap - 1;
+}
+
+/* joiner: every second, a living guard of the host's near us that this game
+ * would not show (off the floor, in no room being drawn while it should be,
+ * faded, hidden, or far from the host's spot) is said in the log, so the next
+ * report of a guard missing on a joiner's screen says why */
+static void coopGuardsWatch(void)
+{
+    static u32 said[COOP_MAX_CHRS];
+    PropRecord *bond = getCurrentPlayerProp();
+    s32 i;
+
+    if (bond == NULL || g_ChrSlots == NULL)
+    {
+        return;
+    }
+    for (i = 0; i < g_NumChrSlots && i < COOP_MAX_CHRS; i++)
+    {
+        ChrRecord *chr = &g_ChrSlots[i];
+        const char *why = NULL;
+        f32 dx, dz;
+        char line[320];
+
+        if (chr->model == NULL || chr->prop == NULL || coopIsPlayerChr(chr) || chr->actiontype == ACT_DIE
+            || chr->actiontype == ACT_DEAD || (chr->hidden & CHRHIDDEN_REMOVE) || (chr->chrflags & CHRFLAG_HIDDEN))
+        {
+            continue;
+        }
+        dx = chr->prop->pos.f[0] - bond->pos.f[0];
+        dz = chr->prop->pos.f[2] - bond->pos.f[2];
+        if (dx * dx + dz * dz > 4000.0f * 4000.0f)
+        {
+            continue;
+        }
+        if (sGuardTrackNum[i] != chr->chrnum || sGuardTrack[i].n == 0)
+        {
+            why = "has no track of the host's";
+        }
+        else
+        {
+            const CoopSample *h = &sGuardTrack[i].s[sGuardTrack[i].n - 1];
+            f32 hx = chr->prop->pos.f[0] - h->pos[0], hy = chr->prop->pos.f[1] - h->pos[1], hz = chr->prop->pos.f[2] - h->pos[2];
+
+            if (chr->prop->stan == NULL)
+            {
+                why = "stands on no floor";
+            }
+            else if (hx * hx + hy * hy + hz * hz > 400.0f * 400.0f)
+            {
+                why = "is drawn far from the host's spot";
+            }
+            else if (chr->fadealpha != 0xFF)
+            {
+                why = "is faded";
+            }
+            else if (chr->prop->rooms[0] == 0xFF)
+            {
+                why = "is in no room";
+            }
+        }
+        if (why == NULL || (said[i] != 0 && sTick - said[i] < 300))
+        {
+            continue;
+        }
+        said[i] = sTick;
+        coopGuardLine(line, sizeof(line), chr, i);
+        portConLogf("ge: coop: watch: host chr %d %s: %s\n", chr->chrnum, why, line);
     }
 }
 
@@ -5120,6 +5252,106 @@ static void coopPredictReset(void)
 {
     memset(sPred, 0, sizeof(sPred));
     memset(sAiSyncGot, 0, sizeof(sAiSyncGot));
+}
+
+/* joiner: a new mirror in a slot whose last chr may have been the same
+ * guard's earlier life (Surface 1 and Jungle give a respawn the dead one's
+ * number): nothing of that one's carries over. Its prediction came back as
+ * "predict: guard N survived" on the new one, its track drew it from where
+ * the body lay, and its fade, thuds and AI state were the body's */
+static void coopMirrorSlotFresh(ChrRecord *chr)
+{
+    s32 slot = coopChrSlot(chr);
+
+    if (slot < 0 || slot >= COOP_MAX_CHRS)
+    {
+        return;
+    }
+    sChrHostDying[slot] = 0;
+    coopPredictForget(slot);
+    sPred[slot].chrnum = -1;
+    coopTrackReset(&sGuardTrack[slot]);
+    sGuardTrackNum[slot] = -1;
+    sChrFade[slot] = 0;
+    sChrLastSync[slot] = sTick;
+    sChrFiring[slot] = 0;
+    sChrGunOffSince[slot] = 0;
+    sThudAnim[slot] = NULL;
+    sSneezed[slot] = 0;
+    sAiSyncHave[slot] = 0;
+    sLeftGunOff[slot] = 0;
+    chr->fadealpha = 0xFF;
+}
+
+/* joiner, short of chr slots for a living guard of the host's: free the body
+ * the host stopped sending longest ago (one at a time: it goes on its own
+ * chrTick, and the snapshot after that makes the guard) */
+static void coopMirrorMakeRoom(s32 chrnum)
+{
+    static u32 lastTick;
+    ChrRecord *pick = NULL;
+    s32 i, pickslot = -1;
+
+    if (lastTick != 0 && sTick - lastTick < 10)
+    {
+        return;     /* the last one is still on its way out */
+    }
+    for (i = 0; i < g_NumChrSlots && i < COOP_MAX_CHRS; i++)
+    {
+        ChrRecord *chr = &g_ChrSlots[i];
+
+        if (chr->model == NULL || chr->prop == NULL || coopIsPlayerChr(chr) || chr->chrnum == chrnum
+            || (chr->hidden & CHRHIDDEN_REMOVE))
+        {
+            continue;
+        }
+        if (chr->actiontype != ACT_DEAD && !(chr->actiontype == ACT_DIE && sChrHostDying[i]))
+        {
+            continue;
+        }
+        if (pick == NULL || (s32) (sChrLastSync[i] - sChrLastSync[pickslot]) < 0)
+        {
+            pick = chr;
+            pickslot = i;
+        }
+    }
+    if (pick == NULL)
+    {
+        return;
+    }
+    lastTick = sTick;
+    portConLogf("ge: coop: no chr slot for host chr %d: body %d goes to make room (%d free)\n", chrnum, pick->chrnum, chrGetNumFree());
+    pick->hidden |= CHRHIDDEN_REMOVE;
+    pick->chrnum = -1;  /* the host's snapshots of it no longer find it */
+}
+
+/* joiner: a host chr we could not mirror, said once in a while, not every snapshot */
+static void coopMirrorMissed(const CoopGuardEnt *e, const char *why)
+{
+    static s16 num[8];
+    static u32 at[8];
+    s32 k, old = 0;
+
+    for (k = 0; k < 8; k++)
+    {
+        if (num[k] == e->chrnum && at[k] != 0)
+        {
+            if (sTick - at[k] < 300)
+            {
+                return;
+            }
+            break;
+        }
+        if ((s32) (at[k] - at[old]) < 0)
+        {
+            old = k;
+        }
+    }
+    k = (k < 8) ? k : old;
+    num[k] = (s16) e->chrnum;
+    at[k] = sTick ? sTick : 1;
+    portConLogf("ge: coop: can't mirror host chr %d at %.0f %.0f %.0f yet: %s (%d chr slots free)\n",
+                e->chrnum, e->pos[0], e->pos[1], e->pos[2], why, chrGetNumFree());
 }
 
 static s32 coopPredictWindowMs(void)
@@ -10981,6 +11213,21 @@ s32 coopDebugDump(char *buf, s32 cap)
                  i, coopNetPeerName(i), coopNetPeerConnected(i), (unsigned) c->session,
                  (unsigned) c->outNext, (unsigned) c->outAcked, (unsigned) c->inDone,
                  (unsigned) (now - c->heardMs));
+        }
+        if (coopInStage() && g_ChrSlots != NULL)
+        {   /* every chr: the two reports side by side show a guard one game has and the other doesn't */
+            DUMP("chrs (%d slots, %d free):\n", (int) g_NumChrSlots, (int) chrGetNumFree());
+            for (i = 0; i < g_NumChrSlots; i++)
+            {
+                ChrRecord *chr = &g_ChrSlots[i];
+
+                if (chr->model == NULL || chr->prop == NULL || n >= cap - 1)
+                {
+                    continue;
+                }
+                n += coopGuardLine(buf + n, cap - n, chr, i);
+                DUMP("%s\n", coopIsPlayerChr(chr) ? " (a player)" : "");
+            }
         }
     }
 #undef DUMP

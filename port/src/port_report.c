@@ -589,7 +589,7 @@ static void reportWriteInfo(const char *dir, const char *what)
 
 static void reportWriteCommon(const char *dir)
 {
-    static char coop[8192];
+    static char coop[32768];
     char path[1300];
     FILE *f;
 
