@@ -241,6 +241,7 @@ typedef struct
 
 #define COOP_EVENTS_PER_PKT 32
 #define COOP_PUPPET_CHRNUM  30000
+#define COOP_LEFTGUN_NONE   0xFF
 #define COOP_YELP_GAP_MS    400     /* a hurt guard's yelp: not again this soon after the last one here */
 #define COOP_PARTNER_SIGHT  6000.0f    /* coopChrNearPartner */
 #define COOP_EVENT_RING     256
@@ -305,7 +306,8 @@ typedef struct
     u8 alertness;
     u8 flags2;
     u8 random;
-    u8 pad[3];
+    u8 leftgun;     /* the left hand's ITEM_IDS, COOP_LEFTGUN_NONE empty, 0 a host from before it was sent */
+    u8 pad[2];
     u32 chrflags;
     u16 hidden;
     s16 padpreset1;
@@ -546,6 +548,7 @@ static u32 coopNowMs(void);
 static void coopSessionTick(void);
 static void coopRecvBye(s32 c, CoopByePkt *b);
 static void coopRecvAiSync(CoopAiPkt *p);
+static void coopFollowLeftGun(ChrRecord *chr, s32 slot, s32 item);
 static void coopSendAiSync(void);
 static void coopApplyNote(CoopEvent *ev);
 static void coopApplyEndAll(void);
@@ -570,6 +573,7 @@ static PropRecord *sCorpse;   /* our own body while we are down (coopCorpseTick)
 static u8 sLeashNear;          /* players who have come to a leash scene this mission (coopLeashBroken) */
 static CoopAiEnt sAiSync[COOP_MAX_CHRS];    /* joiner: the host's AI state per chr slot (COOPPKT_AISYNC) */
 static u8 sAiSyncHave[COOP_MAX_CHRS];
+static u8 sLeftGunOff[COOP_MAX_CHRS];  /* joiner: AI syncs in a row the host's left hand was empty and ours not */
 static s16 sHatSeen[COOP_MAX_CHRS];     /* joiner: 1 + the chrnum whose hat our copy has had, so one shot off isn't put back */
 static void coopSayBye(void);
 static s32 coopLobbyStart(const char *spec);
@@ -2031,6 +2035,7 @@ void coopStageStart(void)
     sLastSnapTick = 0;
     memset(sAiSyncHave, 0, sizeof(sAiSyncHave));
     memset(sHatSeen, 0, sizeof(sHatSeen));
+    memset(sLeftGunOff, 0, sizeof(sLeftGunOff));
     memset(sChrHostDying, 0, sizeof(sChrHostDying));
     coopPredictReset();
     sMissionTicks = 0;
@@ -3302,6 +3307,35 @@ static void coopHarnessTick(void)
             {
                 portConLogf("ge: coop: testunarm chr %d\n", unarmchr);
                 chrSetWeaponFlag4(c, GUNRIGHT);
+            }
+        }
+    }
+
+    if (coopNetIsHost() && coopPartnerHere())
+    {   /* GE_COOP_TESTLEFT=<chrnum>:<s>: <s> seconds in, that chr gets a second D5K
+         * in its left hand, put away 6 s later (harness only) */
+        static s32 testleft = -1, leftchr;
+        if (testleft == -1)
+        {
+            const char *e = getenv("GE_COOP_TESTLEFT");
+            testleft = 0;
+            if (e != NULL && sscanf(e, "%d:%d", &leftchr, &testleft) != 2)
+            {
+                testleft = 0;
+            }
+        }
+        if (testleft > 0 && coopInMission() && (sMissionTicks == (u32) testleft * 60 || sMissionTicks == (u32) testleft * 60 + 360))
+        {
+            ChrRecord *c = chrFindByLiteralId(leftchr);
+            if (c != NULL && sMissionTicks == (u32) testleft * 60 && chrGetEquippedWeaponProp(c, GUNLEFT) == NULL)
+            {
+                portConLogf("ge: coop: testleft chr %d gets a left-hand D5K\n", leftchr);
+                chrGiveWeapon(c, getPropForHeldItem(ITEM_MP5K), ITEM_MP5K, PROPFLAG_WEAPON_LEFTHANDED);
+            }
+            else if (c != NULL && sMissionTicks != (u32) testleft * 60)
+            {
+                portConLogf("ge: coop: testleft chr %d puts it away\n", leftchr);
+                chrSetWeaponFlag4(c, GUNLEFT);
             }
         }
     }
@@ -8798,6 +8832,12 @@ static void coopSendAiSync(void)
         e->maxdamage = chr->maxdamage;
         e->hat = (chr->handle_positiondata_hat != NULL && chr->handle_positiondata_hat->obj != NULL)
                  ? (s16) (chr->handle_positiondata_hat->obj->obj + 1) : 0;
+        {
+            PropRecord *left = chrGetEquippedWeaponProp(chr, GUNLEFT);
+
+            e->leftgun = (left != NULL && left->type == PROP_TYPE_WEAPON && left->weapon != NULL && left->weapon->weaponnum > 0
+                          && left->weapon->weaponnum < COOP_LEFTGUN_NONE) ? (u8) left->weapon->weaponnum : COOP_LEFTGUN_NONE;
+        }
         if (pkt.count == COOP_AI_PER_PKT)
         {
             coopNetSend(&pkt, hdr + pkt.count * (s32) sizeof(CoopAiEnt));
@@ -8831,6 +8871,47 @@ static void coopFollowHat(ChrRecord *chr, s32 slot, s32 hat)
     {
         sHatSeen[slot] = (s16) (chr->chrnum + 1);
         portConLogf("ge: coop: host chr %d wears hat %d: ours put it on\n", chr->chrnum, model);
+    }
+}
+
+/* Joiner: the guard snapshot carries the right hand only, so a guard the host
+ * gave a second gun (a two-gun guard's clone, a script's) fired its left hand
+ * with nothing in it here. The AI sync carries the left; ours gets it when its
+ * hand is empty, and puts its own away when the host's has been empty for two
+ * syncs in a row (a drop's DROP event lands well before that) */
+static void coopFollowLeftGun(ChrRecord *chr, s32 slot, s32 item)
+{
+    PropRecord *held;
+
+    if (item == 0 || chr->model == NULL || chr->actiontype == ACT_DIE || chr->actiontype == ACT_DEAD)
+    {
+        return;     /* an older host says nothing about it */
+    }
+    held = chrGetEquippedWeaponProp(chr, GUNLEFT);
+    if (item == COOP_LEFTGUN_NONE)
+    {
+        if (held == NULL || held->type != PROP_TYPE_WEAPON || held->weapon == NULL
+            || (held->weapon->runtime_bitflags & RUNTIMEBITFLAG_REMOVE))
+        {
+            sLeftGunOff[slot] = 0;
+        }
+        else if (++sLeftGunOff[slot] >= 2)
+        {
+            sLeftGunOff[slot] = 0;
+            chrSetWeaponFlag4(chr, GUNLEFT);
+            portConLogf("ge: coop: host chr %d's left hand is empty: ours put away gun %d\n", chr->chrnum, held->weapon->weaponnum);
+        }
+        return;
+    }
+    sLeftGunOff[slot] = 0;
+    if (held == NULL)
+    {
+        PropRecord *gun = chrGiveWeapon(chr, getPropForHeldItem((ITEM_IDS) item), (ITEM_IDS) item, PROPFLAG_WEAPON_LEFTHANDED);
+
+        if (gun != NULL)
+        {
+            portConLogf("ge: coop: host chr %d holds gun %d in its left hand: ours too\n", chr->chrnum, item);
+        }
     }
 }
 
@@ -8869,6 +8950,7 @@ static void coopRecvAiSync(CoopAiPkt *p)
             sAiSyncHave[slot] = 1;
             sAiSyncGot[slot]++;
             coopFollowHat(chr, slot, p->ent[k].hat);
+            coopFollowLeftGun(chr, slot, p->ent[k].leftgun);
         }
     }
 }
