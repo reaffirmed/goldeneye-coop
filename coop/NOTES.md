@@ -2920,3 +2920,35 @@ online versus. From the versus review (project files, versus-review/):
   80 s: players 1 and 2 kept fighting after 3 quit, nothing hit player 2's
   body after it left, and player 1's game ended the match alone; two
   players, first to 3: four matches in a row to the end screen and back.
+
+## Shot items move the same for everyone (COOP_VERSION stays 16)
+
+Owner's report on v0.6.7: the host throws the covert modem in Dam; the
+joiner shoots it and it hops on the joiner's screen while the host still
+sees it where it landed (and the other way round).
+
+- Cause: objHit's objBounce gives a shot item a random kick in the
+  shooter's game only. COOPEV_OBJKNOCK covered setup objects (a padlock)
+  but returned for anything without a setup offset, so thrown items and
+  guards' dropped guns (coop_items.c) were never sent.
+- coopItemsBounced (after objBounce in objHit) sends COOPEV_ITEMKNOCK (31,
+  the last ext id): the item id, the kick (speed x 1000) and the tumble
+  (projectile->mtx as a quaternion). The others run objBounce on their copy
+  and overwrite its kick with the shooter's, so it flies the same way. Once
+  the shooter's copy has been still for 10 ticks, its place goes out as
+  COOPEV_DROPREST (coopItemsApplyRest takes any item by id).
+- An item stuck to a setup object that a shot knocks loose
+  (coopItemsParentKnocked, before objDropRecursively in objHit): each game
+  drops its own copy through OBJKNOCK's children, then the shooter's
+  resting place goes out the same way.
+- Covers every coop_items item: grenades, the three mines, the modem,
+  camera, bomb case, plastique, the GoldenEye key, guards' dropped guns.
+  An older build ignores type 31, so the protocol number stays.
+- Harness: GE_COOP_TESTKNOCK=<s>[:<every>[:<times>]] knocks the nearest
+  such item as a shot would; GE_COOP_TESTITEMLOG=1 logs where each one is
+  every 2 s.
+- Checked over the mock Steam on Dam (Secret Agent), host throws two modems
+  at 15 s: before, after the joiner's knock the host's copy lay at x 18818
+  and the joiner's at 18518 (3 m apart); after, both logs agree to the unit
+  for three joiner knocks (GE_COOP_NETSIM 120:30:2) and two host knocks on
+  remote mines. Dam, Facility and Frigate mission runs pass.

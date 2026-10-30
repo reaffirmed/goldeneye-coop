@@ -10692,6 +10692,7 @@ void objHit(ShotData *shotdata, BulletHit *hit)
 
 #ifndef TARGET_N64
     coopObjKnockChildren(hit->prop->child != NULL);
+    coopItemsParentKnocked(hit->prop);  /* co-op: a thrown item stuck to it lands in the same place everywhere */
 #endif
     objDropRecursively(hit->prop);
 
@@ -10731,6 +10732,9 @@ void objHit(ShotData *shotdata, BulletHit *hit)
         if (do_bounce)
         {
             objBounce(obj, &shotdata->viewDir);
+#ifndef TARGET_N64
+            coopItemsBounced(obj);  /* co-op: a thrown or dropped item flies the same way in every world */
+#endif
         }
     }
 }

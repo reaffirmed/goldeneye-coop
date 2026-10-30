@@ -62,6 +62,7 @@ void coopExtApply(s32 kind, const u8 *raw, s32 from)
         case COOPEV_DROP:
         case COOPEV_DROPREST:
         case COOPEV_ITEMSTUCK:
+        case COOPEV_ITEMKNOCK:
             coopItemsApply(kind, raw, from);
             break;
         case COOPEV_BARK:

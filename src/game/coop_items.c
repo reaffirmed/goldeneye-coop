@@ -16,6 +16,11 @@
  * mirrored guard drop the same gun; a joiner's guards never drop on their
  * own.
  *
+ * A shot that knocks one of these items about (objBounce) happens only in the
+ * shooter's game, with a random kick, so COOPEV_ITEMKNOCK sends the kick
+ * itself (its speed and tumble) and every copy flies the same way; once the
+ * shooter's copy is still, where it lies goes out as a COOPEV_DROPREST.
+ *
  * Each such item has an id (the player who made it, a serial). Whichever
  * copy goes off or is picked up first sends COOPEV_ITEMGONE; the others go
  * off with it, or leave the world. A dropped gun picked up by one player is
@@ -66,6 +71,7 @@ extern void setupUpdateObjectRoomPosition(ObjectRecord *obj);
 extern void matrix_4x4_set_identity(Mtxf *mtx);
 extern void projectileFree(Projectile *projectile);
 extern bool objCoopEmbed(PropRecord *prop, PropRecord *parent);
+extern void objBounce(ObjectRecord *obj, coord3d *arg1);
 
 enum { COOPITEM_THROWN = 1, COOPITEM_DROP = 2 };
 enum { COOPGONE_BOOM = 1, COOPGONE_PICKED = 2 };
@@ -124,6 +130,14 @@ typedef struct
     f32 pos[3];
 } CoopStuckMsg;         /* COOPEV_ITEMSTUCK: where the thrower's own copy ended up (28 bytes) */
 
+typedef struct
+{
+    u16 id;
+    s16 rot[4];         /* its tumble per tick, a quaternion x 32767 */
+    s16 speed[3];       /* the kick, x 1000 */
+    s32 stage;
+} CoopKnockMsg;         /* COOPEV_ITEMKNOCK: our shot sent it flying (20 bytes) */
+
 #define COOP_ITEMS_MAX 64
 
 typedef struct
@@ -136,6 +150,7 @@ typedef struct
     u8 still;           /* host: ticks it has not moved */
     u8 settled;         /* a throw: ours, where it ended up has been sent; a partner's, their word on it came */
     u8 embedfix;        /* stuck to an object off our screen: its matrix is worked out when that is drawn */
+    u8 knocked;         /* our shot sent it flying: where it comes to rest is to be sent */
     u16 age;            /* ticks since the throw */
     f32 last[3];        /* host: where it was last tick */
     s32 item;
@@ -241,6 +256,7 @@ static void coopItemAdd(u16 id, s32 kind, ObjectRecord *obj)
     sItems[free].still = 0;
     sItems[free].settled = 0;
     sItems[free].embedfix = 0;
+    sItems[free].knocked = 0;
     sItems[free].age = 0;
     sItems[free].id = id;
     sItems[free].kind = (u8) kind;
@@ -1037,6 +1053,181 @@ s32 coopItemsUnsettled(PropRecord *prop)
     return it != NULL && it->kind == COOPITEM_THROWN && !it->settled && (it->id >> 14) != (u16) coopExtSelf();
 }
 
+/* ---- knocked about by a shot -------------------------------------------------
+ * objBounce gives a shot item a random kick, in the shooter's game only: the
+ * host shot the covert modem and it hopped about on the host's screen and lay
+ * still on the joiner's, and the other way round. The shooter's kick goes to
+ * everyone, so their copies fly the same way, and where the shooter's copy
+ * comes to rest follows (COOPEV_DROPREST, as a guard's drop). */
+
+static Projectile *coopItemsProjectile(ObjectRecord *obj)
+{
+    if (obj->runtime_bitflags & RUNTIMEBITFLAG_EMBEDDED)
+    {
+        return obj->embedment->projectile;
+    }
+    if (obj->runtime_bitflags & RUNTIMEBITFLAG_HASPROJECTILE)
+    {
+        return obj->projectile;
+    }
+    return NULL;
+}
+
+static s16 coopItemsPackSpeed(f32 v)
+{
+    v *= 1000.0f;
+    return (s16) ((v > 32767.0f) ? 32767.0f : (v < -32767.0f) ? -32767.0f : v);
+}
+
+/* propobj.c objHit: our shot just bounced obj */
+void coopItemsBounced(ObjectRecord *obj)
+{
+    CoopItem *it;
+    Projectile *pr;
+    CoopKnockMsg m;
+    f32 q[4];
+    s32 k;
+
+    if (sApplying || !coopItemsOn() || (it = coopItemByObj(obj)) == NULL || (pr = coopItemsProjectile(obj)) == NULL)
+    {
+        return;
+    }
+    memset(&m, 0, sizeof(m));
+    m.id = it->id;
+    coopItemsMtxToQuat(&pr->mtx, coopItemsMtxScale(&pr->mtx), q);
+    for (k = 0; k < 4; k++)
+    {
+        m.rot[k] = (s16) (q[k] * 32767.0f);
+    }
+    m.speed[0] = coopItemsPackSpeed(pr->speed.f[0]);
+    m.speed[1] = coopItemsPackSpeed(pr->speed.f[1]);
+    m.speed[2] = coopItemsPackSpeed(pr->speed.f[2]);
+    m.stage = bossGetStageNum();
+    it->knocked = 1;
+    it->still = 0;
+    it->settled = 1;    /* ours: the rest word below replaces the settle word */
+    coopExtSend(COOPEV_ITEMKNOCK, 0xFF, &m, sizeof(m));
+    portConLogf("ge: coop: we knocked item %04x about\n", it->id);
+}
+
+/* propobj.c objHit: our shot is about to knock loose what sits on parent (a
+ * modem stuck to a crate): each game drops its own copy its own way, so where
+ * ours lands goes to everyone as for a shot item */
+void coopItemsParentKnocked(PropRecord *parent)
+{
+    PropRecord *child;
+    CoopItem *it;
+
+    if (sApplying || !coopItemsOn() || parent == NULL)
+    {
+        return;
+    }
+    for (child = parent->child; child != NULL; child = child->prev)
+    {
+        if ((child->type == PROP_TYPE_OBJ || child->type == PROP_TYPE_WEAPON) && (it = coopItemByObj(child->obj)) != NULL)
+        {
+            it->knocked = 1;
+            it->still = 0;
+            it->settled = 1;
+            portConLogf("ge: coop: we knocked item %04x loose\n", it->id);
+        }
+    }
+}
+
+static void coopItemsApplyKnock(const CoopKnockMsg *m, s32 from)
+{
+    CoopItem *it = coopItemById(m->id);
+    CoopExtView view;
+    ObjectRecord *obj;
+    Projectile *pr;
+    coord3d dir = { 0.0f, 0.0f, 0.0f };
+    f32 q[4];
+    s32 k;
+
+    if (m->stage != bossGetStageNum() || it == NULL)
+    {
+        return;     /* gone here already */
+    }
+    obj = it->obj;
+    if (obj->prop->parent != NULL && !(obj->runtime_bitflags & RUNTIMEBITFLAG_EMBEDDED))
+    {
+        return;     /* in someone's hands here */
+    }
+    sApplying = 1;
+    objBounce(obj, &dir);
+    sApplying = 0;
+    if ((pr = coopItemsProjectile(obj)) == NULL)
+    {
+        return;
+    }
+    for (k = 0; k < 4; k++)
+    {
+        q[k] = (f32) m->rot[k] / 32767.0f;
+    }
+    coopItemsQuatToMtx(q, 1.0f, &pr->mtx);
+    pr->speed.f[0] = (f32) m->speed[0] / 1000.0f;
+    pr->speed.f[1] = (f32) m->speed[1] / 1000.0f;
+    pr->speed.f[2] = (f32) m->speed[2] / 1000.0f;
+    if (!coopVersus() && coopExtRemoteView(from, &view) && view.prop != NULL)
+    {
+        pr->ownerprop = view.prop;
+    }
+    it->knocked = 0;    /* theirs to say where it ends up */
+    it->settled = 1;
+    portConLogf("ge: coop: player %d knocked item %04x about: ours flies too\n", from + 1, m->id);
+}
+
+/* each tick: once a copy our shot sent flying is still, where it lies goes to everyone */
+static void coopItemsKnockTick(void)
+{
+    s32 i, k;
+
+    for (i = 0; i < COOP_ITEMS_MAX; i++)
+    {
+        CoopItem *it = &sItems[i];
+        ObjectRecord *obj = it->obj;
+        CoopDropRestMsg r;
+        f32 q[4];
+
+        if (!it->used || !it->knocked || !coopItemLive(it))
+        {
+            continue;
+        }
+        if (obj->prop->parent != NULL || (obj->runtime_bitflags & RUNTIMEBITFLAG_EMBEDDED))
+        {
+            it->knocked = 0;    /* picked up, still stuck where it was, or stuck to something on the way */
+            continue;
+        }
+        if (coopItemsAirborne(obj) || it->last[0] != obj->prop->pos.f[0] || it->last[1] != obj->prop->pos.f[1]
+            || it->last[2] != obj->prop->pos.f[2])
+        {
+            it->last[0] = obj->prop->pos.f[0];
+            it->last[1] = obj->prop->pos.f[1];
+            it->last[2] = obj->prop->pos.f[2];
+            it->still = 0;
+            continue;
+        }
+        if (++it->still < 10)
+        {
+            continue;
+        }
+        it->knocked = 0;
+        it->rested = 1;
+        memset(&r, 0, sizeof(r));
+        r.id = it->id;
+        coopItemsMtxToQuat(&obj->mtx, coopItemsMtxScale(&obj->mtx), q);
+        for (k = 0; k < 4; k++)
+        {
+            r.rot[k] = (s16) (q[k] * 32767.0f);
+        }
+        r.pos[0] = obj->prop->pos.f[0];
+        r.pos[1] = obj->prop->pos.f[1];
+        r.pos[2] = obj->prop->pos.f[2];
+        coopExtSend(COOPEV_DROPREST, 0xFF, &r, sizeof(r));
+        portConLogf("ge: coop: knocked item %04x came to rest at %.0f %.0f %.0f\n", r.id, r.pos[0], r.pos[1], r.pos[2]);
+    }
+}
+
 /* ---- events --------------------------------------------------------------- */
 
 void coopItemsApply(s32 kind, const u8 *raw, s32 from)
@@ -1081,6 +1272,17 @@ void coopItemsApply(s32 kind, const u8 *raw, s32 from)
             }
             break;
         }
+        case COOPEV_ITEMKNOCK:
+        {
+            CoopKnockMsg m;
+
+            memcpy(&m, raw, sizeof(m));
+            if (coopInMissionNow())
+            {
+                coopItemsApplyKnock(&m, from);
+            }
+            break;
+        }
         case COOPEV_DROPREST:
         {
             CoopDropRestMsg r;
@@ -1112,7 +1314,11 @@ void coopItemsApply(s32 kind, const u8 *raw, s32 from)
  * degrees up (negative down); with GE_COOP_TESTFIRE it aims a throw.
  * GE_COOP_TESTTHROWAT=<tag>:<s>[:<dist>]: at <s> seconds stand <dist> units
  * (default 250) from the object with that tag and look at it for 8 s, so a
- * GE_COOP_TESTFIRE throw lands on it. */
+ * GE_COOP_TESTFIRE throw lands on it.
+ * GE_COOP_TESTKNOCK=<s>[:<every>[:<times>]]: from <s> seconds, every <every>
+ * s (5), <times> times (3), knock the nearest thrown or dropped item about
+ * as a shot from where we look would (objHit's bounce).
+ * GE_COOP_TESTITEMLOG=1: every 2 s, log where each thrown or dropped item is. */
 static s32 sTestAimAt = -2;
 static f32 sTestAimYaw, sTestAimPitch, sTestAimBase = -1.0f;
 static s32 sTestAtTag = -1, sTestAtAt = -1;
@@ -1165,6 +1371,74 @@ static void coopItemsTestThrowAt(s32 missionticks)
     g_CurrentPlayer->vv_verta = atan2f(dy, (d > 1.0f) ? d : 1.0f) * 57.29578f;
 }
 
+static void coopItemsTestKnock(s32 missionticks)
+{
+    static s32 at = -2, every = 5, times = 3, logon;
+    CoopItem *best = NULL;
+    f32 bestd = 1e30f;
+    s32 i;
+
+    if (at == -2)
+    {
+        const char *e = getenv("GE_COOP_TESTKNOCK");
+
+        at = -1;
+        if (e != NULL && sscanf(e, "%d:%d:%d", &at, &every, &times) >= 1)
+        {
+            at *= 60;
+        }
+        logon = getenv("GE_COOP_TESTITEMLOG") != NULL;
+    }
+    if (logon && missionticks > 0 && (missionticks % 120) == 0)
+    {
+        for (i = 0; i < COOP_ITEMS_MAX; i++)
+        {
+            if (coopItemLive(&sItems[i]))
+            {
+                PropRecord *p = sItems[i].obj->prop;
+
+                portConLogf("ge: coop: itemlog t=%d id %04x item %d at %.0f %.0f %.0f%s%s\n", missionticks / 60, sItems[i].id,
+                            sItems[i].item, p->pos.f[0], p->pos.f[1], p->pos.f[2],
+                            coopItemsAirborne(sItems[i].obj) ? " airborne" : "", p->parent != NULL ? " parented" : "");
+            }
+        }
+    }
+    if (at < 0 || times <= 0 || missionticks < at || ((missionticks - at) % (every * 60)) != 0 || g_CurrentPlayer->prop == NULL)
+    {
+        return;
+    }
+    times--;
+    for (i = 0; i < COOP_ITEMS_MAX; i++)
+    {
+        PropRecord *p;
+        f32 dx, dz;
+
+        if (!coopItemLive(&sItems[i]) || (p = sItems[i].obj->prop)->parent != NULL)
+        {
+            continue;
+        }
+        dx = p->pos.f[0] - g_CurrentPlayer->prop->pos.f[0];
+        dz = p->pos.f[2] - g_CurrentPlayer->prop->pos.f[2];
+        if (dx * dx + dz * dz < bestd)
+        {
+            bestd = dx * dx + dz * dz;
+            best = &sItems[i];
+        }
+    }
+    if (best == NULL)
+    {
+        portConLogf("ge: coop: testknock: nothing to knock\n");
+        return;
+    }
+    {
+        coord3d dir = { 0.0f, 0.0f, -1.0f };    /* straight ahead, in the view */
+
+        portConLogf("ge: coop: testknock: item %04x (dist %.0f)\n", best->id, sqrtf(bestd));
+        objBounce(best->obj, &dir);
+        coopItemsBounced(best->obj);
+    }
+}
+
 void coopItemsTick(s32 missionticks)
 {
     coopItemsRestTick();
@@ -1184,9 +1458,11 @@ void coopItemsTick(s32 missionticks)
         }
     }
     coopItemsTestThrowAt(missionticks);
+    coopItemsTestKnock(missionticks);
     if (coopItemsOn())
     {
         coopItemsSettleTick();
+        coopItemsKnockTick();
     }
     if (missionticks == 1)
     {
