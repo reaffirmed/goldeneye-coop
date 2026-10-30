@@ -2952,3 +2952,33 @@ sees it where it landed (and the other way round).
   and the joiner's at 18518 (3 m apart); after, both logs agree to the unit
   for three joiner knocks (GE_COOP_NETSIM 120:30:2) and two host knocks on
   remote mines. Dam, Facility and Frigate mission runs pass.
+
+## Guards' grenades are live on a joiner's screen (COOP_VERSION stays 16)
+
+Owner's report: a joiner can pick up the grenades guards throw.
+
+- Cause: a guard's throw is a drop (chrlvTickThrowGrenade arms the
+  grenade at frame 61, propobjSetDropped(DROPTYPE_THROWGRENADE) at 119,
+  CHRHIDDEN_DROP_HELD_ITEMS), so the host sent it as COOPEV_DROP like a
+  gun. The joiner's mirrored guard runs no AI and holds no grenade, so
+  coopItemsApplyDrop made one with no fuse and dropped it at the guard's
+  feet: a pickup to objTickPlayer (a grenade is only refused while its
+  timer is >= 0). Taking it sent ITEMGONE PICKED, and the pickup rule for
+  drops then took the host's live grenade into the host's inventory too.
+- COOPEV_DROP now carries the fuse (1 + timer, 0 none) and the drop type
+  in its last 4 bytes (28 now; an older host sends zeros, which mean
+  none). The joiner arms its copy with the host's fuse and drops it with
+  DROPTYPE_THROWGRENADE, so it is thrown the way the guard faces, lands
+  near the host's copy and can't be picked up; it goes off with the host's
+  (ITEMGONE BOOM) or on its own fuse, whichever comes first.
+- Player throws were already right: each copy gets the thrower's fuse
+  (gunCoopSpawnThrown), so a partner's grenade or mine is no pickup, in
+  the air or on the floor (remote mines sit at timer 1 once armed).
+- Harness: GE_COOP_TESTGRENADE=<s>[:<every>] (host: the nearest guard
+  throws), GE_COOP_TESTSTEPON=<s> (stand on the nearest item lying still
+  every second); GE_COOP_TESTITEMLOG now logs the fuse.
+- Checked on Dam: before, the joiner stood on and picked up 4 of 4 guard
+  grenades (fuse -1) and each vanished from the host's world too; after,
+  0 of 4, each with a fuse, landing within about 25 units of the host's
+  and going off. Host grenades and remote mines: the joiner's copies have
+  fuses and none was picked up. Dam, Facility and Frigate mission runs pass.
