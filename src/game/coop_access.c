@@ -5,9 +5,10 @@
  * GoldenEye has no spoken dialogue to subtitle: briefings and mission
  * messages are already text. What a player who can't hear misses is the
  * sound of the world, so the captions say that instead, with where it came
- * from: "GUNFIRE - BEHIND", "EXPLOSION - LEFT", "DOOR OPENS - RIGHT", and
- * "ALARM" for as long as the alarm sounds. They sit above the mission
- * message line, at most COOPCAP_LINES, solo and co-op.
+ * from, as a list in the bottom left like Minecraft's subtitles: "Gunfire",
+ * "Explosion", "Door opens" with an arrow at the side it came from, and
+ * "Alarm" for as long as the alarm sounds; at most COOPCAP_LINES, solo,
+ * co-op and versus.
  *
  * Colours: every player colour (name tags, radar, pings, chat, toasts) comes
  * from coopPlayerColour, which picks the colour-blind set when it is on.
@@ -116,7 +117,6 @@ s32 coopScreenShakeOn(void)
 #define COOPCAP_FADE_MS 500
 #define COOPCAP_MERGE_MS 1500   /* the same sound from the same side refreshes its line */
 
-static const char *const sCapText[COOPCAP_COUNT] = { "GUNFIRE", "EXPLOSION", "DOOR OPENS", "ALARM" };
 static const f32 sCapRange[COOPCAP_COUNT] = { 4000.0f, 8000.0f, 1500.0f, 0.0f };   /* about 40, 80 and 15 m */
 
 typedef struct
@@ -218,64 +218,143 @@ void coopCaptionChrGunfire(ChrRecord *chr)
     }
 }
 
-static Gfx *coopCapPrint(Gfx *gdl, s32 x, s32 y, char *text, u32 colour)
+static void coopCapExpire(u32 now)
 {
-    return textRenderOutlined(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic, colour,
-                              (colour & 0xFF) * 5 / 8, (s32) viGetX(), viGetY(), 0, 0);
-}
-
-/* above the mission message line, centred, newest lowest */
-Gfx *coopCaptionsRender(Gfx *gdl)
-{
-    static const char *const sides[4] = { "AHEAD", "RIGHT", "BEHIND", "LEFT" };
-    u32 now = coopCapNowMs();
-    s32 cx = viGetViewLeft() + viGetViewWidth() / 2;
-    s32 bottom = viGetViewTop() + viGetViewHeight() - 0x48;
-    s32 alarm;
-    s32 rows = 0;
-    s32 i;
-
     while (sCapCount > 0 && now - sCap[0].ms >= COOPCAP_SHOW_MS)
     {
         memmove(&sCap[0], &sCap[1], sizeof(sCap[0]) * (COOPCAP_LINES - 1));
         sCapCount--;
     }
-    alarm = portAccessCaptions() && alarmIsActive();
-    if (!portAccessCaptions() || (sCapCount == 0 && !alarm))
+}
+
+#define COOPCAP_ROW_H   0x0B
+#define COOPCAP_SCALE   0.75f
+
+static Gfx *coopCapPrint(Gfx *gdl, s32 x, s32 y, const char *text, u32 colour)
+{
+    char buf[48];
+    s32 sx = x + 1, sy = y + 1;
+
+    snprintf(buf, sizeof(buf), "%s\n", text);
+    portTextScale(COOPCAP_SCALE);
+    gdl = textRender(gdl, &sx, &sy, buf, ptrFontZurichBoldChars, ptrFontZurichBold, (colour & 0xFF) / 2,
+                     (s32) viGetX(), viGetY(), 0, 0);
+    gdl = textRender(gdl, &x, &y, buf, ptrFontZurichBoldChars, ptrFontZurichBold, colour, (s32) viGetX(), viGetY(), 0, 0);
+    portTextScale(1.0f);
+    return gdl;
+}
+
+static s32 coopCapWidth(const char *text)
+{
+    char buf[48];
+    s32 th = 0, tw = 0;
+
+    snprintf(buf, sizeof(buf), "%s\n", text);
+    portTextScale(COOPCAP_SCALE);
+    textMeasure(&th, &tw, buf, ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+    portTextScale(1.0f);
+    return tw;
+}
+
+static s32 coopCapAlarm(void)
+{
+    return portAccessCaptions() && alarmIsActive();
+}
+
+static s32 coopCapListWidth(void)
+{
+    static const char *const text[COOPCAP_COUNT] = { "Gunfire", "Explosion", "Door opens", "Alarm" };
+    s32 w = 0;
+    s32 i;
+
+    for (i = 0; i < COOPCAP_COUNT; i++)
+    {   /* every row as wide as the longest name could be, so the list doesn't jump */
+        s32 tw = coopCapWidth(text[i]);
+
+        w = (tw > w) ? tw : w;
+    }
+    return w + (coopCapWidth(">") + 3) * 2 + 6;
+}
+
+/* coop_captions.c: Modern captions keep right of the list */
+s32 coopCaptionsRight(void)
+{
+    return coopCaptionsHeight() > 0 ? viGetViewLeft() + 0x14 + coopCapListWidth() : 0;
+}
+
+/* coop_chat.c: how far the chat lines sit above the list */
+s32 coopCaptionsHeight(void)
+{
+    s32 rows = sCapCount + coopCapAlarm();
+
+    return (portAccessCaptions() && rows > 0) ? rows * COOPCAP_ROW_H + 4 : 0;
+}
+
+/* the list, Minecraft's subtitles: bottom left, one dark row a sound, all
+ * one width, newest lowest; the name in the middle, an arrow at the side
+ * it came from ("v" both sides when behind), the text dimming as the sound
+ * gets older and fading at the end */
+Gfx *coopCaptionsRender(Gfx *gdl)
+{
+    static const char *const text[COOPCAP_COUNT] = { "Gunfire", "Explosion", "Door opens", "Alarm" };
+    u32 now = coopCapNowMs();
+    s32 left = viGetViewLeft() + 0x14;
+    s32 bottom = viGetViewTop() + viGetViewHeight() - 0x14;
+    s32 arrow = coopCapWidth(">") + 3;
+    s32 w = coopCapListWidth();
+    s32 alarm;
+    s32 rows;
+    s32 i;
+
+    coopCapExpire(now);
+    alarm = coopCapAlarm();
+    rows = sCapCount + alarm;
+    if (!portAccessCaptions() || rows == 0)
     {
         return gdl;
     }
-    gdl = coopTextScaleBegin(gdl, (f32) cx, (f32) bottom + 0x0C);
-    gdl = microcode_constructor(gdl);
-    for (i = sCapCount - 1 + alarm; i >= 0; i--)
+    if (hudAnchorsToEdges())
     {
-        char line[48];
-        s32 th = 0, tw = 0;
-        s32 a = 0xFF;
-        s32 y = bottom - rows * 0x0C;
+        PORT_HUD_ANCHOR(gdl, PORT_HUD_ANCHOR_LEFT);
+    }
+    gdl = coopTextScaleBegin(gdl, (f32) viGetViewLeft(), (f32) (viGetViewTop() + viGetViewHeight()));
+    gdl = microcode_constructor(gdl);
+    for (i = rows - 1; i >= 0; i--)
+    {
+        s32 y = bottom - (rows - i) * COOPCAP_ROW_H;
+        s32 kind = (i == sCapCount) ? COOPCAP_ALARM : sCap[i].kind;
+        s32 side = (i == sCapCount) ? 0 : sCap[i].side;
+        s32 a = 0xFF, grey = 0xFF;
+        u32 colour;
 
-        if (alarm && i == sCapCount)
-        {
-            snprintf(line, sizeof(line), "[ ALARM ]\n");
-        }
-        else
+        if (i < sCapCount)
         {
             u32 age = now - sCap[i].ms;
 
+            grey = 0xFF - (s32) (age * 0x60 / COOPCAP_SHOW_MS);     /* white, greying with age */
             if (age > COOPCAP_SHOW_MS - COOPCAP_FADE_MS)
             {
                 a = (s32) ((COOPCAP_SHOW_MS - age) * 0xFF / COOPCAP_FADE_MS);
             }
-            snprintf(line, sizeof(line), "[ %s - %s ]\n", sCapText[(s32) sCap[i].kind], sides[(s32) sCap[i].side]);
         }
-        textMeasure(&th, &tw, line, ptrFontBankGothicChars, ptrFontBankGothic, 0);
-        gdl = microcode_constructor_related_to_menus(gdl, cx - tw / 2 - 3, y - 2, cx + tw / 2 + 3, y + 0x0A,
-                                                     (u32) (a / 2));
-        gdl = coopCapPrint(gdl, cx - tw / 2, y, line, 0xFFFFFF00u | (u32) a);
-        rows++;
+        colour = ((u32) grey << 24) | ((u32) grey << 16) | ((u32) grey << 8) | (u32) a;
+        gdl = microcode_constructor_related_to_menus(gdl, left, y, left + w, y + COOPCAP_ROW_H, (u32) (a * 0xA0 / 0xFF));
+        gdl = coopCapPrint(gdl, left + (w - coopCapWidth(text[kind])) / 2, y + 1, text[kind], colour);
+        if (side == 3 || side == 2)
+        {
+            gdl = coopCapPrint(gdl, left + 3, y + 1, side == 3 ? "<" : "v", colour);
+        }
+        if (side == 1 || side == 2)
+        {
+            gdl = coopCapPrint(gdl, left + w - arrow, y + 1, side == 1 ? ">" : "v", colour);
+        }
     }
     gdl = combiner_bayer_lod_perspective(gdl);
     gdl = coopTextScaleEnd(gdl);
+    if (hudAnchorsToEdges())
+    {
+        PORT_HUD_ANCHOR_OFF(gdl);
+    }
     return gdl;
 }
 

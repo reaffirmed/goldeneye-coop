@@ -3099,6 +3099,9 @@ Gfx *chrRenderProp(PropRecord *prop, Gfx *gdl, s32 withalpha)
         f32 f = chrobjFogVisRangeRelated(prop, getinstsize(chrmodel)); //0-1
         chrfadealpha = (s32) (f * (f32) chrfadealpha);
     }
+#ifndef TARGET_N64
+    chrfadealpha = coopFadePartnerAlpha(prop, chrfadealpha);   /* story co-op: a partner up close (coop_fade.c) */
+#endif
 
     if ((chrfadealpha < 0xFF) || (chr->chrflags & CHRFLAG_00020000))
     {
@@ -3177,6 +3180,12 @@ Gfx *chrRenderProp(PropRecord *prop, Gfx *gdl, s32 withalpha)
             {
                 sp4C = ((1.0f - spC0.a) * (f32)(sp4C));
             }
+#ifndef TARGET_N64
+            if (chrfadealpha < 0xFF && coopPropIsPartner(prop))
+            {
+                sp4C = (sp4C * chrfadealpha) / 0xFF;   /* the shadow fades with a partner up close */
+            }
+#endif
 
             sub_GAME_7F073FC8(sp4C);
 

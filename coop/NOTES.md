@@ -3400,3 +3400,33 @@ seen on the rig first, a third turned up while testing them:
   17 dropped events; after, "5 thrown and dropped items sent", all five in
   its item log at the host's places, no dropped events, and its detonator
   at 25 s set off its own two mines on both copies.
+## Partner fade and Modern captions (2026-10-30)
+
+- **Partner Fade** (coop_fade.c, Port Options, `partner_fade`, on). Two Bonds
+  that walk into each other used to fill the view with the partner's jacket
+  (at 2 m the puppet already covers the middle of a 4:3 view). chrRenderProp
+  now scales a partner puppet's fade alpha by the distance between the two
+  Bonds: whole from 2.6 m, gone at 1 m (about where they touch), smoothstep
+  in between, eased over ~90 ms so a respawn beside you doesn't pop; its
+  shadow fades with it. Story only: never in versus, in cutscenes or while
+  spectating; a partner more than 2.2 m above or below is never faded. The
+  name tag stays, so you still see who is there.
+- **Modern captions** (coop_captions.c, Accessibility, `caption_style`,
+  Modern by default). hudmsgTopShow (the scripts' speech, "Natalya: ...")
+  and hudmsgBottomShow (mission messages and pickups) hand the line to
+  coopSubtitleShow, which splits off the speaker, takes out Rare's hand
+  wrapping and indents, and shows it bottom centre on a dark soft box:
+  the name in a colour (fixed for the leads, red for Warning / Mission
+  Failure, hashed for the rest), the line in white Zurich at 85 %, re-wrapped
+  to three quarters of the view, three at once, newest lowest, on screen
+  2.6 s plus 55 ms a character (7 s at most). Story only (one player on the
+  PC, not versus); Classic brings Rare's lines back.
+- **Sound Captions, Minecraft style** (coop_access.c, the owner's ask). The
+  centred "[ GUNFIRE - BEHIND ]" lines became a list in the bottom left: one
+  dark row a sound, all one width, newest lowest, the name in the middle in
+  Zurich, "<" or ">" at the side it came from ("v" both sides when behind),
+  the text greying as the sound ages and fading at the end; "Alarm" while
+  it sounds. The chat lines lift clear of it.
+- Harness: GE_COOP_TESTWALK=<s>:<in|out|fwd>:<m>[,...] walks a Bond into the
+  first partner and back out (face them, forward or backward until <m>);
+  GE_SUBTEST=<s> shows a scripted exchange of captions.

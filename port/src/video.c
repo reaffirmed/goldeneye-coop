@@ -145,6 +145,8 @@ static int s_CfgCaptions = 0;       /* [display] captions: sound captions (gunfi
 static int s_CfgColorblind = 0;     /* [display] colorblind: player colours, 0 standard, 1 red-green, 2 blue-yellow */
 static int s_CfgScreenShake = 1;    /* [display] screen_shake: explosions shake the view (vanilla on) */
 static int s_CfgTextSize = 100;     /* [display] text_size: co-op text, captions and messages, percent */
+static int s_CfgCaptionStyle = 0;   /* [display] caption_style: 0 Modern (coop_captions.c), 1 Classic (Rare's message lines) */
+static int s_CfgPartnerFade = 1;    /* [display] partner_fade: a partner up close fades out (coop_fade.c) */
 static int s_CfgWeaponFov = 0;      /* [display] weapon_fov: 1 = the gun draws at the default FOV (gunfire.c), 0 = Match View */
 static int s_CfgSettingHelp = 1;   /* [display] setting_help: the folder sheets' help box (front.c), default on */
 /* Classic Mode's NTSC composite filter (gfx_opengl.cpp vi_prog[3]) is a Classic
@@ -414,6 +416,8 @@ s32 portAccessCaptions(void)   { return s_CfgCaptions; }
 s32 portAccessColorblind(void) { return s_CfgColorblind; }
 s32 portAccessScreenShake(void) { return s_CfgScreenShake; }
 s32 portAccessTextSize(void)   { return s_CfgTextSize; }
+s32 portCaptionsClassic(void)  { return s_CfgCaptionStyle; }
+s32 portPartnerFade(void)      { return s_CfgPartnerFade; }
 
 /** [display] weapon_fov: gunfire.c gunWeaponFovY draws the gun at the default FOV, not the view's */
 s32 portWeaponFov(void)
@@ -1345,6 +1349,8 @@ static int videoSetDisplayOption(const char *key, const char *value)
     if (SDL_strcasecmp(key, "colorblind") == 0)   { s_CfgColorblind = SDL_clamp(SDL_atoi(value), 0, 2); return 1; }
     if (SDL_strcasecmp(key, "screen_shake") == 0) { s_CfgScreenShake = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "text_size") == 0)    { s_CfgTextSize = SDL_clamp(SDL_atoi(value), 100, 200); return 1; }
+    if (SDL_strcasecmp(key, "caption_style") == 0) { s_CfgCaptionStyle = SDL_atoi(value) != 0; return 1; }
+    if (SDL_strcasecmp(key, "partner_fade") == 0) { s_CfgPartnerFade = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "weapon_fov") == 0)   { s_CfgWeaponFov = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "setting_help") == 0) { s_CfgSettingHelp = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "mouse_auto_aim") == 0) { s_CfgMouseAutoAim = SDL_atoi(value) != 0; return 1; }
@@ -1620,6 +1626,8 @@ s32 portVideoOptionGet(const char *key, s32 *out)
     if (SDL_strcasecmp(key, "colorblind") == 0)   { *out = s_CfgColorblind; return 1; }
     if (SDL_strcasecmp(key, "screen_shake") == 0) { *out = s_CfgScreenShake; return 1; }
     if (SDL_strcasecmp(key, "text_size") == 0)    { *out = s_CfgTextSize; return 1; }
+    if (SDL_strcasecmp(key, "caption_style") == 0) { *out = s_CfgCaptionStyle; return 1; }
+    if (SDL_strcasecmp(key, "partner_fade") == 0) { *out = s_CfgPartnerFade; return 1; }
     if (SDL_strcasecmp(key, "weapon_fov") == 0)   { *out = s_CfgWeaponFov; return 1; }
     if (SDL_strcasecmp(key, "setting_help") == 0) { *out = s_CfgSettingHelp; return 1; }
     if (SDL_strcasecmp(key, "mouse_auto_aim") == 0) { *out = s_CfgMouseAutoAim; return 1; }
@@ -2472,6 +2480,8 @@ static void videoWriteDefaultIni(void)
     fprintf(f, "colorblind=%d\n", s_CfgColorblind);
     fprintf(f, "screen_shake=%d\n", s_CfgScreenShake);
     fprintf(f, "text_size=%d\n", s_CfgTextSize);
+    fprintf(f, "caption_style=%d\n", s_CfgCaptionStyle);
+    fprintf(f, "partner_fade=%d\n", s_CfgPartnerFade);
     fprintf(f, "setting_help=%d\n", s_CfgSettingHelp);
     fprintf(f, "mouse_auto_aim=%d\n", s_CfgMouseAutoAim);
     fprintf(f, "mute_unfocused=%d\n", s_CfgMuteUnfocused);

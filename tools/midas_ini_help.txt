@@ -235,6 +235,13 @@ padN_stickmode.
   coop_menu           | 0          | 1 draws the CO-OP screen on the
                       |            | original folder (Classic); 0 the
                       |            | Modern tabbed screen. Same options
+  partner_fade        | 1          | Story co-op: a partner closer than
+                      |            | 2.6 m fades out, gone at 1 m, and
+                      |            | back as you part. 0 = always drawn
+  caption_style       | 0          | 0 Modern: speech and mission messages
+                      |            | as caption lines, bottom centre, the
+                      |            | speaker's name in colour. 1 Classic:
+                      |            | Rare's top and bottom lines
   unlimited_explosions| 1          | 100 explosions at once instead of 6.
                       |            | Demo playback always uses 6
   adzy                | 0          | 1 = play missions as the Siberian
