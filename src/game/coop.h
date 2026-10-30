@@ -598,6 +598,8 @@ void coopVersusRecvPkt(void *buf, s32 player);
 void coopVersusTick(void);
 void coopVersusSubFieldTick(void);
 void coopVersusQuit(void);       /* mpmenu.c: we picked Quit on the pause menu */
+s32  coopVersusHitMarker(f32 *left);          /* coop_hud.c: 1 a hit, 2 a kill, 0 none */
+s32  coopVersusHurtFrom(coord3d *pos, f32 *left); /* coop_hud.c: where who last hit us stood */
 u32  coopVersusTeamMates(void);  /* coop_ping.c: who our pings are for (bits by session number) */
 s32  coopVersusQuitAlone(void);  /* mpmenu.c: our Quit leaves the match to the others */   /* the others' bodies on the ticks between 60ths */
 void coopVsStartMatch(s32 stage);          /* front.c: this PC's half of the match, then into the arena */
