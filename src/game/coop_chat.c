@@ -899,12 +899,17 @@ static s32 coopFeedWrap(const char *line, s32 maxw, CoopToastPiece *pc, s32 *row
 Gfx *coopFeedRender(Gfx *gdl)
 {
     s32 left = viGetViewLeft() + 0x14;
-    s32 bottom = viGetViewTop() + viGetViewHeight() - 0x34;
+    s32 sublift = coopSubtitlesHeight() - 0x0A;   /* above the Modern captions (coop_captions.c) */
+    s32 lift = coopCaptionsHeight() - 0x15;     /* and Sound Captions' list (coop_access.c) */
+    s32 bottom;
     const s32 maxw = viGetViewWidth() * 3 / 5;
     CoopToastPiece pc[COOPFEED_ROWS * 2];
     s32 y;
     s32 i;
     s32 any;
+
+    lift = (sublift > lift) ? sublift : lift;
+    bottom = viGetViewTop() + viGetViewHeight() - 0x34 - ((lift > 0) ? lift : 0);
 
     while (sToastCount > 0 && sNow - sToast[0].tick >= COOPTOAST_SHOW)
     {

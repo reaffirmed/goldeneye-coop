@@ -8,8 +8,8 @@
  * (the default) both become caption lines in the style of a modern shooter:
  * bottom centre, on a dark soft box each, the speaker's name in its own
  * colour and the line in white after it, re-wrapped to the box, up to
- * COOPSUB_LINES at once with the newest lowest. Sound Captions (coop_access.c)
- * join the same stack, above the speech, in grey brackets.
+ * COOPSUB_LINES at once with the newest lowest. Sound Captions keep their
+ * own list at the bottom left (coop_access.c).
  *
  * Story only (solo and co-op): versus and split-screen keep Rare's lines.
  * Caption Style = Classic brings Rare's back everywhere.
@@ -59,6 +59,8 @@ typedef struct
 static CoopSub sSub[COOPSUB_LINES];
 static void coopSubtitlesHarness(void);
 static s32 sSubCount;
+static s32 sSubHeight;
+static s32 sMinLeft;        /* this frame: no box left of here */      /* how tall the last frame's stack was, from its bottom */
 
 static u32 coopSubNowMs(void)
 {
@@ -301,6 +303,7 @@ static Gfx *coopSubBox(Gfx *gdl, s32 cx, s32 bottom, s32 maxw, const char *name,
         w = (rw > w) ? rw : w;
     }
     x0 = cx - w / 2;
+    x0 = (x0 - COOPSUB_PAD_X < sMinLeft) ? sMinLeft + COOPSUB_PAD_X : x0;   /* clear of Sound Captions */
     y0 = bottom - COOPSUB_PAD_Y - n * COOPSUB_ROW_H;
     /* the soft box: a faint rim around a darker core */
     gdl = microcode_constructor_related_to_menus(gdl, x0 - COOPSUB_PAD_X - 1, y0 - COOPSUB_PAD_Y - 1,
@@ -319,19 +322,25 @@ static Gfx *coopSubBox(Gfx *gdl, s32 cx, s32 bottom, s32 maxw, const char *name,
     return gdl;
 }
 
+/* coop_chat.c: the chat lines and toasts sit above the captions */
+s32 coopSubtitlesHeight(void)
+{
+    return sSubHeight;
+}
+
 /* bondview2.c, after Rare's messages: the captions, bottom centre, newest
- * lowest, with Sound Captions above them */
+ * lowest */
 Gfx *coopSubtitlesRender(Gfx *gdl)
 {
     u32 now = coopSubNowMs();
     s32 cx = viGetViewLeft() + viGetViewWidth() / 2;
-    s32 bottom = viGetViewTop() + viGetViewHeight() - 0x1C;
+    s32 base = viGetViewTop() + viGetViewHeight() - 0x1C;
+    s32 bottom = base;
     s32 maxw = viGetViewWidth() * 3 / 4;
-    char sound[4][48];
-    s32 nsound;
     s32 i;
 
     coopSubtitlesHarness();
+    sSubHeight = 0;
     while (sSubCount > 0 && now - sSub[0].ms >= sSub[0].show)
     {
         memmove(&sSub[0], &sSub[1], sizeof(sSub[0]) * (COOPSUB_LINES - 1));
@@ -342,10 +351,15 @@ Gfx *coopSubtitlesRender(Gfx *gdl)
     {
         return gdl;
     }
-    nsound = coopCaptionSoundLines(sound, 4);
-    if (sSubCount == 0 && nsound == 0)
+    if (sSubCount == 0)
     {
         return gdl;
+    }
+    sMinLeft = coopCaptionsRight();
+    if (sMinLeft > 0)
+    {   /* Sound Captions' list is up at the bottom left: the boxes start right of it */
+        sMinLeft += 4;
+        maxw = viGetViewLeft() + viGetViewWidth() - 0x14 - sMinLeft - 2 * COOPSUB_PAD_X;
     }
     gdl = coopTextScaleBegin(gdl, (f32) cx, (f32) bottom);
     gdl = microcode_constructor(gdl);
@@ -367,13 +381,7 @@ Gfx *coopSubtitlesRender(Gfx *gdl)
         gdl = coopSubBox(gdl, cx, bottom, maxw, s->name, s->colour, s->text, 0xFFFFFFFF, a, &top);
         bottom = top - COOPSUB_GAP;
     }
-    for (i = nsound - 1; i >= 0; i--)
-    {
-        s32 top;
-
-        gdl = coopSubBox(gdl, cx, bottom, maxw, "", 0, sound[i], 0xC8C8C8FF, 0xE0, &top);
-        bottom = top - COOPSUB_GAP;
-    }
+    sSubHeight = base - bottom;
     gdl = combiner_bayer_lod_perspective(gdl);
     gdl = coopTextScaleEnd(gdl);
     return gdl;
