@@ -7087,6 +7087,9 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
                                     {
                                         sndPlaySfx((struct ALBankAlt_s *)g_musicSfxBufferPtr, ROCKET_LAUNCH_SFX, (ALSoundState *)&sp208->projectile->sounds[1]);
                                     }
+#ifndef TARGET_N64
+                                    coopItemsLaunched((ObjectRecord *) sp208, &sp240, &sp16C, &sp1BC, &sp1AC, self);  /* co-op: seen in flight on the joiners */
+#endif
                                 }
                             }
                         }
@@ -7120,6 +7123,9 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
                                     sp128->projectile->refreshrate = 50;
 #else
                                     sp128->projectile->refreshrate = 60;
+#endif
+#ifndef TARGET_N64
+                                    coopItemsLaunched((ObjectRecord *) sp128, &sp240, &sp9C, &spDC, NULL, self);  /* co-op: seen in flight on the joiners */
 #endif
                                 }
                             }

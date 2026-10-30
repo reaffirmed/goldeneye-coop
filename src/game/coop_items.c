@@ -51,10 +51,12 @@
 #include "propobj.h"
 #include "quaternion.h"
 #include "math_atan2f.h"
+#include "lv.h"
 #include "coop.h"
 
 extern void portConLogf(const char *fmt, ...);
 extern ObjectRecord *gunCoopSpawnThrown(s32 item, coord3d *pos, Mtxf *rot, coord3d *velocity, Mtxf *spin, s32 timer, PropRecord *owner);
+extern ObjectRecord *gunCoopSpawnRound(s32 item, coord3d *pos, Mtxf *rot, coord3d *velocity, coord3d *thrust, s32 timer, s32 guard, PropRecord *owner);
 extern void objFreePermanently(ObjectRecord *obj, bool freeprop);
 extern void chrpropReparent(PropRecord *newChild, PropRecord *host);
 extern void chrpropDeregisterRooms(PropRecord *prop);
@@ -72,15 +74,17 @@ extern void matrix_4x4_set_identity(Mtxf *mtx);
 extern void projectileFree(Projectile *projectile);
 extern bool objCoopEmbed(PropRecord *prop, PropRecord *parent);
 extern void objBounce(ObjectRecord *obj, coord3d *arg1);
+extern PropRecord *hatCreateForChr(ChrRecord *chr, s32 modelnum, u32 flags);
 
-enum { COOPITEM_THROWN = 1, COOPITEM_DROP = 2 };
+enum { COOPITEM_THROWN = 1, COOPITEM_DROP = 2, COOPITEM_ROUND = 3 /* a launcher round: the thrower's goes off, the others' only show it in flight */ };
+enum { COOPTHROW_ROUND = 1, COOPTHROW_GUARD = 2, COOPTHROW_POWERED = 4 };   /* CoopThrowMsg flags */
 enum { COOPGONE_BOOM = 1, COOPGONE_PICKED = 2 };
 
 typedef struct
 {
     u16 id;
     u8 item;            /* ITEM_IDS */
-    u8 flags;
+    u8 flags;           /* COOPTHROW_*: a launcher round, a guard's, a rocket under power (an older build sends 0) */
     f32 pos[3];         /* where it leaves the hand */
     f32 vel[3];
 } CoopThrowMsg;         /* COOPEV_THROW */
@@ -90,9 +94,11 @@ typedef struct
     u16 id;
     s16 timer;          /* the fuse, as the thrower's game set it */
     s16 rot[4];         /* its orientation, a quaternion x 32767 */
-    s16 spin[4];        /* its tumble per tick */
+    s16 spin[4];        /* its tumble per tick; a powered rocket's thrust x 1000 */
     s32 stage;
-} CoopThrowMoreMsg;     /* COOPEV_THROWMORE */
+    s16 chrnum;         /* COOPTHROW_GUARD: the host's guard that fired it */
+    s16 pad;
+} CoopThrowMoreMsg;     /* COOPEV_THROWMORE (an older build sent the first 24 bytes) */
 
 typedef struct
 {
@@ -175,11 +181,14 @@ static s32 coopItemsOn(void)
     return coopEnabled() && coopSessionActive();
 }
 
-/* the throws worth seeing: everything that is thrown as an object (not knives, which hurt by touch) */
+/* the throws worth seeing: everything that is thrown as an object. A knife hurts
+ * by touch, in the thrower's game only: the others' copies are made without the
+ * flag that lets a knife in flight cut (gunCoopSpawnThrown) */
 static s32 coopItemsThrowable(s32 item)
 {
     switch (item)
     {
+        case ITEM_THROWKNIFE:
         case ITEM_GRENADE:
         case ITEM_REMOTEMINE:
         case ITEM_PROXIMITYMINE:
@@ -348,6 +357,100 @@ void coopItemsThrown(ObjectRecord *obj, coord3d *pos, Mtxf *rot, coord3d *vel, M
     portConLogf("ge: coop: threw item %d (id %04x) at %.0f %.0f %.0f\n", a.item, a.id, a.pos[0], a.pos[1], a.pos[2]);
 }
 
+/* gun.c (our rockets, grenade-launcher rounds and tank shells) and chraction.c
+ * (the host's guards' rounds): obj was launched from pos. Everyone else's game
+ * shows it in flight; only this one's goes off (its blast is sent as any is) */
+void coopItemsLaunched(ObjectRecord *obj, coord3d *pos, Mtxf *rot, coord3d *vel, coord3d *thrust, ChrRecord *guard)
+{
+    WeaponObjRecord *w = (WeaponObjRecord *) obj;
+    CoopThrowMsg a;
+    CoopThrowMoreMsg b;
+    Mtxf r;
+    s32 k;
+
+    if (sApplying || !coopItemsOn() || coopVersus() || obj == NULL
+        || (w->weaponnum != ITEM_ROCKETROUND && w->weaponnum != ITEM_GRENADEROUND)
+        || (guard != NULL && (!coopExtIsHost() || coopPropIsPartner(guard->prop))))
+    {
+        return;
+    }
+    memset(&a, 0, sizeof(a));
+    memset(&b, 0, sizeof(b));
+    a.id = b.id = coopItemNewId();
+    a.item = (u8) w->weaponnum;
+    a.flags = COOPTHROW_ROUND | (guard != NULL ? COOPTHROW_GUARD : 0) | (thrust != NULL ? COOPTHROW_POWERED : 0);
+    for (k = 0; k < 3; k++)
+    {
+        a.pos[k] = pos->f[k];
+        a.vel[k] = vel->f[k];
+        if (thrust != NULL)
+        {
+            f32 t = thrust->f[k] * 1000.0f;
+            b.spin[k] = (s16) ((t > 32767.0f) ? 32767.0f : (t < -32767.0f) ? -32767.0f : t);
+        }
+    }
+    b.timer = (s16) w->timer;
+    r = *rot;
+    r.m[3][0] = r.m[3][1] = r.m[3][2] = 0.0f;
+    coopQuatPack(&r, b.rot);
+    b.stage = bossGetStageNum();
+    b.chrnum = (guard != NULL) ? guard->chrnum : -1;
+    coopItemAdd(a.id, COOPITEM_ROUND, obj);
+    coopExtSend(COOPEV_THROW, 0xFF, &a, sizeof(a));
+    coopExtSend(COOPEV_THROWMORE, 0xFF, &b, sizeof(b));
+    portConLogf("ge: coop: %s %d launched round %d (id %04x) at %.0f %.0f %.0f\n", guard != NULL ? "guard" : "we, player",
+                guard != NULL ? guard->chrnum : coopExtSelf() + 1, a.item, a.id, a.pos[0], a.pos[1], a.pos[2]);
+}
+
+/* propobj.c: a partner's (or the host's guard's) round we only show. 1: it
+ * does no harm, and goes without a blast */
+s32 coopItemsShownOnly(ObjectRecord *obj)
+{
+    CoopItem *it;
+
+    if (!coopItemsOn() || obj == NULL)
+    {
+        return 0;
+    }
+    it = coopItemByObj(obj);
+    return it != NULL && it->kind == COOPITEM_ROUND && (it->id >> 14) != (u16) coopExtSelf();
+}
+
+/* propobj.c chrobjWeaponTick: one of those rounds. It goes when it hits
+ * something or when the real one went off (ITEMGONE), and after 10 s at most */
+s32 coopItemsShownOnlyTick(PropRecord *prop)
+{
+    WeaponObjRecord *w;
+    CoopItem *it;
+
+    if (prop == NULL || !coopItemsShownOnly(prop->obj))
+    {
+        return 0;
+    }
+    it = coopItemByObj(prop->obj);
+    w = (WeaponObjRecord *) prop->obj;
+    if (w->weaponnum == ITEM_GRENADEROUND && w->timer > 0)
+    {
+        w->timer -= g_ClockTimer;
+        if (w->timer < 0)
+        {
+            w->timer = 0;
+        }
+    }
+    if (it->age < 0xFFFF)
+    {
+        it->age += (u16) ((g_ClockTimer > 0) ? g_ClockTimer : 1);
+    }
+    if (w->timer == 0 || it->gone || it->age > 600)
+    {
+        w->timer = -1;
+        prop->obj->runtime_bitflags |= RUNTIMEBITFLAG_REMOVE;
+        it->used = 0;
+        portConLogf("ge: coop: round %04x shown here is gone after %d ticks%s\n", it->id, it->age, it->gone ? ", the real one went off" : "");
+    }
+    return 1;
+}
+
 static void coopItemsApplyThrow(const CoopThrowMoreMsg *b, s32 from)
 {
     CoopExtView view;
@@ -382,6 +485,36 @@ static void coopItemsApplyThrow(const CoopThrowMoreMsg *b, s32 from)
     vel.f[1] = sPendingThrow.vel[1];
     vel.f[2] = sPendingThrow.vel[2];
     coopQuatUnpack(b->rot, &rot);
+    if (sPendingThrow.flags & COOPTHROW_ROUND)
+    {   /* a launcher round: ours flies and smokes, and goes when theirs goes off
+         * (their blast comes as its own event) or when it hits something */
+        coord3d thrust;
+        ChrRecord *chr;
+
+        if (coopVersus())
+        {
+            return;
+        }
+        if ((sPendingThrow.flags & COOPTHROW_GUARD) && (chr = chrFindByLiteralId(b->chrnum)) != NULL)
+        {
+            owner = chr->prop;
+        }
+        thrust.f[0] = (sPendingThrow.flags & COOPTHROW_POWERED) ? b->spin[0] / 1000.0f : 0.0f;
+        thrust.f[1] = (sPendingThrow.flags & COOPTHROW_POWERED) ? b->spin[1] / 1000.0f : 0.0f;
+        thrust.f[2] = (sPendingThrow.flags & COOPTHROW_POWERED) ? b->spin[2] / 1000.0f : 0.0f;
+        sApplying = 1;
+        obj = gunCoopSpawnRound(sPendingThrow.item, &pos, &rot, &vel, (sPendingThrow.flags & COOPTHROW_POWERED) ? &thrust : NULL,
+                                b->timer, (sPendingThrow.flags & COOPTHROW_GUARD) != 0, owner);
+        sApplying = 0;
+        if (obj == NULL)
+        {
+            return;
+        }
+        coopItemAdd(b->id, COOPITEM_ROUND, obj);
+        portConLogf("ge: coop: %s %d's round %d (id %04x) flies here from %.0f %.0f %.0f\n", (sPendingThrow.flags & COOPTHROW_GUARD) ? "guard" : "player",
+                    (sPendingThrow.flags & COOPTHROW_GUARD) ? b->chrnum : from + 1, sPendingThrow.item, b->id, pos.f[0], pos.f[1], pos.f[2]);
+        return;
+    }
     coopQuatUnpack(b->spin, &spin);
     sApplying = 1;
     obj = gunCoopSpawnThrown(sPendingThrow.item, &pos, &rot, &vel, &spin, b->timer, owner);
@@ -505,6 +638,16 @@ static void coopItemsApplyDrop(const CoopDropMsg *m)
             }
         }
     }
+    if (found == NULL && m->item <= 0 && chr != NULL && chr->prop != NULL && chr->model != NULL
+        && m->model >= PROP_HATFURRY && m->model <= PROP_HATPEAKED && chr->handle_positiondata_hat == NULL)
+    {   /* a hat the host's guard got by script, shot off before our copy had it: put it on to knock it off */
+        found = hatCreateForChr(chr, m->model, 0);
+        if (found != NULL)
+        {
+            coopHatSeen(chr);
+            portConLogf("ge: coop: host guard %d's hat %d made to fall\n", m->chrnum, m->model);
+        }
+    }
     if (found == NULL && m->item <= 0)
     {
         return;     /* a key or object our stand-in does not have: nothing to make it from */
@@ -601,6 +744,12 @@ void coopItemsExplodeBegin(PropRecord *prop)
     {
         return;
     }
+    if (it->kind == COOPITEM_ROUND)
+    {   /* our launcher round: the copies only showed it, and go now; its blast is sent as any is */
+        coopItemsSendGone(it, COOPGONE_BOOM);
+        it->used = 0;
+        return;
+    }
     sExploding = prop->obj;
     sExplodingOwner = ((it->id >> 14) != (u16) coopExtSelf()) ? 1 + (it->id >> 14) : 0;
     if (!it->gone)
@@ -685,6 +834,11 @@ static void coopItemsApplyGone(const CoopGoneMsg *g, s32 from)
     }
     obj = it->obj;
     prop = obj->prop;
+    if (it->kind == COOPITEM_ROUND)
+    {
+        it->gone = 1;   /* coopItemsShownOnlyTick takes it away */
+        return;
+    }
     if (g->how == COOPGONE_BOOM)
     {
         it->gone = 1;   /* coopItemsExplodeBegin knows it, and sends nothing back */
@@ -1553,6 +1707,89 @@ static void coopItemsTestGrenade(s32 missionticks)
     }
 }
 
+/* GE_COOP_TESTROUND=<s>:<item>[:<chrnum>]: <s> seconds in, a rocket (86) or a
+ * grenade-launcher round (87) is launched from our Bond, or on the host from
+ * that guard, level and the way it faces (harness only) */
+static void coopItemsTestRound(s32 missionticks)
+{
+    static s32 at = -2, item, chrnum = -1;
+    ChrRecord *guard = NULL;
+    PropRecord *from;
+    WeaponObjRecord *w;
+    coord3d pos, vel, dir;
+    Mtxf rot, ident;
+    f32 yaw;
+
+    if (at == -2)
+    {
+        const char *e = getenv("GE_COOP_TESTROUND");
+
+        at = -1;
+        if (e == NULL || sscanf(e, "%d:%d:%d", &at, &item, &chrnum) < 2)
+        {
+            at = -1;
+        }
+        at = (at >= 0) ? at * 60 : -1;
+    }
+    if (at < 0 || missionticks != at || g_CurrentPlayer->prop == NULL)
+    {
+        return;
+    }
+    from = g_CurrentPlayer->prop;
+    yaw = g_CurrentPlayer->vv_theta * (M_PI_F / 180.0f);
+    if (chrnum >= 0 && coopExtIsHost() && (guard = chrFindByLiteralId(chrnum)) != NULL && guard->prop != NULL && guard->model != NULL)
+    {
+        from = guard->prop;
+        yaw = getsubroty(guard->model);
+        dir.f[0] = sinf(yaw);
+        dir.f[2] = cosf(yaw);
+    }
+    else
+    {
+        guard = NULL;
+        dir.f[0] = -sinf(yaw);
+        dir.f[2] = cosf(yaw);
+    }
+    dir.f[1] = 0.05f;
+    pos.f[0] = from->pos.f[0] + dir.f[0] * 60.0f;
+    pos.f[1] = from->pos.f[1] + (guard != NULL ? 40.0f : 0.0f);
+    pos.f[2] = from->pos.f[2] + dir.f[2] * 60.0f;
+    w = (WeaponObjRecord *) create_new_item_instance_of_model(item == ITEM_ROCKETROUND ? PROP_CHRROCKET : PROP_CHRGRENADEROUND, item);
+    if (w == NULL)
+    {
+        return;
+    }
+    matrix_4x4_set_identity(&ident);
+    matrix_4x4_set_identity(&rot);
+    vel.f[0] = dir.f[0] * (item == ITEM_ROCKETROUND ? 3.0f : 33.333332f);
+    vel.f[1] = dir.f[1] * (item == ITEM_ROCKETROUND ? 3.0f : 33.333332f) + (item == ITEM_ROCKETROUND ? 0.0f : 6.0f);
+    vel.f[2] = dir.f[2] * (item == ITEM_ROCKETROUND ? 3.0f : 33.333332f);
+    w->timer = (item == ITEM_ROCKETROUND) ? -1 : 180;
+    gunInitProjectileObject((ObjectRecord *) w, &pos, from->stan, &rot, &vel, &ident, from);
+    if (!(w->runtime_bitflags & RUNTIMEBITFLAG_HASPROJECTILE))
+    {
+        return;
+    }
+    if (item == ITEM_ROCKETROUND)
+    {
+        dir.f[0] *= 1.111111f;
+        dir.f[1] *= 1.111111f;
+        dir.f[2] *= 1.111111f;
+        w->projectile->flags |= PROJECTILEFLAG_LAUNCHING | PROJECTILEFLAG_00000020;
+        w->projectile->unkB0 = w->runtime_pos.f[1];
+        w->projectile->unkB4 = w->projectile->speed.f[1];
+        w->projectile->unk10 = dir;
+    }
+    else
+    {
+        w->projectile->unk8C = 0.3f;
+        w->projectile->unk94 = 0.13333333f;
+        w->projectile->refreshrate = 60;
+    }
+    portConLogf("ge: coop: testround %d from %s\n", item, guard != NULL ? "a guard" : "us");
+    coopItemsLaunched((ObjectRecord *) w, &pos, &rot, &vel, item == ITEM_ROCKETROUND ? &dir : NULL, guard);
+}
+
 void coopItemsTick(s32 missionticks)
 {
     coopItemsRestTick();
@@ -1574,6 +1811,7 @@ void coopItemsTick(s32 missionticks)
     coopItemsTestThrowAt(missionticks);
     coopItemsTestKnock(missionticks);
     coopItemsTestGrenade(missionticks);
+    coopItemsTestRound(missionticks);
     if (coopItemsOn())
     {
         coopItemsSettleTick();

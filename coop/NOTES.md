@@ -2982,3 +2982,100 @@ Owner's report: a joiner can pick up the grenades guards throw.
   0 of 4, each with a fuse, landing within about 25 units of the host's
   and going off. Host grenades and remote mines: the joiner's copies have
   fuses and none was picked up. Dam, Facility and Frigate mission runs pass.
+
+## Host sync gaps: presses, the partner's tank, guns put away (COOP_VERSION stays 16)
+
+From the audit of what the host simulates but doesn't send
+(project files goldeneye-coop/sync-audit/host-sync-gaps.html), the three
+cheap ones:
+
+- **Presses reach every copy of the level scripts.** Each game runs the
+  background lists itself, and many wait on if_object_was_activated or
+  if_bond_used_gadget_on_object. COOPEV_OBJUSE went joiner to host only;
+  the host's own press went nowhere, so a joiner's copy never got past
+  such a wait (Dam's backup: no beeping at the computer on the joiner).
+  coopSendObjUse now sends the host's presses too; coopApplyObjUse on a
+  joiner only sets RUNTIMEBITFLAG_ACTIVATED (or PROPSTATE_ACTIVATED and
+  the gadget) in its own game, no alarm toggle and no door link (WORLD
+  and DOOR carry those). A joiner's press already reached the others
+  through the host. Older joiners return early on a non-host, so no
+  version change. A joiner logs "our copy of a script found obj N pressed".
+- **A partner's tank crushes guards on the host.** bondview2.c's crush
+  runs in the driver's game, where a joiner skips guard damage; the host
+  moved its copy without crushing. coopTankCrush (coop_tank.c) runs the
+  same box test every tick on the host for each partner driving, with
+  chrlvExplosionDamage(3.0) and the crush sounds for a dying chr.
+- **A runtime gun the host's guard puts away goes on the joiner too.** A
+  setup gun was already corrected by replication, but one given at
+  runtime (guard_try_spawning_item, mirrored spawns) stayed in the
+  joiner's guard's hand. coopApplyGuard now puts ours away
+  (chrSetWeaponFlag4) once the snapshot's right-hand gun has differed for
+  COOP_GUN_OFF_TICKS (90), long enough for a drop's DROP event to land
+  first; a new gun is given once the hand is empty, as before.
+- Harness: GE_COOP_TESTTANKCHR=<chrnum> (host: stand that chr in front of
+  a partner's tank 2 s after they get in), GE_COOP_TESTUNARM=<chrnum>:<s>
+  (host: that chr puts its gun away, gets a D5K 3 s later, puts it away
+  5 s after that).
+- Checked with two copies over the mock Steam, before on main (3ec70d7)
+  and after: Dam, host presses the backup computer at 20 s
+  (GE_COOP_TESTUSE=-1:6:20): before, nothing on the joiner; after, "player
+  1 used obj 28184 here" and its copy of the script passes the press.
+  Runway, joiner drives the tank (GE_COOP_TESTTANK=25) with chr 23 put in
+  front of it: before, the guard stands and fires from beside the tank;
+  after, "player 2's tank runs over chr 23" and it dies on both. Dam, chr
+  6's runtime D5K put away: before, the joiner's guard keeps it; after,
+  "host chr 6 put away gun 10" 1.5 s later.
+
+## Host sync gaps, the rest: hats, yelps, rounds, knives, trucks, script sounds (COOP_VERSION stays 16)
+
+The other gaps from the same audit. Everything new rides a spare field,
+a spare flag bit, the throw events or the extension packet range, so an
+older build ignores it.
+
+- **Hats a script gives a guard.** guard_try_spawning_hat runs on the
+  host only. The AI sync record's spare s16 (CoopAiEnt.hat) now carries
+  1 + the hat's model; a joiner's copy that has never had that chr's hat
+  puts it on (coopFollowHat), and one it lost stays off (sHatSeen). A DROP
+  for a hat our copy never had makes the hat and lets it fall.
+- **Yelps and the body-fall thud.** GSF_HURT (the snapshot's flag 64) says
+  the host's guard took damage since the last snapshot, and makes that
+  guard due at once; a joiner plays the yelp unless its own predicted
+  shot did within COOP_YELP_GAP_MS. The thud is played on the joiner from
+  the death animation's own thud frames (coopGuardThuds), nothing sent.
+  Sparks and holes where a guard's bullets land are still host-only.
+- **Rockets, grenade-launcher rounds and tank shells in flight.** The
+  launch goes out as a THROW with COOPTHROW_ROUND (and COOPTHROW_GUARD,
+  the chrnum in THROWMORE's spare end, for the host's guards; a rocket's
+  thrust in the spin field). The other games launch a copy
+  (gunCoopSpawnRound) registered as COOPITEM_ROUND: it flies, smokes and
+  sounds, hits nothing on a direct hit, and is removed without a blast
+  when it hits something, when the real one goes off (ITEMGONE) or after
+  10 s (coopItemsShownOnlyTick). The blast still comes as EXPLODE. The
+  player's rocket hook is in gunfire.c (gun.c's copy is EU only).
+- **Thrown knives.** Replayed like the other throws, made without
+  RUNTIMEBITFLAG_THROWING_KNIFE_RELATED so a copy can't cut; only the
+  thrower's knife hurts, through the forwarded shot as before.
+- **Trucks and jeeps.** COOPPKT_VEHICLE (12) once a second from the host:
+  position, yaw, path, next step, speeds. A joiner takes the path and
+  speeds, and puts a vehicle more than COOPVEH_SNAP (150) out where the
+  host's is; the first time (a drop-in), its list also goes to the host's
+  offset. Aircraft are left to their animations.
+- **Sounds from chr lists.** AI_Sfx* commands from a chr's list (ID below
+  0x1000) are relayed like presentation commands; background and object
+  lists already play their own everywhere.
+- Gap 9 (a shot-up ammo crate's box) needed nothing: every story-mission
+  ammo crate has flags 0x1, without PROPFLAG_FORCEMORTAL, so objIsMortal
+  is false and none can be shot up. Only multiplayer setups have them.
+- Harness: GE_COOP_TESTHAT=<chrnum>:<s>[:<chr2>], GE_COOP_TESTHURT=<chrnum>:<s>,
+  GE_COOP_TESTROUND=<s>:<item>[:<chrnum>], GE_COOP_TESTSFX=<chrnum>:<s>,
+  and GE_COOP_TESTFIRE=3:<s> (knives) / 24 / 25 for the launchers.
+- Checked on Dam with two copies over the mock Steam: chr 6's beret put on
+  and later knocked off on the joiner, chr 7's made to fall from the DROP;
+  a small blast on chr 6 yelps and its body thuds on the joiner; the
+  host's guard 6's rocket and the joiner's grenade rounds and rockets fly
+  on the other screen for as long as the real one (50 ticks) and go when
+  it goes off; the host's knives replayed on the joiner; a joiner arriving
+  35 s in had the truck 49 m back, put on the host's path at step 7; a
+  guard's script sound heard on the joiner. mission_runs.sh (dam,
+  facility, runway, surface, streets, frigate), the three late joins and
+  joiner_spots.sh pass.

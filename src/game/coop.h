@@ -67,6 +67,7 @@ void coopTeleportPlayerTo(coord3d *pos, StandTile *stan, f32 yaw);    /* bondvie
 s32  coopCinemaFocus(coord3d *out);                                     /* bondview2.c: a scripted cinema's pad */
 s32  coopKeepBodyList(ChrRecord *chr, AIRecord *list);  /* joiner: the host's ending list already runs on our body */
 extern s32 g_CoopObjExploding;   /* propobj.c propExplode: an object is going off */
+void coopHatSeen(ChrRecord *chr);    /* joiner: our copy has had that chr's hat, so the host's AI sync doesn't put it back */
 s32  coopScriptSpawnsLeftToHost(void);  /* joiner: a level script's spawn is the host's, mirrored from its snapshots */
 s32  coopScriptSpawnMayShow(const u8 *list, s32 next, u8 label); /* host: a one-shot script spawn may happen in view */
 s32  coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid);
@@ -633,8 +634,9 @@ void coopExtTick(s32 inmission);
 void coopExtApply(s32 kind, const u8 *raw, s32 from);
 /* the features' own unreliable packets: u32 magic, u16 version, u16 type first, as coop.c's */
 #define COOPPKT_EXT_FIRST 10
-#define COOPPKT_EXT_LAST  11
-enum { COOPPKT_TEAMTIME = 10, COOPPKT_TANK = 11 };
+#define COOPPKT_EXT_LAST  12    /* an older build ignores the ones past its own last */
+enum { COOPPKT_TEAMTIME = 10, COOPPKT_TANK = 11, COOPPKT_VEHICLE = 12 /* host -> joiners: where the trucks are (coop_repl.c) */ };
+void coopReplVehiclePacket(const void *buf, s32 len, s32 from);
 void coopExtSendPacket(void *pkt, s32 len, s32 to);    /* fills magic and version */
 void coopExtPacket(const void *pkt, s32 len, s32 from);
 
@@ -681,6 +683,9 @@ void coopItemsStageStart(void);
 void coopItemsTick(s32 missionticks);                  /* harness: GE_COOP_TESTAIM */
 void coopItemsApply(s32 kind, const u8 *raw, s32 from);
 void coopItemsThrown(ObjectRecord *obj, coord3d *pos, Mtxf *rot, coord3d *vel, Mtxf *spin);    /* gun.c */
+void coopItemsLaunched(ObjectRecord *obj, coord3d *pos, Mtxf *rot, coord3d *vel, coord3d *thrust, ChrRecord *guard); /* gun.c, chraction.c: a launcher round */
+s32  coopItemsShownOnly(ObjectRecord *obj);             /* propobj.c: a round only shown here, which does no harm */
+s32  coopItemsShownOnlyTick(PropRecord *prop);          /* propobj.c chrobjWeaponTick: 1, such a round (gone without a blast) */
 s32  coopItemsChrDropping(ChrRecord *chr);              /* chr.c: 1 keeps a joiner's guard from dropping on its own */
 void coopItemsChrDropped(ChrRecord *chr, PropRecord *prop);
 void coopItemsExplodeBegin(PropRecord *prop);           /* propobj.c propExplode */
