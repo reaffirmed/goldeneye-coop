@@ -20,6 +20,9 @@
 #include "model.h"
 
 //#include "chraicommands.h" /* needed for ai list commands, remove when moving global ai lists to chraicommands/chrai */
+#ifndef TARGET_N64
+extern s32 coopVersus(void);   /* coop_versus.c */
+#endif
 // bss
 
 
@@ -823,6 +826,12 @@ void cheatTryActivateFromInputBuffer(void)
     else
     {
         applicableMask = (getPlayerCount() == 1) ? CHEAT_MASK_SPGAME : CHEAT_MASK_MPGAME;
+#ifndef TARGET_N64
+        if (coopVersus())
+        {
+            applicableMask = 0;     /* online versus: no button codes, one PC can't change the match's rules */
+        }
+#endif
     }
 
     // Iterate through all cheats until one is activated or all are checked

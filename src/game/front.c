@@ -8923,7 +8923,7 @@ enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLRO
        CLROW_CHARACTER, CLROW_CHAT, CLROW_PUBLIC, CLROW_PASSWORD, CLROW_JOINPUBLIC, CLROW_LAYOUT, CLROW_OPTION,
        CLROW_HOSTLEAVES, CLROW_VSMODE, CLROW_VSARENA, CLROW_VSSCENARIO, CLROW_VSLENGTH, CLROW_VSWEAPONS, CLROW_VSSTART,
        CLROW_DISCORDYES, CLROW_DISCORDNO, CLROW_PROFILE, CLROW_VOICEMUTE, CLROW_LIVES, CLROW_BLEEDOUT, CLROW_RESPAWN,
-       CLROW_UPDATE, CLROW_UPDATECHECK, CLROW_UPDATERESTART, CLROW_ALLOPTIONS };
+       CLROW_UPDATE, CLROW_UPDATECHECK, CLROW_UPDATERESTART, CLROW_ALLOPTIONS, CLROW_VSRADAR, CLROW_VSARMOUR };
 #define COOP_LOBBY_ROWS     72      /* every tab's rows, chat lines wrapped included, and Classic's headings */
 /* The screen is laid out like Modern Warfare 2's lobbies (coopMw*): the
  * title top left, the tabs under it, the tab's rows down the left with
@@ -9258,6 +9258,12 @@ static void coopVsStep(s32 kind, s32 dir)
             }
             coopSetSetting(COOPSET_VSWEAPONS, v);
             break;
+        case CLROW_VSRADAR:
+            coopSetSetting(COOPSET_VSRULES, coopSetting(COOPSET_VSRULES) ^ COOPVSRULE_NORADAR);
+            break;
+        case CLROW_VSARMOUR:
+            coopSetSetting(COOPSET_VSRULES, coopSetting(COOPSET_VSRULES) ^ COOPVSRULE_NOARMOUR);
+            break;
         default:
             break;
     }
@@ -9316,6 +9322,10 @@ static void coopVsLobbyRows(void)
     }
     coopVsWeaponsName(sc, coopSetting(COOPSET_VSWEAPONS), value, sizeof(value));
     coopLobbyAdd((host && sc != SCENARIO_MWTGG) ? CLROW_VSWEAPONS : CLROW_TEXT, 0, "Weapons\n", value);
+    coopLobbyAdd(host ? CLROW_VSRADAR : CLROW_TEXT, 0, "Radar\n",
+                 coopVersusRule(COOPVSRULE_NORADAR) ? "Off\n" : "On\n");
+    coopLobbyAdd(host ? CLROW_VSARMOUR : CLROW_TEXT, 0, "Body Armour\n",
+                 coopVersusRule(COOPVSRULE_NOARMOUR) ? "Off\n" : "On\n");
 }
 
 static s32 coopLobbyActionable(const struct CoopLobbyRow *r)
@@ -10074,6 +10084,8 @@ static s32 coopLobbySteps(const struct CoopLobbyRow *r)
         case CLROW_VSSCENARIO:
         case CLROW_VSLENGTH:
         case CLROW_VSWEAPONS:
+        case CLROW_VSRADAR:
+        case CLROW_VSARMOUR:
         case CLROW_LIVES:
         case CLROW_BLEEDOUT:
         case CLROW_RESPAWN:
@@ -10117,6 +10129,8 @@ static void coopLobbyStep(const struct CoopLobbyRow *r, s32 dir)
         case CLROW_VSSCENARIO:
         case CLROW_VSLENGTH:
         case CLROW_VSWEAPONS:
+        case CLROW_VSRADAR:
+        case CLROW_VSARMOUR:
             coopVsStep(r->kind, dir);
             break;
         case CLROW_LIVES:
@@ -10246,6 +10260,8 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
         case CLROW_VSSCENARIO:
         case CLROW_VSLENGTH:
         case CLROW_VSWEAPONS:
+        case CLROW_VSRADAR:
+        case CLROW_VSARMOUR:
             coopVsStep(r->kind, 1);
             break;
         case CLROW_VSSTART:
@@ -10413,10 +10429,12 @@ static void coopLobbyHarness(void)
     }
 
     if (coop_vs_harness != NULL && coopLobbyIsHost())
-    {   /* GE_COOP_VERSUS=<arena>:<scenario>:<length>:<weapons>, the host's versus rows */
-        s32 a = 1, sc = 0, len = 2, w = 1;
+    {   /* GE_COOP_VERSUS=<arena>:<scenario>:<length>:<weapons>[:<rules>], the host's versus rows
+         * (rules: COOPVSRULE_* bits) */
+        s32 a = 1, sc = 0, len = 2, w = 1, rules = 0;
 
-        sscanf(coop_vs_harness, "%d:%d:%d:%d", &a, &sc, &len, &w);
+        sscanf(coop_vs_harness, "%d:%d:%d:%d:%d", &a, &sc, &len, &w, &rules);
+        coopSetSetting(COOPSET_VSRULES, rules);
         coopSetSetting(COOPSET_VSMODE, 1);
         coopSetSetting(COOPSET_VSARENA, a);
         coopSetSetting(COOPSET_VSSCENARIO, sc);
@@ -11671,6 +11689,8 @@ static const char *coopLobbyHelp(const struct CoopLobbyRow *r)
         case CLROW_VSSCENARIO:  return "The multiplayer scenario.\n";
         case CLROW_VSLENGTH:    return "When the match ends.\n";
         case CLROW_VSWEAPONS:   return "The weapons on the map.\n";
+        case CLROW_VSRADAR:     return "The radar in the corner, for everyone in the match.\n";
+        case CLROW_VSARMOUR:    return "Body armour on the map, for everyone in the match.\n";
         case CLROW_UPDATE:
         case CLROW_UPDATECHECK:
             if (r->arg == 1)

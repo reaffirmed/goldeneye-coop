@@ -2868,3 +2868,55 @@ multiplayer) is done, then developed further. Paused, not deleted.
   play, no "smarter guards on" in any log; Port Options sheet without the
   four rows, the 007 screen with its four sliders, the host's GAME SETUP
   without Guard AI. Shots: smart-ai-paused/ in the project files.
+
+## Versus: the HUD layer, the host's rules, leaving (COOP_VERSION 16)
+
+Owner's ask: the weapon switcher and other co-op features were missing in
+online versus. From the versus review (project files, versus-review/):
+
+- HUD: coopHudRender returned whenever more than one player was in the
+  match, and a versus PC always has two to four, so chat lines, toasts, the
+  pad's chat keyboard, Sound Captions, our TALK indicator and the weapon
+  menu were never drawn (the toasts were logged, not shown). Versus now
+  draws those (coopHudVersus) and none of the partner parts (tags, partner
+  radar, objectives); Rare's MP HUD keeps the radar, names and scores. The
+  reconnecting panel (coop_screens.c) shows in versus too.
+- Weapon menu: wmLive accepted one player only, so the menu and the number
+  keys did nothing in versus. It runs there now, except for Flag Tag's flag
+  holder (Rare's cycling refuses them too), and is hidden under the MP
+  pause menu.
+- Rules: each PC applied its own Multiplayer Options sheet in an online
+  match: Invisibility, DK Mode, Tiny Players, Paintball, No Radar, Turbo,
+  Unlimited Ammo (lv.c's cheat pass), No Armor (each arena's pickups),
+  Spawn with Weapon and Random Spawns, plus cheat menu picks and Rare's
+  in-match button codes. Versus now plays the host's rules only: two new
+  host rows under Rules, Radar and Body Armour (COOPSET_VSRULES,
+  COOPVSRULE_NORADAR / NOARMOUR, kept in coop_lobby.txt as vsrules), and
+  everything else from the sheet, the cheat menu and button codes is off
+  (video.c portMpCheatSetting / portMpNoArmorActive / portMpSpawnWeapon /
+  portMpRandomSpawns, lv.c, cheat.c). Versus always allows 100 live
+  explosions, since every blast is set off on every PC.
+- Leaving: Quit on the MP pause menu ran the end of the match, whose VSEND
+  ended it on every PC. A joiner's Quit now sends COOPEV_VSLEFT (38) and
+  ends only its own match; the host's still ends it for all, since the
+  others' packets go through the host. A player whose STATE stops for 2 s
+  (left the session, left the match, or no number after a host change) is
+  gone too. A gone player's body is hidden (no drawing, no collision, no
+  hits), off the radar, drops the flag or Golden Gun where it stood, and a
+  toast says "<name> LEFT THE MATCH". Once one player or one team is left,
+  their game ends the match (coopVsLastStanding).
+- Bodies: coopVsMoveBody set the model's height from the player's eye
+  height, the idle hop #71 fixed for co-op partners; it sets x and z only
+  now. Above 60 fps coopSubFieldTick placed only co-op puppets; it places
+  versus bodies too (coopVersusSubFieldTick).
+- Harness: GE_COOP_VERSUS takes a fifth field, the COOPVSRULE_* bits;
+  GE_VS_QUIT=<s> picks Quit that far into the match.
+- Checked over the mock Steam on Temple: the GE_COOP_TESTTOASTS toasts on
+  both screens in versus; GE_WEAPMENU_TEST opens and takes in versus;
+  VERSUS 1:0:4:1:3 with player 2's midas.ini set to Invisibility, Turbo,
+  Unlimited Ammo, No Armor and Spawn with Weapon: both logs "cheats from
+  Multiplayer Options: No Radar", no armour model loaded on either; three
+  players with player 3 on GE_VS_QUIT=25 and player 2's game killed at
+  80 s: players 1 and 2 kept fighting after 3 quit, nothing hit player 2's
+  body after it left, and player 1's game ended the match alone; two
+  players, first to 3: four matches in a row to the end screen and back.

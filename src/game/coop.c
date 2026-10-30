@@ -85,7 +85,7 @@ u32 randomGetNext(void);
 extern void portConLogf(const char *fmt, ...);
 
 #define COOP_MAGIC   0x50434547u /* "GECP" */
-#define COOP_VERSION 15 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
+#define COOP_VERSION 16 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
                           6: host migration (AI sync, bye, addresses in the roster);
                           7: pings, chat, objective credit, team times, cross-save (COOPEV 16, 20..31, COOPPKT 10);
                           8: versus (COOPEV 32..36, COOPPKT 16);
@@ -99,7 +99,9 @@ extern void portConLogf(const char *fmt, ...);
                               partner's hit (HIT friendly), a blast's owner (EXPLODE), Friendly hits stat;
                           14: the host's mission countdown in WORLD, its blast relayed (COOPEV_AICMD); versus shares
                               the arena's pickups (COOPEV 37), thrown items, dropped guns, object damage and knocks;
-                          15: where a guard's animation loops (GUARDS endframe) */
+                          15: where a guard's animation loops (GUARDS endframe);
+                          16: versus: the host's rules (COOPSET 13) instead of each PC's Multiplayer Options, a
+                              player who quits leaves alone (COOPEV_VSLEFT) */
 
 enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7, COOPPKT_AISYNC = 8, COOPPKT_BYE = 9 };
 /* 10 and 11 (COOPPKT_EXT_FIRST..LAST in coop.h) are coop_ext.c's features' own packets;
@@ -6748,7 +6750,7 @@ s32 coopSetting(s32 which)
 #define COOP_LOBBY_FILE "coop_lobby.txt"
 static const char *const sLobbyKeys[COOPSET_MAX] = {
     "difficulty", "friendlyfire", NULL, "vsarena", "vsscenario", "vslength", "vsweapons",
-    "hostleaves", "lives", "bleedout", "respawn", "scaling", NULL,
+    "hostleaves", "lives", "bleedout", "respawn", "scaling", NULL, "vsrules",
 };
 
 static void coopLobbyLoad(void)
