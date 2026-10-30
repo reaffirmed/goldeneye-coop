@@ -11,7 +11,8 @@
  *
  * [display] weapon_menu (default on). Off: the slot keys still work, taking
  * the slot's next weapon straight away, and next / previous weapon cycle as
- * they always have. Solo only; multiplayer keeps Rare's cycling.
+ * they always have. Solo, co-op and online versus (one player per PC);
+ * split-screen multiplayer keeps Rare's cycling.
  */
 #include <ultra64.h>
 #include <string.h>
@@ -29,6 +30,7 @@
 #include "options.h"
 #include "language.h"
 #include "coop.h"
+#include "front.h"
 
 extern Gfx *portHudScaleBegin(Gfx *gdl, f32 x, f32 y);
 extern Gfx *portHudScaleEnd(Gfx *gdl);
@@ -227,8 +229,10 @@ static void wmEquip(const WmEntry *e)
 
 static s32 wmLive(void)
 {
-    return getPlayerCount() == 1 && !g_CurrentPlayer->bonddead && g_CurrentPlayer->watch_animation_state == 0
-        && g_PlayerIsInTank != 1;   /* the tank has its own guns */
+    return (getPlayerCount() == 1 || coopVersus()) && !g_CurrentPlayer->bonddead
+        && g_CurrentPlayer->watch_animation_state == 0
+        && g_PlayerIsInTank != 1    /* the tank has its own guns */
+        && !(coopVersus() && get_scenario() == SCENARIO_TLD && bondinvIsAliveWithFlag());   /* Flag Tag: no switching with the flag, as Rare's cycling */
 }
 
 /* the entry after the one in hand within slot s, or its first */
