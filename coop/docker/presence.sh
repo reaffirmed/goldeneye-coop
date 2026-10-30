@@ -22,7 +22,7 @@ for i in 1 2 3; do Xvfb :$i -screen 0 960x540x24 >/dev/null 2>&1 & done
 for i in 1 2 3; do mkdir -p /tmp/gediscord/p$i; python3 ../coop/mock/discord_mock.py /tmp/gediscord/p$i & done
 sleep 1
 export SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 GE_SKIPINTRO=1 GE_NOMSGBOX=1 GE_NOINISAVE=1 LD_LIBRARY_PATH=$PWD/mock \
-       GE_DISCORD_APPID=${APPID:-1300000000000000000} ${ALLENV}
+       ${APPID:+GE_DISCORD_APPID=$APPID} ${ALLENV}
 DISPLAY=:2 env XDG_RUNTIME_DIR=/tmp/gediscord/p2 GE_MOCK_STEAMID=${IDS[1]} GE_COOP_LOBBY=wait ${P2ENV} timeout ${RUNSECS:-150} ./ProjectMidas > /out/p2.log 2>&1 &
 DISPLAY=:3 env XDG_RUNTIME_DIR=/tmp/gediscord/p3 GE_MOCK_STEAMID=${IDS[2]} GE_MOCK_FRIEND=${IDS[0]} GE_COOP_LOBBY=wait ${P3ENV} timeout ${RUNSECS:-150} ./ProjectMidas > /out/p3.log 2>&1 &
 

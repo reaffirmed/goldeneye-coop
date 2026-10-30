@@ -260,10 +260,10 @@ Once let in, their game joins your lobby by itself. If your lobby has a
 password, a Discord join skips it: you let them in yourself. If they are not
 your Steam friend, set your Lobby to Public first; Steam keeps everyone else
 out of a Friends Only lobby (their screen says "Couldn't join that game.").
-Discord needs this build's Discord application id in discord_appid.txt next
-to ProjectMidas.exe. Without the file, or without Discord running, the game
-plays as before. Steam starts with the game now so the status shows from
-the first menu; put GE_NO_PRESENCE=1 in the environment to turn both off.
+If Discord isn't open the game plays as before and picks Discord up within
+15 seconds of it starting. Steam starts with the game now so the status
+shows from the first menu. Put GE_NO_DISCORD=1 in the environment to keep
+your status off Discord only, or GE_NO_PRESENCE=1 to turn both off.
 
 Dropping in
 -----------
