@@ -1202,6 +1202,7 @@ Gfx *coopHudRender(Gfx *gdl)
         gdl = coopHudObjectives(gdl, partner ? COOP_RADAR_TOP + 0x16 : 0x10);
     }
     coopCaptionHarness();
+    coopFadeHarness();
     gdl = coopCaptionsRender(gdl);   /* Sound Captions (coop_access.c) */
     gdl = coopFeedRender(gdl);   /* chat lines and toasts (coop_chat.c) */
     gdl = coopChatGridRender(gdl);   /* a pad player typing on the on-screen keyboard */

@@ -381,6 +381,10 @@ static const struct PortOpt sOpts[] = {
     ENUMR ("colorblind",        "[display]", "Colour Blind\n",  PORTOPT_CAT_GAMEPLAY, sColorblindVals, sColorblindText, NULL),
     TOGGLE("screen_shake",      "[display]", "Screen Shake\n",  PORTOPT_CAT_GAMEPLAY),
     ENUMR ("text_size",         "[display]", "Text Size\n",     PORTOPT_CAT_GAMEPLAY, sTextSizeVals, sTextSizeText, NULL),
+    /* mission messages and speech: Modern caption lines (coop_captions.c) or Rare's */
+    TOGGLET("caption_style",    "[display]", "Caption Style\n", PORTOPT_CAT_GAMEPLAY, sCoopMenuText),
+    /* story co-op: a partner right in front of you fades out (coop_fade.c) */
+    TOGGLE("partner_fade",      "[display]", "Partner Fade\n",  PORTOPT_CAT_GAMEPLAY),
     /* the in-game updater (port_update.c): ask GitHub for a newer release at startup */
     TOGGLE("auto_update",       "[display]", "Check for Updates\n", PORTOPT_CAT_GAMEPLAY),
     TOGGLET("crouch_key",       "[input]",   "Crouch Key\n",    PORTOPT_CAT_CONTROLLER, sHoldToggleText),

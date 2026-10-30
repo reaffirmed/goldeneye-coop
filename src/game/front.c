@@ -4634,6 +4634,7 @@ static const struct PortSheetRow port_sheet_rows_portopts[] = {
     { SHROW_OPT, "guard_budget" },           /* their escalations a mission, the host's in co-op */
 #endif
     { SHROW_OPT, "coop_menu" },              /* the CO-OP screen: Modern, or Classic on the folder */
+    { SHROW_OPT, "partner_fade" },           /* story co-op: a partner up close fades out (coop_fade.c) */
     { SHROW_OPT, "unlimited_explosions" },   /* default ON */
     { SHROW_OPT, "watch_static" },           /* the watch's fuzz, default ON (vanilla) */
     { SHROW_OPT, "fast_pause" },             /* the watch at Rare's top speed, default OFF */
@@ -4644,8 +4645,8 @@ static const struct PortSheetRow port_sheet_rows_portopts[] = {
 /* ACCESSIBILITY: captions, colours, shake and text size (coop_access.c), and
  * every hold-or-toggle choice in one place (Aim Control is Rare's own row) */
 static const struct PortSheetRow port_sheet_rows_access[] = {
-    { SHROW_OPT, "captions" }, { SHROW_OPT, "colorblind" }, { SHROW_OPT, "text_size" },
-    { SHROW_OPT, "screen_shake" }, { SHROW_OPT, "head_roll" },
+    { SHROW_OPT, "captions" }, { SHROW_OPT, "caption_style" }, { SHROW_OPT, "colorblind" },
+    { SHROW_OPT, "text_size" }, { SHROW_OPT, "screen_shake" }, { SHROW_OPT, "head_roll" },
     { SHROW_OPT, "aim_control" }, { SHROW_OPT, "crouch_key" }, { SHROW_OPT, "walk_key" },
 };
 static const struct PortSheetRow port_sheet_rows_hud[] = {

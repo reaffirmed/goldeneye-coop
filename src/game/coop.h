@@ -772,6 +772,10 @@ void coopCaptionChrGunfire(ChrRecord *chr);     /* chraction.c: a chr's gun went
 Gfx *coopCaptionsRender(Gfx *gdl);
 void coopCaptionHarness(void);
 
+/* story co-op: a partner up close fades out (coop_fade.c) */
+s32  coopFadePartnerAlpha(PropRecord *prop, s32 alpha);    /* chr.c chrRenderProp */
+void coopFadeHarness(void);
+
 
 /* netcode (coop_repl.c and the netcode thread's later files): COOPPKT 20..23, COOPEV 48..55 */
 #define COOPPKT_REPL 20     /* records */
