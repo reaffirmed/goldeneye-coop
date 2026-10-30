@@ -659,6 +659,7 @@ void coopTankTick(s32 inmission);
 void coopTankPacket(const void *raw, s32 len, s32 from);
 s32  coopTankDriving(s32 player);           /* a partner is in a tank */
 s32  coopTankTaken(PropRecord *prop);       /* a partner is driving this tank */
+PropRecord *coopTankPropOf(s32 player); /* the tank a partner is driving, NULL none */
 s32  coopTankTestTap(void);                 /* GE_COOP_TESTTANK's B press */
 
 /* team mission times (coop_teamtime.c): in co-op the mission's time is the
@@ -709,6 +710,7 @@ void coopItemsExplodeEnd(void);
 s32  coopItemsExploding(void);
 s32  coopItemsExplodingOwner(void);
 s32  coopItemsExplodingOurRound(void);               /* a rocket or grenade round we fired is going off */
+s32  coopItemsExplodingOwnRound(void);               /* a round launched in this game is going off */
 s32  coopItemsIsPartners(ObjectRecord *obj);            /* a partner's remote mine: not our detonator's */
 s32  coopItemsEmbedPending(ObjectRecord *obj);          /* propobj.c: stuck by a partner's word, matrix still to work out */
 s32  coopItemsUnsettled(PropRecord *prop);             /* propobj.c weaponFindThrown: a partner's throw, still in the air for them */

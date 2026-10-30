@@ -3250,6 +3250,75 @@ and the host staying back (00 Agent, both invulnerable, mock Steam).
   (stand by an object facing it), x<tag> (use the gadget in hand on it);
   GE_COOP_WATCHWORLD logs the stage flags as they change.
 
+## Surface 1: a respawned guard missing on the joiner's screen (2026-10-30, COOP_VERSION stays 16)
+
+Report: on Surface 1 a guard that threw grenades was on the host's screen;
+the joiner saw the grenades but not the guard. The two F8 reports (v0.6.11)
+put it at guard 7, one of the four Surface 1 respawns: background lists
+0x1001..0x1004 spawn a guard at a pad whenever chr 4..7 is gone, and the
+new one takes the dead one's number (guard_set_chr_num). In those reports
+the joiner's copy of that third guard 7 existed, got its snapshots and
+fired and threw with the host's, and the joiner's chr checksum never
+disagreed. So the logs show it was there, but not why it wasn't drawn.
+The rig can't run without the cart, so this was not reproduced.
+
+- **Respawns with no slot.** Surface 1 has 19 chr slots (9 setup guards +
+  10). The host spawns a guard only with 3 free (chrSpawnAtCoord), and the
+  joiner mirrored one only with 3 free too, but the joiner keeps bodies
+  for up to 5 s after the host frees them. With one body more than the
+  host, the joiner had no room for the respawn until the body went. Now a
+  living guard needs only 1 free. When fewer than 3 are free, the body the
+  host stopped sending longest ago goes ("no chr slot for host chr N: body
+  M goes to make room"). A body is still mirrored only with 3 free.
+- **A new copy started with the old copy's state.** A respawn's copy often
+  reuses the slot of the same guard's earlier copy. The prediction, the
+  position track, fade, thuds and AI-sync state were per slot and carried
+  over ("predict: guard 7 survived" printed on a brand-new copy).
+  coopMirrorSlotFresh clears them when a copy is made.
+- **Saying why next time.** A failed copy is logged with its reason ("can't
+  mirror host chr N ... yet: no floor below its spot / no free chr slot
+  ..."). Once a second the joiner checks each living guard of the host's
+  within 4000 units. If one is drawn more than 400 units from the host's newest spot,
+  stands on no floor, is faded, is in no room, or has no track, it logs
+  "watch: host chr N ...": its slot, action, spot, ground, rooms (r: drawn
+  this frame), alpha, hidden bits and the host's spot. coop.txt in an F8
+  report now lists every chr the same way, so the two games' reports can
+  be compared line by line.
+
+## The joiner's tank: guards look past it, its shells hurt (COOP_VERSION stays 16)
+
+Tester report: on Runway, guards ignored a joiner in the tank, or ran
+around in front of it once they had noticed them, and its shells hurt
+nobody. Three causes:
+
+- **Guards looked into the partner's tank.** A guard's sight and aim tests
+  (chrCanSeeBond, chrlvCurrentPlayerCall7F0B0E24, the shot's line) leave
+  out "Bond" and the tank Bond drives (bondviewUpdateGuardTankFlagsRelated,
+  g_PlayerTankProp). For a partner, coopGuardTankFlags left out only the
+  puppet, so the host's guards found the partner's own tank in every line:
+  never seen, and a guard that had heard them came closer and closer
+  instead of firing. It now leaves out the tank the partner drives too
+  (coopTankPropOf).
+- **The joiner dropped those hits as cover.** coopHitBehindCover tested the
+  guard's line to our Bond with our own tank in it, so every hit was
+  "behind cover now". It leaves our tank out as the guards' own test does.
+- **A joiner's rounds stopped reaching the host.** Since the Train fix
+  (a joiner doesn't send an object's explosion back), everything set off
+  through propExplode stayed on the joiner, and that includes its own
+  rockets, launcher rounds and tank shells, whose blast only the host can
+  make hurt. coopItemsExplodingOwnRound says the blast is a round this game
+  launched (our COOPITEM_ROUND); those are sent again. The projectile's
+  owner can't say: a round that hit something has lost it.
+- Harness: GE_COOP_TESTTANK=<s>:0 (get in and sit still),
+  GE_COOP_TESTTANKCHR=<chrnum>:<dist> (stand the chr further out, negative
+  for behind).
+- Checked on Runway with two copies over the mock Steam, before (main,
+  2d0de5b, with the harness) and after. Joiner in a still tank, chr 23 8 m
+  away: before, it never fires and the joiner takes no hits; after, "chr 23
+  firing" 9 times and 8 hits land on the joiner. Joiner fires four shells
+  (GE_COOP_TESTFIRE=32:30:6) at chr 23 put where they land: before, no
+  blast reaches the host and chr 23 stands; after, "peer explosion (type
+  13)" for each, chr 23 hurt, dies and fades on both.
 ## Discord presence on (2026-10-30)
 
 - GoldenEye Coop has its own Discord application now: id
