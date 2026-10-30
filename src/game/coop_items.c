@@ -158,7 +158,7 @@ typedef struct
     s32 stage;
 } CoopKnockMsg;         /* COOPEV_ITEMKNOCK: our shot sent it flying (20 bytes) */
 
-#define COOP_ITEMS_MAX 64
+#define COOP_ITEMS_MAX 128
 
 typedef struct
 {
@@ -257,7 +257,7 @@ static CoopItem *coopItemByObj(ObjectRecord *obj)
 
 static void coopItemAdd(u16 id, s32 kind, ObjectRecord *obj)
 {
-    s32 i, free = -1;
+    s32 i, free = -1, drop = -1;
 
     for (i = 0; i < COOP_ITEMS_MAX; i++)
     {
@@ -269,10 +269,32 @@ static void coopItemAdd(u16 id, s32 kind, ObjectRecord *obj)
                 free = i;
             }
         }
+        else if (sItems[i].obj == obj)
+        {
+            free = i;   /* the same object again: its record */
+            break;
+        }
+        else
+        {
+            if (sItems[i].id == id)
+            {   /* an older item with this id (a player who came back started
+                 * their count again): it keeps its place but loses the id,
+                 * so the new one's events can't reach it */
+                portConLogf("ge: coop: item id %04x reused, the older one no longer follows it\n", id);
+                sItems[i].id = 0;
+            }
+            if (sItems[i].kind == COOPITEM_DROP && drop < 0)
+            {
+                drop = i;
+            }
+        }
     }
     if (free < 0)
-    {
-        free = sSerial % COOP_ITEMS_MAX;   /* full: the oldest is likely long gone */
+    {   /* full: a guard's dropped gun lying about loses its record before
+         * anything thrown does (a partner's mine with no record would be ours
+         * to set off, and its blast would no longer reach the others) */
+        free = (drop >= 0) ? drop : sSerial % COOP_ITEMS_MAX;
+        portConLogf("ge: coop: item records full, item %04x's record goes to %04x\n", sItems[free].id, id);
     }
     sItems[free].used = 1;
     sItems[free].gone = 0;
@@ -296,6 +318,63 @@ static u16 coopItemNewId(void)
         sSerial = 1;
     }
     return (u16) ((coopExtSelf() & 3) << 14) | sSerial;
+}
+
+/* an item of ours came back to us (the host's copies, after we rejoined):
+ * our new ids go on past it */
+static void coopItemSeenId(u16 id)
+{
+    if ((id >> 14) == (u16) (coopExtSelf() & 3) && (u16) (id & 0x3FFF) > sSerial)
+    {
+        sSerial = (u16) (id & 0x3FFF);
+    }
+}
+
+/* coop.c coopRenumber: host migration renumbered the players, newof[old] =
+ * new, -1 gone. Each item's id names its player, which is who may set it off
+ * and whose copy speaks for it, so the ids follow the players. A player who
+ * left keeps their items under a number nobody has now (the same one in
+ * every game), so nobody's detonator takes them and their ids don't collide
+ * with the new host's; with no number spare they lose their ids. */
+void coopItemsRenumber(const s32 *newof)
+{
+    s32 map[COOP_MAX_PLAYERS], taken[COOP_MAX_PLAYERS];
+    s32 p, q, i;
+
+    memset(taken, 0, sizeof(taken));
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        if (newof[p] >= 0 && newof[p] < COOP_MAX_PLAYERS)
+        {
+            taken[newof[p]] = 1;
+        }
+    }
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        map[p] = (newof[p] >= 0 && newof[p] < COOP_MAX_PLAYERS) ? newof[p] : -1;
+        for (q = COOP_MAX_PLAYERS - 1; map[p] < 0 && q >= 0; q--)
+        {
+            if (!taken[q])
+            {
+                taken[q] = 1;
+                map[p] = q;
+            }
+        }
+    }
+    for (i = 0; i < COOP_ITEMS_MAX; i++)
+    {
+        CoopItem *it = &sItems[i];
+        s32 owner;
+
+        if (!it->used || it->id == 0)
+        {
+            continue;
+        }
+        owner = it->id >> 14;
+        it->id = (map[owner] >= 0) ? (u16) ((map[owner] << 14) | (it->id & 0x3FFF)) : 0;
+    }
+    sPendingFrom = -1;
+    portConLogf("ge: coop: item owners renumbered (%d %d %d %d)\n", map[0], map[1], map[2], map[3]);
 }
 
 static void coopQuatPack(Mtxf *m, s16 *out)
@@ -477,7 +556,12 @@ static void coopItemsApplyThrow(const CoopThrowMoreMsg *b, s32 from)
         return; /* the first half went missing (another stage) */
     }
     sPendingFrom = -1;
-    if (b->stage != bossGetStageNum() || coopItemById(b->id) != NULL)
+    if (b->stage != bossGetStageNum())
+    {
+        return;
+    }
+    coopItemSeenId(b->id);
+    if (coopItemById(b->id) != NULL)
     {
         return;
     }
@@ -1292,11 +1376,13 @@ static void coopItemsSettleTick(void)
         parent = obj->prop->parent;
         if (obj->runtime_bitflags & RUNTIMEBITFLAG_EMBEDDED)
         {
-            s32 ofs = (parent != NULL && parent->type == PROP_TYPE_OBJ) ? coopExtSetupOfs(parent->obj) : -1;
+            /* a door is a setup object too: a mine on a door that was still
+             * swinging on the other screens hit a different place there */
+            s32 ofs = (parent != NULL && (parent->type == PROP_TYPE_OBJ || parent->type == PROP_TYPE_DOOR)) ? coopExtSetupOfs(parent->obj) : -1;
 
             if (ofs < 0)
             {
-                it->settled = 1;    /* stuck to a guard or to something thrown: theirs can stay as it is */
+                it->settled = 1;    /* stuck to something thrown: theirs can stay as it is */
                 continue;
             }
             coopItemsSendStuck(it, ofs, &obj->runtime_pos);
@@ -1321,6 +1407,145 @@ static void coopItemsSettleTick(void)
         }
     }
 }
+
+/* coop_repl.c coopReplSendSnapshot (host): a player is arriving in a mission
+ * under way, a drop-in or a rejoin. The join snapshot has the setup objects;
+ * the items thrown and planted so far, everyone's, and the guns spawned
+ * guards dropped go to them here, as the throw or drop that would have made
+ * them, followed by where each one is now. The ids stay the owners', so a
+ * rejoiner's own mines are theirs to set off again. */
+void coopItemsSendAllTo(s32 player)
+{
+    s32 i, n = 0;
+
+    if (!coopItemsOn() || !coopExtIsHost() || player <= 0 || player >= COOP_MAX_PLAYERS)
+    {
+        return;
+    }
+    for (i = 0; i < COOP_ITEMS_MAX; i++)
+    {
+        CoopItem *it = &sItems[i];
+        ObjectRecord *obj = it->obj;
+        PropRecord *parent;
+        WeaponObjRecord *w;
+
+        if (!it->used || it->id == 0 || it->kind == COOPITEM_ROUND || !coopItemLive(it))
+        {
+            continue;   /* (a round in flight goes off in a moment) */
+        }
+        parent = obj->prop->parent;
+        w = (WeaponObjRecord *) obj;
+        if (parent != NULL && !(obj->runtime_bitflags & RUNTIMEBITFLAG_EMBEDDED))
+        {
+            continue;   /* in someone's hands */
+        }
+        if (it->kind == COOPITEM_DROP)
+        {
+            CoopDropMsg m;
+
+            if (parent != NULL || obj->prop->type != PROP_TYPE_WEAPON || coopExtSetupOfs(obj) >= 0)
+            {
+                continue;   /* a setup object (the snapshot has it), or a hat or key */
+            }
+            memset(&m, 0, sizeof(m));
+            m.id = it->id;
+            m.chrnum = -1;  /* no guard: made where it lies */
+            m.item = (s8) w->weaponnum;
+            m.model = (s16) obj->obj;
+            m.stage = bossGetStageNum();
+            m.pos[0] = obj->prop->pos.f[0];
+            m.pos[1] = obj->prop->pos.f[1];
+            m.pos[2] = obj->prop->pos.f[2];
+            m.fuse = (w->timer >= 0) ? (s16) (w->timer + 1) : 0;
+            coopExtSend(COOPEV_DROP, player, &m, sizeof(m));
+            n++;
+            continue;
+        }
+        {
+            CoopThrowMsg a;
+            CoopThrowMoreMsg b;
+            CoopStuckMsg m;
+            Mtxf r;
+            f32 scale = coopItemsMtxScale(&obj->mtx), q[4];
+            s32 j, k, ofs = -1;
+
+            memset(&a, 0, sizeof(a));
+            memset(&b, 0, sizeof(b));
+            a.id = b.id = it->id;
+            a.item = (u8) w->weaponnum;
+            for (k = 0; k < 3; k++)
+            {
+                a.pos[k] = obj->prop->pos.f[k];
+                a.vel[k] = coopItemsAirborne(obj) ? obj->projectile->speed.f[k] : 0.0f;
+            }
+            b.timer = (s16) w->timer;
+            matrix_4x4_set_identity(&r);
+            for (j = 0; j < 3; j++)
+            {
+                for (k = 0; k < 3; k++)
+                {
+                    r.m[j][k] = (scale != 0.0f) ? obj->mtx.m[j][k] / scale : obj->mtx.m[j][k];
+                }
+            }
+            coopQuatPack(&r, b.rot);
+            matrix_4x4_set_identity(&r);
+            coopQuatPack(&r, b.spin);
+            b.stage = bossGetStageNum();
+            b.chrnum = -1;
+            coopExtSend(COOPEV_THROW, player, &a, sizeof(a));
+            coopExtSend(COOPEV_THROWMORE, player, &b, sizeof(b));
+            n++;
+            if (coopItemsAirborne(obj))
+            {
+                continue;   /* its own word on where it ends up follows */
+            }
+            if (obj->runtime_bitflags & RUNTIMEBITFLAG_EMBEDDED)
+            {
+                ofs = (parent->type == PROP_TYPE_OBJ || parent->type == PROP_TYPE_DOOR) ? coopExtSetupOfs(parent->obj) : -1;
+                if (ofs < 0)
+                {
+                    continue;   /* stuck to something thrown */
+                }
+            }
+            memset(&m, 0, sizeof(m));
+            m.id = it->id;
+            m.objofs = ofs;
+            coopItemsMtxToQuat(&obj->mtx, scale, q);
+            for (k = 0; k < 4; k++)
+            {
+                m.rot[k] = (s16) (q[k] * 32767.0f);
+            }
+            m.pos[0] = obj->runtime_pos.f[0];
+            m.pos[1] = obj->runtime_pos.f[1];
+            m.pos[2] = obj->runtime_pos.f[2];
+            if (ofs < 0)
+            {
+                m.pos[0] = obj->prop->pos.f[0];
+                m.pos[1] = obj->prop->pos.f[1];
+                m.pos[2] = obj->prop->pos.f[2];
+            }
+            coopExtSend(COOPEV_ITEMSTUCK, player, &m, sizeof(m));
+        }
+    }
+    portConLogf("ge: coop: %d thrown and dropped items sent to player %d, who is arriving\n", n, player + 1);
+}
+
+/* propobj.c weaponCreate: a weapon slot it may not free to make room. Every
+ * game frees its own off-screen pick, and what is off screen differs from
+ * player to player, so a partner's mine went from one world only: their
+ * detonator set off theirs, and ours, the one that can hurt guards, was gone */
+s32 coopItemsKeepSlot(ObjectRecord *obj)
+{
+    CoopItem *it;
+
+    if (!coopItemsOn() || coopVersus())
+    {
+        return 0;
+    }
+    it = coopItemByObj(obj);
+    return it != NULL && it->kind == COOPITEM_THROWN;
+}
+
 
 static void coopItemsApplyStuck(const CoopStuckMsg *m, s32 from)
 {

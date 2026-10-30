@@ -660,6 +660,7 @@ void coopTankPacket(const void *raw, s32 len, s32 from);
 s32  coopTankDriving(s32 player);           /* a partner is in a tank */
 s32  coopTankTaken(PropRecord *prop);       /* a partner is driving this tank */
 PropRecord *coopTankPropOf(s32 player); /* the tank a partner is driving, NULL none */
+void coopTankRenumber(const s32 *newof);    /* host migration: newof[old] = new, -1 gone */
 s32  coopTankTestTap(void);                 /* GE_COOP_TESTTANK's B press */
 
 /* team mission times (coop_teamtime.c): in co-op the mission's time is the
@@ -697,6 +698,9 @@ void coopChatTypedLine(char *out, s32 cap);         /* the line being typed */
 void coopItemsStageStart(void);
 void coopItemsTick(s32 missionticks);                  /* harness: GE_COOP_TESTAIM */
 void coopItemsApply(s32 kind, const u8 *raw, s32 from);
+void coopItemsSendAllTo(s32 player);                 /* host: a player arriving gets the items lying about */
+void coopItemsRenumber(const s32 *newof);           /* host migration: item ids follow their players */
+s32  coopItemsKeepSlot(ObjectRecord *obj);           /* propobj.c weaponCreate: a thrown item not to free */
 void coopItemsThrown(ObjectRecord *obj, coord3d *pos, Mtxf *rot, coord3d *vel, Mtxf *spin);    /* gun.c */
 void coopItemsLaunched(ObjectRecord *obj, coord3d *pos, Mtxf *rot, coord3d *vel, coord3d *thrust, ChrRecord *guard); /* gun.c, chraction.c: a launcher round */
 s32  coopItemsShownOnly(ObjectRecord *obj);             /* propobj.c: a round only shown here, which does no harm */

@@ -3344,3 +3344,59 @@ nobody. Three causes:
   so the host never has 3 and Dam never starts. main does the same, so it
   is the script's GE_COOP_LOBBY=wait driving falling behind the menus, not
   Discord.
+
+## Hidden co-op bugs: host changes, rejoins, crowded worlds (COOP_VERSION stays 16)
+
+From a read of the code for the pattern behind the Runway tank and Surface 1
+respawn reports (the report is the "Co-op bugs still hiding" doc). Two were
+seen on the rig first, a third turned up while testing them:
+
+- **A rejoiner's events were all dropped.** A player who crashed or quit and
+  came back had "event queue to player 1 full" from its first second on, so
+  everything it sent the host reliably (presses, pickups, throws, mine
+  blasts) was lost for the rest of the mission (17 drops in one run on
+  main). The host's first packets to it still acked the rejoiner's previous
+  life; coopRecvEvents took that ack, which put outAcked past outNext, and
+  the u32 difference read as a full queue for good. A packet that acks
+  events we never sent is now ignored; the sender starts over as soon as it
+  hears our new session.
+- **Item ids follow host migration.** An item's id carries its owner in the
+  top two bits, and coopRenumber didn't touch them: the new host's
+  detonator set off the old host's mines and not its own. coopItemsRenumber
+  maps the ids with newof; a player who left keeps their items under a
+  number nobody holds (the highest free, the same in every game). The tank's
+  per-player slots move too (coopTankRenumber).
+- **A player arriving mid-mission gets the items lying about.** The join
+  snapshot is setup objects only. coopReplSendSnapshot now also calls
+  coopItemsSendAllTo: every live thrown item goes to them as THROW +
+  THROWMORE (same id, where it is now, its fuse) + ITEMSTUCK (stuck to a
+  setup object or lying), and spawned guards' dropped guns as a DROP with no
+  guard. A rejoiner's own earlier items come back with its ids, so its
+  detonator works on them again, and coopItemSeenId moves its serial past
+  them. An id that turns up again (a count started over) is taken from the
+  older record (coopItemAdd).
+- **A throw stuck to a door** is now sent with ITEMSTUCK like one stuck to an
+  object. (Items never stick to chrs: objEmbed leaves chrs and players out.)
+- **The 30 weapon slots.** weaponCreate frees an off-screen lying gun or
+  mine when full, and each game's screen is different, so a partner's mine
+  could go from one world only. A live co-op thrown item is never picked
+  (coopItemsKeepSlot); guns lying about still are.
+- **The item records** are 128, and when full a guard's dropped gun loses its
+  record first, never a thrown item.
+- **A parked tank.** Tanks are left out of replication and their packets
+  stopped a second after the driver got out, so a later player had the tank
+  where the level put it. The host sends the last driven tank's place once a
+  second while nobody drives it.
+- Checked, no change: PR #83's relayed presses on Runway (the host takes
+  the key and boards the plane, GE_COOP_TESTUSE=2:3:15): the joiner's own
+  copy of the list finds the press, objective B and the stage flags agree,
+  one ending and one debrief on the joiner.
+- Harness: GE_COOP_TESTDETONATE=<s> presses the watch's detonator.
+- Rig (Dam, two copies over the mock Steam): host killed at 32 s after both
+  threw two remote mines, the joiner (now host) detonates at 55 s: before,
+  "item 0001/0002 went off" (the old host's) and its own stayed; after, its
+  own went off and the old host's (now c001, c002) stayed. Joiner killed at
+  35 s and back 3 s later: before, no items at all on the rejoined copy and
+  17 dropped events; after, "5 thrown and dropped items sent", all five in
+  its item log at the host's places, no dropped events, and its detonator
+  at 25 s set off its own two mines on both copies.

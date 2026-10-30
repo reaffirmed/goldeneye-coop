@@ -12387,6 +12387,9 @@ WeaponObjRecord* weaponCreate(bool musthaveprop, bool musthavemodel, ModelFileHe
         }  else if ((g_WeaponSlots[i].runtime_bitflags & RUNTIMEBITFLAG_HASPROJECTILE) == 0 && (g_WeaponSlots[i].state & PROPSTATE_RESPAWN) == 0)
         {
             WeaponObjRecord* slot = &g_WeaponSlots[i];
+#ifndef TARGET_N64
+            if (!coopItemsKeepSlot((ObjectRecord *) slot))  /* co-op: not a thrown item every game keeps a copy of */
+#endif
             if (((slot->timer <= 0) && (slot->prop->parent == NULL))
                     || (((slot->weaponnum == ITEM_REMOTEMINE) || (slot->weaponnum == ITEM_PROXIMITYMINE) || (slot->weaponnum == ITEM_TIMEDMINE))
                             && ((slot->prop->parent == NULL) || (slot->prop->parent->type == PROP_TYPE_OBJ) || (slot->prop->parent->type == PROP_TYPE_DOOR) || (slot->prop->parent->type == PROP_TYPE_WEAPON))))
