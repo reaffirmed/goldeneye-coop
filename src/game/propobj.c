@@ -3553,6 +3553,12 @@ void chrobjWeaponTick(struct PropRecord* prop)
     if (obj->type == PROP_TYPE_SMOKE) // 8
     {
         weapon = prop->weapon;
+#ifndef TARGET_N64
+        if (coopItemsShownOnlyTick(prop))   /* co-op: a partner's round, shown in flight; its blast comes from them */
+        {
+            return;
+        }
+#endif
 
         if (((weapon->weaponnum == ITEM_GRENADE) || (weapon->weaponnum == ITEM_GRENADEROUND )) && (weapon->timer >= 0))
         {
@@ -5290,6 +5296,12 @@ s32 objTick(struct PropRecord *prop)
 						{
 							var_v0_3 = playerProp2->type;
 							projectileStopped = 1;
+#ifndef TARGET_N64
+							if (coopItemsShownOnly(obj))
+							{
+								var_v0_3 = -1;  /* co-op: a round only shown here hits nothing */
+							}
+#endif
 							if (var_v0_3 == 3)
 							{
 								chrlvExplosionDamage((ChrRecord *) playerProp2->chr, &obj->runtime_pos, 2.0f, 1);

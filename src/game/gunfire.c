@@ -340,6 +340,13 @@ void gunFireTankShell(s32 handnum)
                 sndPlaySfx(g_musicSfxBufferPtr, 1, &obj->projectile->sounds[1]);
             }
         }
+#ifndef TARGET_N64
+        {   /* co-op: the rocket (or the tank's shell) is seen in flight everywhere (coop_items.c) */
+            extern void coopItemsLaunched(ObjectRecord *obj, coord3d *pos, Mtxf *rot, coord3d *vel, coord3d *thrust, ChrRecord *guard);
+            coopItemsLaunched((ObjectRecord *) obj, &obj->runtime_pos, &shellmtx, &velocity,
+                              (weaponid != ITEM_TANKSHELLS) ? &unscaledvelocity : NULL, NULL);
+        }
+#endif
     }
 }
 

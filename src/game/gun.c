@@ -81,6 +81,9 @@ s32 dword_CODE_bss_80076A48; // Unused
 extern f32 g_GLGrenadeLaunchUnk8C;
 extern f32 g_GLGrenadeLaunchUnk94;
 extern f32 g_TankShellSpeed;
+#ifndef TARGET_N64
+extern void coopItemsLaunched(ObjectRecord *obj, coord3d *pos, Mtxf *rot, coord3d *vel, coord3d *thrust, ChrRecord *guard);
+#endif
 
 // data
 ////D:80032440
@@ -2381,6 +2384,7 @@ ObjectRecord *gunCoopSpawnThrown(s32 item, coord3d *pos, Mtxf *rot, coord3d *vel
         case ITEM_MICROCAMERA:   proptype = PROP_CHRMICROCAMERA; break;
         case ITEM_GOLDENEYEKEY:  proptype = PROP_CHRGOLDENEYEKEY; break;
         case ITEM_PLASTIQUE:     proptype = PROP_CHRPLASTIQUE; break;
+        case ITEM_THROWKNIFE:    proptype = PROP_CHRKNIFE; break;
         default:
             return NULL;
     }
@@ -2405,7 +2409,15 @@ ObjectRecord *gunCoopSpawnThrown(s32 item, coord3d *pos, Mtxf *rot, coord3d *vel
 
     gunInitProjectileObject((ObjectRecord *) wor, pos, tile, rot, velocity, spin, owner);
 
-    if ((wor->runtime_bitflags & RUNTIMEBITFLAG_HASPROJECTILE) != 0)
+    if ((wor->runtime_bitflags & RUNTIMEBITFLAG_HASPROJECTILE) != 0 && item == ITEM_THROWKNIFE)
+    {   /* without RUNTIMEBITFLAG_THROWING_KNIFE_RELATED: it flies and lands, but only
+         * the thrower's own knife cuts (its hit reaches the host as a shot) */
+        wor->projectile->flags = (s32) (wor->projectile->flags | 2);
+        wor->projectile->unk8C = 0.1f;
+        wor->projectile->refreshrate = THROWN_ITEM_REFRESH_RATE;
+        objUpdateThrowKnifeSound(wor);
+    }
+    else if ((wor->runtime_bitflags & RUNTIMEBITFLAG_HASPROJECTILE) != 0)
     {
         wor->projectile->flags = (s32) (wor->projectile->flags | 2);
         wor->projectile->unk8C = (item == ITEM_GRENADE) ? 0.3f : 0.1f;
@@ -2426,6 +2438,71 @@ ObjectRecord *gunCoopSpawnThrown(s32 item, coord3d *pos, Mtxf *rot, coord3d *vel
         }
     }
 
+    return (ObjectRecord *) wor;
+}
+
+/* co-op (coop_items.c): a partner's rocket, grenade-launcher round or tank
+ * shell, or the host's guard's, launched here as it was there. It only shows
+ * the round in flight: coop_items.c keeps it from doing harm or going off */
+ObjectRecord *gunCoopSpawnRound(s32 item, coord3d *pos, Mtxf *rot, coord3d *velocity, coord3d *thrust, s32 timer, s32 guard, PropRecord *owner)
+{
+    struct WeaponObjRecord *wor;
+    StandTile *tile;
+    Mtxf identitymtx;
+
+    if (item != ITEM_ROCKETROUND && item != ITEM_GRENADEROUND)
+    {
+        return NULL;
+    }
+    tile = stanFindTileBelowPos(pos, NULL, NULL);
+    if (tile == NULL && owner != NULL)
+    {
+        tile = owner->stan;
+    }
+    if (tile == NULL)
+    {
+        return NULL;
+    }
+    wor = (struct WeaponObjRecord *) create_new_item_instance_of_model(item == ITEM_ROCKETROUND ? PROP_CHRROCKET : PROP_CHRGRENADEROUND, item);
+    if (wor == NULL || wor->prop == NULL)
+    {
+        return NULL;
+    }
+    wor->timer = timer;
+    wor->runtime_bitflags &= ~(RUNTIMEBITFLAG_OWNER);
+    matrix_4x4_set_identity(&identitymtx);
+    gunInitProjectileObject((ObjectRecord *) wor, pos, tile, rot, velocity, &identitymtx, owner);
+    if ((wor->runtime_bitflags & RUNTIMEBITFLAG_HASPROJECTILE) == 0)
+    {
+        return (ObjectRecord *) wor;
+    }
+    if (item == ITEM_ROCKETROUND)
+    {   /* as gunFireTankShell, or a guard's in chraction.c */
+        wor->projectile->flags |= PROJECTILEFLAG_LAUNCHING;
+        if (thrust != NULL)
+        {
+            wor->projectile->flags |= PROJECTILEFLAG_00000020;
+            wor->projectile->unkB0 = wor->runtime_pos.y;
+            wor->projectile->unkB4 = wor->projectile->speed.y;
+            wor->projectile->unk10.x = thrust->x;
+            wor->projectile->unk10.y = thrust->y;
+            wor->projectile->unk10.z = thrust->z;
+            if (!guard)
+            {
+                wor->projectile->refreshrate = THROWN_ITEM_REFRESH_RATE;
+            }
+            if (wor->projectile->sounds[0] == NULL)
+            {
+                sndPlaySfx((struct ALBankAlt_s *) g_musicSfxBufferPtr, guard ? ROCKET_LAUNCH_SFX : 1, (ALSoundState *) &wor->projectile->sounds[0]);
+            }
+        }
+    }
+    else
+    {   /* as gunSpawnGLGrenade, or a guard's */
+        wor->projectile->unk8C = guard ? 0.3f : g_GLGrenadeLaunchUnk8C;
+        wor->projectile->unk94 = guard ? 0.13333333f : g_GLGrenadeLaunchUnk94;
+        wor->projectile->refreshrate = guard ? 60 : THROWN_ITEM_REFRESH_RATE;
+    }
     return (ObjectRecord *) wor;
 }
 #endif
@@ -2501,6 +2578,9 @@ void gunSpawnGLGrenade(s32 handnum)
             grenadeobj->projectile->unk8C = g_GLGrenadeLaunchUnk8C;
             grenadeobj->projectile->unk94 = g_GLGrenadeLaunchUnk94;
             grenadeobj->projectile->refreshrate = THROWN_ITEM_REFRESH_RATE;
+#ifndef TARGET_N64
+            coopItemsLaunched((ObjectRecord *) grenadeobj, &grenadeobj->runtime_pos, &launchmtx, &launchvel, NULL, NULL);  /* co-op: seen in flight everywhere */
+#endif
         }
     }
 }

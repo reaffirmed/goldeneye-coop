@@ -682,6 +682,9 @@ void coopItemsStageStart(void);
 void coopItemsTick(s32 missionticks);                  /* harness: GE_COOP_TESTAIM */
 void coopItemsApply(s32 kind, const u8 *raw, s32 from);
 void coopItemsThrown(ObjectRecord *obj, coord3d *pos, Mtxf *rot, coord3d *vel, Mtxf *spin);    /* gun.c */
+void coopItemsLaunched(ObjectRecord *obj, coord3d *pos, Mtxf *rot, coord3d *vel, coord3d *thrust, ChrRecord *guard); /* gun.c, chraction.c: a launcher round */
+s32  coopItemsShownOnly(ObjectRecord *obj);             /* propobj.c: a round only shown here, which does no harm */
+s32  coopItemsShownOnlyTick(PropRecord *prop);          /* propobj.c chrobjWeaponTick: 1, such a round (gone without a blast) */
 s32  coopItemsChrDropping(ChrRecord *chr);              /* chr.c: 1 keeps a joiner's guard from dropping on its own */
 void coopItemsChrDropped(ChrRecord *chr, PropRecord *prop);
 void coopItemsExplodeBegin(PropRecord *prop);           /* propobj.c propExplode */
