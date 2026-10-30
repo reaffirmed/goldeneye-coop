@@ -181,7 +181,7 @@ enum
     COOPSET_VSRULES,        /* versus: COOPVSRULE_* bits, the host's in place of each PC's Multiplayer Options */
     COOPSET_MAX = 16
 };
-enum { COOPVSRULE_NORADAR = 1, COOPVSRULE_NOARMOUR = 2 };
+enum { COOPVSRULE_NORADAR = 1, COOPVSRULE_NOARMOUR = 2, COOPVSRULE_NEXTARENA = 4 };
 s32  coopSetting(s32 which);
 s32  coopVersusRule(s32 bit);   /* coop_versus.c: the host's versus rule is on */
 void coopSetSetting(s32 which, s32 value);
