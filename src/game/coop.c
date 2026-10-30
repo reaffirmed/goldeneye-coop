@@ -2361,9 +2361,11 @@ static s32 coopHitBehindCover(CoopEvent *ev)
         return 0;
     }
     height = chr->chrheight - 20.0f;
+    bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, 0);     /* the tank we drive is no cover from its guns */
     clear = stanTestLineUnobstructed(&stan, from.f[0], from.f[2], bond->pos.f[0], bond->pos.f[2],
                                      CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_PATHBLOCKER | CDTYPE_AIOPAQUE, height, height, 0.0f, 1.0f)
             && stan == bond->stan;
+    bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, 1);
     if (clear)
     {
         return 0;
@@ -4020,12 +4022,19 @@ s32 coopTargetIsRemote(void)
 }
 
 /* bondviewUpdateGuardTankFlagsRelated for whichever Bond the guard is on:
- * takes the target out of the line-of-sight test against itself. */
+ * takes the target, and the tank they drive, out of the line-of-sight test
+ * against itself. A partner's tank left in saw it block every line to them. */
 void coopGuardTankFlags(s32 flag)
 {
     if (g_CoopPropOverride != NULL)
     {
+        PropRecord *tank = coopTankPropOf(coopPlayerOfProp(g_CoopPropOverride));
+
         chrSetMoving(g_CoopPropOverride->chr, flag);
+        if (tank != NULL)
+        {
+            sub_GAME_7F04F218(tank, flag);
+        }
         return;
     }
     bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, flag);
@@ -10053,9 +10062,11 @@ void coopExplosionCreated(PropRecord *source, coord3d *pos, s32 type, u8 *rooms)
     }
     if (coopIsMirroringClient())
     {
-        if (!sApplyingRemoteBoom && !g_CoopObjExploding)
+        if (!sApplyingRemoteBoom && (!g_CoopObjExploding || coopItemsExplodingOwnRound()))
         {   /* an object's blast is the host's, already: its damage event made it here
-             * (sent back, it went off twice there; Train's carriages in its ending) */
+             * (sent back, it went off twice there; Train's carriages in its ending).
+             * Our own rocket, launcher round or tank shell goes through propExplode
+             * too, but only here: the host needs it to hurt anything */
             ev.u.boom.owner = (u8) (coopSelf() + 1);
             coopQueueEventTo(&ev, 0);
             portConLogf("ge: coop: our explosion (type %d), sent to host\n", type);

@@ -13,10 +13,11 @@
  *     the driver's puppet, which would stick out of the hatch
  *   - a tank a partner is driving can't be entered (bondview2.c)
  *
- * The tank's shells are the driver's own shots and explosions, which co-op
+ * The tank's shells are the driver's own rounds and blasts, which co-op
  * already shares. Running guards over is the host's: the driver's game
  * leaves guard damage to it, so the host runs the same crush against its
- * copy of a partner's tank (coopTankCrush).
+ * copy of a partner's tank (coopTankCrush). A guard looking or shooting at
+ * a partner in a tank looks past that tank, as at our own (coopGuardTankFlags).
  */
 #include <ultra64.h>
 #include <string.h>
@@ -67,11 +68,25 @@ static u32 sSeen[COOP_MAX_PLAYERS];
 static s32 sMyOfs = -1;     /* the tank we drove, for the packets after we got out */
 static s32 sOutFor;
 static s32 sTestAt = -2;    /* GE_COOP_TESTTANK */
+static s32 sTestSpin = 1;
 
 s32 coopTankDriving(s32 player)
 {
     return player >= 0 && player < COOP_MAX_PLAYERS && player != coopExtSelf() && sOfs[player] >= 0
         && sNow - sSeen[player] < COOPTANK_STALE;
+}
+
+/* the tank a partner is driving, NULL none */
+PropRecord *coopTankPropOf(s32 player)
+{
+    ObjectRecord *obj;
+
+    if (!coopTankDriving(player) || g_CurrentSetup.propDefs == NULL)
+    {
+        return NULL;
+    }
+    obj = (ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + sOfs[player]);
+    return (obj->type == PROPDEF_TANK) ? obj->prop : NULL;
 }
 
 s32 coopTankTaken(PropRecord *prop)
@@ -183,11 +198,13 @@ void coopTankPacket(const void *raw, s32 len, s32 from)
     chrobjCollisionRelated(obj);
 }
 
-/* GE_COOP_TESTTANKCHR=<chrnum>: host, once a partner has driven a tank for
- * 2 s, stand that chr in front of it, where its turning sweeps (harness only) */
+/* GE_COOP_TESTTANKCHR=<chrnum>[:<dist>]: host, once a partner has driven a
+ * tank for 2 s, stand that chr <dist> (150) in front of it, where its turning
+ * sweeps, or further out to be shot at (harness only) */
 static void coopTankTestChr(s32 player)
 {
     static s32 chrnum = -2;
+    static f32 dist = 150.0f;
     static u32 since;
     ObjectRecord *obj;
     ChrRecord *chr;
@@ -199,6 +216,10 @@ static void coopTankTestChr(s32 player)
         const char *e = getenv("GE_COOP_TESTTANKCHR");
 
         chrnum = (e != NULL) ? atoi(e) : -1;
+        if (e != NULL && strchr(e, ':') != NULL)
+        {
+            dist = (f32) atoi(strchr(e, ':') + 1);
+        }
     }
     if (chrnum < 0)
     {
@@ -214,8 +235,8 @@ static void coopTankTestChr(s32 player)
     }
     obj = (ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + sOfs[player]);
     pos = obj->prop->pos;
-    pos.f[0] += 150.0f * sinf(((TankRecord *) obj)->tank_orientation_angle);
-    pos.f[2] += 150.0f * cosf(((TankRecord *) obj)->tank_orientation_angle);
+    pos.f[0] += dist * sinf(((TankRecord *) obj)->tank_orientation_angle);
+    pos.f[2] += dist * cosf(((TankRecord *) obj)->tank_orientation_angle);
     stan = stanFindTileBelowPos(&pos, NULL, NULL);
     if (stan != NULL)
     {
@@ -304,8 +325,8 @@ static void coopTankCrush(s32 player)
     }
 }
 
-/* GE_COOP_TESTTANK=<s>: <s> seconds into the mission stand on the tank, get
- * in, and turn it for 10 s (harness only) */
+/* GE_COOP_TESTTANK=<s>[:<spin>]: <s> seconds into the mission stand on the
+ * tank, get in, and turn it for 10 s, or with spin 0 sit still (harness only) */
 s32 coopTankTestTap(void)
 {
     const s32 t = (s32) coopExtMissionTicks();
@@ -325,6 +346,7 @@ static void coopTankTestTick(void)
         const char *e = getenv("GE_COOP_TESTTANK");
 
         sTestAt = (e != NULL) ? atoi(e) * 60 : -1;
+        sTestSpin = (e != NULL && strchr(e, ':') != NULL) ? atoi(strchr(e, ':') + 1) : 1;
     }
     if (sTestAt < 0)
     {
@@ -352,7 +374,7 @@ static void coopTankTestTick(void)
         g_WorldTankProp = it;   /* as walking into it does */
         portConLogf("ge: coop: testtank: on the tank at %.0f %.0f %.0f\n", to.f[0], to.f[1], to.f[2]);
     }
-    if (g_PlayerIsInTank == 1 && t > sTestAt + 30 && t < sTestAt + 30 + 600)
+    if (sTestSpin && g_PlayerIsInTank == 1 && t > sTestAt + 30 && t < sTestAt + 30 + 600)
     {
         g_TankOrientationAngle += 0.01f;
         if (g_TankOrientationAngle >= M_TAU_F)
