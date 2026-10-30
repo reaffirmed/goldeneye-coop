@@ -185,6 +185,7 @@ static s32 sApplying;               /* a partner's throw, drop or pickup is bein
 static ObjectRecord *sExploding;    /* propExplode is setting this item off */
 static s32 sExplodingOwner;         /* 1 + the player whose item it is, 0 ours */
 static s32 sExplodingOurRound;      /* propExplode is setting off a launcher round our Bond fired */
+static s32 sExplodingOwnRound;      /* propExplode is setting off a round this game launched (ours, or the host's guard's) */
 
 
 static s32 coopItemsOn(void)
@@ -858,6 +859,7 @@ void coopItemsExplodeBegin(PropRecord *prop)
     sExploding = NULL;
     sExplodingOwner = 0;
     sExplodingOurRound = 0;
+    sExplodingOwnRound = 0;
     if (prop == NULL || prop->obj == NULL || !coopItemsOn())
     {
         return;
@@ -874,6 +876,7 @@ void coopItemsExplodeBegin(PropRecord *prop)
     }
     if (it->kind == COOPITEM_ROUND)
     {   /* our launcher round: the copies only showed it, and go now; its blast is sent as any is */
+        sExplodingOwnRound = (it->id >> 14) == (u16) coopExtSelf();
         coopItemsSendGone(it, COOPGONE_BOOM);
         it->used = 0;
         return;
@@ -893,12 +896,21 @@ void coopItemsExplodeEnd(void)
     sExploding = NULL;
     sExplodingOwner = 0;
     sExplodingOurRound = 0;
+    sExplodingOwnRound = 0;
 }
 
 /* coop.c: the blast being made is a launcher round our own Bond fired */
 s32 coopItemsExplodingOurRound(void)
 {
     return sExplodingOurRound;
+}
+
+/* coop.c coopExplosionCreated: the blast is a launcher round or tank shell
+ * launched in this game, which the others only showed in flight. The
+ * projectile's owner can't say: a round that hits something has lost it */
+s32 coopItemsExplodingOwnRound(void)
+{
+    return sExplodingOwnRound;
 }
 
 /* coop.c coopExplosionCreated: the blast is one of these items' (each world sets off its own copy) */
