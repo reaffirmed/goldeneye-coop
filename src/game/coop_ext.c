@@ -37,6 +37,9 @@ void coopExtPacket(const void *pkt, s32 len, s32 from)
         case COOPPKT_TANK:
             coopTankPacket(pkt, len, from);
             break;
+        case COOPPKT_VEHICLE:
+            coopReplVehiclePacket(pkt, len, from);
+            break;
     }
 }
 

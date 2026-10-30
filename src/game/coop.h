@@ -634,8 +634,9 @@ void coopExtTick(s32 inmission);
 void coopExtApply(s32 kind, const u8 *raw, s32 from);
 /* the features' own unreliable packets: u32 magic, u16 version, u16 type first, as coop.c's */
 #define COOPPKT_EXT_FIRST 10
-#define COOPPKT_EXT_LAST  11
-enum { COOPPKT_TEAMTIME = 10, COOPPKT_TANK = 11 };
+#define COOPPKT_EXT_LAST  12    /* an older build ignores the ones past its own last */
+enum { COOPPKT_TEAMTIME = 10, COOPPKT_TANK = 11, COOPPKT_VEHICLE = 12 /* host -> joiners: where the trucks are (coop_repl.c) */ };
+void coopReplVehiclePacket(const void *buf, s32 len, s32 from);
 void coopExtSendPacket(void *pkt, s32 len, s32 to);    /* fills magic and version */
 void coopExtPacket(const void *pkt, s32 len, s32 from);
 

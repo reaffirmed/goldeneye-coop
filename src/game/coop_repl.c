@@ -77,6 +77,9 @@ extern s32 objGetDestroyedLevel(ObjectRecord *obj);
 extern void objFreePermanently(ObjectRecord *obj, bool freeprop);
 extern void setupUpdateObjectRoomPosition(ObjectRecord *obj);
 extern StandTile *stanFindTileBelowPos(coord3d *pos, u8 *rooms, f32 *yRtn);
+extern s32 sub_GAME_7F044B38(ObjectRecord *obj);   /* propobj.c: a vehicle's matrix from its yaw, on the floor */
+extern PathRecord *pathFindById(s32 ID);
+extern s32 chraiGetAIListID(AIRecord *list, bool *global);
 
 #define COOPREPL_MAX            1024    /* setup objects tracked per stage (Dam has ~300) */
 #define COOPREPL_PER_PKT        16
@@ -1041,9 +1044,171 @@ static void coopReplHarness(u32 missionticks)
     }
 }
 
+/* ---- vehicles -------------------------------------------------------------------
+ * A truck or jeep drives itself in every game, from its own list, along its
+ * path, and stops wherever something blocks it there; a player who drops in
+ * starts it from the beginning. So the records above leave its position out,
+ * and once a second the host sends where each one is and where it is going
+ * (COOPPKT_VEHICLE). A joiner takes the path, the next step and the speeds,
+ * and puts a vehicle more than COOPVEH_SNAP away where the host's is; the
+ * first time that happens (a drop-in) its list also goes to where the host's
+ * is. Aircraft follow their own animations closely enough, and the tank is
+ * coop_tank.c's. */
+#define COOPVEH_MAX   8
+#define COOPVEH_SNAP  150.0f    /* units: a vehicle further out than this is put where the host's is */
+
+typedef struct
+{
+    u16 idx;        /* the object's place in the records above */
+    s16 path;       /* its path's ID, -1 none */
+    s16 nextstep;
+    u16 ailist;     /* chraiGetAIListID, 0xFFFF none */
+    u16 aioffset;
+    u16 pad;
+    f32 pos[3];
+    f32 roty;
+    f32 speed;
+    f32 speedaim;
+    f32 speedtime60;
+    f32 turnrot60;
+} CoopVehicleRec;
+
+typedef struct
+{
+    u32 magic;
+    u16 version;
+    u16 type;       /* COOPPKT_VEHICLE */
+    s32 stage;
+    u16 total;      /* records in the stage, as CoopReplPkt */
+    u16 count;
+    CoopVehicleRec v[COOPVEH_MAX];
+} CoopVehiclePkt;
+
+static u8 sVehMoved[COOPREPL_MAX];  /* joiner: this vehicle has been put where the host's is */
+
+static void coopReplSendVehicles(void)
+{
+    CoopVehiclePkt p;
+    s32 i, k = 0, pl;
+
+    memset(&p, 0, sizeof(p));
+    p.type = COOPPKT_VEHICLE;
+    p.stage = bossGetStageNum();
+    p.total = (u16) sNum;
+    for (i = 0; i < sNum && k < COOPVEH_MAX; i++)
+    {
+        ObjectRecord *obj = coopReplObj(i);
+        VehichleRecord *v = (VehichleRecord *) obj;
+        CoopVehicleRec *r = &p.v[k];
+        bool global;
+        s32 id;
+
+        if (obj->type != PROPDEF_VEHICHLE || obj->prop == NULL)
+        {
+            continue;
+        }
+        id = (v->ailist != NULL) ? chraiGetAIListID(v->ailist, &global) : -1;
+        r->idx = (u16) i;
+        r->path = (v->path != NULL) ? (s16) v->path->ID : -1;
+        r->nextstep = (s16) v->nextstep;
+        r->ailist = (id >= 0) ? (u16) id : 0xFFFF;
+        r->aioffset = v->aioffset;
+        r->pos[0] = obj->prop->pos.f[0];
+        r->pos[1] = obj->prop->pos.f[1];
+        r->pos[2] = obj->prop->pos.f[2];
+        r->roty = v->roty;
+        r->speed = v->speed;
+        r->speedaim = v->speedaim;
+        r->speedtime60 = v->speedtime60;
+        r->turnrot60 = v->turnrot60;
+        k++;
+    }
+    if (k == 0)
+    {
+        return;
+    }
+    p.count = (u16) k;
+    for (pl = 1; pl < COOP_MAX_PLAYERS; pl++)
+    {
+        if (coopReplPlayerHere(pl))
+        {
+            coopExtSendPacket(&p, (s32) ((u8 *) &p.v[k] - (u8 *) &p), pl);
+        }
+    }
+}
+
+void coopReplVehiclePacket(const void *buf, s32 len, s32 from)
+{
+    const CoopVehiclePkt *p = (const CoopVehiclePkt *) buf;
+    s32 hdr = (s32) ((const u8 *) &p->v[0] - (const u8 *) p);
+    s32 k;
+
+    if (!coopReplHostPkt(buf, len, from, hdr, p->stage) || p->count > COOPVEH_MAX
+        || len < hdr + p->count * (s32) sizeof(CoopVehicleRec) || p->total != sNum)
+    {
+        return;
+    }
+    for (k = 0; k < p->count; k++)
+    {
+        const CoopVehicleRec *r = &p->v[k];
+        ObjectRecord *obj;
+        VehichleRecord *v;
+        PathRecord *path;
+        f32 dx, dz;
+
+        if (r->idx >= sNum || (obj = coopReplObj(r->idx))->type != PROPDEF_VEHICHLE || obj->prop == NULL)
+        {
+            continue;
+        }
+        v = (VehichleRecord *) obj;
+        path = (r->path >= 0) ? pathFindById(r->path) : NULL;
+        v->path = path;
+        v->nextstep = (path != NULL && r->nextstep >= 0) ? r->nextstep : 0;
+        v->speed = r->speed;
+        v->speedaim = r->speedaim;
+        v->speedtime60 = r->speedtime60;
+        v->turnrot60 = r->turnrot60;
+        dx = obj->prop->pos.f[0] - r->pos[0];
+        dz = obj->prop->pos.f[2] - r->pos[2];
+        if (dx * dx + dz * dz > COOPVEH_SNAP * COOPVEH_SNAP)
+        {
+            coord3d pos;
+            StandTile *stan;
+            bool global;
+
+            pos.f[0] = r->pos[0];
+            pos.f[1] = r->pos[1] + 60.0f;
+            pos.f[2] = r->pos[2];
+            stan = stanFindTileBelowPos(&pos, NULL, NULL);
+            if (stan == NULL)
+            {
+                continue;
+            }
+            pos.f[1] = r->pos[1];
+            if (!sVehMoved[r->idx] && v->ailist != NULL && r->ailist != 0xFFFF
+                && chraiGetAIListID(v->ailist, &global) == r->ailist)
+            {   /* the first time (a drop-in): its list goes on from where the host's is */
+                v->aioffset = r->aioffset;
+            }
+            sVehMoved[r->idx] = 1;
+            obj->prop->stan = stan;
+            obj->prop->pos = pos;
+            v->runtime_pos = pos;
+            v->roty = r->roty;
+            sub_GAME_7F044B38(obj);
+            chrobjCollisionRelated(obj);
+            setupUpdateObjectRoomPosition(obj);
+            portConLogf("ge: coop: vehicle %d was %.0f out: put where the host's is (path %d, step %d)\n",
+                        r->idx, sqrtf(dx * dx + dz * dz), r->path, v->nextstep);
+        }
+    }
+}
+
 void coopReplStageStart(void)
 {
     s32 p;
+
+    memset(sVehMoved, 0, sizeof(sVehMoved));
 
     sListBase = NULL;
     sNum = 0;
@@ -1073,6 +1238,10 @@ void coopReplTick(u32 missionticks)
     {
         coopReplHarness(missionticks);
         coopReplHostTick();
+        if ((sTick % 60) == 45)
+        {
+            coopReplSendVehicles();
+        }
     }
     else
     {
