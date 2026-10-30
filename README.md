@@ -69,7 +69,7 @@ Every player in a game needs a compatible version. `README-COOP.txt` in the zip 
 
 ### Updating
 
-From v0.3.0 on, the game updates itself. When a new release is out, the top of the CO-OP screen's PLAY tab shows **Update to vX - Install**; pick it, then **Restart Now**. You can also check from the OPTIONS tab. If a firewall blocks GitHub, download the new zip and unzip it over your folder.
+From v0.3.0 on, the game updates itself. When a new release is out, the Files screen asks when the game opens: **Update Now** downloads it and restarts into it, **Not Now** asks again next launch, and **Skip This Version** stays quiet until a newer one. Nothing downloads unless you say so. The top of the CO-OP screen's PLAY tab also shows **Update to vX - Install**; pick it, then **Restart Now**. You can also check from the OPTIONS tab. If a firewall blocks GitHub, download the new zip and unzip it over your folder.
 
 <img src="docs/images/updater.png" width="480" alt="The PLAY tab offering an update">
 

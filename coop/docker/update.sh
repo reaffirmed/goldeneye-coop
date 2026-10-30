@@ -15,6 +15,10 @@
 # AUTO=install stops before the restart, AUTO=none only shows the offer;
 # DIGEST=bad|none must refuse it;
 # SHOTS are seconds; TAB=4 shows the CONTROLS tab.
+# PROMPT=update|later|skip starts on the Files screen instead and answers the
+# launch prompt with the keyboard (xdotool) at ASK seconds: Update Now must
+# install and restart, Not Now and Skip This Version must leave the game as
+# it was, and Skip must remember the release (Data/Update/skip.txt).
 ROOT=${ROOT:-/home/dev/project}
 OUT=${OUT:-/out}
 cd "$ROOT/build_pc" || exit 1
@@ -60,16 +64,42 @@ srv=$!
 rm -rf /tmp/gecoop-mock
 Xvfb :1 -screen 0 1280x720x24 >/dev/null 2>&1 &
 sleep 1
-export SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 GE_NOMSGBOX=1 LD_LIBRARY_PATH="$inst/mock" GE_MENU=lobby
+export SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 GE_NOMSGBOX=1 LD_LIBRARY_PATH="$inst/mock"
 export GE_UPDATE_API=http://127.0.0.1:8765/releases/latest GE_UPDATE_FAKEVER=v0.2.1
-[ "${AUTO:-restart}" != none ] && export GE_UPDATE_AUTO=${AUTO:-restart}
+if [ -n "$PROMPT" ]; then
+    export GE_MENU=select   # the Files screen, where the prompt is
+    [ "$PROMPT" = update ] && AUTO=restart || AUTO=none
+else
+    export GE_MENU=lobby
+    [ "${AUTO:-restart}" != none ] && export GE_UPDATE_AUTO=${AUTO:-restart}
+fi
 [ -n "$TAB" ] && export GE_COOP_LOBBYTAB=$TAB
 cd "$inst"
 DISPLAY=:1 GE_MOCK_STEAMID=76561190000000101 GE_MOCK_FRIEND=76561190000000202 \
     timeout "${RUNSECS:-60}" "$inst/ProjectMidas" > "$OUT/update.log" 2>&1 &
-for t in ${SHOTS:-10 14 18 40}; do sleep $((t - ${prev:-0})); prev=$t; DISPLAY=:1 import -window root "$OUT/update_$t.png"; done
+if [ -n "$PROMPT" ]; then
+    answer() {   # Update Now is the first answer, Not Now the second, Skip the third
+        local W k
+        W=$(DISPLAY=:1 xdotool search --name . | tail -1)
+        DISPLAY=:1 xdotool windowfocus "$W" 2>/dev/null; DISPLAY=:1 xdotool windowactivate "$W" 2>/dev/null
+        case "$PROMPT" in later) k="d Return" ;; skip) k="d d Return" ;; *) k="Return" ;; esac   # D is C-right
+        for k in $k; do DISPLAY=:1 xdotool keydown "$k"; sleep 0.08; DISPLAY=:1 xdotool keyup "$k"; sleep 0.3; done
+    }
+    for t in ${SHOTS:-12 16 18 30}; do
+        if [ -z "$asked" ] && [ "$t" -gt "${ASK:-14}" ]; then sleep $((${ASK:-14} - ${prev:-0})); prev=${ASK:-14}; answer; asked=1; fi
+        sleep $((t - ${prev:-0})); prev=$t; DISPLAY=:1 import -window root "$OUT/update_$t.png"
+    done
+else
+    for t in ${SHOTS:-10 14 18 40}; do sleep $((t - ${prev:-0})); prev=$t; DISPLAY=:1 import -window root "$OUT/update_$t.png"; done
+fi
 sleep $(( ${RUNSECS:-60} - prev + 2 ))
-pkill -f "$inst/ProjectMidas"; sleep 1; kill $srv; pkill Xvfb
+pkill -f "$inst/ProjectMidas"; sleep 1
+if [ "$PROMPT" = skip ]; then   # once more: the skipped release must not ask again
+    DISPLAY=:1 GE_MOCK_STEAMID=76561190000000101 GE_MOCK_FRIEND=76561190000000202 \
+        timeout 16 "$inst/ProjectMidas" > "$OUT/update2.log" 2>&1
+    DISPLAY=:1 import -window root "$OUT/update_skipped_again.png" 2>/dev/null
+fi
+kill $srv; pkill Xvfb
 
 # what the update did
 fail=0
@@ -77,6 +107,13 @@ check() { if eval "$2"; then echo "ok:   $1"; else echo "FAIL: $1"; fail=1; fi; 
 (cd "$inst" && sha256sum -c --quiet "$work/kept.sha") && echo "ok:   cart image and campaign save untouched" || { echo "FAIL: a kept file changed"; fail=1; }
 check "nothing written outside the game folder" "[ ! -e '$work/escaped.txt' ]"
 check "no ini, save or cart from the zip" "grep -q 'music_volume=35' '$inst/midas.ini' && ! grep -q 'auto_update=0' '$inst/midas.ini' && ! grep -q 'zip save' '$inst/Data/Saves/eeprom.bin'"
+if [ -n "$PROMPT" ]; then
+    check "the launch prompt was answered: $PROMPT" "grep -q 'launch prompt for v0.2.2' '$OUT/update.log'"
+fi
+if [ "$PROMPT" = skip ]; then
+    check "the skipped release is remembered" "grep -qx 'v0.2.2' '$inst/Data/Update/skip.txt'"
+    check "the next launch doesn't ask about it" "grep -q 'skipping v0.2.2' '$OUT/update2.log' && grep -q 'v0.2.2 is out' '$OUT/update2.log' && ! grep -q 'launch prompt' '$OUT/update2.log'"
+fi
 if [ "${AUTO:-restart}" = none ]; then
     check "nothing installed without the player's word" "! grep -q 'v0.2.2 marker' '$inst/ProjectMidas'"
 elif [ "${DIGEST:-good}" = good ]; then

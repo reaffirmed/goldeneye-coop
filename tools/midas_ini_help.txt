@@ -201,8 +201,10 @@ padN_stickmode.
                       |            | when it is focused again
   Updates
   auto_update         | 1          | 1 = ask GitHub for a newer co-op release
-                      |            | at startup; the CO-OP screen offers it.
-                      |            | Nothing downloads until you pick it.
+                      |            | at startup; the Files screen asks whether
+                      |            | to update (Update Now / Not Now / Skip
+                      |            | This Version) and the CO-OP screen offers
+                      |            | it. Nothing downloads until you pick it.
                       |            | 0 = only when you pick Check Now, or a
                       |            | host has another version
   Player options (global, not per save file)

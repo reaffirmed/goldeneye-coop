@@ -515,6 +515,9 @@ static void portDlgClose(void);
 static s32 portDlgTick(void);
 static s32 portDlgSaidYes(void);
 static Gfx *portDlgDraw(Gfx *DL);
+/* the update prompt on the Files screen (with the box, further down) */
+static s32 portUpdPromptTick(void);
+static Gfx *portUpdPromptDraw(Gfx *DL);
 static s32 port_filesel_options_selected = FALSE; /* OPTIONS clicked: menu change at the end of the tick */
 #endif
 
@@ -2765,6 +2768,10 @@ s32 interface_menu05_fileselect(void)
         }
     }
 #ifndef TARGET_N64
+    else if (portUpdPromptTick())
+    {   /* a newer release: Update Now / Not Now / Skip This Version, or its download */
+        g_MenuTimer = 0;
+    }
     else if (portDlgIsOpen())
     {   /* EXIT GAME "Are you sure?" - Yes / No. The cursor stays live (mouse
          * users click a button), and the box itself owns all of that now. */
@@ -3037,6 +3044,7 @@ char* get_ptr_difficulty_name(s32 difficulty)
 #define PORT_DLG_H        52
 #define PORT_DLG_T        135
 #define PORT_DLG_ROW2     27    /* answers, down from the box top */
+#define PORT_DLG_NOTE_H   16    /* a note line (portDlgSetNote) adds this */
 #define PORT_DLG_SHEET    0x000000B4 /* black @ ~70%: the erase popup's 20% was hard to read over the wallets */
 #define PORT_DLG_PICK     0xFFFFFF60 /* the picked answer: white @ ~38% - a black box vanished on the dark sheet */
 #define PORT_DLG_TEXT     0xEBD879FF
@@ -3047,6 +3055,7 @@ static s32 port_dlg_pick;
 static s32 port_dlg_done;          /* 0 = running, 1 = answered, -1 = cancelled */
 static s32 port_dlg_n;             /* answers, drawn left to right in index order */
 static char port_dlg_title[48];
+static char port_dlg_note[64];     /* a dimmer line under the question, "" for none (portDlgSetNote) */
 static const char *port_dlg_answer[PORT_DLG_MAX_ANSWERS];
 static struct rectbbox port_dlg_bound[PORT_DLG_MAX_ANSWERS];
 static f32 port_dlg_cursor_h;      /* hover picks only on MOTION */
@@ -3068,6 +3077,7 @@ static void portDlgOpenN(const char *title, const char *const *answers, s32 n, s
         port_dlg_answer[i] = answers[i];
     }
     port_dlg_pick = (def < 0 || def >= port_dlg_n) ? port_dlg_n - 1 : def;
+    port_dlg_note[0] = '\0';
     port_dlg_done = 0;
     port_dlg_open = TRUE;
     port_dlg_cursor_h = cursor_h_pos;
@@ -3083,6 +3093,12 @@ static void portDlgOpen(const char *title, const char *yes, const char *no, s32 
     a[0] = (yes != NULL) ? yes : "Yes\n";
     a[1] = (no != NULL) ? no : "No\n";
     portDlgOpenN(title, a, 2, def ? 0 : 1);
+}
+
+/** A dimmer second line under the question of the box just opened; the box grows to fit it. */
+static void portDlgSetNote(const char *note)
+{
+    snprintf(port_dlg_note, sizeof(port_dlg_note), "%s", (note != NULL) ? note : "");
 }
 
 static s32 portDlgIsOpen(void)
@@ -3197,6 +3213,8 @@ static Gfx *portDlgDraw(Gfx *DL)
     const s32 t = PORT_DLG_T;
     struct point2d textpos;
     struct point2d textsize;
+    s32 nh = 0, nw = 0;
+    s32 down = 0;          /* the note line pushes the answers down */
     s32 w;
     s32 l;
     s32 i;
@@ -3207,6 +3225,15 @@ static Gfx *portDlgDraw(Gfx *DL)
     textsize.p[1] = 0;
     textMeasure(&textsize.p[1], &textsize.p[0], port_dlg_title, ptrFontZurichBoldChars, ptrFontZurichBold, 0);
     w = textsize.p[0] + (PORT_DLG_PAD * 2);
+    if (port_dlg_note[0] != '\0')
+    {
+        textMeasure(&nh, &nw, port_dlg_note, ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+        if (nw + (PORT_DLG_PAD * 2) > w)
+        {
+            w = nw + (PORT_DLG_PAD * 2);
+        }
+        down = PORT_DLG_NOTE_H;
+    }
     if (w < PORT_DLG_W)
     {
         w = PORT_DLG_W;
@@ -3215,14 +3242,32 @@ static Gfx *portDlgDraw(Gfx *DL)
     {
         w = PORT_DLG_W * 3 / 2;   /* three answers need the room */
     }
+    for (i = 0; i < port_dlg_n; i++)
+    {   /* and long answers ("Skip This Version") a column each */
+        s32 ah = 0, aw = 0;
+
+        textMeasure(&ah, &aw, (char *) port_dlg_answer[i], ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+        if ((aw + PORT_DLG_PAD * 2) * port_dlg_n > w)
+        {
+            w = (aw + PORT_DLG_PAD * 2) * port_dlg_n;
+        }
+    }
     l = (440 - w) / 2;
 
-    DL = microcode_constructor_related_to_menus(DL, l, t, l + w, t + PORT_DLG_H, PORT_DLG_SHEET);
+    DL = microcode_constructor_related_to_menus(DL, l, t, l + w, t + PORT_DLG_H + down, PORT_DLG_SHEET);
 
     textpos.p[1] = l + (w / 2) - (textsize.p[0] / 2);
     textpos.p[0] = t + 6;
     DL = textRender(DL, &textpos.p[1], &textpos.p[0], port_dlg_title, ptrFontZurichBoldChars, ptrFontZurichBold,
             PORT_DLG_TEXT, viGetX(), viGetY(), 0, 0);
+    if (port_dlg_note[0] != '\0')
+    {
+        s32 x = l + (w / 2) - (nw / 2);
+        s32 y = t + 6 + PORT_DLG_NOTE_H;
+
+        DL = textRender(DL, &x, &y, port_dlg_note, ptrFontZurichBoldChars, ptrFontZurichBold,
+                0xFFFFFFB0, viGetX(), viGetY(), 0, 0);
+    }
 
     for (i = 0; i < port_dlg_n; i++)
     {   /* index order, left to right: YES sits left, as the exit prompt has
@@ -3234,7 +3279,7 @@ static Gfx *portDlgDraw(Gfx *DL)
         textsize.p[1] = 0;
         textMeasure(&textsize.p[1], &textsize.p[0], text, ptrFontZurichBoldChars, ptrFontZurichBold, 0);
         textpos.p[1] = cx - (textsize.p[0] / 2);
-        textpos.p[0] = t + PORT_DLG_ROW2;
+        textpos.p[0] = t + PORT_DLG_ROW2 + down;
 
         port_dlg_bound[i].left = (f32) (textpos.p[1] - 6);
         port_dlg_bound[i].right = (f32) (textpos.p[1] + textsize.p[0] + 6);
@@ -3255,6 +3300,144 @@ static Gfx *portDlgDraw(Gfx *DL)
         }
     }
     return DL;
+}
+
+/* ---- THE UPDATE PROMPT -----------------------------------------------------
+ *
+ * When the startup check (port/src/port_update.c) finds a newer release, the
+ * Files screen asks once, in the box above: Update Now, Not Now, or Skip This
+ * Version (B is Not Now). Nothing is downloaded unless they pick Update Now;
+ * then a note shows the download, and the game restarts into the new build
+ * once it is in. B on the note lets the download finish in the background
+ * (the CO-OP screen has its progress and Restart Now). Not Now asks again
+ * next launch; Skip stays quiet until a release newer than that one. The
+ * CO-OP screen still offers the update whatever they picked.
+ */
+enum {
+    PORT_UPDP_NONE,
+    PORT_UPDP_ASK,      /* the box is up */
+    PORT_UPDP_WAIT,     /* they said yes: downloading and installing */
+    PORT_UPDP_FAILED    /* the box again: why, Try Again or OK */
+};
+static s32 port_updp;
+
+static void portUpdPromptFailed(void)
+{
+    static const char *const answers[2] = { "Try Again\n", "OK\n" };
+    char note[64];
+
+    snprintf(note, sizeof(note), "%.60s\n", portUpdateError());
+    portDlgOpenN("Update failed\n", answers, 2, 1);
+    portDlgSetNote(note);
+    port_updp = PORT_UPDP_FAILED;
+}
+
+/** The Files screen's tick runs this first: 1 = the prompt owns this frame's input. */
+static s32 portUpdPromptTick(void)
+{
+    switch (port_updp)
+    {
+        case PORT_UPDP_NONE:
+        {
+            static const char *const answers[3] = { "Update Now\n", "Not Now\n", "Skip This Version\n" };
+            const char *own = portUpdateOwn();
+            char title[48], note[64];
+
+            /* not over another box, nor on the frame a press lands (it would answer at once) */
+            if (portDlgIsOpen() || folder_selected_for_deletion >= 0 || !portUpdatePromptWanted()
+                || joyGetButtonsPressedThisFrame(PLAYER_1, ANY_BUTTON) != 0)
+            {
+                return 0;
+            }
+            snprintf(title, sizeof(title), "%.20s is out. Update now?\n", portUpdateLatest());
+            snprintf(note, sizeof(note), "You have %.20s. Co-op needs the same version.\n",
+                     own[0] != '\0' ? own : "a build from source");
+            portDlgOpenN(title, answers, 3, PORTUPD_ANSWER_UPDATE);
+            portDlgSetNote(note);
+            port_updp = PORT_UPDP_ASK;
+            sndPlaySfx((struct ALBankAlt_s *) g_musicSfxBufferPtr, OPTION_CLICK2_SFX, NULL);
+            return 1;
+        }
+        case PORT_UPDP_ASK:
+            if (!portDlgIsOpen())
+            {   /* closed under us (the idle timeout): ask again when they are back */
+                port_updp = PORT_UPDP_NONE;
+                return 0;
+            }
+            if (portDlgTick())
+            {
+                const s32 pick = portDlgPick();   /* -1: B, the same as Not Now */
+
+                portUpdatePromptAnswer(pick < 0 ? PORTUPD_ANSWER_LATER : pick);
+                port_updp = (pick == PORTUPD_ANSWER_UPDATE) ? PORT_UPDP_WAIT : PORT_UPDP_NONE;
+            }
+            return 1;
+        case PORT_UPDP_WAIT:
+            switch (portUpdateState())
+            {
+                case PORTUPD_DOWNLOADING:
+                case PORTUPD_INSTALLING:
+                    if (joyGetButtonsPressedThisFrame(PLAYER_1, B_BUTTON) != 0)
+                    {   /* keep playing; it finishes in the background */
+                        port_updp = PORT_UPDP_NONE;
+                        sndPlaySfx((struct ALBankAlt_s *) g_musicSfxBufferPtr, GUN_M60AMMGUN_3_SFX, NULL);
+                    }
+                    return 1;
+                case PORTUPD_READY:
+                    portUpdateRestart();   /* quits this copy; on failure the state says why */
+                    if (portUpdateState() == PORTUPD_FAILED)
+                    {
+                        portUpdPromptFailed();
+                    }
+                    return 1;
+                case PORTUPD_FAILED:
+                    portUpdPromptFailed();
+                    return 1;
+                default:
+                    port_updp = PORT_UPDP_NONE;
+                    return 0;
+            }
+        case PORT_UPDP_FAILED:
+            if (!portDlgIsOpen())
+            {
+                port_updp = PORT_UPDP_NONE;
+                return 0;
+            }
+            if (portDlgTick())
+            {
+                if (portDlgPick() == 0)
+                {
+                    portUpdateInstall();
+                    port_updp = PORT_UPDP_WAIT;
+                }
+                else
+                {
+                    port_updp = PORT_UPDP_NONE;
+                }
+            }
+            return 1;
+    }
+    return 0;
+}
+
+/** The download's note while they wait (the question itself is the box's own draw). */
+static Gfx *portUpdPromptDraw(Gfx *DL)
+{
+    char title[48];
+
+    if (port_updp != PORT_UPDP_WAIT)
+    {
+        return DL;
+    }
+    if (portUpdateState() == PORTUPD_DOWNLOADING)
+    {
+        snprintf(title, sizeof(title), "Downloading %.20s  %d%%\n", portUpdateLatest(), (int) portUpdateProgress());
+    }
+    else
+    {
+        snprintf(title, sizeof(title), "Installing %.20s...\n", portUpdateLatest());
+    }
+    return portDlgDrawNote(DL, title, "The game restarts when it is done. B: carry on\n");
 }
 
 #endif /* !TARGET_N64 */
@@ -3605,6 +3788,7 @@ Gfx *constructor_menu05_fileselect(Gfx *DL)
     {
         DL = portDlgDraw(DL);
     }
+    DL = portUpdPromptDraw(DL);
 #endif
 
     if (folder_selected_for_deletion < 0)
