@@ -7285,6 +7285,12 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
                         {
                             CapBeamLengthAndDecideIfRendered(&self->beams[hand], prop_selfchr->act_attack.attack_item, &sp240, &sp258);
                         }
+#ifndef TARGET_N64
+                        /* co-op: where the shot landed, so the joiners see its sparks and tracer and hear it */
+                        coopGuardShotLanded(self, hand, prop_selfchr->act_attack.attack_item, &sp240, &sp258,
+                                            (sp22C != 0 && sp254 != NULL) ? sp254->room : -1,
+                                            sp22C != 0 && stanSavedColl_posData == NULL, sp264 != 0);
+#endif
                     }
                 }
             }

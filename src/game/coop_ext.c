@@ -40,6 +40,9 @@ void coopExtPacket(const void *pkt, s32 len, s32 from)
         case COOPPKT_VEHICLE:
             coopReplVehiclePacket(pkt, len, from);
             break;
+        case COOPPKT_IMPACTS:
+            coopGuardImpactsPacket(pkt, len, from);
+            break;
     }
 }
 

@@ -48,6 +48,7 @@
 #include "front.h"
 #include "file.h"
 #include "gun.h"
+#include "glass.h"
 #include "math_atan2f.h"   /* the game's math.h has no atan2f: undeclared, it returned garbage (-w hides it) */
 #include "port_save.h"
 #include <music.h>
@@ -530,6 +531,8 @@ static s32 coopIsMirroringClient(void);
 static void coopSendGuards(void);
 static void coopReapGuards(void);
 static void coopGuardThuds(void);
+static void coopFlushImpacts(void);
+static u32 sImpactsGot;     /* joiner: guards' shots whose landing the host sent */
 static void coopGuardsInterpTick(void);
 static s32 coopPredictHolds(s32 slot, ChrRecord *chr, ModelAnimation *hostanim, s32 hostdying);
 static void coopPredictForget(s32 slot);
@@ -2189,6 +2192,10 @@ static void coopTickBody(void)
     if (coopNetIsHost() && coopNetHasPeer() && coopPartnerHere() && (sTick % 3) == 0)
     {
         coopSendGuards();
+    }
+    if (coopNetIsHost())
+    {
+        coopFlushImpacts();     /* this tick's guard shots, where they landed */
     }
     if (coopNetIsHost() && coopNetHasPeer() && coopPartnerHere() && (sTick % 60) == 30)
     {
@@ -4675,6 +4682,126 @@ static void coopClientGunfire(void)
             }
         }
     }
+}
+
+/* ---- where the host's guards' shots land ------------------------------------------
+ * A joiner's copy of a guard flashes and sounds as it fires (coopClientGunfire),
+ * but where each shot lands is worked out in the host's game: its sparks, the
+ * ricochet and the tracer were the host's alone. The host collects them as its
+ * guards fire and sends them every tick there are any (COOPPKT_IMPACTS, unreliable:
+ * a lost one is a lost spark). Damage still comes as HIT. */
+#define COOP_IMPACTS_PER_PKT 16
+enum { COOPIMP_SPARK = 1, COOPIMP_RICOCHET = 2, COOPIMP_TRACER = 4 };
+
+typedef struct
+{
+    s16 chrnum;
+    u8 hand;
+    u8 flags;       /* COOPIMP_* */
+    s16 room;       /* the spark's room */
+    s16 item;
+    f32 from[3];    /* the gun */
+    f32 to[3];      /* where it landed */
+} CoopImpact;
+
+typedef struct
+{
+    u32 magic;
+    u16 version;
+    u16 type;       /* COOPPKT_IMPACTS */
+    s32 stage;
+    u16 count;
+    u16 pad;
+    CoopImpact imp[COOP_IMPACTS_PER_PKT];
+} CoopImpactsPkt;
+
+static CoopImpactsPkt sImpacts;
+
+void coopGuardShotLanded(ChrRecord *chr, s32 hand, s32 item, coord3d *from, coord3d *to, s32 room, s32 ricochet, s32 tracer)
+{
+    CoopImpact *m;
+    s32 k;
+
+    if (sEnabled <= 0 || !coopNetIsHost() || !coopNetHasPeer() || !coopPartnerHere() || chr == NULL || coopIsPlayerChr(chr)
+        || (room < 0 && !tracer))
+    {
+        return;
+    }
+    if (sImpacts.count >= COOP_IMPACTS_PER_PKT)
+    {
+        coopFlushImpacts();
+    }
+    m = &sImpacts.imp[sImpacts.count++];
+    memset(m, 0, sizeof(*m));
+    m->chrnum = chr->chrnum;
+    m->hand = (u8) hand;
+    m->flags = (room >= 0 ? COOPIMP_SPARK : 0) | (ricochet ? COOPIMP_RICOCHET : 0) | (tracer ? COOPIMP_TRACER : 0);
+    m->room = (s16) room;
+    m->item = (s16) item;
+    for (k = 0; k < 3; k++)
+    {
+        m->from[k] = from->f[k];
+        m->to[k] = to->f[k];
+    }
+}
+
+static void coopFlushImpacts(void)
+{
+    if (sImpacts.count == 0)
+    {
+        return;
+    }
+    sImpacts.type = COOPPKT_IMPACTS;
+    sImpacts.stage = bossGetStageNum();
+    coopExtSendPacket(&sImpacts, (s32) ((u8 *) &sImpacts.imp[sImpacts.count] - (u8 *) &sImpacts), COOP_ALL);
+    sImpacts.count = 0;
+}
+
+void coopGuardImpactsPacket(const void *buf, s32 len, s32 from)
+{
+    const CoopImpactsPkt *p = (const CoopImpactsPkt *) buf;
+    s32 hdr = (s32) ((const u8 *) &p->imp[0] - (const u8 *) p);
+    s32 k;
+
+    if (from != 0 || coopNetIsHost() || !coopInMission() || len < hdr || p->stage != bossGetStageNum()
+        || p->count > COOP_IMPACTS_PER_PKT || len < hdr + p->count * (s32) sizeof(CoopImpact))
+    {
+        return;
+    }
+    for (k = 0; k < p->count; k++)
+    {
+        const CoopImpact *m = &p->imp[k];
+        coord3d at, gun;
+
+        at.f[0] = m->to[0];
+        at.f[1] = m->to[1];
+        at.f[2] = m->to[2];
+        if (m->flags & COOPIMP_SPARK)
+        {
+            bullet_spark_create(&at, 1, 26.0f, m->room);
+        }
+        if (m->flags & COOPIMP_RICOCHET)
+        {
+            recall_joy2_hits_edit_flag((ITEM_IDS) m->item, &at, -1);
+        }
+        if (m->flags & COOPIMP_TRACER)
+        {
+            ChrRecord *chr = chrFindByLiteralId(m->chrnum);
+
+            if (chr != NULL && chr->prop != NULL && m->hand <= GUNLEFT)
+            {
+                gun.f[0] = m->from[0];
+                gun.f[1] = m->from[1];
+                gun.f[2] = m->from[2];
+                CapBeamLengthAndDecideIfRendered(&chr->beams[m->hand], (ITEM_IDS) m->item, &gun, &at);
+            }
+        }
+    }
+    if ((sImpactsGot / 32) != ((sImpactsGot + p->count) / 32))
+    {
+        portConLogf("ge: coop: %u of the host's guards' shots landed here\n", sImpactsGot + p->count);
+    }
+    sImpactsGot += p->count;
 }
 
 /* the frames a dying animation's body hits the floor at (its StruckAnim, or an
