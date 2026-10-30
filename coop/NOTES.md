@@ -3146,3 +3146,66 @@ What the guards' own action tick does was the gap:
   joiner's hit prediction up to a second late (AISYNC); the civilian kill
   count, which only the host's level script acts on.
 - Harness: GE_COOP_TESTDROP=<chrnum>:<s> (host: that chr drops its gun).
+
+## Versus: co-op fixes carried over, the review's open items (COOP_VERSION stays 16)
+
+Owner's ask: carry the recent co-op fixes over to online versus and work
+through items 7-14 of the online versus review (project files,
+versus-review/).
+
+- Audit. Already right in versus: knives, grenades and mines, death drops,
+  shot items (#79), body hop and 60 fps placing (#77), player bullet sparks
+  (coop_look). Guard-only fixes (#81, hats, yelps, script sounds, vehicles,
+  console presses) don't apply. Two gaps fixed:
+  - Rockets and grenade-launcher rounds: coopItemsLaunched skipped versus,
+    so a player's round was never seen in flight on the other PCs (the
+    blast still came). Versus sends them now; guard rounds stay out.
+  - A blast with no floor straight below it (a ledge, a rocket into a wall
+    over a drop) was dropped on the other PCs. coopVsApplyBoom now finds
+    its floor with coop.c's coopBoomStan (from PR #85), and logs a blast it
+    still has to drop.
+- Item 7, end-screen stats and awards: each PC filled the other players'
+  columns from what it saw of them (no shots, no headshots, no speed) and
+  rolled the award ties with its own dice, so the end screens disagreed.
+  Each PC now sends its own column once at game over (COOPEV_VSSTATS, 39:
+  shots, headshots, on-screen time, speed, armour, longest and shortest
+  life, multikill, backside hits), mpmenu.c fills g_playerPlayerData from
+  them, and the picks are made in session order with dice seeded from the
+  match serial (coopVersusAwardRandom, coopVersusAwardMetrics). A column
+  that comes in late re-picks (mpVersusRechooseAwards). The end screen's
+  network polling also had stopped with the clock (coopTickBody returned
+  at clock 0), so a late column never arrived; versus polls there now.
+- Item 8, feedback: a hit marker at the crosshair (an X; bigger and red on
+  a kill), an arc toward whoever just hit us (screen-space, 1 s), and a
+  kill feed toast ("NAME KILLED NAME", "KILLED THEMSELVES").
+- Item 9, Public Games: lobby keys gevs (versus) and gewhat ("Versus:
+  Temple, Normal", "Co-op: Dam", "Versus lobby"), shown dimmed under the
+  name; a versus game in a match reads Next Match (a joiner waits in the
+  lobby and plays the next one).
+- Item 10, After a Match (a host row under Rules, COOPVSRULE_NEXTARENA in
+  vsrules): Same Arena (the default) is a rematch on Start Match; Next
+  Arena moves the lobby on to the next arena that holds everyone when a
+  match ends. Random stays Random.
+- Item 13, pings: they went to everyone, and never aged in versus
+  (coopPingTick wasn't called), so the key worked once. Pings go to
+  team-mates only (coopVersusTeamMates), a free-for-all press says "Pings
+  are for team-mates only.", a ping from a non-team-mate is dropped, and
+  they age and draw as in co-op.
+- Item 14, the host leaving mid-match: checked with three players, the
+  host's game killed at 40 s. Migration renumbers, the old host's body
+  goes as a gone player, the "Host not responding" panel shows, and the
+  new host's blasts reach the other player. No change needed. Cosmetic: a
+  versus death drop logs as "host guard 30000 dropped".
+- Items 11 (custom weapon sets online) and 12 (picking teams in the
+  lobby) are not done: both need more in HELLO (eight weapons, or a team
+  per player) than the two free COOPSET slots hold, so a COOP_VERSION
+  bump. Left for after PR #85 lands.
+- Sweep (project files, versus-review/versus-test-checklist-results.md):
+  two to four players over the mock Steam, every scenario but Flag Tag to
+  the end screen, 37 matches, awards the same on every PC in all 37, no
+  crashes. Each bullet's wall puff (explosion type 1) goes out as its own
+  VSBOOM (co-op relays it the same way); it is how the debris shows on the
+  other screens, but it could be trimmed.
+- Harness: GE_VS_TESTBOOM=<s>[:<dy>] (a blast on the first opponent),
+  GE_VS_PING=<s> (ping every 5 s), the fifth GE_COOP_VERSUS field takes 4
+  for Next Arena.
