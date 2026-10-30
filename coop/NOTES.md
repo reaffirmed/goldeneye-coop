@@ -3284,3 +3284,38 @@ The rig can't run without the cart, so this was not reproduced.
   this frame), alpha, hidden bits and the host's spot. coop.txt in an F8
   report now lists every chr the same way, so the two games' reports can
   be compared line by line.
+
+## The joiner's tank: guards look past it, its shells hurt (COOP_VERSION stays 16)
+
+Tester report: on Runway, guards ignored a joiner in the tank, or ran
+around in front of it once they had noticed them, and its shells hurt
+nobody. Three causes:
+
+- **Guards looked into the partner's tank.** A guard's sight and aim tests
+  (chrCanSeeBond, chrlvCurrentPlayerCall7F0B0E24, the shot's line) leave
+  out "Bond" and the tank Bond drives (bondviewUpdateGuardTankFlagsRelated,
+  g_PlayerTankProp). For a partner, coopGuardTankFlags left out only the
+  puppet, so the host's guards found the partner's own tank in every line:
+  never seen, and a guard that had heard them came closer and closer
+  instead of firing. It now leaves out the tank the partner drives too
+  (coopTankPropOf).
+- **The joiner dropped those hits as cover.** coopHitBehindCover tested the
+  guard's line to our Bond with our own tank in it, so every hit was
+  "behind cover now". It leaves our tank out as the guards' own test does.
+- **A joiner's rounds stopped reaching the host.** Since the Train fix
+  (a joiner doesn't send an object's explosion back), everything set off
+  through propExplode stayed on the joiner, and that includes its own
+  rockets, launcher rounds and tank shells, whose blast only the host can
+  make hurt. coopItemsExplodingOwnRound says the blast is a round this game
+  launched (our COOPITEM_ROUND); those are sent again. The projectile's
+  owner can't say: a round that hit something has lost it.
+- Harness: GE_COOP_TESTTANK=<s>:0 (get in and sit still),
+  GE_COOP_TESTTANKCHR=<chrnum>:<dist> (stand the chr further out, negative
+  for behind).
+- Checked on Runway with two copies over the mock Steam, before (main,
+  2d0de5b, with the harness) and after. Joiner in a still tank, chr 23 8 m
+  away: before, it never fires and the joiner takes no hits; after, "chr 23
+  firing" 9 times and 8 hits land on the joiner. Joiner fires four shells
+  (GE_COOP_TESTFIRE=32:30:6) at chr 23 put where they land: before, no
+  blast reaches the host and chr 23 stands; after, "peer explosion (type
+  13)" for each, chr 23 hurt, dies and fades on both.
