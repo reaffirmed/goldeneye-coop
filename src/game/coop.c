@@ -5596,9 +5596,10 @@ static void coopApplyObjKnock(CoopEvent *ev)
     portConLogf("ge: coop: player %d knocked obj %d loose\n", ev->from + 1, ev->u.knock.objofs);
 }
 
-/* A joiner pressing Use on a console, switch or the Runway plane marks it
- * activated only in its own game, and the level scripts that wait for that
- * run on the host: the press is sent there. */
+/* A press of Use on a console, switch or the Runway plane marks it activated
+ * only in the presser's game. A joiner's is sent to the host, whose level
+ * scripts are the ones that count; every press also reaches the other
+ * joiners, whose own copies of those scripts wait on it too. */
 
 static s32 sApplyingUse;
 static ObjectRecord *sGadgetObj;    /* the last object a partner used a gadget on, and the item */
@@ -5656,8 +5657,9 @@ static void coopSendObjUse(ObjectRecord *obj, s32 gadget)
         coopNoteActivated(obj, coopSelf());
         coopObjNoteUse(coopSelf());
     }
-    if (sEnabled <= 0 || sApplyingUse || coopVersus() || coopNetIsHost() || !coopNetHasPeer() || !coopPartnerHere())
-    {
+    if (sEnabled <= 0 || sApplyingUse || coopVersus() || !coopNetHasPeer() || !coopPartnerHere())
+    {   /* the host's press goes out too: every joiner's own copy of the level
+         * scripts waits on it (Dam's backup beeps at the computer it started) */
         return;
     }
     ofs = coopSetupOfs(obj);
@@ -5677,7 +5679,7 @@ static void coopApplyObjUse(CoopEvent *ev)
 {
     ObjectRecord *obj;
 
-    if (!coopNetIsHost() || ev->u.use.stage != bossGetStageNum() || !coopInMission() || g_CurrentSetup.propDefs == NULL
+    if (ev->u.use.stage != bossGetStageNum() || !coopInMission() || g_CurrentSetup.propDefs == NULL
         || coopSetupOfs((u8 *) g_CurrentSetup.propDefs + ev->u.use.objofs) < 0)
     {
         return;
@@ -5685,6 +5687,25 @@ static void coopApplyObjUse(CoopEvent *ev)
     obj = (ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + ev->u.use.objofs);
     if (obj->prop == NULL)
     {
+        return;
+    }
+    if (!coopNetIsHost())
+    {   /* the host's press, or another joiner's: only so our own copy of the
+         * level scripts sees it (its sounds, screens and later steps). What the
+         * press changes comes from the host as usual: the alarm in WORLD, the
+         * doors as DOOR events, so neither is run again here */
+        if (ev->u.use.gadget > 0)
+        {
+            obj->state |= PROPSTATE_ACTIVATED;
+            sGadgetObj = obj;
+            sGadgetItem = ev->u.use.gadget;
+        }
+        else
+        {
+            obj->runtime_bitflags |= RUNTIMEBITFLAG_ACTIVATED;
+        }
+        portConLogf("ge: coop: player %d used obj %d here (type %d, item %d)\n", ev->from + 1, ev->u.use.objofs, obj->type,
+            ev->u.use.gadget);
         return;
     }
     if (ev->u.use.gadget > 0)
@@ -9258,6 +9279,10 @@ void coopObjActivatedPass(void *script, void *obj)
 {
     s32 i;
 
+    if (sEnabled > 0 && !coopNetIsHost() && coopInMission() && obj != NULL)
+    {   /* the credit is the host's to give; this only says our copy got there */
+        portConLogf("ge: coop: our copy of a script found obj %d pressed\n", coopSetupOfs(obj));
+    }
     if (sEnabled <= 0 || !coopNetIsHost())
     {
         return;
