@@ -942,8 +942,22 @@ void coopLookTestTick(s32 missionticks)
     }
 }
 
+/* GE_COOP_STEPS f<n> (coop_checklist.c): press fire <n> times from now */
+static s32 sTestPressFrom = -1, sTestPressLen;
+
+void coopLookTestPress(s32 presses)
+{
+    sTestPressFrom = sTestTicks + 1;
+    sTestPressLen = presses * 16;
+}
+
 u16 coopLookTestButtons(u16 buttons)
 {
+    if (sTestPressFrom >= 0 && sTestTicks >= sTestPressFrom && sTestTicks < sTestPressFrom + sTestPressLen
+        && ((sTestTicks - sTestPressFrom) % 16) < 8)
+    {
+        buttons |= Z_TRIG;
+    }
     if (sTestFireItem > 0 && sTestTicks >= sTestFireAt && sTestTicks < sTestFireAt + sTestFireLen
         && ((sTestTicks - sTestFireAt) % 16) < 8)
     {

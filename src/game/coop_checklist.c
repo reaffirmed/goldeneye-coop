@@ -11,10 +11,14 @@
  *       h<item>  switch to that item        d       die
  *       w<m>     stand on the waypoint pad nearest <m> metres from here
  *       a        raise the alarm             n<chr>  stand 3 to 10 m from that chr, facing it
+ *       f<n>     press fire <n> times (throws or plants what's in hand)
+ *       v<tag>   stand 1.5 m from that object, facing it
+ *       x<tag>   use the gadget in hand on that object (what gunfire.c does when it is aimed at)
+ *       l<deg>   look <deg> degrees down (negative up)
  *   GE_COOP_WATCH=<chr>[,<chr>...]  every second, log those chrs when they
  *                          appear, vanish, die or move more than 7 m in a
  *                          second (and whether their room is on our screen)
- *   GE_COOP_WATCHWORLD=1   log the alarm and the countdown when they change
+ *   GE_COOP_WATCHWORLD=1   log the alarm, the countdown and the stage flags when they change
  *   GE_COOP_REVIVE=1       log any chr that leaves ACT_DIE/ACT_DEAD for another action
  *   GE_COOP_SOLO=1         run the steps with no partner (a host on its own)
  */
@@ -38,10 +42,12 @@
 #include "bondinv.h"
 #include "gun.h"
 #include "bg.h"
+#include "stan.h"
 #include "math_atan2f.h"
 
 extern void portConLogf(const char *fmt, ...);
 void bondviewCallRecordDamageKills(f32 damage, f32 arg1, s32 arg2, s32 arg3);
+void coopLookTestPress(s32 presses);
 
 #define CL_MAXSTEPS 24
 #define CL_MAXWATCH 8
@@ -64,6 +70,7 @@ static s32    sWatchSeen[CL_MAXWATCH];
 static coord3d sWatchPos[CL_MAXWATCH];
 static s32    sWatchWorld;
 static s32    sLastAlarm = -1, sLastClockRun = -1;
+static s32    sLastFlags;
 static u32    sLastTicks, sLastSec, sDoneAt;
 static s32    sLinger = 20;  /* GE_COOP_STEPSLINGER=<s>: seconds to watch after the last step */
 
@@ -236,7 +243,7 @@ static void clStep(ClStep *s)
             return;
         }
     }
-    if (s->kind == 'o' || s->kind == 'g' || s->kind == 'u' || s->kind == 'b')
+    if (s->kind == 'o' || s->kind == 'g' || s->kind == 'u' || s->kind == 'b' || s->kind == 'v' || s->kind == 'x')
     {
         o = objFindByTagId(s->arg);
         if (o == NULL || o->prop == NULL)
@@ -323,6 +330,46 @@ static void clStep(ClStep *s)
         case 'a':
             alarmActivate();
             break;
+        case 'v':
+        {
+            coord3d to;
+            StandTile *stan = NULL;
+            s32 k;
+
+            for (k = 0; k < 8 && stan == NULL; k++)
+            {   /* the first side of it with floor */
+                to.f[0] = o->prop->pos.f[0] + 150.0f * cosf(k * 0.7853982f);
+                to.f[1] = o->prop->pos.f[1] + 100.0f;
+                to.f[2] = o->prop->pos.f[2] + 150.0f * sinf(k * 0.7853982f);
+                stan = stanFindTileBelowPos(&to, NULL, NULL);
+            }
+            if (stan != NULL)
+            {
+                f32 dx = o->prop->pos.f[0] - to.f[0], dz = o->prop->pos.f[2] - to.f[2];
+
+                coopRespawnPlayerAt(&to, stan, 0.0f, weapon);
+                g_CurrentPlayer->vv_theta = atan2f(-dx, dz) * 57.29578f;   /* as GE_COOP_TESTTHROWAT faces it */
+                if (g_CurrentPlayer->vv_theta < 0.0f)
+                {
+                    g_CurrentPlayer->vv_theta += 360.0f;
+                }
+            }
+            else
+            {
+                portConLogf("ge: coop: step v%d: no floor by it\n", s->arg);
+            }
+            break;
+        }
+        case 'x':
+            o->state |= PROPSTATE_ACTIVATED;
+            coopObjGadgetUsed(o, weapon);
+            break;
+        case 'f':
+            coopLookTestPress(s->arg > 0 ? s->arg : 1);
+            break;
+        case 'l':
+            g_CurrentPlayer->vv_verta = (f32) -s->arg;
+            break;
     }
     portConLogf("ge: coop: step %c%d at %u s done\n", s->kind, s->arg, coopExtMissionTicks() / 60);
 }
@@ -365,6 +412,11 @@ static void clWatchTick(void)
         s32 alarm = alarmIsActive() ? 1 : 0;
         s32 run = countdownTimerIsRunning() ? 1 : 0;
 
+        if (objectiveregisters1 != sLastFlags)
+        {
+            portConLogf("ge: coop: watch: stage flags %x (was %x)\n", objectiveregisters1, sLastFlags);
+            sLastFlags = objectiveregisters1;
+        }
         if (alarm != sLastAlarm)
         {
             portConLogf("ge: coop: watch: alarm %s\n", alarm ? "on" : "off");
@@ -425,6 +477,7 @@ void coopChecklistTick(void)
         memset(sWatchSeen, 0, sizeof(sWatchSeen));
         memset(sLastAct, 0, sizeof(sLastAct));
         sLastAlarm = sLastClockRun = -1;
+        sLastFlags = 0;
     }
     sLastTicks = t;
     if ((!sSolo && !coopLobbyHasPartner()) || t < 2)

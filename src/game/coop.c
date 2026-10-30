@@ -6587,6 +6587,7 @@ static void coopApplyWorld(CoopWorldPkt *p)
     {
         if ((p->depositbits & (1u << i)) && !d->flag)
         {
+            portConLogf("ge: coop: peer planted objective item %d (item %d)\n", i, d->weaponnum);
             d->flag = 1;
             coopObjNoteActor(sWorldFrom, 0);
         }

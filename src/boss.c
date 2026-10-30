@@ -175,6 +175,9 @@ struct memallocstring memallocstringtable[] = {
 };
 
 s32 g_MainStageNum = LEVELID_NONE;
+#ifndef TARGET_N64
+static s32 sReturnedFromStage;     /* bossReturnTitleStage ran for the stage now loaded */
+#endif
 s32 g_BossIsDebugMenuOpen = FALSE;
 
 OSScMsg g_bossGfxDoneMsg = { OS_SC_DONE_MSG };
@@ -900,6 +903,9 @@ void bossMainloop(void)
 
         g_StageNum = g_MainStageNum;
         g_MainStageNum = LEVELID_NONE;
+#ifndef TARGET_N64
+        sReturnedFromStage = 0;
+#endif
     }
 
     // if(gdl) also works here.
@@ -945,6 +951,14 @@ LEVELID bossGetStageNum() {
  */
 void bossReturnTitleStage(void) {
 #ifndef TARGET_N64
+    if (sReturnedFromStage)
+    {   /* co-op: this stage has ended already and unloads at the end of the
+         * frame. A joiner's own copy of the host's ending can finish in the
+         * same frame as the host's mission end arrives; ending it twice ran
+         * the debrief twice */
+        return;
+    }
+    sReturnedFromStage = 1;
     {
         extern void coopMissionComplete(void);
         coopMissionComplete(); /* co-op: the partner's mission ends with ours */
