@@ -3079,3 +3079,29 @@ older build ignores it.
   guard's script sound heard on the joiner. mission_runs.sh (dam,
   facility, runway, surface, streets, frigate), the three late joins and
   joiner_spots.sh pass.
+
+## Host sync leftovers: floorless blasts, guard shot landings, left hands, aircraft (COOP_VERSION stays 16)
+
+What testing the audit's fixes turned up:
+
+- **A blast with no floor straight below it** (a rocket on a cliff face, a
+  wall's top, mid-air) was dropped by the receiving game. coopBoomStan
+  now looks higher and up to 2 m around it, and failing that anchors the
+  blast to our own Bond's tile; the tile only anchors the blast's prop,
+  its rooms come with the event. GE_COOP_TESTBOOM=<chrnum>:<dy> (joiner).
+- **Where the host's guards' shots land.** chrlvFireWeaponRelated hands
+  each shot's end point to coopGuardShotLanded; the host sends the tick's
+  lot as COOPPKT_IMPACTS (13, unreliable). A joiner makes the spark, plays
+  the ricochet off a wall and draws the tracer from the guard's gun.
+- **A guard's left-hand gun.** CoopAiEnt's spare byte is the left hand's
+  item (0xFF empty, 0 from an older host: left alone). A joiner's copy
+  gets it when its hand is empty and puts its own away after two syncs
+  of the host's being empty. GE_COOP_TESTLEFT=<chrnum>:<s>.
+- **Aircraft.** The vehicle records carry aircraft (kind 1): animation
+  (animation_table_ptrs2 index), frame, speed, end frame, rotor aim. A
+  joiner's that flies another animation or none is put on the host's
+  and its list moved on; the frame of the same flight is left alone (on
+  Runway the host's plane stood at frame 0 while the joiner's flew, so
+  frame correction would fight it). GE_COOP_TESTAIR=<s>:<anim>.
+- Checked with two copies over the mock Steam; mission_runs.sh (six
+  missions), the three late joins and joiner_spots.sh pass.
