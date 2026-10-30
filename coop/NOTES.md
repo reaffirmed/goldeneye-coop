@@ -2982,3 +2982,46 @@ Owner's report: a joiner can pick up the grenades guards throw.
   0 of 4, each with a fuse, landing within about 25 units of the host's
   and going off. Host grenades and remote mines: the joiner's copies have
   fuses and none was picked up. Dam, Facility and Frigate mission runs pass.
+
+## Host sync gaps: presses, the partner's tank, guns put away (COOP_VERSION stays 16)
+
+From the audit of what the host simulates but doesn't send
+(project files goldeneye-coop/sync-audit/host-sync-gaps.html), the three
+cheap ones:
+
+- **Presses reach every copy of the level scripts.** Each game runs the
+  background lists itself, and many wait on if_object_was_activated or
+  if_bond_used_gadget_on_object. COOPEV_OBJUSE went joiner to host only;
+  the host's own press went nowhere, so a joiner's copy never got past
+  such a wait (Dam's backup: no beeping at the computer on the joiner).
+  coopSendObjUse now sends the host's presses too; coopApplyObjUse on a
+  joiner only sets RUNTIMEBITFLAG_ACTIVATED (or PROPSTATE_ACTIVATED and
+  the gadget) in its own game, no alarm toggle and no door link (WORLD
+  and DOOR carry those). A joiner's press already reached the others
+  through the host. Older joiners return early on a non-host, so no
+  version change. A joiner logs "our copy of a script found obj N pressed".
+- **A partner's tank crushes guards on the host.** bondview2.c's crush
+  runs in the driver's game, where a joiner skips guard damage; the host
+  moved its copy without crushing. coopTankCrush (coop_tank.c) runs the
+  same box test every tick on the host for each partner driving, with
+  chrlvExplosionDamage(3.0) and the crush sounds for a dying chr.
+- **A runtime gun the host's guard puts away goes on the joiner too.** A
+  setup gun was already corrected by replication, but one given at
+  runtime (guard_try_spawning_item, mirrored spawns) stayed in the
+  joiner's guard's hand. coopApplyGuard now puts ours away
+  (chrSetWeaponFlag4) once the snapshot's right-hand gun has differed for
+  COOP_GUN_OFF_TICKS (90), long enough for a drop's DROP event to land
+  first; a new gun is given once the hand is empty, as before.
+- Harness: GE_COOP_TESTTANKCHR=<chrnum> (host: stand that chr in front of
+  a partner's tank 2 s after they get in), GE_COOP_TESTUNARM=<chrnum>:<s>
+  (host: that chr puts its gun away, gets a D5K 3 s later, puts it away
+  5 s after that).
+- Checked with two copies over the mock Steam, before on main (3ec70d7)
+  and after: Dam, host presses the backup computer at 20 s
+  (GE_COOP_TESTUSE=-1:6:20): before, nothing on the joiner; after, "player
+  1 used obj 28184 here" and its copy of the script passes the press.
+  Runway, joiner drives the tank (GE_COOP_TESTTANK=25) with chr 23 put in
+  front of it: before, the guard stands and fires from beside the tank;
+  after, "player 2's tank runs over chr 23" and it dies on both. Dam, chr
+  6's runtime D5K put away: before, the joiner's guard keeps it; after,
+  "host chr 6 put away gun 10" 1.5 s later.
