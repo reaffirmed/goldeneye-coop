@@ -64,8 +64,8 @@ ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 | --- | --- | --- | --- | --- | --- |
 | D1 | ONEPLAYER, SPLITOBJ | Walks into the bungee room alone, jumps | Bungee objective completes on both; both get the ending | `bungee` || pass (rig, 2 and 3 players; failed on 620f526, fixed in 74d3da9) |
 | D2 | ACTION | Shoots out every alarm box (00 Agent) | "Neutralize all alarms" completes on both | || pass (rig: joiner breaks all 4 alarms, 00 Agent) |
-| D3 | KEYITEM | Picks up and places the covert modem on the satellite link (SA+) | Objective completes on both; the host's inventory no longer shows a modem to place | | |
-| D4 | ACTION | Uses the mainframe for the data backup (00 Agent) | Completes on both | | |
+| D3 | KEYITEM | Picks up and places the covert modem on the satellite link (SA+) | Objective completes on both; the host's inventory no longer shows a modem to place | | fail, fixed (rig, 2026-10-30): a modem the joiner threw short fell through the level on the host, so B failed only on the joiner (now on both, as in solo); a modem on the link was not re-run |
+| D4 | ACTION | Uses the mainframe for the data backup (00 Agent) | Completes on both | | not run (rig, 2026-10-30): guard fire in the rig destroyed both mainframes first, with the host doing it too |
 | D5 | LATEJOIN | Joins late after the host raised the alarm | Alarm is sounding on the joiner, guards alerted | `lateAlarm` || pass (rig: drop-in at 35 s sees the alarm on) |
 | D6 | CUTJOIN | Joins during the opening swirl | Joiner spawns into play, not a frozen camera | | |
 | D7 | SCRIPTDEATH | Dies on the bungee platform while the host is far away | Respawns beside the host; jump still possible | | |
@@ -78,7 +78,7 @@ ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 | F2 | SPLITOBJ | Meets Doak first (the known "objective B failed" flash) | No "failed" message on either screen, even briefly | `doak` || pass (rig: no failed flash) |
 | F3 | KEYITEM | Talks to Doak, then opens the door that needs the decoder | Host receives the decoder (script gives it "to the team"); the joiner can still open the door | | |
 | F4 | ACTION, FX | Plants charges on the bottling-room tanks | Tanks blow on both; "Destroy all tanks" completes on both | || pass (rig: joiner shoots all 10 tanks, objective on both) |
-| F5 | SAMETIME | Both players plant on the same tank in the same second | Counted once; tank blows once | | |
+| F5 | SAMETIME | Both players plant on the same tank in the same second | Counted once; tank blows once | | pass (rig, 2026-10-30): both blow tanks 1 and 2 in the same second; each destroyed once, the same on both |
 | F6 | ONEPLAYER | Reaches the bottling room first; its alarm/timer fires on the joiner's entry | Same timer on both screens | | |
 | F7 | FX | Watches Natalya/the scientist room while the host is elsewhere; guards that hide "when not on screen" vanish | No chr vanishes in front of the joiner | | |
 | F8 | ONEPLAYER | Reaches the exit (Ourumov ending) first | Ending starts for both, once | | |
@@ -112,10 +112,10 @@ ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| SI1 | ACTION, FX | Plants the charges in the fuel rooms | Charges blow on both | | |
-| SI2 | KEYITEM | Picks up the circuit board / satellite plans | Objective on both | | |
+| SI1 | ACTION, FX | Plants the charges in the fuel rooms | Charges blow on both | | pass (rig, 2026-10-30): each charge the joiner plants reaches the host ("peer planted objective item"); 3 of 4 rooms in one run, the 4th throw rolls out of its room for the host too |
+| SI2 | KEYITEM | Picks up the circuit board / satellite plans | Objective on both | | pass (rig, 2026-10-30): C and D complete on both, credit to the joiner |
 | SI3 | SPAWN, TARGET | Reaches Ourumov first, looking at his spawn | Ourumov appears and runs for both; drops his key for both | | |
-| SI4 | ONEPLAYER | Starts the escape countdown | Same countdown on both screens | `siloClock` | |
+| SI4 | ONEPLAYER | Starts the escape countdown | Same countdown on both screens | `siloClock` | pass (rig, 2026-10-30): 00 Agent, host 509.6 s and joiner 509.9 s |
 | SI5 | BLEEDOUT | Is down and bleeding out as the countdown ends | Mission fails once, one failure screen on each | | |
 | SI6 | FX | Countdown runs out | Explosions around both players, not just the host | | |
 
@@ -181,7 +181,7 @@ ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 | DE1 | ACTION, FX | Destroys the helicopters and weapon caches | Destroyed on both | || pass (rig: 17 caches); see the desync note |
 | DE2 | SPAWN | Reaches Trevelyan's spawn first, watching it | Trevelyan appears for both | | |
 | DE3 | KEYITEM | Picks up the safe key and opens the safe | Works for the joiner, objective on both | || not run |
-| DE4 | ONEPLAYER | Boards the train first | Ending for both | | |
+| DE4 | ONEPLAYER | Boards the train first | Ending for both | | pass (rig, 2026-10-30): the joiner reaches the train pad; the ending runs for both |
 
 ## 14. Train
 
@@ -236,9 +236,9 @@ ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
 | AZ1 | SPAWN, TARGET | Reaches Jaws first | Jaws spawns and fights the joiner | | |
-| AZ2 | KEYITEM, ACTION | Reprograms the shuttle guidance | Objective on both | | |
+| AZ2 | KEYITEM, ACTION | Reprograms the shuttle guidance | Objective on both | | pass (rig, 2026-10-30): the joiner uses both guidance items; A completes on both |
 | AZ3 | FX | Watches a guard the script removes "when not on screen" | It doesn't vanish in front of the joiner | | |
-| AZ4 | ONEPLAYER, FX | Launches the shuttle | Launch on both, ends for both | | |
+| AZ4 | ONEPLAYER, FX | Launches the shuttle | Launch on both, ends for both | | pass (rig, 2026-10-30): the joiner closes the doors and the launch runs; B on both, both debrief complete |
 
 ## 20. Egyptian
 
@@ -255,10 +255,10 @@ ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 | # | Family | What to do | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
 | X1 | SCRIPTDEATH | Die during a cutscene (fade) | The scene ends with both alive or respawned | | |
-| X2 | SAMETIME | Both press the same console / switch on one frame | One activation | | |
+| X2 | SAMETIME | Both press the same console / switch on one frame | One activation | | pass (rig, 2026-10-30): both press Aztec's launch console in the same second; the doors and launch run once |
 | X3 | LATEJOIN | Late join after doors opened and alarm raised | Doors and alarm as the host's | `lateAlarm` || pass for the alarm (rig); doors not checked |
 | X4 | LATEJOIN | Host leaves mid-mission (migration) | New host keeps the alarm, doors and objectives | | |
-| X5 | CUTJOIN | Drop in during the intro swirl or an end cutscene | Joiner arrives in play or in the same scene | | |
+| X5 | CUTJOIN | Drop in during the intro swirl or an end cutscene | Joiner arrives in play or in the same scene | | fail, fixed (rig, 2026-10-30): a joiner dropping into the Dam bungee ending could debrief twice; now once |
 | X6 | SPLITOBJ | End every mission and compare the two results screens | Same objective list and states | every run || pass on 17 missions (rig sweep) |
 | X7 | MANY | Repeat the escort rows (BU1, C1, J1) with 3 and 4 players | Followers pick one player and stay on them | | |
 | X8 | MANY | Repeat the spawn rows (F1, SI3, ST1) with 3 and 4 players | Spawns still happen | || pass (Facility Doak 3 players, Statue Natalya 4 players) |

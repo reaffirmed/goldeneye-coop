@@ -3209,3 +3209,43 @@ versus-review/).
 - Harness: GE_VS_TESTBOOM=<s>[:<dy>] (a blast on the first opponent),
   GE_VS_PING=<s> (ping every 5 s), the fifth GE_COOP_VERSUS field takes 4
   for Next Arena.
+
+## Story sweep: the joiner does the least-tested missions (2026-10-30, COOP_VERSION stays 16)
+
+Rig runs of the checklist rows nobody had run, the joiner doing the work
+and the host staying back (00 Agent, both invulnerable, mock Steam).
+
+- **A partner's throw at rest off the floor tiles.** On Dam a covert modem
+  the joiner threw short of the satellite link came to rest on the parapet,
+  where no floor tile is straight below it. The joiner's ITEMSTUCK
+  ("landed") reached the host, but coopItemsApplyRest found no tile and
+  gave up, and the host's copy, which had not hit anything on the host's
+  screen, fell through the level for ever (itemlog: y -258914 after 20 s).
+  The host's script never saw the modem lying loose, so "Install covert
+  modem" failed only on the joiner, and the host's desync check kept
+  undoing the joiner's stage flag 0x2000. coopItemsRestStan now also looks
+  a little higher and up to 2.5 m around. After: "drop 4001 put where ...
+  came to rest", B fails on both as in solo, no desync. The same rest path
+  places a guard's dropped gun.
+- **Two mission ends in one frame.** A joiner who dropped into the Dam
+  bungee ending (JOINAFTER=24, host on pad 330 at 10 s) ran its own copy
+  of the ending; it finished in the frame the host's MISSIONEND arrived,
+  and bossReturnTitleStage ran twice: two "mission end" lines, two
+  debriefs. Seen once on the old build; it now returns early when the
+  stage has already ended (reset when the next stage loads). Two runs
+  after the fix, one with each order, debrief once.
+- Checked, no change: Silo, the joiner's collects (C, D) and each charge
+  it plants ("peer planted objective item N" on the host); the countdown
+  within 0.3 s. Aztec, the joiner uses both guidance items (A on both),
+  closes the doors and launches (B on both, both debrief complete); both
+  players pressing the launch console in the same second run it once.
+  Depot, the joiner reaching the train pad ends it for both. Facility,
+  both players blowing tanks 1 and 2 in the same second: each destroyed
+  once on both.
+- Not settled in the rig: Dam's backup (guard fire destroys both
+  mainframes before the Use, with the host doing it too); the fourth
+  Silo room (the throw rolls out of the room for the host as well);
+  Natalya's escorts, which need the story played up to them.
+- Harness: GE_COOP_STEPS f<n> (press fire), l<deg> (look down), v<tag>
+  (stand by an object facing it), x<tag> (use the gadget in hand on it);
+  GE_COOP_WATCHWORLD logs the stage flags as they change.
