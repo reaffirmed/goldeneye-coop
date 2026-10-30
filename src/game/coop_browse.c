@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <bondtypes.h>
+#include <boss.h>
 #include "coop.h"
 #include "coop_net.h"
 #include "port_update.h"
@@ -106,6 +107,42 @@ s32 coopBrowseLocked(s32 i)
 s32 coopBrowseInMission(s32 i)
 {
     return coopSteamBrowseInMission(i);
+}
+
+/* a versus game: in a match it can't be joined (no late joining) */
+s32 coopBrowseVersus(s32 i)
+{
+    return coopSteamBrowseVersus(i);
+}
+
+/* what the public game plays ("Versus: Temple, Normal", "Co-op: Dam"), "" from an older host */
+const char *coopBrowseWhat(s32 i)
+{
+    return coopSteamBrowseWhat(i);
+}
+
+/* host: what we play, for the others' Public Games */
+static void coopBrowseSetWhat(s32 inmission)
+{
+    const s32 versus = (coopSetting(COOPSET_VSMODE) & 1) != 0;
+    char what[40];
+
+    if (inmission && coopVersus())
+    {
+        char arena[32], scenario[32];
+
+        coopVsPresenceNames(bossGetStageNum(), arena, sizeof(arena), scenario, sizeof(scenario));
+        snprintf(what, sizeof(what), "Versus: %s, %s", arena, scenario);
+    }
+    else if (inmission && coopMissionName(bossGetStageNum()) != NULL)
+    {
+        snprintf(what, sizeof(what), "Co-op: %s", coopMissionName(bossGetStageNum()));
+    }
+    else
+    {
+        snprintf(what, sizeof(what), "%s lobby", versus ? "Versus" : "Co-op");
+    }
+    coopSteamSetWhat(what, versus);
 }
 
 static void coopBrowseJoinWith(s32 i, const char *pw)
@@ -387,6 +424,10 @@ void coopBrowseTick(s32 inmission)
         return;
     }
     coopSteamSetInMission(inmission);   /* host: Public Games shows Drop In while we play */
+    if ((sNow % 30) == 0)
+    {
+        coopBrowseSetWhat(inmission);
+    }
     if (sDirty)
     {
         sDirty = 0;

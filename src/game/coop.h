@@ -406,6 +406,8 @@ const char *coopBrowseName(s32 i);
 s32  coopBrowseMembers(s32 i);
 s32  coopBrowseLocked(s32 i);
 s32  coopBrowseInMission(s32 i);
+s32  coopBrowseVersus(s32 i);
+const char *coopBrowseWhat(s32 i);
 void coopBrowseJoin(s32 i);
 s32  coopBrowseChecking(void);
 s32  coopBrowseRefused(void);

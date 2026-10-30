@@ -9598,11 +9598,24 @@ static void coopLobbyBuildRows(void)
             coopLobbyCopyName(name, sizeof(name), coopBrowseName(i));
             name[strlen(name) - 1] = '\0';
             snprintf(label, sizeof(label), "%.30s  %d/%d\n", name, (int) coopBrowseMembers(i), COOP_MAX_PLAYERS);
-            r = coopLobbyAdd(CLROW_JOINPUBLIC, i, label,
-                             coopBrowseLocked(i) ? "Password\n" : coopBrowseInMission(i) ? "Drop In\n" : "Join\n");
-            if (r != NULL && coopBrowseMembers(i) >= COOP_MAX_PLAYERS)
-            {
-                r->dim = TRUE;
+            {   /* a co-op mission can be dropped into; a versus match can't, so joining waits in its lobby */
+                const s32 inmatch = coopBrowseInMission(i) && coopBrowseVersus(i);
+
+                r = coopLobbyAdd(CLROW_JOINPUBLIC, i, label,
+                                 coopBrowseLocked(i) ? "Password\n" : inmatch ? "Next Match\n" : coopBrowseInMission(i) ? "Drop In\n" : "Join\n");
+                if (r != NULL && coopBrowseMembers(i) >= COOP_MAX_PLAYERS)
+                {
+                    r->dim = TRUE;
+                }
+            }
+            if (coopBrowseWhat(i)[0] != '\0' && coop_lobby_nrows < COOP_LOBBY_ROWS - 4)
+            {   /* what it plays, under its name */
+                snprintf(label, sizeof(label), "  %.40s\n", coopBrowseWhat(i));
+                r = coopLobbyAdd(CLROW_TEXT, 0, label, "");
+                if (r != NULL)
+                {
+                    r->colour = PORT_SHEET_COL_DIM;
+                }
             }
             if (coopBrowseTyping() == COOPBROWSE_TYPE_JOIN && coopBrowseTypingFor() == i)
             {
