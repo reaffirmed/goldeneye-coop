@@ -748,7 +748,7 @@ static void coopVsApplyBoom(const VsBoom *b, s32 from)
     pos.f[0] = b->pos[0];
     pos.f[1] = b->pos[1];
     pos.f[2] = b->pos[2];
-    stan = stanFindTileBelowPos(&pos, NULL, NULL);
+    stan = coopBoomStan(&pos);   /* a blast on a ledge or in mid-air, as in co-op */
     if (stan == NULL || b->rooms[0] == 0xFF || owner < 0)
     {
         return;

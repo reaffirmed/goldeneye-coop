@@ -383,5 +383,8 @@ void coopDesignApply(s32 kind, const u8 *raw, s32 from)
         case COOPEV_VOTE:
             coopVoteApply(raw, from);
             break;
+        case COOPEV_DROPSTART:
+            coopItemsApplyDropStart(raw);
+            break;
     }
 }

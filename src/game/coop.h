@@ -112,7 +112,8 @@ enum
     COOPEV_VOTE = 57,       /* to the host: a vote; host -> all: the count (coop_vote.c) */
     COOPEV_LIVES = 58,      /* to the host: our lives this mission; host -> a returning joiner: what it had left (coop.c) */
     COOPEV_SEEN = 59,       /* to the host: guards our screen has drawn (CHRFLAG_HAS_BEEN_ON_SCREEN, coop.c) */
-    COOPEV_ENDING = 60      /* to the host: our copy of the level script reached an ending first (coop.c coopAiSkip) */
+    COOPEV_ENDING = 60,     /* to the host: our copy of the level script reached an ending first (coop.c coopAiSkip) */
+    COOPEV_DROPSTART = 61   /* host -> all: how a guard's drop left its hand (coop_items.c; an older joiner ignores it) */
 };
 #define COOP_ALL_PLAYERS 0xFF   /* coopDesignSend's `to`: everyone */
 void coopDesignSend(s32 kind, s32 to, const void *payload, s32 len);
@@ -691,6 +692,8 @@ s32  coopItemsShownOnly(ObjectRecord *obj);             /* propobj.c: a round on
 s32  coopItemsShownOnlyTick(PropRecord *prop);          /* propobj.c chrobjWeaponTick: 1, such a round (gone without a blast) */
 s32  coopItemsChrDropping(ChrRecord *chr);              /* chr.c: 1 keeps a joiner's guard from dropping on its own */
 void coopItemsChrDropped(ChrRecord *chr, PropRecord *prop);
+void coopItemsApplyDropStart(const u8 *raw);
+StandTile *coopBoomStan(coord3d *pos);                  /* coop.c: the floor a partner's blast goes off on here (versus too) */            /* coop_cutscene.c coopDesignApply: COOPEV_DROPSTART */
 void coopItemsExplodeBegin(PropRecord *prop);           /* propobj.c propExplode */
 void coopItemsExplodeEnd(void);
 s32  coopItemsExploding(void);
