@@ -2472,6 +2472,11 @@ static void coopSubFieldTick(void)
     {
         return;
     }
+    if (coopVersus())
+    {
+        coopVersusSubFieldTick();
+        return;
+    }
     if (coopIsMirroringClient())
     {
         coopGuardsInterpTick();

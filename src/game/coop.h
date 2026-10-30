@@ -584,6 +584,7 @@ void coopVersusMatchOver(void);
 s32  coopVersusPktSize(void);
 void coopVersusRecvPkt(void *buf, s32 player);
 void coopVersusTick(void);
+void coopVersusSubFieldTick(void);   /* the others' bodies on the ticks between 60ths */
 void coopVsStartMatch(s32 stage);          /* front.c: this PC's half of the match, then into the arena */
 
 /* ---- the feature batch: chat, spectating, objective credit, team times,

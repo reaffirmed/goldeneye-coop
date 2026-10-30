@@ -283,7 +283,16 @@ static void coopVsMoveBody(s32 li, const CoopRemoteInfo *info)
     prop->pos = pos;
     if (chr->model != NULL)
     {
-        setsuboffset(chr->model, &pos);
+        coord3d off;
+
+        /* x and z only, as Rare's own MP bodies and co-op's partners do
+         * (coop.c coopPuppetPlace): the model's height is the animation's
+         * root over the ground, and a loop of the idle seeds the root from
+         * it, so the player's eye height here made the body hop */
+        getsuboffset(chr->model, &off);
+        off.f[0] = pos.f[0];
+        off.f[2] = pos.f[2];
+        setsuboffset(chr->model, &off);
         setsubroty(chr->model, info->yaw);
         sub_GAME_7F01FC10(chr->model, &prop->pos, &prop->pos, &chr->ground);
     }
@@ -377,6 +386,33 @@ static void coopVsRemoteTick(s32 li)
     }
     coopVsFeedPlayer(pl, &info);
     coopLookBodyTick(&sVsLook[li], pl->prop->chr, &info.look, info.dead, COOP_PUPPET_CHRNUM + sVsNet[0]);
+}
+
+/* coop.c coopSubFieldTick: a tick between two 60ths (tickhz above 60). The
+ * game moves our own Bond on every tick, but the others' bodies were placed
+ * only on the 60ths, so above 60 fps they stepped. Their spots between
+ * samples come from the clock, so each tick places them again; the rest of
+ * their state stays on the 60ths. */
+void coopVersusSubFieldTick(void)
+{
+    s32 li;
+
+    if (!coopVersus())
+    {
+        return;
+    }
+    for (li = 1; li < sVsCount; li++)
+    {
+        struct player *pl = g_playerPointers[li];
+        CoopRemoteInfo info;
+
+        if (pl != NULL && pl->prop != NULL && pl->prop->chr != NULL && sVsHeard[li]
+            && coopRemoteInfo(sVsNet[li], &info) && !info.dead)
+        {
+            coopVsMoveBody(li, &info);
+            coopVsFeedPlayer(pl, &info);
+        }
+    }
 }
 
 /* ---- events -------------------------------------------------------------------- */
