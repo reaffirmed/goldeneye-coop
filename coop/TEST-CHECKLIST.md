@@ -81,7 +81,7 @@ ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 | F5 | SAMETIME | Both players plant on the same tank in the same second | Counted once; tank blows once | | pass (rig, 2026-10-30): both blow tanks 1 and 2 in the same second; each destroyed once, the same on both |
 | F6 | ONEPLAYER | Reaches the bottling room first; its alarm/timer fires on the joiner's entry | Same timer on both screens | | |
 | F7 | FX | Watches Natalya/the scientist room while the host is elsewhere; guards that hide "when not on screen" vanish | No chr vanishes in front of the joiner | | |
-| F8 | ONEPLAYER | Reaches the exit (Ourumov ending) first | Ending starts for both, once | | |
+| F8 | ONEPLAYER | Reaches the exit (Ourumov ending) first | Ending starts for both, once | | pass (rig, 2026-10-30): the joiner on the exit pad (309) starts the ending; one mission end on each |
 
 ## 3. Runway
 
@@ -171,7 +171,7 @@ ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
 | SR1 | ONEPLAYER | Drives the tank (vehicles run on both sides) | "Bond in tank" checks work for the joiner's tank | | |
-| SR2 | ACTION | Meets Valentin / reaches the exit | Ends for both | | |
+| SR2 | ACTION | Meets Valentin / reaches the exit | Ends for both | | pass for the exit (rig, 2026-10-30): the joiner on pad 248; one mission end on each. Jungle (468) and Control (168) exits the same |
 | SR3 | FX | Civilians appear and disappear (Streets reaper fix) | No flicker on the joiner | | |
 
 ## 13. Depot
@@ -220,7 +220,7 @@ ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 | --- | --- | --- | --- | --- | --- |
 | CA1 | ACTION | Destroys the comms equipment / radio | Objective on both | || pass (rig: A, B, C on both); D and E fail on both, the same when the host does it; see the desync note |
 | CA2 | TARGET | Meets Trevelyan's taunt spot first | Taunt aimed at the joiner | | |
-| CA3 | ONEPLAYER | Reaches the lift first | Ends for both | | |
+| CA3 | ONEPLAYER | Reaches the lift first | Ends for both | | pass (rig, 2026-10-30): the joiner on the lift pad (369); one ending, one mission end on each |
 
 ## 18. Cradle
 
