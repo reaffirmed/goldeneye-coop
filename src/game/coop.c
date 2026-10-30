@@ -3294,6 +3294,40 @@ static void coopHarnessTick(void)
     }
 
     if (coopNetIsHost() && coopPartnerHere())
+    {   /* GE_COOP_TESTSFX=<chrnum>:<s>: <s> seconds in, that chr's list plays a
+         * sound, as Train's and Egyptian's chr lists do (harness only) */
+        static s32 testsfx = -1, sfxchr;
+        if (testsfx == -1)
+        {
+            const char *e = getenv("GE_COOP_TESTSFX");
+            testsfx = 0;
+            if (e != NULL && sscanf(e, "%d:%d", &sfxchr, &testsfx) != 2)
+            {
+                testsfx = 0;
+            }
+        }
+        if (testsfx > 0 && coopInMission() && sMissionTicks == (u32) testsfx * 60)
+        {
+            ChrRecord *c = chrFindByLiteralId(sfxchr);
+            static u8 list[16];
+            AiSfxPlayRecord r;
+
+            if (c != NULL)
+            {
+                memset(list, 0, sizeof(list));
+                r.cmd = AI_SfxPlay;
+                ((u8 *) &r.SOUND_NUM)[0] = 0x00;   /* big-endian, as the interpreter's ntohs reads it */
+                ((u8 *) &r.SOUND_NUM)[1] = 0x7B;
+                r.CHANNEL_NUM = 0;
+                memcpy(list, &r, sizeof(r));
+                list[sizeof(r)] = AI_EndList;
+                portConLogf("ge: coop: testsfx chr %d\n", sfxchr);
+                coopAiCommand(list, 0, c);
+            }
+        }
+    }
+
+    if (coopNetIsHost() && coopPartnerHere())
     {   /* GE_COOP_TESTHURT=<chrnum>:<s>: <s> seconds in, a small blast hurts that
          * chr, and a big one kills it 3 s later (harness only) */
         static s32 testhurt = -1, hurtchr;
@@ -9907,6 +9941,24 @@ static s32 coopIsPresentationCmd(u8 cmd)
     }
 }
 
+/* the script's sound commands: played, stopped and faded on the channels a
+ * level's scripts share (sfx_related) */
+static s32 coopIsSoundCmd(u8 cmd)
+{
+    switch (cmd)
+    {
+        case AI_SfxPlay:
+        case AI_SfxStopChannel:
+        case AI_SfxSetChannelVolume:
+        case AI_SfxFadeChannelVolume:
+        case AI_SfxEmitFromObject:
+        case AI_SfxEmitFromPad:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
 static s32 sApplyingRemoteAi;
 
 /* a joiner's own copy of the level scripts leaves these to the host: the
@@ -9945,6 +9997,17 @@ void coopAiCommand(u8 *list, s32 offset, ChrRecord *self)
          * (the Dam bungee jump, Runway): each game runs it for its own Bond,
          * from the host's moment rather than when its own copy of the level
          * script gets there */
+    }
+    else if (coopIsSoundCmd(cmd))
+    {   /* a sound from a chr's list, which runs on the host only (Egyptian, Train).
+         * The background lists (0x1000 up) and objects' lists play their own
+         * in every game */
+        bool global;
+
+        if (self == NULL || chraiGetAIListID((AIRecord *) list, &global) >= 0x1000)
+        {
+            return;
+        }
     }
     else if (!coopIsPresentationCmd(cmd))
     {
