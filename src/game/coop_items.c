@@ -370,7 +370,8 @@ void coopItemsThrown(ObjectRecord *obj, coord3d *pos, Mtxf *rot, coord3d *vel, M
 
 /* gun.c (our rockets, grenade-launcher rounds and tank shells) and chraction.c
  * (the host's guards' rounds): obj was launched from pos. Everyone else's game
- * shows it in flight; only this one's goes off (its blast is sent as any is) */
+ * shows it in flight; only this one's goes off (its blast is sent as any is,
+ * in versus as VSBOOM), so an opponent sees a rocket coming and can dodge it */
 void coopItemsLaunched(ObjectRecord *obj, coord3d *pos, Mtxf *rot, coord3d *vel, coord3d *thrust, ChrRecord *guard)
 {
     WeaponObjRecord *w = (WeaponObjRecord *) obj;
@@ -379,9 +380,9 @@ void coopItemsLaunched(ObjectRecord *obj, coord3d *pos, Mtxf *rot, coord3d *vel,
     Mtxf r;
     s32 k;
 
-    if (sApplying || !coopItemsOn() || coopVersus() || obj == NULL
+    if (sApplying || !coopItemsOn() || obj == NULL
         || (w->weaponnum != ITEM_ROCKETROUND && w->weaponnum != ITEM_GRENADEROUND)
-        || (guard != NULL && (!coopExtIsHost() || coopPropIsPartner(guard->prop))))
+        || (guard != NULL && (coopVersus() || !coopExtIsHost() || coopPropIsPartner(guard->prop))))
     {
         return;
     }
@@ -502,9 +503,9 @@ static void coopItemsApplyThrow(const CoopThrowMoreMsg *b, s32 from)
         coord3d thrust;
         ChrRecord *chr;
 
-        if (coopVersus())
+        if (coopVersus() && (owner == NULL || (sPendingThrow.flags & COOPTHROW_GUARD)))
         {
-            return;
+            return;     /* (versus: a player's, flying from their body) */
         }
         if ((sPendingThrow.flags & COOPTHROW_GUARD) && (chr = chrFindByLiteralId(b->chrnum)) != NULL)
         {

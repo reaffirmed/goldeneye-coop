@@ -211,6 +211,16 @@ void coopPingPress(void)
         portConLogf("ge: coop: ping: refused: we are down\n");
         return;
     }
+    if (coopVersus() && coopVersusTeamMates() == 0)
+    {   /* versus: pings are for team-mates, and there are none */
+        if (sTicks - sLastPress >= COOPPING_COOLDOWN)
+        {
+            sLastPress = sTicks;
+            hudmsgBottomShow("Pings are for team-mates only.\n");
+            portConLogf("ge: coop: ping: refused: no team-mates in this match\n");
+        }
+        return;
+    }
     if (sTicks - sLastPress < COOPPING_COOLDOWN)
     {
         return;
@@ -276,7 +286,23 @@ void coopPingPress(void)
     portConLogf("ge: coop: ping: %s at %.0f %.0f %.0f (room %d, chr %d), we are at %.0f %.0f %.0f\n",
                 ping.kind == COOPPING_ENEMY ? "enemy" : "spot", ping.pos[0], ping.pos[1], ping.pos[2], ping.room,
                 ping.chrnum, bond->pos.x, bond->pos.y, bond->pos.z);
-    coopPingSend(&ping);
+    if (coopVersus())
+    {   /* only our side sees it */
+        u32 mates = coopVersusTeamMates();
+        s32 p;
+
+        for (p = 0; p < COOP_MAX_PLAYERS; p++)
+        {
+            if (mates & (1u << p))
+            {
+                coopPingSendTo(&ping, p);
+            }
+        }
+    }
+    else
+    {
+        coopPingSend(&ping);
+    }
     coopPingReceive(&ping, coopLobbySelfPlayer());
 }
 
@@ -293,6 +319,11 @@ void coopPingReceive(CoopPing *ping, s32 from)
     {
         portConLogf("ge: coop: ping from player %d dropped (stage %d, we are in %d)\n", from + 1, ping->stage,
                     bossGetStageNum());
+        return;
+    }
+    if (coopVersus() && from != coopLobbySelfPlayer() && !(coopVersusTeamMates() & (1u << from)))
+    {   /* an opponent's (an older build sends to everyone) */
+        portConLogf("ge: coop: ping from player %d dropped: not on our side\n", from + 1);
         return;
     }
     s = &sPings[from];

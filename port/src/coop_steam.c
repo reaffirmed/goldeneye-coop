@@ -64,6 +64,8 @@ typedef unsigned char sbool; /* C++ bool in the DLL: only the low byte is set */
 #define LOBBY_KEY_NAME "host"
 #define LOBBY_KEY_MISSION "gemission"   /* "1" while the host is in a mission: Public Games says Drop In */
 #define LOBBY_KEY_PASSWORD "pw"
+#define LOBBY_KEY_WHAT "gewhat"     /* what the host is playing ("Versus: Temple"), for Public Games */
+#define LOBBY_KEY_VERSUS "gevs"     /* "1" when it is a versus game: no dropping into a match */
 
 /* the password handshake: transport-level messages, never handed to the game */
 #define PW_ASK    0x57504547u   /* "GEPW" + the hash */
@@ -203,6 +205,8 @@ typedef struct
     int members;
     int locked;
     int inmission;
+    int versus;
+    char what[40];
 } SteamPublic;
 static SteamPublic sPublicList[MAX_PUBLIC];
 static int sNumPublic;
@@ -569,7 +573,13 @@ static void onLobbyList(const unsigned char *p)
         snprintf(e->name, sizeof(e->name), "%s", (v != NULL && v[0] != '\0') ? v : "?");
         v = pGetLobbyData(sMM, lobby, LOBBY_KEY_MISSION);
         e->inmission = (v != NULL && strcmp(v, "1") == 0);
+        v = pGetLobbyData(sMM, lobby, LOBBY_KEY_VERSUS);
+        e->versus = (v != NULL && strcmp(v, "1") == 0);
+        v = pGetLobbyData(sMM, lobby, LOBBY_KEY_WHAT);
+        snprintf(e->what, sizeof(e->what), "%s", (v != NULL) ? v : "");     /* (an older host sets none) */
         e->members = pGetNumLobbyMembers(sMM, lobby);
+        portConLogf("ge: steam: public game '%s' %d/4%s%s: %s\n", e->name, e->members, e->inmission ? ", playing" : "",
+                    e->versus ? ", versus" : "", e->what);
         sNumPublic++;
     }
     portConLogf("ge: steam: %d public game(s) listed\n", sNumPublic);
@@ -1363,6 +1373,37 @@ int coopSteamBrowseLocked(int i)
 int coopSteamBrowseInMission(int i)
 {
     return i >= 0 && i < sNumPublic && sPublicList[i].inmission;
+}
+
+int coopSteamBrowseVersus(int i)
+{
+    return i >= 0 && i < sNumPublic && sPublicList[i].versus;
+}
+
+const char *coopSteamBrowseWhat(int i)
+{
+    return (i >= 0 && i < sNumPublic) ? sPublicList[i].what : "";
+}
+
+/* host: what we play, for Public Games (set when it changes) */
+void coopSteamSetWhat(const char *what, int versus)
+{
+    static char last[40];
+    static int lastvs = -1;
+
+    if (!sReady || !sIsHost || sLobby == 0)
+    {
+        last[0] = '\0';
+        lastvs = -1;
+        return;
+    }
+    if (versus != lastvs || strncmp(what, last, sizeof(last) - 1) != 0)
+    {
+        snprintf(last, sizeof(last), "%s", what);
+        lastvs = versus;
+        pSetLobbyData(sMM, sLobby, LOBBY_KEY_WHAT, last);
+        pSetLobbyData(sMM, sLobby, LOBBY_KEY_VERSUS, versus ? "1" : "0");
+    }
 }
 
 /* host: in a mission (1) or in the menus (0), for Public Games */

@@ -1016,12 +1016,96 @@ Gfx *coopHudSkipVote(Gfx *gdl)
     return combiner_bayer_lod_perspective(gdl);
 }
 
+/* versus: a hit we landed, as an X round the crosshair (red for a kill) */
+static Gfx *coopHudHitMarker(Gfx *gdl)
+{
+    f32 left;
+    s32 kind = coopVersusHitMarker(&left);
+    s32 cx, cy, k, r;
+    u32 colour;
+
+    if (kind == 0)
+    {
+        return gdl;
+    }
+    cx = (s32) g_CurrentPlayer->crosshair_angle.f[0];
+    cy = (s32) g_CurrentPlayer->crosshair_angle.f[1];
+    colour = coopHudWithAlpha((kind == 2) ? COOP_HUD_COL_FAIL : COOP_HUD_COL_TEXT, 0.4f + 0.6f * left);
+    r = (kind == 2) ? 9 : 7;
+    gdl = microcode_constructor(gdl);
+    for (k = 4; k <= r; k++)
+    {   /* four short diagonals, clear of the crosshair itself */
+        gdl = microcode_constructor_related_to_menus(gdl, cx + k, cy + k, cx + k + 1, cy + k + 1, COOP_HUD_COL_SHADOW);
+        gdl = microcode_constructor_related_to_menus(gdl, cx - k - 1, cy + k, cx - k, cy + k + 1, COOP_HUD_COL_SHADOW);
+        gdl = microcode_constructor_related_to_menus(gdl, cx + k, cy - k - 1, cx + k + 1, cy - k, COOP_HUD_COL_SHADOW);
+        gdl = microcode_constructor_related_to_menus(gdl, cx - k - 1, cy - k - 1, cx - k, cy - k, COOP_HUD_COL_SHADOW);
+        gdl = microcode_constructor_related_to_menus(gdl, cx + k - 1, cy + k - 1, cx + k, cy + k, colour);
+        gdl = microcode_constructor_related_to_menus(gdl, cx - k, cy + k - 1, cx - k + 1, cy + k, colour);
+        gdl = microcode_constructor_related_to_menus(gdl, cx + k - 1, cy - k, cx + k, cy - k + 1, colour);
+        gdl = microcode_constructor_related_to_menus(gdl, cx - k, cy - k, cx - k + 1, cy - k + 1, colour);
+    }
+    return combiner_bayer_lod_perspective(gdl);
+}
+
+/* versus: a red mark on a ring round the middle of the view, toward whoever
+ * last hit us (behind us: at the bottom) */
+static Gfx *coopHudHurtArrow(Gfx *gdl)
+{
+    coord3d v;
+    f32 left, ex, ey, len;
+    s32 cx = viGetViewLeft() + viGetViewWidth() / 2, cy = viGetViewTop() + viGetViewHeight() / 2;
+    s32 rad = viGetViewHeight() / 4;
+    s32 k;
+    u32 colour;
+
+    if (!coopVersusHurtFrom(&v, &left))
+    {
+        return gdl;
+    }
+    mtx4TransformVecInPlace(camGetWorldToScreenMtxf(), &v);
+    ex = v.f[0];
+    ey = v.f[2];     /* (ahead is -z in view space: up the screen) */
+    len = sqrtf(ex * ex + ey * ey);
+    if (len < 1.0e-3f)
+    {
+        return gdl;
+    }
+    ex /= len;
+    ey /= len;
+    colour = coopHudWithAlpha(COOP_HUD_COL_FAIL, left);
+    gdl = microcode_constructor(gdl);
+    for (k = -3; k <= 3; k++)
+    {   /* a short arc of squares, widest in its middle */
+        f32 a = (f32) k * 0.06f;
+        f32 dx = ex * cosf(a) - ey * sinf(a), dy = ex * sinf(a) + ey * cosf(a);
+        s32 px = cx + (s32) (dx * (f32) rad), py = cy + (s32) (dy * (f32) rad);
+        s32 h = (k == 0) ? 3 : (k == -1 || k == 1) ? 2 : 1;
+
+        gdl = microcode_constructor_related_to_menus(gdl, px - h - 1, py - h - 1, px + h + 2, py + h + 2, coopHudWithAlpha(COOP_HUD_COL_SHADOW, left));
+        gdl = microcode_constructor_related_to_menus(gdl, px - h, py - h, px + h + 1, py + h + 1, colour);
+    }
+    return combiner_bayer_lod_perspective(gdl);
+}
+
 /* Online versus (coop_versus.c): every PC has two to four players in the
  * match, so the rest of this file, which is about partners, stays off. What
  * isn't: the chat line and toasts, Sound Captions, our own voice and the
- * weapon menu. Rare's MP HUD has the radar, names and scores. */
+ * weapon menu; and versus's own hit marker, the arrow toward who hit us and
+ * a team-mate's ping. Rare's MP HUD has the radar, names and scores. */
 static Gfx *coopHudVersus(Gfx *gdl)
 {
+    if (!g_CurrentPlayer->bonddead && !g_CurrentPlayer->mpmenuon)
+    {
+        CoopPingMark m;
+        s32 i;
+
+        for (i = 0; coopPingAt(i, &m); i++)
+        {
+            gdl = coopHudPing(gdl, &m);
+        }
+        gdl = coopHudHurtArrow(gdl);
+        gdl = coopHudHitMarker(gdl);
+    }
     if (coopVoiceSelfOpen())
     {
         gdl = coopHudSelfVoice(gdl);

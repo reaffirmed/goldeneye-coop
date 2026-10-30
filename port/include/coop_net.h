@@ -77,6 +77,9 @@ const char *coopSteamOwnBuild(void);
 const char *coopSteamRefusedRelease(void); /* after refusal 3: the host's release, "" from older builds */
 int  coopSteamBrowseInMission(int i);   /* the public game is in a mission: Drop In */
 void coopSteamSetInMission(int on);     /* host: in a mission or not */
+int  coopSteamBrowseVersus(int i);      /* the public game is a versus one: a match can't be joined */
+const char *coopSteamBrowseWhat(int i); /* what it plays ("Versus: Temple"), "" from an older host */
+void coopSteamSetWhat(const char *what, int versus);  /* host: what we play */
 int  coopSteamJoinRefused(void);        /* once, after a wrong password */
 
 void coopSteamSetJoinPasswordHash(unsigned int hash);  /* a Discord join secret carries the hash, not the password */

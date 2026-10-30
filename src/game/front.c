@@ -8923,7 +8923,7 @@ enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLRO
        CLROW_CHARACTER, CLROW_CHAT, CLROW_PUBLIC, CLROW_PASSWORD, CLROW_JOINPUBLIC, CLROW_LAYOUT, CLROW_OPTION,
        CLROW_HOSTLEAVES, CLROW_VSMODE, CLROW_VSARENA, CLROW_VSSCENARIO, CLROW_VSLENGTH, CLROW_VSWEAPONS, CLROW_VSSTART,
        CLROW_DISCORDYES, CLROW_DISCORDNO, CLROW_PROFILE, CLROW_VOICEMUTE, CLROW_LIVES, CLROW_BLEEDOUT, CLROW_RESPAWN,
-       CLROW_UPDATE, CLROW_UPDATECHECK, CLROW_UPDATERESTART, CLROW_ALLOPTIONS, CLROW_VSRADAR, CLROW_VSARMOUR };
+       CLROW_UPDATE, CLROW_UPDATECHECK, CLROW_UPDATERESTART, CLROW_ALLOPTIONS, CLROW_VSRADAR, CLROW_VSARMOUR, CLROW_VSNEXT };
 #define COOP_LOBBY_ROWS     72      /* every tab's rows, chat lines wrapped included, and Classic's headings */
 /* The screen is laid out like Modern Warfare 2's lobbies (coopMw*): the
  * title top left, the tabs under it, the tab's rows down the left with
@@ -9264,6 +9264,9 @@ static void coopVsStep(s32 kind, s32 dir)
         case CLROW_VSARMOUR:
             coopSetSetting(COOPSET_VSRULES, coopSetting(COOPSET_VSRULES) ^ COOPVSRULE_NOARMOUR);
             break;
+        case CLROW_VSNEXT:
+            coopSetSetting(COOPSET_VSRULES, coopSetting(COOPSET_VSRULES) ^ COOPVSRULE_NEXTARENA);
+            break;
         default:
             break;
     }
@@ -9326,6 +9329,19 @@ static void coopVsLobbyRows(void)
                  coopVersusRule(COOPVSRULE_NORADAR) ? "Off\n" : "On\n");
     coopLobbyAdd(host ? CLROW_VSARMOUR : CLROW_TEXT, 0, "Body Armour\n",
                  coopVersusRule(COOPVSRULE_NOARMOUR) ? "Off\n" : "On\n");
+    coopLobbyAdd(host ? CLROW_VSNEXT : CLROW_TEXT, 0, "After a Match\n",
+                 coopVersusRule(COOPVSRULE_NEXTARENA) ? "Next Arena\n" : "Same Arena\n");
+}
+
+/* host, back from a match: After a Match's Next Arena moves the lobby on to
+ * the next arena that holds everyone (Random stays Random) */
+static void coopVsAfterMatch(void)
+{
+    if (coopLobbyIsHost() && coopVersusRule(COOPVSRULE_NEXTARENA) && coopVsArena() > 0)
+    {
+        coopVsStep(CLROW_VSARENA, 1);
+        portConLogf("ge: versus: after the match, next arena %d\n", coopVsArena());
+    }
 }
 
 static s32 coopLobbyActionable(const struct CoopLobbyRow *r)
@@ -9598,11 +9614,24 @@ static void coopLobbyBuildRows(void)
             coopLobbyCopyName(name, sizeof(name), coopBrowseName(i));
             name[strlen(name) - 1] = '\0';
             snprintf(label, sizeof(label), "%.30s  %d/%d\n", name, (int) coopBrowseMembers(i), COOP_MAX_PLAYERS);
-            r = coopLobbyAdd(CLROW_JOINPUBLIC, i, label,
-                             coopBrowseLocked(i) ? "Password\n" : coopBrowseInMission(i) ? "Drop In\n" : "Join\n");
-            if (r != NULL && coopBrowseMembers(i) >= COOP_MAX_PLAYERS)
-            {
-                r->dim = TRUE;
+            {   /* a co-op mission can be dropped into; a versus match can't, so joining waits in its lobby */
+                const s32 inmatch = coopBrowseInMission(i) && coopBrowseVersus(i);
+
+                r = coopLobbyAdd(CLROW_JOINPUBLIC, i, label,
+                                 coopBrowseLocked(i) ? "Password\n" : inmatch ? "Next Match\n" : coopBrowseInMission(i) ? "Drop In\n" : "Join\n");
+                if (r != NULL && coopBrowseMembers(i) >= COOP_MAX_PLAYERS)
+                {
+                    r->dim = TRUE;
+                }
+            }
+            if (coopBrowseWhat(i)[0] != '\0' && coop_lobby_nrows < COOP_LOBBY_ROWS - 4)
+            {   /* what it plays, under its name */
+                snprintf(label, sizeof(label), "  %.40s\n", coopBrowseWhat(i));
+                r = coopLobbyAdd(CLROW_TEXT, 0, label, "");
+                if (r != NULL)
+                {
+                    r->colour = PORT_SHEET_COL_DIM;
+                }
             }
             if (coopBrowseTyping() == COOPBROWSE_TYPE_JOIN && coopBrowseTypingFor() == i)
             {
@@ -10086,6 +10115,7 @@ static s32 coopLobbySteps(const struct CoopLobbyRow *r)
         case CLROW_VSWEAPONS:
         case CLROW_VSRADAR:
         case CLROW_VSARMOUR:
+        case CLROW_VSNEXT:
         case CLROW_LIVES:
         case CLROW_BLEEDOUT:
         case CLROW_RESPAWN:
@@ -10131,6 +10161,7 @@ static void coopLobbyStep(const struct CoopLobbyRow *r, s32 dir)
         case CLROW_VSWEAPONS:
         case CLROW_VSRADAR:
         case CLROW_VSARMOUR:
+        case CLROW_VSNEXT:
             coopVsStep(r->kind, dir);
             break;
         case CLROW_LIVES:
@@ -10262,6 +10293,7 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
         case CLROW_VSWEAPONS:
         case CLROW_VSRADAR:
         case CLROW_VSARMOUR:
+        case CLROW_VSNEXT:
             coopVsStep(r->kind, 1);
             break;
         case CLROW_VSSTART:
@@ -10344,6 +10376,7 @@ void init_menu1D_cooplobby(void)
     {   /* back from an online versus match, in co-op's mode of play */
         coopVersusClear();
         gamemode = GAMEMODE_SOLO;
+        coopVsAfterMatch();
     }
     coop_lobby_ok = coopLobbyOpen();
     coop_lobby_nfriends = coopLobbyFriends();
@@ -11661,6 +11694,7 @@ static const char *coopLobbyHelp(const struct CoopLobbyRow *r)
         case CLROW_MISSION:     return "Pick any mission and difficulty. The whole party comes along.\n";
         case CLROW_CONTINUE:    return "Start the next mission of your campaign together.\n";
         case CLROW_VSSTART:     return "Start the match with everyone in the lobby.\n";
+        case CLROW_VSNEXT:      return "After each match, stay on this arena or move on to the next one.\n";
         case CLROW_INVITE:      return "Send this friend a Steam invite.\n";
         case CLROW_OVERLAY:     return "Open Steam's own invite window.\n";
         case CLROW_LEAVE:       return coopLobbyIsHost() && coopLobbyHasPartner() ? "Leave the lobby. The next player becomes the host.\n"

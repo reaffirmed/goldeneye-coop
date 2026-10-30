@@ -61,6 +61,7 @@
 #include "propobj.h"
 #include "explosion.h"
 #include "front.h"
+#include "mpmenu.h"
 #include "coop.h"
 #include "coop_net.h"
 #include "math_atan2f.h"
@@ -94,6 +95,8 @@ extern void portJoyInjectHeld(s8 contpadnum, u16 mask);
 #define VS_DEAD_SETTLE  120     /* ticks a remote death plays before the game counts it as finished */
 #define VS_PKT_EVERY    12      /* ticks between our VERSUS packets (5 a second) */
 #define VS_GONE_AFTER   120     /* ticks without their STATE before a player counts as gone */
+#define VS_HITMARK_TICKS 12     /* our hit marker stays this long, a kill's twice */
+#define VS_HURT_TICKS   60      /* the arrow toward who hit us */
 #ifdef VERSION_EU
 #define CHROBJ_REGEN_TICKS 1000 /* chrprop.c propExecuteTickOperation: a taken pickup's wait */
 #else
@@ -130,6 +133,30 @@ static char sVsName[MAX_PLAYER_COUNT][24];  /* their name as the match began (a 
 static s32 sVsInBlast;                  /* explosion.c: damage from a blast is being dealt */
 static s32 sVsApplying;                 /* a remote event is being applied */
 static u32 sVsTick;
+typedef struct
+{   /* COOPEV_VSSTATS: one PC's own column of the end screen, what only it counts */
+    u16 shots;          /* SHOT_REGISTER_TOTAL */
+    u16 head;           /* SHOT_REGISTER_HEAD */
+    u32 onscreen;       /* time_other_players_on_screen */
+    f32 kmh;            /* its average speed, from its own clock */
+    u16 armour;         /* body_armor_pickups x 100 */
+    u16 longest;        /* longest_inning / 4, 0xFFFF for S32_MAX */
+    u16 shortest;       /* shortest_inning / 4, the same */
+    u8 multikill;       /* most_killed_one_time */
+    u8 pad;
+    u8 backside[MAX_PLAYER_COUNT];  /* hits it took from behind, by the shooter's session number */
+    u8 pad2[2];
+} VsStats;
+
+static VsStats sVsCol[COOP_MAX_PLAYERS];    /* by session number, ours included */
+static s32 sVsColHave[COOP_MAX_PLAYERS];
+static s32 sVsBackLocal[MAX_PLAYER_COUNT];  /* hits from behind on our player, by local index, before the columns */
+static s32 sVsColSent;
+static s32 sVsHitMark;          /* ticks left on our hit marker */
+static s32 sVsHitKill;          /* it was a kill */
+static s32 sVsHurtTicks;        /* ticks left on the arrow toward who hit us */
+static f32 sVsHurtFrom[2];      /* where they stood (x, z) */
+static u32 sVsAwardDice;
 static s32 sVsHuntAt = -2;    /* harness (coopVsHarness) */
 static s32 sVsHuntHits;     /* harness: hits we dealt since its last look round */
 
@@ -263,6 +290,10 @@ void coopVersusStageStart(void)
     sVsEnded = 0;
     sVsQuit = 0;
     sVsTick = 0;
+    sVsColSent = 0;
+    memset(sVsColHave, 0, sizeof(sVsColHave));
+    sVsHitMark = 0;
+    sVsHurtTicks = 0;
     sVsHuntAt = -2;     /* (the harness reads its settings again) */
 }
 
@@ -281,6 +312,8 @@ s32 coopVersusStartPad(s32 li, s32 count)
 static s32 coopVsScenarioItem(void);
 static void coopVsDropAt(s32 li, s32 item);
 static void coopVsSend(s32 kind, s32 to, const void *payload, s32 len);
+static void coopVsApplyStats(const VsStats *c, s32 from);
+static void coopVsKillFeed(s32 lk, s32 lv);
 
 /* one player (or one team) is all that is left: the match is over */
 static void coopVsLastStanding(void)
@@ -344,6 +377,28 @@ static void coopVsGone(s32 li)
     coopFeedToast(msg, (p < COOP_MAX_PLAYERS) ? p : -1);
     portConLogf("ge: versus: local player %d (player %d) left the match\n", li + 1, p + 1);
     coopVsLastStanding();
+}
+
+/* coop_ping.c: the session numbers a ping of ours is for (bit p = player p),
+ * our team-mates in a team scenario; none in a free-for-all, where a ping
+ * only told the opponents where we were looking */
+u32 coopVersusTeamMates(void)
+{
+    u32 mates = 0;
+    s32 li;
+
+    if (!coopVersus() || !portMpTeamScenario())
+    {
+        return 0;
+    }
+    for (li = 1; li < sVsCount; li++)
+    {
+        if (!sVsGone[li] && sVsNet[li] < COOP_MAX_PLAYERS && portMpTeamOf(li) == portMpTeamOf(0))
+        {
+            mates |= 1u << sVsNet[li];
+        }
+    }
+    return mates;
 }
 
 /* mpmenu.c: our Quit leaves the match to the others, unless we host it */
@@ -575,6 +630,11 @@ s32 coopVersusDamage(f32 damage, f32 vx, f32 vz, s32 attacker, s32 armour)
     h.armour = (u8) (armour != 0);
     coopVsSend(COOPEV_VSHIT, sVsNet[victim], &h, sizeof(h));
     portConLogf("ge: versus: hit player %d for %.3f\n", sVsNet[victim] + 1, damage);
+    if (sVsHitMark < VS_HITMARK_TICKS || !sVsHitKill)
+    {
+        sVsHitMark = VS_HITMARK_TICKS;
+        sVsHitKill = 0;
+    }
     sVsHuntHits++;
     return 1;
 }
@@ -606,6 +666,7 @@ void coopVersusKilled(s32 victim, s32 killer, s32 gg)
     k.pos[2] = bond->pos.f[2];
     coopVsSend(COOPEV_VSKILL, COOP_ALL, &k, sizeof(k));
     portConLogf("ge: versus: killed by player %d\n", (k.killer == 0xFF) ? 0 : k.killer + 1);
+    coopVsKillFeed((killer >= 0 && killer < sVsCount) ? killer : 0, 0);
 }
 
 /* the scenario's item (Flag Tag's flag, the Golden Gun) */
@@ -677,6 +738,29 @@ static void coopVsDropAt(s32 li, s32 item)
     }
 }
 
+/* the kill feed: one toast per kill, on every PC ("mock101|KILLED MOCK202") */
+static void coopVsKillFeed(s32 lk, s32 lv)
+{
+    char killer[24], victim[24], msg[64];
+    const char *n;
+
+    n = coopPlayerName(sVsNet[lk]);
+    snprintf(killer, sizeof(killer), "%s", (n != NULL && sVsNet[lk] < COOP_MAX_PLAYERS) ? n : sVsName[lk]);
+    killer[strcspn(killer, "\n")] = '\0';
+    n = coopPlayerName(sVsNet[lv]);
+    snprintf(victim, sizeof(victim), "%s", (n != NULL && sVsNet[lv] < COOP_MAX_PLAYERS) ? n : sVsName[lv]);
+    victim[strcspn(victim, "\n")] = '\0';
+    if (lk == lv)
+    {
+        snprintf(msg, sizeof(msg), "%s|KILLED THEMSELVES", killer);
+    }
+    else
+    {
+        snprintf(msg, sizeof(msg), "%s|KILLED %s", killer, victim);
+    }
+    coopFeedToast(msg, (sVsNet[lk] < COOP_MAX_PLAYERS) ? sVsNet[lk] : -1);
+}
+
 static void coopVsApplyKill(const VsKill *k)
 {
     s32 lv = coopVsLocalOfNet(k->victim);
@@ -713,6 +797,12 @@ static void coopVsApplyKill(const VsKill *k)
         g_playerPlayerData[lv].have_token_or_goldengun = 0;
     }
     portConLogf("ge: versus: player %d killed player %d\n", ((k->killer == 0xFF) ? k->victim : k->killer) + 1, k->victim + 1);
+    if (lk == 0 && lv != 0)
+    {   /* ours: the marker turns red */
+        sVsHitMark = VS_HITMARK_TICKS * 2;
+        sVsHitKill = 1;
+    }
+    coopVsKillFeed(lk, lv);
 }
 
 /* a blast set off on someone else's game, again here with its owner */
@@ -748,13 +838,19 @@ static void coopVsApplyBoom(const VsBoom *b, s32 from)
     pos.f[0] = b->pos[0];
     pos.f[1] = b->pos[1];
     pos.f[2] = b->pos[2];
-    stan = coopBoomStan(&pos);   /* a blast on a ledge or in mid-air, as in co-op */
-    if (stan == NULL || b->rooms[0] == 0xFF || owner < 0)
+    if (b->rooms[0] == 0xFF || owner < 0)
     {
+        return;
+    }
+    stan = coopBoomStan(&pos);   /* a blast on a ledge or in mid-air, as in co-op */
+    if (stan == NULL)
+    {
+        portConLogf("ge: versus: player %d's blast at %.0f %.0f %.0f has no floor here, dropped\n", from + 1, pos.f[0], pos.f[1], pos.f[2]);
         return;
     }
     memcpy(rooms, b->rooms, sizeof(rooms));
     explosionCreate(NULL, &pos, stan, b->type, 0, owner, rooms, 0);
+    portConLogf("ge: versus: player %d's blast (type %d) at %.0f %.0f %.0f set off here\n", from + 1, b->type, pos.f[0], pos.f[1], pos.f[2]);
 }
 
 /* coop.c coopPickedUp: something was picked up here. The scenario's item
@@ -884,15 +980,26 @@ void coopVersusApplyEvent(s32 kind, s32 from, const void *raw)
             const VsHit *h = (const VsHit *) raw;
             s32 lk = coopVsLocalOfNet(from);
 
-            if (lk > 0 && get_cur_playernum() == 0 && !g_playerPointers[0]->bonddead)
+            if (lk > 0 && get_cur_playernum() == 0 && !g_playerPointers[0]->bonddead && !g_gameOverFlag)
             {
                 portConLogf("ge: versus: hit by player %d for %.3f\n", from + 1, h->damage);
                 record_damage_kills(h->damage, h->vx, h->vz, lk, h->armour);
+                if (g_playerPointers[lk]->prop != NULL)
+                {   /* the arrow points where their body is here */
+                    sVsHurtFrom[0] = g_playerPointers[lk]->prop->pos.f[0];
+                    sVsHurtFrom[1] = g_playerPointers[lk]->prop->pos.f[2];
+                    sVsHurtTicks = VS_HURT_TICKS;
+                }
             }
             break;
         }
         case COOPEV_VSKILL:
             coopVsApplyKill((const VsKill *) raw);
+            if (g_gameOverFlag)
+            {   /* it came after the end here: the table it changes is on the end screen */
+                extern void mpVersusRechooseAwards(void);
+                mpVersusRechooseAwards();
+            }
             break;
         case COOPEV_VSLEFT:
             coopVsGone(coopVsLocalOfNet(from));
@@ -914,6 +1021,14 @@ void coopVersusApplyEvent(s32 kind, s32 from, const void *raw)
         case COOPEV_VSPICK:
             coopVsApplyPick((const VsPick *) raw, from);
             break;
+        case COOPEV_VSSTATS:
+        {
+            VsStats c;
+
+            memcpy(&c, raw, sizeof(c));
+            coopVsApplyStats(&c, from);
+            break;
+        }
     }
     sVsApplying = 0;
 }
@@ -933,6 +1048,169 @@ void coopVersusMatchOver(void)
     }
     coopVsSend(COOPEV_VSEND, COOP_ALL, NULL, 0);
     portConLogf("ge: versus: the match is over\n");
+}
+
+/* ---- the end screen's stats -------------------------------------------------------
+ * Each PC counts only some of the stats the awards are picked from: its own
+ * player's shots, speed, armour, time alive and multi-kills, and the hits from
+ * behind its own player took. Left as they were, the awards and accuracy came
+ * out differently on every screen. At the end each PC sends its column, every
+ * PC fills the table from them (its own through the same packing, so all agree)
+ * and picks again, with dice seeded by the match. */
+
+static u16 coopVsPackInning(s32 v)
+{
+    return (v == S32_MAX || v / 4 >= 0xFFFF) ? 0xFFFF : (u16) ((v < 0 ? 0 : v) / 4);
+}
+
+static s32 coopVsUnpackInning(u16 v)
+{
+    return (v == 0xFFFF) ? S32_MAX : (s32) v * 4;
+}
+
+static void coopVsOwnColumn(VsStats *c, s32 duration)
+{
+    struct player_data *pd = &g_playerPlayerData[0];
+    s32 li, b;
+
+    memset(c, 0, sizeof(*c));
+    c->shots = (u16) ((pd->shot_count[SHOT_REGISTER_TOTAL] > 0xFFFF) ? 0xFFFF : pd->shot_count[SHOT_REGISTER_TOTAL]);
+    c->head = (u16) ((pd->shot_count[SHOT_REGISTER_HEAD] > 0xFFFF) ? 0xFFFF : pd->shot_count[SHOT_REGISTER_HEAD]);
+    c->onscreen = (u32) pd->time_other_players_on_screen;
+    c->kmh = pd->distance_traveled / 100000.0f / ((duration + 1) / (3600.0f * 60.0f));
+    c->armour = (u16) ((pd->body_armor_pickups * 100.0f > 65535.0f) ? 65535.0f : pd->body_armor_pickups * 100.0f + 0.5f);
+    c->longest = coopVsPackInning(pd->longest_inning);
+    c->shortest = coopVsPackInning(pd->shortest_inning);
+    c->multikill = (u8) pd->most_killed_one_time;
+    for (li = 0; li < sVsCount; li++)
+    {
+        if (sVsNet[li] < MAX_PLAYER_COUNT)
+        {
+            b = sVsBackLocal[li];
+            c->backside[sVsNet[li]] = (u8) ((b > 255) ? 255 : b);
+        }
+    }
+}
+
+/* mpmenu.c mpChooseAwards, before it reads the table: our column goes out
+ * once, and every column we have goes into the table */
+void coopVersusAwardStats(s32 duration)
+{
+    s32 li, p;
+
+    if (!coopVersus())
+    {
+        return;
+    }
+    if (!sVsColSent)
+    {   /* the hits from behind counted here, before the columns are added to them */
+        for (li = 0; li < MAX_PLAYER_COUNT; li++)
+        {
+            sVsBackLocal[li] = (li < sVsCount) ? g_playerPlayerData[li].damage_to_backside : 0;
+        }
+        coopVsOwnColumn(&sVsCol[sVsNet[0]], duration);
+        sVsColHave[sVsNet[0]] = 1;
+        sVsColSent = 1;
+        coopVsSend(COOPEV_VSSTATS, COOP_ALL, &sVsCol[sVsNet[0]], sizeof(VsStats));
+        portConLogf("ge: versus: our end-screen stats sent (%d shots, %d head)\n", sVsCol[sVsNet[0]].shots, sVsCol[sVsNet[0]].head);
+    }
+    for (li = 0; li < sVsCount; li++)
+    {
+        struct player_data *pd = &g_playerPlayerData[li];
+        const s32 net = sVsNet[li];
+        s32 back = sVsBackLocal[li];
+
+        for (p = 0; p < COOP_MAX_PLAYERS; p++)
+        {
+            if (sVsColHave[p] && p != sVsNet[0] && net < MAX_PLAYER_COUNT)
+            {
+                back += sVsCol[p].backside[net];
+            }
+        }
+        pd->damage_to_backside = back;
+        if (net >= COOP_MAX_PLAYERS || !sVsColHave[net])
+        {
+            continue;   /* (theirs has not come; ours is always here) */
+        }
+        pd->shot_count[SHOT_REGISTER_TOTAL] = sVsCol[net].shots;
+        pd->shot_count[SHOT_REGISTER_HEAD] = sVsCol[net].head;
+        pd->time_other_players_on_screen = (s32) sVsCol[net].onscreen;
+        pd->distance_traveled = sVsCol[net].kmh * 100000.0f * ((duration + 1) / (3600.0f * 60.0f));
+        pd->body_armor_pickups = sVsCol[net].armour / 100.0f;
+        pd->longest_inning = coopVsUnpackInning(sVsCol[net].longest);
+        pd->shortest_inning = coopVsUnpackInning(sVsCol[net].shortest);
+        pd->most_killed_one_time = sVsCol[net].multikill;
+    }
+}
+
+/* mpmenu.c mpChooseAwards, the table read: each PC's own row index is 0, so
+ * the rows go into session order (seat[k] the player of row k) for the ties
+ * and the dice to fall alike; and the speed is the one its PC sent, as is */
+void coopVersusAwardMetrics(s32 count, struct AwardMetrics *metrics, s32 *seat)
+{
+    struct AwardMetrics local[MAX_PLAYER_COUNT];
+    s32 k, li, p;
+
+    for (k = 0; k < MAX_PLAYER_COUNT; k++)
+    {
+        seat[k] = k;
+    }
+    if (!coopVersus() || count != sVsCount)
+    {
+        return;
+    }
+    memcpy(local, metrics, sizeof(local[0]) * count);
+    k = 0;
+    for (p = 0; p <= COOP_MAX_PLAYERS && k < count; p++)
+    {   /* (a player renumbered away after a host change sits at COOP_MAX_PLAYERS, last) */
+        for (li = 0; li < count; li++)
+        {
+            if (sVsNet[li] == p)
+            {
+                seat[k] = li;
+                metrics[k] = local[li];
+                if (p < COOP_MAX_PLAYERS && sVsColHave[p])
+                {
+                    metrics[k].avg_km_per_hour = sVsCol[p].kmh;
+                }
+                k++;
+            }
+        }
+    }
+    if (k != count)
+    {   /* (cannot happen: every player has a number) */
+        memcpy(metrics, local, sizeof(local[0]) * count);
+        for (k = 0; k < MAX_PLAYER_COUNT; k++)
+        {
+            seat[k] = k;
+        }
+    }
+}
+
+/* mpmenu.c: the awards' dice, seeded by the match each time they are picked */
+u32 coopVersusAwardRandom(s32 reset)
+{
+    if (reset)
+    {
+        sVsAwardDice = sVsSerial * 2654435761u + 0x5EEDu;
+        return 0;
+    }
+    sVsAwardDice = sVsAwardDice * 1103515245u + 12345u;
+    return sVsAwardDice >> 8;
+}
+
+static void coopVsApplyStats(const VsStats *c, s32 from)
+{
+    extern void mpVersusRechooseAwards(void);
+
+    if (from < 0 || from >= COOP_MAX_PLAYERS || from == sVsNet[0] || coopVsLocalOfNet(from) <= 0)
+    {
+        return;
+    }
+    memcpy(&sVsCol[from], c, sizeof(*c));
+    sVsColHave[from] = 1;
+    portConLogf("ge: versus: player %d's end-screen stats came (%d shots, %d head)\n", from + 1, c->shots, c->head);
+    mpVersusRechooseAwards();   /* (once the match is over here; else the end picks with it) */
 }
 
 /* ---- the VERSUS packet ----------------------------------------------------------- */
@@ -973,7 +1251,9 @@ void coopVersusRecvPkt(void *buf, s32 player)
  * opponent and from then on keep facing them (GE_COOP_TESTFIRE fires).
  * GE_VS_GOTO=<s>: at <s> seconds walk onto the first opponent's spot (pickups).
  * GE_VS_GRAB=<s>: at <s> seconds walk onto the scenario's item (Flag Tag, Golden Gun).
- * GE_VS_RESPAWN=1: press Start when dead, and at the end screen. */
+ * GE_VS_RESPAWN=1: press Start when dead, and at the end screen.
+ * GE_VS_TESTBOOM=<s>[:<dy>]: a blast on the first opponent (see below).
+ * GE_VS_PING=<s>: from <s> seconds press ping every 5 s. */
 static s32 sVsHuntDone;
 static s32 sVsHuntAlive;
 static s32 sVsHuntDir;
@@ -1005,6 +1285,21 @@ static void coopVsHarness(void)
         coopVersusQuit();
         mpCalculateAwards(FALSE);
         return;
+    }
+    if (getenv("GE_VS_TESTBOOM") != NULL && sVsTick == (u32) atoi(getenv("GE_VS_TESTBOOM")) * 60 && them != NULL)
+    {   /* GE_VS_TESTBOOM=<s>[:<dy>]: a grenade-sized blast on the first opponent that far
+         * in, or <dy> above them (below their floor when negative: no floor under it) */
+        const char *e = getenv("GE_VS_TESTBOOM");
+        coord3d at = them->pos;
+
+        at.f[1] += (strchr(e, ':') != NULL) ? (f32) atof(strchr(e, ':') + 1) : 0.0f;
+        portConLogf("ge: versus: harness: blast on player %d at %.0f %.0f %.0f\n", sVsNet[1] + 1, at.f[0], at.f[1], at.f[2]);
+        explosionCreate(NULL, &at, them->stan, 2, 0, 0, them->rooms, 0);
+    }
+    if (getenv("GE_VS_PING") != NULL && sVsTick >= (u32) atoi(getenv("GE_VS_PING")) * 60 && (sVsTick % 300) == 0)
+    {   /* GE_VS_PING=<s>: from <s> seconds, press ping every 5 s */
+        extern void coopPingPress(void);
+        coopPingPress();
     }
     if (sVsRespawn && me->bonddead && (sVsTick % 30) == 0)
     {   /* GE_VS_RESPAWN: press Start to come back */
@@ -1363,6 +1658,34 @@ static void coopVsAudit(void)
 
 /* ---- every tick (coop.c coopTick) ------------------------------------------------- */
 
+/* coop_hud.c: our hit marker, 0 when none (2 a kill), and the size it has left */
+s32 coopVersusHitMarker(f32 *left)
+{
+    if (!coopVersus() || sVsHitMark <= 0)
+    {
+        return 0;
+    }
+    *left = (f32) sVsHitMark / (f32) (sVsHitKill ? VS_HITMARK_TICKS * 2 : VS_HITMARK_TICKS);
+    return sVsHitKill ? 2 : 1;
+}
+
+/* coop_hud.c: where whoever last hit us stood (their body here), for the
+ * arrow toward them; 0 when there is none */
+s32 coopVersusHurtFrom(coord3d *pos, f32 *left)
+{
+    struct player *me = g_playerPointers[0];
+
+    if (!coopVersus() || sVsHurtTicks <= 0 || me == NULL || me->prop == NULL || me->bonddead)
+    {
+        return 0;
+    }
+    pos->f[0] = sVsHurtFrom[0];
+    pos->f[1] = me->prop->pos.f[1];
+    pos->f[2] = sVsHurtFrom[1];
+    *left = (f32) sVsHurtTicks / (f32) VS_HURT_TICKS;
+    return 1;
+}
+
 void coopVersusTick(void)
 {
     s32 li;
@@ -1372,6 +1695,14 @@ void coopVersusTick(void)
         return;
     }
     sVsTick++;
+    if (sVsHitMark > 0)
+    {
+        sVsHitMark--;
+    }
+    if (sVsHurtTicks > 0)
+    {
+        sVsHurtTicks--;
+    }
     coopVsAudit();
     coopVsWander();
     coopVsPickupsHarness();
