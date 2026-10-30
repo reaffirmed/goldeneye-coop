@@ -748,13 +748,19 @@ static void coopVsApplyBoom(const VsBoom *b, s32 from)
     pos.f[0] = b->pos[0];
     pos.f[1] = b->pos[1];
     pos.f[2] = b->pos[2];
-    stan = coopBoomStan(&pos);   /* a blast on a ledge or in mid-air, as in co-op */
-    if (stan == NULL || b->rooms[0] == 0xFF || owner < 0)
+    if (b->rooms[0] == 0xFF || owner < 0)
     {
+        return;
+    }
+    stan = coopBoomStan(&pos);   /* a blast on a ledge or in mid-air, as in co-op */
+    if (stan == NULL)
+    {
+        portConLogf("ge: versus: player %d's blast at %.0f %.0f %.0f has no floor here, dropped\n", from + 1, pos.f[0], pos.f[1], pos.f[2]);
         return;
     }
     memcpy(rooms, b->rooms, sizeof(rooms));
     explosionCreate(NULL, &pos, stan, b->type, 0, owner, rooms, 0);
+    portConLogf("ge: versus: player %d's blast (type %d) at %.0f %.0f %.0f set off here\n", from + 1, b->type, pos.f[0], pos.f[1], pos.f[2]);
 }
 
 /* coop.c coopPickedUp: something was picked up here. The scenario's item
@@ -973,7 +979,8 @@ void coopVersusRecvPkt(void *buf, s32 player)
  * opponent and from then on keep facing them (GE_COOP_TESTFIRE fires).
  * GE_VS_GOTO=<s>: at <s> seconds walk onto the first opponent's spot (pickups).
  * GE_VS_GRAB=<s>: at <s> seconds walk onto the scenario's item (Flag Tag, Golden Gun).
- * GE_VS_RESPAWN=1: press Start when dead, and at the end screen. */
+ * GE_VS_RESPAWN=1: press Start when dead, and at the end screen.
+ * GE_VS_TESTBOOM=<s>[:<dy>]: a blast on the first opponent (see below). */
 static s32 sVsHuntDone;
 static s32 sVsHuntAlive;
 static s32 sVsHuntDir;
@@ -1005,6 +1012,16 @@ static void coopVsHarness(void)
         coopVersusQuit();
         mpCalculateAwards(FALSE);
         return;
+    }
+    if (getenv("GE_VS_TESTBOOM") != NULL && sVsTick == (u32) atoi(getenv("GE_VS_TESTBOOM")) * 60 && them != NULL)
+    {   /* GE_VS_TESTBOOM=<s>[:<dy>]: a grenade-sized blast on the first opponent that far
+         * in, or <dy> above them (below their floor when negative: no floor under it) */
+        const char *e = getenv("GE_VS_TESTBOOM");
+        coord3d at = them->pos;
+
+        at.f[1] += (strchr(e, ':') != NULL) ? (f32) atof(strchr(e, ':') + 1) : 0.0f;
+        portConLogf("ge: versus: harness: blast on player %d at %.0f %.0f %.0f\n", sVsNet[1] + 1, at.f[0], at.f[1], at.f[2]);
+        explosionCreate(NULL, &at, them->stan, 2, 0, 0, them->rooms, 0);
     }
     if (sVsRespawn && me->bonddead && (sVsTick % 30) == 0)
     {   /* GE_VS_RESPAWN: press Start to come back */
