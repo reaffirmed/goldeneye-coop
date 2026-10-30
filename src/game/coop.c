@@ -53,6 +53,7 @@
 
 extern s32 chrlvCurrentPlayerCall7F0B0E24(ChrRecord *self);
 extern PROP getPropForHeldItem(ITEM_IDS item);
+extern PropRecord *hatCreateForChr(ChrRecord *chr, s32 modelnum, u32 flags);   /* propobj.c, no header has it */
 
 void doorSetOpenState(DoorRecord *door, s32 newstate);
 bool doorIsClosed(DoorRecord *door);
@@ -304,7 +305,7 @@ typedef struct
     u16 hidden;
     s16 padpreset1;
     s16 chrpreset1;
-    s16 pad2;
+    s16 hat;        /* 1 + the PROP_ model of the hat it wears, 0 none (or a host from before hats were sent) */
     s32 timer60;
     f32 damage;
     f32 maxdamage;
@@ -556,6 +557,7 @@ static PropRecord *sCorpse;   /* our own body while we are down (coopCorpseTick)
 static u8 sLeashNear;          /* players who have come to a leash scene this mission (coopLeashBroken) */
 static CoopAiEnt sAiSync[COOP_MAX_CHRS];    /* joiner: the host's AI state per chr slot (COOPPKT_AISYNC) */
 static u8 sAiSyncHave[COOP_MAX_CHRS];
+static s16 sHatSeen[COOP_MAX_CHRS];     /* joiner: 1 + the chrnum whose hat our copy has had, so one shot off isn't put back */
 static void coopSayBye(void);
 static s32 coopLobbyStart(const char *spec);
 
@@ -2012,6 +2014,7 @@ void coopStageStart(void)
     }
     sLastSnapTick = 0;
     memset(sAiSyncHave, 0, sizeof(sAiSyncHave));
+    memset(sHatSeen, 0, sizeof(sHatSeen));
     memset(sChrHostDying, 0, sizeof(sChrHostDying));
     coopPredictReset();
     sMissionTicks = 0;
@@ -3272,6 +3275,49 @@ static void coopHarnessTick(void)
             {
                 portConLogf("ge: coop: testunarm chr %d\n", unarmchr);
                 chrSetWeaponFlag4(c, GUNRIGHT);
+            }
+        }
+    }
+
+    if (coopNetIsHost() && coopPartnerHere())
+    {   /* GE_COOP_TESTHAT=<chrnum>:<s>[:<chr2>]: <s> seconds in, that chr's script
+         * gives it a beret, shot off 6 s later; chr2 gets one too, shot off at once,
+         * before an AI sync can carry it (harness only) */
+        static s32 testhat = -1, hatchr, hatchr2 = -1;
+        if (testhat == -1)
+        {
+            const char *e = getenv("GE_COOP_TESTHAT");
+            testhat = 0;
+            if (e != NULL && sscanf(e, "%d:%d:%d", &hatchr, &testhat, &hatchr2) < 2)
+            {
+                testhat = 0;
+            }
+        }
+        if (testhat > 0 && coopInMission())
+        {
+            u32 at = (u32) testhat * 60;
+            s32 k;
+
+            for (k = 0; k < 2; k++)
+            {
+                ChrRecord *c = chrFindByLiteralId(k == 0 ? hatchr : hatchr2);
+                u32 off = at + (k == 0 ? 360 : 10);
+
+                if (c == NULL || (k == 1 && hatchr2 < 0))
+                {
+                    continue;
+                }
+                if (sMissionTicks == at && c->handle_positiondata_hat == NULL)
+                {
+                    portConLogf("ge: coop: testhat chr %d gets a beret\n", c->chrnum);
+                    hatCreateForChr(c, PROP_HATBERET, 0);
+                }
+                else if (sMissionTicks == off && c->handle_positiondata_hat != NULL)
+                {   /* as chrlvTakeDamage does for a shot to the hat */
+                    portConLogf("ge: coop: testhat chr %d's hat shot off\n", c->chrnum);
+                    propobjSetDropped(c->handle_positiondata_hat, 4);
+                    c->hidden |= CHRHIDDEN_DROP_HELD_ITEMS;
+                }
             }
         }
     }
@@ -8440,6 +8486,8 @@ static void coopSendAiSync(void)
         e->timer60 = chr->timer60;
         e->damage = chr->damage;
         e->maxdamage = chr->maxdamage;
+        e->hat = (chr->handle_positiondata_hat != NULL && chr->handle_positiondata_hat->obj != NULL)
+                 ? (s16) (chr->handle_positiondata_hat->obj->obj + 1) : 0;
         if (pkt.count == COOP_AI_PER_PKT)
         {
             coopNetSend(&pkt, hdr + pkt.count * (s32) sizeof(CoopAiEnt));
@@ -8449,6 +8497,41 @@ static void coopSendAiSync(void)
     if (pkt.count > 0)
     {
         coopNetSend(&pkt, hdr + pkt.count * (s32) sizeof(CoopAiEnt));
+    }
+}
+
+/* Joiner: a hat the host's guard was given by its script (guard_try_spawning_hat
+ * runs on the host only), or that a guard we made from the snapshots never got.
+ * Put on once: a hat our copy has had and lost was shot off, and stays off. */
+static void coopFollowHat(ChrRecord *chr, s32 slot, s32 hat)
+{
+    s32 model = hat - 1;
+
+    if (chr->handle_positiondata_hat != NULL)
+    {
+        sHatSeen[slot] = (s16) (chr->chrnum + 1);
+        return;
+    }
+    if (hat <= 0 || model < PROP_HATFURRY || model > PROP_HATPEAKED || sHatSeen[slot] == chr->chrnum + 1
+        || chr->actiontype == ACT_DIE || chr->actiontype == ACT_DEAD || chr->model == NULL)
+    {
+        return;
+    }
+    if (hatCreateForChr(chr, model, 0) != NULL)
+    {
+        sHatSeen[slot] = (s16) (chr->chrnum + 1);
+        portConLogf("ge: coop: host chr %d wears hat %d: ours put it on\n", chr->chrnum, model);
+    }
+}
+
+/* coop_items.c: our copy has had this chr's hat (made to fall with the host's drop) */
+void coopHatSeen(ChrRecord *chr)
+{
+    s32 slot = coopChrSlot(chr);
+
+    if (slot >= 0 && slot < COOP_MAX_CHRS)
+    {
+        sHatSeen[slot] = (s16) (chr->chrnum + 1);
     }
 }
 
@@ -8475,6 +8558,7 @@ static void coopRecvAiSync(CoopAiPkt *p)
             sAiSync[slot] = p->ent[k];
             sAiSyncHave[slot] = 1;
             sAiSyncGot[slot]++;
+            coopFollowHat(chr, slot, p->ent[k].hat);
         }
     }
 }

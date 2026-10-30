@@ -72,6 +72,7 @@ extern void matrix_4x4_set_identity(Mtxf *mtx);
 extern void projectileFree(Projectile *projectile);
 extern bool objCoopEmbed(PropRecord *prop, PropRecord *parent);
 extern void objBounce(ObjectRecord *obj, coord3d *arg1);
+extern PropRecord *hatCreateForChr(ChrRecord *chr, s32 modelnum, u32 flags);
 
 enum { COOPITEM_THROWN = 1, COOPITEM_DROP = 2 };
 enum { COOPGONE_BOOM = 1, COOPGONE_PICKED = 2 };
@@ -503,6 +504,16 @@ static void coopItemsApplyDrop(const CoopDropMsg *m)
                 found = child;
                 break;
             }
+        }
+    }
+    if (found == NULL && m->item <= 0 && chr != NULL && chr->prop != NULL && chr->model != NULL
+        && m->model >= PROP_HATFURRY && m->model <= PROP_HATPEAKED && chr->handle_positiondata_hat == NULL)
+    {   /* a hat the host's guard got by script, shot off before our copy had it: put it on to knock it off */
+        found = hatCreateForChr(chr, m->model, 0);
+        if (found != NULL)
+        {
+            coopHatSeen(chr);
+            portConLogf("ge: coop: host guard %d's hat %d made to fall\n", m->chrnum, m->model);
         }
     }
     if (found == NULL && m->item <= 0)

@@ -67,6 +67,7 @@ void coopTeleportPlayerTo(coord3d *pos, StandTile *stan, f32 yaw);    /* bondvie
 s32  coopCinemaFocus(coord3d *out);                                     /* bondview2.c: a scripted cinema's pad */
 s32  coopKeepBodyList(ChrRecord *chr, AIRecord *list);  /* joiner: the host's ending list already runs on our body */
 extern s32 g_CoopObjExploding;   /* propobj.c propExplode: an object is going off */
+void coopHatSeen(ChrRecord *chr);    /* joiner: our copy has had that chr's hat, so the host's AI sync doesn't put it back */
 s32  coopScriptSpawnsLeftToHost(void);  /* joiner: a level script's spawn is the host's, mirrored from its snapshots */
 s32  coopScriptSpawnMayShow(const u8 *list, s32 next, u8 label); /* host: a one-shot script spawn may happen in view */
 s32  coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid);
