@@ -3386,7 +3386,7 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
 #ifndef TARGET_N64
                     if (objectiveregisters1 != coopflags)
                     {   /* co-op: a new flag is whoever passed this script's last check */
-                        coopScriptSetsFlags(Entityp, ChrEntityp);
+                        coopScriptSetsFlags(Entityp, ChrEntityp, (u32) objectiveregisters1 & ~(u32) coopflags);
                     }
 #endif
                     Offset += sizeof(AiSetObjectiveBitfieldRecord);
@@ -3406,6 +3406,9 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     s32                             flags = ntohl(ai->BITS);
                     if (chrHasStageFlag(ChrEntityp, flags)) /* PD && ai->val[4] == 1) || (!chrHasStageFlag(ChrEntityp, flags) && ai->val[4] == 0  * */
                     {
+#ifndef TARGET_N64
+                        coopScriptFlagPass(Entityp, (u32) flags);  /* co-op: credit follows whoever set it */
+#endif
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
                     else

@@ -58,7 +58,8 @@ s32  coopCctvWatches(void);              /* propobj.c: 0 on a joiner, the host's
 void coopCctvAlarm(PropRecord *seen);    /* log: the Bond a camera raised the alarm on */
 void coopAltBondCredit(void *script, s32 k);   /* a script's "either player" check passed: k 0 for our Bond, else partner k-1 */
 void coopObjActivatedPass(void *script, void *obj);   /* that script found obj activated: its flags are the presser's */
-void coopScriptSetsFlags(void *script, void *chr);     /* that script (a chr's, or chr NULL) sets stage flags: it was whoever passed its last check */
+void coopScriptSetsFlags(void *script, void *chr, u32 newbits);  /* that script (a chr's, or chr NULL) set newbits: it was whoever passed its last check */
+void coopScriptFlagPass(void *script, u32 bits);       /* that script's "stage flag set?" check passed: credit follows whoever set it */
 void coopAiCommand(u8 *list, s32 offset, ChrRecord *self);
 s32  coopAiSkip(u8 *list, s32 offset, ChrRecord *self);   /* joiner: step over our late copy of the host's ending commands (1), or wait at an ending for the host's (2) */
 s32  coopDeadTick(void); /* 1: co-op owns this death (waiting or respawned) */

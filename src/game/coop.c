@@ -355,6 +355,7 @@ static s32 sEnabled = -1;
 static s32 sNoInterp;   /* GE_COOP_NOINTERP=1: draw each packet as it lands (to compare) */
 static s32 sNoLagComp;  /* GE_COOP_NOLAGCOMP=1: guards aim at the drawn puppet, every hit counts */
 static s32 sCoverSaves; /* joiner: guards' hits dropped behind cover, this run */
+static s32 sCoverDoorHits; /* joiner: guards' hits taken though a door was in the line here */
 #define COOP_MAX_PEERHELD 32
 static s32 sPeerHeld[COOP_MAX_PEERHELD];
 static s32 sNumPeerHeld;
@@ -370,6 +371,8 @@ static void coopResyncPicks(s32 player);
 static CoopHelloPkt sHostHello;  /* joiner: the host's last hello */
 static u32 sMissionSerial;      /* host: missions started */
 static u32 sFollowedMission;    /* joiner: last host mission we launched into */
+static u32 sEndingSkipped;      /* joiner: a host mission we didn't drop into because its ending had begun */
+#define COOP_HOLD_ENDING 2      /* HELLO hold bit 1: the host's ending has begun */
 static s32 sLobbyReady;         /* our Ready on the lobby screen */
 static s32 sDownRule = COOPDOWN_BOTH; /* the host's down rule (lobby): COOPDOWN_BOTH, _TIMER or _REVIVE */
 static u8 sSettings[COOPSET_MAX];     /* the host's other lobby settings; the joiner copies them from HELLO */
@@ -435,6 +438,11 @@ static struct
     s8 player;
 } sScriptPass[COOP_SCRIPTPASS];
 static s32 sScriptPassNext;
+/* host: who set each stage flag (credit), -1 nobody known. A script that
+ * waits on a flag another player's action set (Aztec's launch countdown
+ * waits on the guidance flag) carries that player's credit to the flags it
+ * sets itself, however long it waits first. */
+static s8 sFlagBy[32];
 
 static CoopRemote sR[COOP_MAX_PLAYERS];
 static CoopClock sClock[COOP_MAX_PLAYERS];  /* each player's clock against ours (coop_interp.c) */
@@ -2061,6 +2069,7 @@ void coopStageStart(void)
     sHostHiccups = 0;
     sNumPeerHeld = 0;
     memset(sScriptPass, 0, sizeof(sScriptPass));    /* a new mission's scripts */
+    memset(sFlagBy, -1, sizeof(sFlagBy));
     sNumTeamPicks = 0;
     sClockSet = 0;
     sLastHurtTick = sLastFightTick = sDeadSince = 0;
@@ -2348,7 +2357,23 @@ static void coopRemoteAim(CoopRemote *r, s32 p)
     }
 }
 
-/* joiner: a guard's hit that the host decided before we reached cover */
+static s32 coopCoverLineClear(StandTile *stan, coord3d *from, f32 height, coord3d *to, StandTile *tostan, s32 types)
+{
+    s32 clear;
+
+    bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, 0);     /* the tank we drive is no cover from its guns */
+    clear = stanTestLineUnobstructed(&stan, from->f[0], from->f[2], to->f[0], to->f[2], types, height, height, 0.0f, 1.0f)
+            && stan == tostan;
+    bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, 1);
+    return clear;
+}
+
+/* joiner: a guard's hit that the host decided before we reached cover. A
+ * door alone in the line doesn't count: each game moves its doors itself
+ * from the open and close events, so one can be shut here while the host's
+ * is open or held open by a guard in its doorway (Bunker 2's cell guard,
+ * whose every shot at a joiner in the corridor was dropped). The host's
+ * guard saw us past its door; its call stands. */
 static s32 coopHitBehindCover(CoopEvent *ev)
 {
     ChrRecord *chr;
@@ -2379,17 +2404,22 @@ static s32 coopHitBehindCover(CoopEvent *ev)
         return 0;
     }
     height = chr->chrheight - 20.0f;
-    bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, 0);     /* the tank we drive is no cover from its guns */
-    clear = stanTestLineUnobstructed(&stan, from.f[0], from.f[2], bond->pos.f[0], bond->pos.f[2],
-                                     CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_PATHBLOCKER | CDTYPE_AIOPAQUE, height, height, 0.0f, 1.0f)
-            && stan == bond->stan;
-    bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, 1);
+    clear = coopCoverLineClear(stan, &from, height, &bond->pos, bond->stan,
+                               CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_PATHBLOCKER | CDTYPE_AIOPAQUE);
     if (clear)
     {
         return 0;
     }
+    if (coopCoverLineClear(stan, &from, height, &bond->pos, bond->stan, CDTYPE_OBJS | CDTYPE_PATHBLOCKER | CDTYPE_AIOPAQUE))
+    {
+        sCoverDoorHits++;
+        portConLogf("ge: coop: lagcomp: guard %d's hit (%.3f) taken: only a door is in the way here\n",
+                    ev->u.hit.chrnum, ev->u.hit.damage);
+        return 0;
+    }
     sCoverSaves++;
-    portConLogf("ge: coop: lagcomp: guard %d's hit (%.3f) dropped: we are behind cover now\n", ev->u.hit.chrnum, ev->u.hit.damage);
+    portConLogf("ge: coop: lagcomp: guard %d's hit (%.3f) dropped: we are behind cover now (guard at %.0f %.0f %.0f room %d, we are in room %d)\n",
+                ev->u.hit.chrnum, ev->u.hit.damage, from.f[0], from.f[1], from.f[2], (s32) chr->prop->stan->room, (s32) bond->stan->room);
     return 1;
 }
 
@@ -8201,6 +8231,12 @@ static void coopSendHello(void)
     memcpy(p.settings, sSettings, sizeof(p.settings));
     p.missionticks = coopInMission() ? sMissionTicks : 0;
     p.hold = (u8) ((sHold ? 1 : 0) | (sHoldArrived << 4));
+    if (coopNetIsHost() && coopInMission() && g_PlayerInvincible && !coopVersus())
+    {   /* bit 1: our ending has begun (only endings turn damage and pickups off):
+         * nobody new comes in now, they wait for the next mission (older
+         * builds don't read the bit and drop in as before) */
+        p.hold |= COOP_HOLD_ENDING;
+    }
     if (!coopNetIsHost())
     {
         coopNetSend(&p, sizeof(p));
@@ -8311,6 +8347,20 @@ s32 coopFrontTick(void)
         if (diff < DIFFICULTY_AGENT || diff >= DIFFICULTY_MAX)
         {
             diff = DIFFICULTY_AGENT;
+        }
+        if (((sHostHello.hold & COOP_HOLD_ENDING) || sEndingSkipped == sHostHello.mission)
+            && sHostHello.mission != 0 && !(coopSetting(COOPSET_VSMODE) & 1))
+        {   /* the host's mission is in its ending: dropping in now would only
+             * show a stranger's cutscene and its debrief. Wait for the next
+             * mission (a new mission number; the host's debrief that follows
+             * still says this one's stage, so it stays skipped) */
+            if (sEndingSkipped != sHostHello.mission)
+            {
+                sEndingSkipped = sHostHello.mission;
+                portConLogf("ge: coop: the host's mission %u is in its ending: joining the next one\n", sHostHello.mission);
+                coopFeedToast("THE MISSION IS ENDING|YOU JOIN THE NEXT ONE", -1);
+            }
+            return 0;
         }
         sFollowedMission = sHostHello.mission;
         if (coopSetting(COOPSET_VSMODE) & 1)
@@ -10254,24 +10304,69 @@ void coopAltBondCredit(void *script, s32 k)
     coopScriptPassBy(script, who);
 }
 
-void coopScriptSetsFlags(void *script, void *chr)
+/* host: these stage flags are now player's doing */
+static void coopNoteFlagsBy(u32 bits, s32 player)
 {
-    s32 i;
+    s32 b;
+
+    if (player < 0 || player >= COOP_MAX_PLAYERS)
+    {
+        return;
+    }
+    for (b = 0; b < 32; b++)
+    {
+        if (bits & (1u << b))
+        {
+            sFlagBy[b] = (s8) player;
+        }
+    }
+}
+
+/* chrai.c: a script's "stage flag set?" check passed: what it does next
+ * follows from whoever set that flag */
+void coopScriptFlagPass(void *script, u32 bits)
+{
+    s32 b;
+
+    if (sEnabled <= 0 || !coopNetIsHost() || !coopInMission())
+    {
+        return;
+    }
+    for (b = 31; b >= 0; b--)
+    {
+        if ((bits & (1u << b)) && sFlagBy[b] >= 0)
+        {
+            coopScriptPassBy(script, sFlagBy[b]);
+            return;
+        }
+    }
+}
+
+void coopScriptSetsFlags(void *script, void *chr, u32 newbits)
+{
+    s32 i, p = -1;
 
     for (i = 0; i < COOP_SCRIPTPASS; i++)
     {
         if (sScriptPass[i].script == script)
         {
-            coopObjNoteActor(sScriptPass[i].player, 0);
-            return;
+            p = sScriptPass[i].player;
+            break;
         }
     }
-    if (chr != NULL && sEnabled > 0 && coopNetIsHost())
+    if (p < 0 && chr != NULL && sEnabled > 0 && coopNetIsHost())
     {   /* a chr's own script (Valentin, Janus, a scientist): the player it is
          * dealing with, the one its "Bond" is right now */
-        s32 p = (sTickChr == chr && g_CoopPropOverride != NULL) ? coopPlayerOfProp(g_CoopPropOverride) : -1;
-
-        coopObjNoteActor((p >= 0) ? p : coopSelf(), 0);
+        p = (sTickChr == chr && g_CoopPropOverride != NULL) ? coopPlayerOfProp(g_CoopPropOverride) : -1;
+        p = (p >= 0) ? p : coopSelf();
+    }
+    if (p >= 0)
+    {
+        coopObjNoteActor(p, 0);
+        if (sEnabled > 0 && coopNetIsHost())
+        {
+            coopNoteFlagsBy(newbits, p);
+        }
     }
 }
 
@@ -10806,8 +10901,10 @@ static void coopEndingApply(const u8 *raw, s32 from)
     if (m.ownflags & ~(u32) objectiveregisters1)
     {   /* what their copy set on the way in (Dam: the bungee objective, then damage off), which ours now skips */
         portConLogf("ge: coop: player %d's ending brings stage flags %08x\n", from + 1, m.ownflags & ~(u32) objectiveregisters1);
+        coopNoteFlagsBy(m.ownflags & ~(u32) objectiveregisters1, from);
         objectiveregisters1 |= (s32) m.ownflags;
     }
+    coopObjNoteUse(from);   /* the bungee objective and the ending are theirs, not ours (coop_objective.c) */
     if (!m.isobj)
     {
         ChrRecord *c = chrFindByLiteralId(m.who);
