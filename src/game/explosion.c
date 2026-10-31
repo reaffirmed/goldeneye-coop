@@ -8,6 +8,9 @@
 #include "bg.h"
 #include "bondview.h"
 #include "coop.h"
+#ifdef TARGET_N64
+#define coopVsViewCount getPlayerCount     /* the cart has no online versus */
+#endif
 #include "cheat.h"
 #include "chrai.h"
 #include "chraction.h"
@@ -404,7 +407,7 @@ explosionCreate(PropRecord *arg0, struct coord3d *target_pos, StandTile *target_
                 explosionInitFlyingParticles(target_pos, sp44->shrapnel_scatter_dist, sp44->shrapnel_hvel, sp44->shrapnel_vvel, sp44->shrapnel_size);
             }
 
-            if (getPlayerCount() >= 2)
+            if (coopVsViewCount() >= 2)     /* (online versus: one view, as solo) */
             {
                 for (var_v0 = 0; var_v0 < SMOKE_BUFFER_LEN; var_v0++)
                 {
@@ -1478,7 +1481,7 @@ void explosionCreateSmoke(coord3d *pos, StandTile *stan, s16 smoke_type, u8 *roo
     PropRecord *prop;
 
     smoke = NULL;
-    player_count = getPlayerCount();
+    player_count = coopVsViewCount();
 
     for (i = 0; i < 20; i++)
     {
@@ -2060,7 +2063,7 @@ void explosionScorchTick(struct coord3d *pos, f32 explosion_size, s16 room)
 
     temp_s0 = getRoomPositionByIndex((s32) room);
 
-    if (getPlayerCount() < 2)
+    if (coopVsViewCount() < 2)      /* online versus leaves scorches too: one view per PC */
     {
         if (explosion_size > 200.0f)
         {
@@ -2153,7 +2156,7 @@ Gfx *explosionRenderScorchBuffer(Gfx *arg0)
     s32 i;
     s32 phi_s3 = -1;
 
-    if (getPlayerCount() >= 2)
+    if (coopVsViewCount() >= 2)
     {
         return arg0;
     }

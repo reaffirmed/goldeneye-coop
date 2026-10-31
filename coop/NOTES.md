@@ -3430,3 +3430,51 @@ seen on the rig first, a third turned up while testing them:
 - Harness: GE_COOP_TESTWALK=<s>:<in|out|fwd>:<m>[,...] walks a Bond into the
   first partner and back out (face them, forward or backward until <m>);
   GE_SUBTEST=<s> shows a scripted exchange of captions.
+
+## Versus polish: the intro, other players' facing, doors, sound, scorches (2026-10-31, COOP_VERSION stays 16)
+
+Owner's report: online versus feels unpolished next to story co-op: the
+intro around your character is choppy, other players look the wrong way
+while aiming, and Facility's doors look wrong.
+
+- One cause for the intro and the doors. Rare gives the once-a-frame work
+  to the first player in shuffle_player_ids' random order each frame (the
+  MP intro swirl, door motion and sounds, thrown rounds in flight,
+  explosions' ticks, the alarm and gas timers, room unloads, sound slots).
+  In online versus only local player 0 gets a view and a tick, so that
+  work ran only on the frames the shuffle put us first: half of them with
+  two players, a quarter with four (GE_SWIRLDBG showed "sh1" frames where
+  the swirl stood still). player.c now puts local 0 first in versus; the
+  others keep their random order. A Facility door (GE_VS_DOOR) used to
+  stall for up to five 60ths at a time and open at about half speed; it
+  now moves every 60th.
+- Rounds a remote player's body threw (propobj.c isSimOwner) were only
+  simulated on a pass for their owner, which never comes here; in versus
+  ours simulates them.
+- The MP swirl stepped once a 60th (g_ClockTimer), so above 60 fps it moved
+  in steps even when it ran. It keeps Rare's steps and draws the frames
+  between them part way from the last step (s_PortMpSwirlAcc).
+- Facing: playerTick turns a sidestepping body up to 90 degrees into the
+  step (field_1280) and plays a side-on run. A PC player strafes nearly
+  all the time, so others saw a side-on body with the gun out along the
+  run while the player aimed straight at them (GE_VS_STRAFE + GE_VS_AUDIT:
+  "off by -90 deg (lean -90)"). Co-op puppets never had the turn. A remote
+  versus body now keeps the lean at 0 and its strafe plays the walk or run
+  with the gun forward (sub 1/2 at the strafe speed).
+- Sound: the volume of a positional sound came from the nearest of every
+  player's body, so a shot beside another player's body played at full
+  volume to us wherever we stood; and stereo panning was off because of
+  getPlayerCount() >= 2. Both use coopVsViewCount() now (1 in versus).
+- Scorch marks, the debris budget and smoke lifetimes were cut for split
+  screen; versus has one view per PC and gets the solo ones. The scorch
+  buffer is always allocated on PC (a split-screen stage after a solo one
+  kept a stale pointer before; it was never drawn, so harmless).
+- Harness: GE_VS_STRAFE=<s> (face the first opponent, strafe right 2 s,
+  left 2 s, stand 2 s), GE_VS_DOOR=<s> (stand 2.5 m from the nearest door,
+  open it every 6 s, log how far it is open each 60th of its first
+  second), GE_VS_AUDIT prints the lean. GE_VS_TESTBOOM's blast leaves a
+  scorch.
+- Checked over the mock Steam: Temple 2 players (facing 0-2 degrees off
+  while strafing, lean 0), Facility doors, a 3-player Temple match to the
+  end screen (final award picks the same on all three), story co-op
+  Facility. Videos and stills: versus-polish/ in the project files.

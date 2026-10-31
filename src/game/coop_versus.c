@@ -1294,7 +1294,7 @@ static void coopVsHarness(void)
 
         at.f[1] += (strchr(e, ':') != NULL) ? (f32) atof(strchr(e, ':') + 1) : 0.0f;
         portConLogf("ge: versus: harness: blast on player %d at %.0f %.0f %.0f\n", sVsNet[1] + 1, at.f[0], at.f[1], at.f[2]);
-        explosionCreate(NULL, &at, them->stan, 2, 0, 0, them->rooms, 0);
+        explosionCreate(NULL, &at, them->stan, 2, 1, 0, them->rooms, 0);
     }
     if (getenv("GE_VS_PING") != NULL && sVsTick >= (u32) atoi(getenv("GE_VS_PING")) * 60 && (sVsTick % 300) == 0)
     {   /* GE_VS_PING=<s>: from <s> seconds, press ping every 5 s */
@@ -1413,11 +1413,108 @@ void coopVersusHarnessInput(void)
     }
 }
 
+/* GE_VS_DOOR=<s>: that far in, step 2.5 m in front of the door nearest us
+ * that has floor before it, face it and open it; it is shut and opened again
+ * every 6 s after (so the others, and a recording, see a door move) */
+static void coopVsDoorHarness(void)
+{
+    static s32 at = -2;
+    static DoorRecord *door;
+    PropDefHeaderRecord *it = (PropDefHeaderRecord *) g_CurrentSetup.propDefs;
+    PropRecord *bond = g_playerPointers[0]->prop;
+
+    if (at == -2)
+    {
+        at = (getenv("GE_VS_DOOR") != NULL) ? atoi(getenv("GE_VS_DOOR")) * 60 : -1;
+    }
+    if (at < 0 || (s32) sVsTick < at || it == NULL || bond == NULL)
+    {
+        return;
+    }
+    if ((s32) sVsTick == at)
+    {
+        f32 best = 1e12f;
+        coord3d bestto;
+        StandTile *beststan = NULL;
+
+        for (; it->type != PROPDEF_END; it = (PropDefHeaderRecord *) ((u32 *) it + sizepropdef(it)))
+        {
+            DoorRecord *d = (DoorRecord *) it;
+            s32 side;
+
+            if (it->type != PROPDEF_DOOR || d->prop == NULL)
+            {
+                continue;
+            }
+            for (side = 0; side < 4; side++)
+            {   /* in front of it, behind it, or off either end */
+                const f32 a = (f32) side * 1.5708f;
+                coord3d to;
+                StandTile *stan;
+                f32 dx, dz, d2;
+
+                to.f[0] = d->prop->pos.f[0] + sinf(a) * 250.0f;
+                to.f[1] = d->prop->pos.f[1] + 30.0f;
+                to.f[2] = d->prop->pos.f[2] + cosf(a) * 250.0f;
+                if ((stan = stanFindTileBelowPos(&to, NULL, NULL)) == NULL)
+                {
+                    continue;
+                }
+                dx = to.f[0] - bond->pos.f[0];
+                dz = to.f[2] - bond->pos.f[2];
+                d2 = dx * dx + dz * dz;
+                if (d2 < best)
+                {
+                    best = d2;
+                    bestto = to;
+                    beststan = stan;
+                    door = d;
+                }
+            }
+        }
+        if (beststan != NULL)
+        {
+            coopRespawnPlayerAt(&bestto, beststan, 0.0f, getCurrentPlayerWeaponId(GUNRIGHT));
+            portConLogf("ge: versus: harness: at a door (%.0f %.0f %.0f)\n",
+                        door->prop->pos.f[0], door->prop->pos.f[1], door->prop->pos.f[2]);
+        }
+    }
+    if (door == NULL || door->prop == NULL)
+    {
+        return;
+    }
+    {   /* face it */
+        f32 dx = door->prop->pos.f[0] - bond->pos.f[0];
+        f32 dz = door->prop->pos.f[2] - bond->pos.f[2];
+
+        g_playerPointers[0]->vv_theta = -(atan2f(dx, dz) * 180.0f) / M_PI_F;
+        if (g_playerPointers[0]->vv_theta < 0.0f)
+        {
+            g_playerPointers[0]->vv_theta += 360.0f;
+        }
+        g_playerPointers[0]->vv_verta = 0.0f;
+    }
+    if ((((s32) sVsTick - at) % 360) == 30)
+    {
+        doorActivate(door, DOORSTATE_OPENING);
+        portConLogf("ge: versus: harness: door opening\n");
+    }
+    else if ((((s32) sVsTick - at) % 360) == 210)
+    {
+        doorActivate(door, DOORSTATE_CLOSING);
+    }
+    if ((((s32) sVsTick - at) % 360) > 30 && (((s32) sVsTick - at) % 360) <= 90)
+    {   /* how far it has come, each 60th of its first second */
+        portConLogf("ge: versus: harness: door at %.3f\n", door->openPosition);
+    }
+}
+
 /* GE_VS_WANDER=<s>: from <s> seconds walk about, 3 s each of running with a
  * turn, strafing, walking back and standing still (so the others see every
  * body animation). GE_VS_AUDIT=1: every 2 s, for each other player, how
  * their body is drawn here against what their STATE says. */
 static s32 sVsWanderAt = -2;
+static s32 sVsStrafeAt = -1;
 static s32 sVsAudit;
 
 static s8 sVsWanderX, sVsWanderY;
@@ -1432,10 +1529,41 @@ static void coopVsWander(void)
         const char *w = getenv("GE_VS_WANDER");
 
         sVsWanderAt = (w != NULL) ? atoi(w) * 60 : -1;
+        sVsStrafeAt = (getenv("GE_VS_STRAFE") != NULL) ? atoi(getenv("GE_VS_STRAFE")) * 60 : -1;
         sVsAudit = getenv("GE_VS_AUDIT") != NULL;
+        if (sVsWanderAt < 0 && sVsStrafeAt >= 0)
+        {
+            sVsWanderAt = sVsStrafeAt;
+        }
     }
     sVsWanderX = sVsWanderY = 0;
     sVsWanderButtons = 0;
+    if (sVsStrafeAt >= 0 && (s32) sVsTick >= sVsStrafeAt && !g_playerPointers[0]->bonddead)
+    {   /* GE_VS_STRAFE=<s>: from <s> seconds face the first opponent and strafe:
+         * 2 s right, 2 s left, 2 s standing */
+        PropRecord *bond = g_playerPointers[0]->prop;
+        PropRecord *them = (g_playerPointers[1] != NULL) ? g_playerPointers[1]->prop : NULL;
+        const s32 t = ((s32) sVsTick - sVsStrafeAt) / 120;
+
+        if ((s32) sVsTick == sVsStrafeAt)
+        {
+            portConLogf("ge: versus: harness: strafing from here\n");
+        }
+
+        sVsWanderX = ((t % 3) == 0) ? 80 : ((t % 3) == 1) ? -80 : 0;     /* (the stick's x strafes in the PC layouts) */
+        if (them != NULL && bond != NULL)
+        {
+            f32 dx = them->pos.f[0] - bond->pos.f[0];
+            f32 dz = them->pos.f[2] - bond->pos.f[2];
+
+            g_playerPointers[0]->vv_theta = -(atan2f(dx, dz) * 180.0f) / M_PI_F;
+            if (g_playerPointers[0]->vv_theta < 0.0f)
+            {
+                g_playerPointers[0]->vv_theta += 360.0f;
+            }
+        }
+        return;
+    }
     if (sVsWanderAt < 0 || (s32) sVsTick < sVsWanderAt || g_playerPointers[0]->bonddead)
     {
         return;
@@ -1637,7 +1765,7 @@ static void coopVsAudit(void)
             continue;
         }
         drawn = getsubroty(model);
-        diff = (drawn - info.yaw) * (180.0f / M_PI_F) - pl->field_1280;    /* (Rare's lean into a sidestep) */
+        diff = (drawn - info.yaw) * (180.0f / M_PI_F);
         while (diff > 180.0f)
         {
             diff -= 360.0f;
@@ -1646,9 +1774,9 @@ static void coopVsAudit(void)
         {
             diff += 360.0f;
         }
-        portConLogf("ge: vsaudit: player %d facing %.0f, off by %.0f deg, anim %d rate %.2f (moving %.2f fwd %.2f side, crouch %d), "
+        portConLogf("ge: vsaudit: player %d facing %.0f, off by %.0f deg (lean %.0f), anim %d rate %.2f (moving %.2f fwd %.2f side, crouch %d), "
                     "aim %.1f/%.1f drawn %.1f/%.1f, flash %d drawn %d%d, dead %d\n",
-                    sVsNet[li] + 1, info.yaw * (180.0f / M_PI_F), diff, (s32) model->anim - (s32) ptr_animation_table, modelGetAnimSpeed(model),
+                    sVsNet[li] + 1, info.yaw * (180.0f / M_PI_F), diff, pl->field_1280, (s32) model->anim - (s32) ptr_animation_table, modelGetAnimSpeed(model),
                     info.look.speedforwards, info.look.speedsideways, info.look.crouch,
                     info.look.aimpitch, info.look.aimyaw, pl->prop->chr->aimendback, pl->prop->chr->aimendsideback,
                     info.look.flash, coopVsFiring(pl->prop->chr, GUNRIGHT), coopVsFiring(pl->prop->chr, GUNLEFT),
@@ -1705,6 +1833,7 @@ void coopVersusTick(void)
     }
     coopVsAudit();
     coopVsWander();
+    coopVsDoorHarness();
     coopVsPickupsHarness();
     for (li = 1; li < sVsCount; li++)
     {

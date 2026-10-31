@@ -5031,7 +5031,16 @@ s32 objTick(struct PropRecord *prop)
 			)
 			
             isSimOwner = projectile->ownerprop == g_CurrentPlayer->prop;
-			
+#ifndef TARGET_N64
+			/* online versus: another PC's player never gets a pass here
+			 * (lv.c), so a round thrown by their body flies on ours */
+			if (!isSimOwner && coopVersus() && projectile->ownerprop != NULL
+				&& coopVsRemote(getPlayerPointerIndex(projectile->ownerprop)))
+			{
+				isSimOwner = get_player_position_in_shuffled(get_cur_playernum()) == 0;
+			}
+#endif
+
 		}
 	}
 
@@ -13807,7 +13816,14 @@ s32 sub_GAME_7F053894(coord3d *pos, f32 low, f32 high)
     s32 count;
 
     shortest_distance = high;
+#ifndef TARGET_N64
+    /* online versus: only our own Bond hears here; the others' bodies are
+     * other PCs' ears, so a shot beside one of them was played at full
+     * volume to us wherever we stood */
+    count = coopVsViewCount();
+#else
     count = getPlayerCount();
+#endif
 
     for (index = 0; index < count; index++)
     {
@@ -13852,9 +13868,10 @@ s32 sub_GAME_7F053894(coord3d *pos, f32 low, f32 high)
  * SOLO ONLY. With two to four viewports there is no single listener: a
  * sound to the left of player 1 is to the right of player 2, and one pair
  * of speakers cannot serve both, so a shared pan would be wrong for
- * everyone but whoever it was computed for. getPlayerCount() >= 2 drops the
+ * everyone but whoever it was computed for. Two or more views drop the
  * listener (portSndSetListener below) and every voice stays at the vanilla
- * centre - identical output to before this feature existed.
+ * centre - identical output to before this feature existed. Online versus
+ * has one view per PC (coopVsViewCount), so it pans as solo does.
  * ------------------------------------------------------------------------ */
 
 /* Pan offset at full lateral displacement, out of the 63 that AL_PAN_LEFT /
@@ -13895,7 +13912,7 @@ static s32     s_SndListenerValid = 0;
  */
 void portSndSetListener(Mtxf *viewToWorld)
 {
-    if (viewToWorld == NULL || getPlayerCount() >= 2)
+    if (viewToWorld == NULL || coopVsViewCount() >= 2)    /* (online versus has one view, ours) */
     {
         s_SndListenerValid = 0;
         return;
