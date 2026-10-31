@@ -3521,3 +3521,27 @@ From the story polish audit: two rough edges left after v0.6.13.
     lobby.
   - Mission runs (dam facility runway aztec statue cradle) 6/6, late joins
     (dam facility frigate) 3/3, joiner spot checks 4/4.
+
+## Bunker 2: the cell guard's shots dropped on a joiner (2026-10-31, COOP_VERSION stays 16)
+
+Report (F8, joiner, v0.6.12 build e935271): after opening the cell door, the
+joiner could not punch the guard at the cell (chr 18), and it could not hurt
+them. On the replay of the same mission both worked.
+
+- What the report shows: every hit from guard 18 was "lagcomp: ... dropped:
+  we are behind cover now", including three while the joiner stood still in
+  the corridor (room 39), so not cover it had moved into. Just before, the
+  host had closed the cell door (door 9104 -> state 2), then opened it again
+  and closed it (a guard in a doorway holds a door open). There is no log
+  line for a punch that hits nothing, so the punches are not explained.
+- Change: coopHitBehindCover no longer counts a door alone as cover. Each
+  game moves its doors itself from the open and close events, so a door can
+  be shut here while the host's is open or held by a guard in its doorway;
+  the host's guard saw us past it and its call stands ("taken: only a door
+  is in the way here"). Walls and objects still count. A dropped hit now
+  logs the guard's position and both rooms, for the next report.
+- Not reproduced: six rig runs of the joiner with the cell guard (with the
+  key and the cell door, the guard patrolling and alerted, following it and
+  punching) all landed punches and hits. The Dam GE_COOP_TESTHIT check still
+  drops the hit from guard 43 through the rock. Mission runs bunker2, dam,
+  frigate pass.

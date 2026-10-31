@@ -355,6 +355,7 @@ static s32 sEnabled = -1;
 static s32 sNoInterp;   /* GE_COOP_NOINTERP=1: draw each packet as it lands (to compare) */
 static s32 sNoLagComp;  /* GE_COOP_NOLAGCOMP=1: guards aim at the drawn puppet, every hit counts */
 static s32 sCoverSaves; /* joiner: guards' hits dropped behind cover, this run */
+static s32 sCoverDoorHits; /* joiner: guards' hits taken though a door was in the line here */
 #define COOP_MAX_PEERHELD 32
 static s32 sPeerHeld[COOP_MAX_PEERHELD];
 static s32 sNumPeerHeld;
@@ -2356,7 +2357,23 @@ static void coopRemoteAim(CoopRemote *r, s32 p)
     }
 }
 
-/* joiner: a guard's hit that the host decided before we reached cover */
+static s32 coopCoverLineClear(StandTile *stan, coord3d *from, f32 height, coord3d *to, StandTile *tostan, s32 types)
+{
+    s32 clear;
+
+    bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, 0);     /* the tank we drive is no cover from its guns */
+    clear = stanTestLineUnobstructed(&stan, from->f[0], from->f[2], to->f[0], to->f[2], types, height, height, 0.0f, 1.0f)
+            && stan == tostan;
+    bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, 1);
+    return clear;
+}
+
+/* joiner: a guard's hit that the host decided before we reached cover. A
+ * door alone in the line doesn't count: each game moves its doors itself
+ * from the open and close events, so one can be shut here while the host's
+ * is open or held open by a guard in its doorway (Bunker 2's cell guard,
+ * whose every shot at a joiner in the corridor was dropped). The host's
+ * guard saw us past its door; its call stands. */
 static s32 coopHitBehindCover(CoopEvent *ev)
 {
     ChrRecord *chr;
@@ -2387,17 +2404,22 @@ static s32 coopHitBehindCover(CoopEvent *ev)
         return 0;
     }
     height = chr->chrheight - 20.0f;
-    bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, 0);     /* the tank we drive is no cover from its guns */
-    clear = stanTestLineUnobstructed(&stan, from.f[0], from.f[2], bond->pos.f[0], bond->pos.f[2],
-                                     CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_PATHBLOCKER | CDTYPE_AIOPAQUE, height, height, 0.0f, 1.0f)
-            && stan == bond->stan;
-    bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, 1);
+    clear = coopCoverLineClear(stan, &from, height, &bond->pos, bond->stan,
+                               CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_PATHBLOCKER | CDTYPE_AIOPAQUE);
     if (clear)
     {
         return 0;
     }
+    if (coopCoverLineClear(stan, &from, height, &bond->pos, bond->stan, CDTYPE_OBJS | CDTYPE_PATHBLOCKER | CDTYPE_AIOPAQUE))
+    {
+        sCoverDoorHits++;
+        portConLogf("ge: coop: lagcomp: guard %d's hit (%.3f) taken: only a door is in the way here\n",
+                    ev->u.hit.chrnum, ev->u.hit.damage);
+        return 0;
+    }
     sCoverSaves++;
-    portConLogf("ge: coop: lagcomp: guard %d's hit (%.3f) dropped: we are behind cover now\n", ev->u.hit.chrnum, ev->u.hit.damage);
+    portConLogf("ge: coop: lagcomp: guard %d's hit (%.3f) dropped: we are behind cover now (guard at %.0f %.0f %.0f room %d, we are in room %d)\n",
+                ev->u.hit.chrnum, ev->u.hit.damage, from.f[0], from.f[1], from.f[2], (s32) chr->prop->stan->room, (s32) bond->stan->room);
     return 1;
 }
 
