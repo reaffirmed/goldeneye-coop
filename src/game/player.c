@@ -640,6 +640,30 @@ void shuffle_player_ids(void) {
         array_PLAYER_IDs[i] = array_PLAYER_IDs[i + random % (4 - i)];
         array_PLAYER_IDs[i + random % (4 - i)] = temp;
     }
+#ifndef TARGET_N64
+    /* Online versus: only our own player (local 0) gets a view and a tick
+     * here, so the once-a-frame work Rare gives to the first player in this
+     * order (the MP intro swirl, door and projectile motion, explosions, the
+     * alarm and gas timers, room unloads) ran only on the frames the shuffle
+     * happened to put us first: one in two with two players, one in four
+     * with four. We go first every frame; the others keep their random order. */
+    {
+        extern s32 coopVersus(void);
+
+        if (coopVersus())
+        {
+            for (i = 0; i < 4 && array_PLAYER_IDs[i] != 0; i++)
+            {
+                ;
+            }
+            for (; i > 0; i--)
+            {
+                array_PLAYER_IDs[i] = array_PLAYER_IDs[i - 1];
+            }
+            array_PLAYER_IDs[0] = 0;
+        }
+    }
+#endif
 }
 
 s32 get_player_position_in_shuffled(s32 current_player_num) {

@@ -361,6 +361,11 @@ f32 g_MpSwirlAngleDegrees;
 f32 g_MpSwirlForwardSpeed;
 //CODE.bss:80079E10
 f32 g_MpSwirlDistance;
+#ifndef TARGET_N64
+static f32 s_PortMpSwirlAcc;            /* part of a 60th since the swirl's last step */
+static f32 s_PortMpSwirlPrevAngle;      /* the angle and distance before that step */
+static f32 s_PortMpSwirlPrevDistance;
+#endif
 
 #define ALIGN64_V3(val) (((val) | 0x3f) ^ 0x3f)
 
@@ -890,6 +895,11 @@ void bondviewSetCameraMode(s32 arg0)
         g_MpSwirlAngleDegrees = -90.0f;
         g_MpSwirlForwardSpeed = 0.0f;
         g_MpSwirlDistance = 80.0f;
+#ifndef TARGET_N64
+        s_PortMpSwirlAcc = 0.0f;
+        s_PortMpSwirlPrevAngle = g_MpSwirlAngleDegrees;
+        s_PortMpSwirlPrevDistance = g_MpSwirlDistance;
+#endif
         fogLoadLevelEnvironment(bossGetStageNum(), 0);
     }
     else if (g_CameraMode == CAMERAMODE_SWIRL)
@@ -1468,8 +1478,25 @@ void bondviewFrozenCameraTick(u16 buttons, u16 oldbuttons, struct coord3d *pos, 
         */
         if (get_player_position_in_shuffled(get_cur_playernum()) == 0)
         {
+#ifndef TARGET_N64
+            /* Rare steps the swirl once per 60th (g_ClockTimer), so above
+             * 60 fps the frames between two 60ths showed the same camera and
+             * it moved in steps. The steps stay Rare's; the frames between
+             * them are drawn part way from the last step to this one. */
+            s32 steps;
+
+            s_PortMpSwirlAcc += g_GlobalTimerDelta;
+            steps = (s32) s_PortMpSwirlAcc;
+            s_PortMpSwirlAcc -= (f32) steps;
+            for (i2=0; i2<steps; i2++)
+#else
             for (i2=0; i2<g_ClockTimer; i2++)
+#endif
             {
+#ifndef TARGET_N64
+                s_PortMpSwirlPrevAngle = g_MpSwirlAngleDegrees;
+                s_PortMpSwirlPrevDistance = g_MpSwirlDistance;
+#endif
                 if (g_MpSwirlAngleDegrees < 179.5f)
                 {
                     if (g_MpSwirlAngleDegrees < -20.0f)
@@ -1514,11 +1541,26 @@ void bondviewFrozenCameraTick(u16 buttons, u16 oldbuttons, struct coord3d *pos, 
             }
         }
 
+#ifndef TARGET_N64
+        {   /* between the last two steps: see the step loop above */
+            const f32 swirlang = s_PortMpSwirlPrevAngle + (g_MpSwirlAngleDegrees - s_PortMpSwirlPrevAngle) * s_PortMpSwirlAcc;
+            const f32 swirldist = s_PortMpSwirlPrevDistance + (g_MpSwirlDistance - s_PortMpSwirlPrevDistance) * s_PortMpSwirlAcc;
+
+            sp38 = ((swirlang - g_CurrentPlayer->vv_theta) * M_PI_F) / 180.0f;
+
+            pos->f[0] = g_CurrentPlayer->field_488.pos.f[0] + (sinf(sp38) * swirldist);
+            pos->f[1] = g_CurrentPlayer->field_488.pos.f[1] + (swirldist * 0.08f);
+            pos->f[2] = g_CurrentPlayer->field_488.pos.f[2] + (cosf(sp38) * swirldist);
+
+            arg6->f[1] = g_CurrentPlayer->field_488.pos.f[1] + (swirldist * 0.08f);
+        }
+#else
         sp38 = ((g_MpSwirlAngleDegrees - g_CurrentPlayer->vv_theta) * M_PI_F) / 180.0f;
 
         pos->f[0] = g_CurrentPlayer->field_488.pos.f[0] + (sinf(sp38) * g_MpSwirlDistance);
         pos->f[1] = g_CurrentPlayer->field_488.pos.f[1] + (g_MpSwirlDistance * 0.08f);
         pos->f[2] = g_CurrentPlayer->field_488.pos.f[2] + (cosf(sp38) * g_MpSwirlDistance);
+#endif
 
         pos2->f[0] = g_CurrentPlayer->field_488.pos.f[0];
         pos2->f[1] = g_CurrentPlayer->field_488.pos.f[1];
@@ -1527,7 +1569,9 @@ void bondviewFrozenCameraTick(u16 buttons, u16 oldbuttons, struct coord3d *pos, 
         *stan = g_CurrentPlayer->prop->stan;
 
         arg6->f[0] = g_CurrentPlayer->field_488.pos.f[0];
+#ifdef TARGET_N64
         arg6->f[1] = g_CurrentPlayer->field_488.pos.f[1] + (g_MpSwirlDistance * 0.08f);
+#endif
         arg6->f[2] = g_CurrentPlayer->field_488.pos.f[2];
 
 #ifndef TARGET_N64
@@ -14818,6 +14862,28 @@ set_crouch_lean:
             angle = 1.0f;
             sub = 5;
         }
+#ifndef TARGET_N64
+        else if (coopVsRemote(index) && (ppointers[index]->speedsideways != 0.0f)
+            && ((ppointers[index]->speedsideways * ppointers[index]->speedsideways)
+                > (ppointers[index]->speedforwards * ppointers[index]->speedforwards)))
+        {   /* online versus: a strafe faces where they look (see setsubroty
+             * below), so it plays the walk or run with the gun held forward,
+             * as a co-op partner's would, rather than Rare's side-on run */
+            fwd = (ppointers[index]->speedsideways < 0.0f) ? -ppointers[index]->speedsideways : ppointers[index]->speedsideways;
+
+            if ((ppointers[index]->headanim != 0) && (fwd >= 0.4f))
+            {
+                sub = 2;
+                angle = fwd;
+            }
+            else
+            {
+                sub = 1;
+                angle = (fwd + fwd > 1.0f) ? 1.0f : fwd + fwd;
+            }
+            ppointers[index]->field_1280 = 0.0f;
+        }
+#endif
         else if ((ppointers[index]->speedsideways < 0.0f) && (firing_animation_groups[group][4].pointer != NULL))
         {
             sub = 4;
@@ -15050,6 +15116,18 @@ join_768:
     off.x = prop->pos.x;
     off.z = prop->pos.z;
     setsuboffset(chr->model, &off);
+#ifndef TARGET_N64
+    if (coopVsRemote(index))
+    {   /* online versus: another PC's player faces where they look, as a co-op
+         * partner does (coop_look.c). Rare turns a sidestepping body up to 90
+         * degrees into the step (field_1280); with a mouse and keys a player
+         * strafes nearly all the time, so their body ran side-on to the
+         * others, gun out along the run, while they aimed straight at them.
+         * Their sidestep plays the walk or run with the gun forward instead
+         * (the strafe branch above). */
+        ppointers[index]->field_1280 = 0.0f;
+    }
+#endif
     setsubroty(chr->model, (((360.0f - ppointers[index]->vv_theta) + ppointers[index]->field_1280) * M_TAU_F) / 360.0f);
  
     chr->chrflags |= CHRFLAG_INIT;

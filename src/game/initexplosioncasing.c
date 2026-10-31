@@ -2,6 +2,9 @@
 #include <memp.h>
 #include "initexplosioncasing.h"
 #include "explosion.h"
+#ifndef TARGET_N64
+extern s32 coopVsViewCount(void);
+#endif
 
 #ifndef DEBUG
     #ifdef TARGET_N64
@@ -55,7 +58,14 @@ void alloc_explosion_smoke_casing_scorch_impact_buffers(void)
         }
     }
 
+#ifndef TARGET_N64
+    /* always: online versus draws scorches (one view per PC, explosion.c), and
+     * a split-screen stage after a solo one must not keep a pointer into the
+     * freed stage pool */
+    if (TRUE)
+#else
     if (getPlayerCount() == 1)
+#endif
     {
         osSyncPrintf("Allocating %d bytes for scorch data\n", SCORCH_BUFFER_LEN * sizeof(struct Scorch));
         // scorches are the circle burn marks left on the ground from explosions
@@ -75,7 +85,11 @@ void alloc_explosion_smoke_casing_scorch_impact_buffers(void)
         g_BulletImpactBuffer[i].room = -1;
     }
 
+#ifndef TARGET_N64
+    max_particles = MAX_FLYING_PARTICLES / coopVsViewCount();    /* online versus: one view */
+#else
     max_particles = MAX_FLYING_PARTICLES / getPlayerCount();
+#endif
 
     if ((lvlGetCurrentStageToLoad() == LEVELID_STREETS) || (lvlGetCurrentStageToLoad() == LEVELID_DEPOT))
     {
