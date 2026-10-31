@@ -3478,3 +3478,46 @@ while aiming, and Facility's doors look wrong.
   while strafing, lean 0), Facility doors, a 3-player Temple match to the
   end screen (final award picks the same on all three), story co-op
   Facility. Videos and stills: versus-polish/ in the project files.
+
+## Credit for long objectives, and no arrivals during an ending (2026-10-31, COOP_VERSION stays 16)
+
+From the story polish audit: two rough edges left after v0.6.13.
+
+- **Credit that waited too long went to the host.** A level script that sets
+  a stage flag credits whoever passed its last "either player" check
+  (coopScriptSetsFlags). A script that only waits on *another* script's flag
+  had no pass, so its flags went to the host. Aztec: the joiner uses the
+  data tape on the guidance computer (list ai_14 sets 0x200000 as the
+  joiner's), then ai_15 waits on 0x200000, runs the 30 s and 10 s countdowns
+  and sets the launch flags; objective B ("launch shuttle") was the host's.
+  The host now remembers who set each stage flag (sFlagBy, reset each
+  mission), and a passed "flag set?" check in chrai.c
+  (AI_IFObjectiveBitfieldHas, coopScriptFlagPass) hands that player's credit
+  to the waiting script, however long it waits.
+- **A joiner's ending was credited to the host.** When a joiner's copy of the
+  script reaches an ending first (the Dam bungee), coopEndingApply ORs the
+  flags it brings into the host's but never said whose they were, so D went
+  to the host. It now notes the joiner (coopObjNoteUse) and records the
+  flags as theirs.
+- **Arriving during an ending.** A player who followed the host into a
+  mission whose ending had begun loaded in, watched a stranger's cutscene
+  and got its debrief (and once debriefed twice, fixed in the story sweep).
+  The host's HELLO now sets hold bit 1 (COOP_HOLD_ENDING) while its own
+  ending runs (g_PlayerInvincible: only endings turn damage and pickups
+  off; never in versus). A joiner that sees it skips that mission for good
+  (its debrief still names the stage), shows "The mission is ending / You
+  join the next one", and follows the next mission number. Older builds
+  ignore the bit and drop in as before, so COOP_VERSION stays 16.
+- Rig (two copies, mock Steam), before (main) and after:
+  - Aztec, the joiner draws the data tape, uses it on object 15 and presses
+    object 11 (`GE_COOP_STEPS=h73@8,v15@12,x15@16,o11@24,u11@27`): B credit
+    player 1 before, player 2 after.
+  - Dam, the joiner on pad 330 at 30 s (`p330@30`): D credit player 1
+    before, player 2 after.
+  - Dam, the host alone jumps at 6 s (`GE_COOP_SOLO=1 GE_COOP_STEPS=p330@6`),
+    the joiner starts 14 s later: before, "our Bond runs the ending's list
+    0412" and a debrief of a mission it never played; after, "the host's
+    mission 1 is in its ending: joining the next one" and it stays in the
+    lobby.
+  - Mission runs (dam facility runway aztec statue cradle) 6/6, late joins
+    (dam facility frigate) 3/3, joiner spot checks 4/4.
