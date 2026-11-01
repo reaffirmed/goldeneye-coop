@@ -94,6 +94,18 @@ jobs:
           cmake -B build_pc -DCMAKE_BUILD_TYPE=Debug -DGE_VIDEO=ON -DSDL2_LINUX_ROOT="$HOME/sdl2-linux-i686"
           cmake --build build_pc -j$(nproc)
 
+      - name: Co-op warnings, none new (no cart needed)
+        # the game builds with -w; this compiles the co-op files again with
+        # warnings on and fails on any not in coop/ci/warnings-baseline.txt.
+        # An undeclared float function is a real bug here (PR #107)
+        run: |
+          rc=0
+          coop/ci/warnings_check.sh build_pc || rc=$?
+          { echo '### Co-op warnings'; echo; echo '```'; tail -40 build_pc/coop_warnings.diff 2>/dev/null
+            echo "$(awk -F'\t' '{n+=$1} END {print n+0}' build_pc/coop_warnings.now 2>/dev/null) warnings in co-op files (baseline $(awk -F'\t' '!/^#/ {n+=$1} END {print n+0}' coop/ci/warnings-baseline.txt))"
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
+
       - name: Co-op smoothing on a slow, jittery line (no cart needed)
         # coop_interp.c against simulated lines up to 300 ms + 200 ms jitter:
         # fails if partners would stutter (coop/ci/interp_test.c)
