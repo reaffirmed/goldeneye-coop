@@ -3594,3 +3594,13 @@ than 4 m" (Bunker 2 ai_12).
     26 and 27; when the joiner goes down she goes to player 1 (the guards
     there then killed her).
   - Mission runs (bunker2 control train jungle dam statue) 6/6.
+
+## Versus: no hit marker, no arrow toward who hit us
+
+Both are taken out of the versus HUD, as asked (they came in with Item 8,
+feedback, above). coop_hud.c no longer draws the X at the crosshair or the
+red arc on the ring round the middle of the view, and coop_versus.c no
+longer keeps their timers (sVsHitMark, sVsHitKill, sVsHurtTicks,
+sVsHurtFrom) or the two getters. The kill feed stays, and so do the hit and
+kill events themselves: only what was drawn from them is gone. Story co-op
+never had either. Rare's own red flash on taking damage is untouched.

@@ -35,7 +35,7 @@ This is an unofficial fan project. It contains no game assets: every player need
 
 - **The original multiplayer, online,** for 2-4 players on their own screens.
 - Every arena, including Statue and Cradle, and every scenario: Normal, You Only Live Twice, The Living Daylights, The Man with the Golden Gun, Licence to Kill, and the 2 v 1, 2 v 2 and 3 v 1 team games.
-- Game length and weapon sets as in the original, plus a hit marker, a hit direction arrow and a kill feed.
+- Game length and weapon sets as in the original, plus a kill feed.
 
 ### Around the game
 

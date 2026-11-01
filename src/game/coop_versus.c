@@ -95,8 +95,6 @@ extern void portJoyInjectHeld(s8 contpadnum, u16 mask);
 #define VS_DEAD_SETTLE  120     /* ticks a remote death plays before the game counts it as finished */
 #define VS_PKT_EVERY    12      /* ticks between our VERSUS packets (5 a second) */
 #define VS_GONE_AFTER   120     /* ticks without their STATE before a player counts as gone */
-#define VS_HITMARK_TICKS 12     /* our hit marker stays this long, a kill's twice */
-#define VS_HURT_TICKS   60      /* the arrow toward who hit us */
 #ifdef VERSION_EU
 #define CHROBJ_REGEN_TICKS 1000 /* chrprop.c propExecuteTickOperation: a taken pickup's wait */
 #else
@@ -152,10 +150,6 @@ static VsStats sVsCol[COOP_MAX_PLAYERS];    /* by session number, ours included 
 static s32 sVsColHave[COOP_MAX_PLAYERS];
 static s32 sVsBackLocal[MAX_PLAYER_COUNT];  /* hits from behind on our player, by local index, before the columns */
 static s32 sVsColSent;
-static s32 sVsHitMark;          /* ticks left on our hit marker */
-static s32 sVsHitKill;          /* it was a kill */
-static s32 sVsHurtTicks;        /* ticks left on the arrow toward who hit us */
-static f32 sVsHurtFrom[2];      /* where they stood (x, z) */
 static u32 sVsAwardDice;
 static s32 sVsHuntAt = -2;    /* harness (coopVsHarness) */
 static s32 sVsHuntHits;     /* harness: hits we dealt since its last look round */
@@ -292,8 +286,6 @@ void coopVersusStageStart(void)
     sVsTick = 0;
     sVsColSent = 0;
     memset(sVsColHave, 0, sizeof(sVsColHave));
-    sVsHitMark = 0;
-    sVsHurtTicks = 0;
     sVsHuntAt = -2;     /* (the harness reads its settings again) */
 }
 
@@ -630,11 +622,6 @@ s32 coopVersusDamage(f32 damage, f32 vx, f32 vz, s32 attacker, s32 armour)
     h.armour = (u8) (armour != 0);
     coopVsSend(COOPEV_VSHIT, sVsNet[victim], &h, sizeof(h));
     portConLogf("ge: versus: hit player %d for %.3f\n", sVsNet[victim] + 1, damage);
-    if (sVsHitMark < VS_HITMARK_TICKS || !sVsHitKill)
-    {
-        sVsHitMark = VS_HITMARK_TICKS;
-        sVsHitKill = 0;
-    }
     sVsHuntHits++;
     return 1;
 }
@@ -797,11 +784,6 @@ static void coopVsApplyKill(const VsKill *k)
         g_playerPlayerData[lv].have_token_or_goldengun = 0;
     }
     portConLogf("ge: versus: player %d killed player %d\n", ((k->killer == 0xFF) ? k->victim : k->killer) + 1, k->victim + 1);
-    if (lk == 0 && lv != 0)
-    {   /* ours: the marker turns red */
-        sVsHitMark = VS_HITMARK_TICKS * 2;
-        sVsHitKill = 1;
-    }
     coopVsKillFeed(lk, lv);
 }
 
@@ -984,12 +966,6 @@ void coopVersusApplyEvent(s32 kind, s32 from, const void *raw)
             {
                 portConLogf("ge: versus: hit by player %d for %.3f\n", from + 1, h->damage);
                 record_damage_kills(h->damage, h->vx, h->vz, lk, h->armour);
-                if (g_playerPointers[lk]->prop != NULL)
-                {   /* the arrow points where their body is here */
-                    sVsHurtFrom[0] = g_playerPointers[lk]->prop->pos.f[0];
-                    sVsHurtFrom[1] = g_playerPointers[lk]->prop->pos.f[2];
-                    sVsHurtTicks = VS_HURT_TICKS;
-                }
             }
             break;
         }
@@ -1786,34 +1762,6 @@ static void coopVsAudit(void)
 
 /* ---- every tick (coop.c coopTick) ------------------------------------------------- */
 
-/* coop_hud.c: our hit marker, 0 when none (2 a kill), and the size it has left */
-s32 coopVersusHitMarker(f32 *left)
-{
-    if (!coopVersus() || sVsHitMark <= 0)
-    {
-        return 0;
-    }
-    *left = (f32) sVsHitMark / (f32) (sVsHitKill ? VS_HITMARK_TICKS * 2 : VS_HITMARK_TICKS);
-    return sVsHitKill ? 2 : 1;
-}
-
-/* coop_hud.c: where whoever last hit us stood (their body here), for the
- * arrow toward them; 0 when there is none */
-s32 coopVersusHurtFrom(coord3d *pos, f32 *left)
-{
-    struct player *me = g_playerPointers[0];
-
-    if (!coopVersus() || sVsHurtTicks <= 0 || me == NULL || me->prop == NULL || me->bonddead)
-    {
-        return 0;
-    }
-    pos->f[0] = sVsHurtFrom[0];
-    pos->f[1] = me->prop->pos.f[1];
-    pos->f[2] = sVsHurtFrom[1];
-    *left = (f32) sVsHurtTicks / (f32) VS_HURT_TICKS;
-    return 1;
-}
-
 void coopVersusTick(void)
 {
     s32 li;
@@ -1823,14 +1771,6 @@ void coopVersusTick(void)
         return;
     }
     sVsTick++;
-    if (sVsHitMark > 0)
-    {
-        sVsHitMark--;
-    }
-    if (sVsHurtTicks > 0)
-    {
-        sVsHurtTicks--;
-    }
     coopVsAudit();
     coopVsWander();
     coopVsDoorHarness();
