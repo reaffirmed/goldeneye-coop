@@ -26,8 +26,9 @@
 # Exit 1 when a check fails (a crash, an unresolved desync, a joiner that
 # never got the join snapshot, events dropped from a full queue, or, with
 # FAILON_MIGRATE=1, no migration after a host kill, or, with FAILON_SPLIT=1,
-# a cut that left two hosts: no copy stepped down to the other and got its
-# join snapshot again).
+# a cut that made a joiner take over and left two hosts: no copy stepped
+# down to the other and got its join snapshot again; a cut the joiner rode
+# out without taking over passes).
 BUILD=${BUILD:-/home/dev/project/build_pc}
 OUT=${OUT:-/out}
 N=${N:-2}
@@ -113,7 +114,7 @@ grep -qi "segmentation\|signal 11\|assert" "$OUT"/p*.log && fail="$fail crash"
 for i in $(seq 2 $N); do
     [ -f "$OUT/p$i.log" ] && ! grep -q "repl: join snapshot applied" "$OUT/p$i.log" && fail="$fail p$i-never-joined"
 done
-if [ "$FAILON_SPLIT" = 1 ] && { [ "$(cnt 'joining its game')" -eq 0 ] \
+if [ "$FAILON_SPLIT" = 1 ] && [ "$(cnt 'took over [0-9]* chrs')" -gt 0 ] && { [ "$(cnt 'joining its game')" -eq 0 ] \
         || [ "$(cnt 'repl: join snapshot applied')" -lt "$N" ]; }; then fail="$fail split"; fi
 if [ "$FAILON_MIGRATE" = 1 ] && [ "$(cnt 'took over [0-9]* chrs')" -eq 0 ]; then fail="$fail no-migration"; fi
 echo "result: ${fail:-PASS}" >> "$OUT/summary.txt"
