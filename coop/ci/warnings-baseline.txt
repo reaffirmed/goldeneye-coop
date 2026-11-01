@@ -15,7 +15,6 @@
 4	src/game/coop.c: comparison between pointer and integer
 1	src/game/coop.c: comparison is always true due to limited range of data type [-Wtype-limits]
 2	src/game/coop.c: comparison of integer expressions of different signedness: 'u32' {aka 'unsigned int'} and 's32' {aka 'int'} [-Wsign-compare]
-1	src/game/coop.c: implicit declaration of function 'fmodf' [-Wimplicit-function-declaration]
 1	src/game/coop.c: implicit declaration of function 'gunRequestHandWeaponChange' [-Wimplicit-function-declaration]
 1	src/game/coop.c: implicit declaration of function 'memset' [-Wimplicit-function-declaration]
 1	src/game/coop.c: implicit declaration of function 'strcat' [-Wimplicit-function-declaration]
@@ -60,7 +59,6 @@
 3	src/game/coop_chat.c: pointer targets in passing argument 1 of 'strchr' differ in signedness [-Wpointer-sign]
 8	src/game/coop_chat.c: pointer targets in passing argument 1 of 'strlen' differ in signedness [-Wpointer-sign]
 1	src/game/coop_checklist.c: comparison of distinct pointer types lacks a cast
-1	src/game/coop_checklist.c: implicit declaration of function 'fabsf' [-Wimplicit-function-declaration]
 1	src/game/coop_checklist.c: implicit declaration of function 'gunRequestHandWeaponChange' [-Wimplicit-function-declaration]
 1	src/game/coop_checklist.c: implicit declaration of function 'memset' [-Wimplicit-function-declaration]
 1	src/game/coop_checklist.c: missing braces around initializer [-Wmissing-braces]
@@ -86,7 +84,6 @@
 1	src/game/coop_interp.c: implicit declaration of function 'memmove' [-Wimplicit-function-declaration]
 1	src/game/coop_interp.c: implicit declaration of function 'memset' [-Wimplicit-function-declaration]
 1	src/game/coop_items.c: assignment to 'ObjectRecord *' from 'int' makes pointer from integer without a cast [-Wint-conversion]
-1	src/game/coop_items.c: implicit declaration of function 'getsubroty'; did you mean 'getsubopt'? [-Wimplicit-function-declaration]
 1	src/game/coop_items.c: implicit declaration of function 'memset' [-Wimplicit-function-declaration]
 1	src/game/coop_items.c: implicit declaration of function 'objFindByTagId' [-Wimplicit-function-declaration]
 3	src/game/coop_items.c: missing braces around initializer [-Wmissing-braces]
@@ -105,11 +102,6 @@
 1	src/game/coop_ping.c: implicit declaration of function 'getCurrentPlayerWeaponId'; did you mean 'getCurrentPlayerPrevPos'? [-Wimplicit-function-declaration]
 1	src/game/coop_ping.c: implicit declaration of function 'memset' [-Wimplicit-function-declaration]
 1	src/game/coop_repl.c: implicit declaration of function 'memset' [-Wimplicit-function-declaration]
-1	src/game/coop_repl.c: implicit declaration of function 'modelSetAnimEndFrame' [-Wimplicit-function-declaration]
-1	src/game/coop_repl.c: implicit declaration of function 'modelSetAnimation' [-Wimplicit-function-declaration]
-1	src/game/coop_repl.c: implicit declaration of function 'objecthandlerGetModelAnim' [-Wimplicit-function-declaration]
-1	src/game/coop_repl.c: initialization of 'ModelAnimation *' from 'int' makes pointer from integer without a cast [-Wint-conversion]
-1	src/game/coop_repl.c: pointer/integer type mismatch in conditional expression
 1	src/game/coop_screens.c: '%s' directive output may be truncated writing up to 191 bytes into a region of size 72 [-Wformat-truncation=]
 1	src/game/coop_screens.c: passing argument 1 of 'sndPlaySfx' from incompatible pointer type [-Wincompatible-pointer-types]
 1	src/game/coop_screens.c: pointer targets in initialization of 'const char *' from 'unsigned char *' differ in signedness [-Wpointer-sign]
