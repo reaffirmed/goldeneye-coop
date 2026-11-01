@@ -3693,3 +3693,37 @@ packet layout changed.
     back at 90 s, host cut 8 s, joiner cut 10 s. All pass on both, no
     events dropped, no unresolved desync; host upload 12.7 to 18.8 KB/s
     and round trips within 25 ms of main except around the host kill.
+
+## Two hosts settle on one (COOP_VERSION 17)
+
+The first change of the 0.7 bump (NET-3, approved by the coordinator). A
+line that goes quiet for longer than the joiner's wait (2 s, then 3.5 s in
+a mission) makes the joiner take over although the host is still there: on
+the rig a 6 s joiner-side cut did it, and so did 7 of 9 Valentin runs with a
+6 s cut (campaign evidence). When the line came back both copies hosted and
+each took the other as its joiner, each with its own guards, for good.
+
+- Every host's hello sets hold bit 2 (COOP_HOLD_HOSTING) and carries
+  hostgen, the host changes its game has been through (0 for the game that
+  opened the lobby; a migration takes the old host's + 1). It sits in the
+  old pad, so the hello keeps its size.
+- A host that hears another host's hello (coopTwoHosts) keeps the game
+  with more players besides the other, then the one with fewer host
+  changes (the game that was there first: the old host after a joiner-side
+  cut), then the lower SteamID. Both work it out from the same two hellos.
+  "two hosts: player on channel %d hosts too (%d players to our %d, %d
+  host changes to our %d): we keep ours | joining its game".
+- The one that loses sends its other joiners BYE STEPDOWN with the
+  winner's id (new reason, new tohost field: the BYE grows to 24 bytes),
+  then coopJoinOtherHost: the network takes the winner as host, the
+  session starts over (a new session id, so the winner restarts our channel
+  and drops our old session's late packets), and the mission ends back to
+  the lobby, where we follow the host in as any late joiner and get the
+  join snapshot. A joiner that gets STEPDOWN from its host does the same.
+- No ids on the UDP transport (tests): no settling there.
+- A host whose event queue to a joiner overflowed (256 not acked) sends
+  that joiner the join snapshot again once the queue drains ("event queue
+  to player %d drained after dropping events: snapshot again"). No packet
+  change; a joiner's own dropped events are mended by the checksums.
+- net_scenarios.sh: a "two hosts" line, and FAILON_SPLIT=1 fails a run in
+  which a joiner took over but nobody stepped down and got its snapshot.
