@@ -3704,6 +3704,30 @@ packet layout changed.
     events dropped, no unresolved desync; host upload 12.7 to 18.8 KB/s
     and round trips within 25 ms of main except around the host kill.
 
+## Takeover crash: a guard shown dying keeps a stale index (2026-11-01, COOP_VERSION stays 16)
+
+Campaign run valpb1 (a 6 s joiner cut): the joiner took over and crashed
+with signal 11 in chrlvIterateGuardSeeShotDie, from chrlvTickDie. The guard
+was chr 6, removed on the host, mirrored again into another slot and shown
+dying there (coopMirrorDying). coopTakeOverWorld skips a slot whose AI sync
+doesn't name its chr, so the guard kept ACT_DIE and got the host's AI.
+coopMirrorDying set only the actiontype and the two extra-time fields, and
+act_die.notifychrindex (act_init.padding[0]) is where
+chrlvIterateGuardSeeShotDie starts walking g_ChrSlots. Whatever the slot's
+last action left there stayed, for example -1 from chrlvActorFadeAway's
+allowfade, so it read g_ChrSlots[-1] and crashed. The game's own deaths set
+the index to 0.
+
+- coopMirrorDying sets notifychrindex 0 and both thud frames -1, as the
+  game's deaths do (no thud on the first tick).
+- coopTakeOverWorld: a dying or argh chr it skips, with an index outside
+  g_ChrSlots, is set back to 0 ("chr %d was dying with no AI sync: its
+  death goes on here").
+- GE_COOP_TESTDYINGTAKEOVER=1 (harness only): when we take over, the first
+  living guard becomes such a chr (index -1, no AI sync). Before the fix,
+  the rig (joiner cut 20 s, N=2) crashed with the same frames as valpb1's
+  crash report. After the fix it plays on.
+
 ## Two hosts settle on one (COOP_VERSION 17)
 
 The first change of the 0.7 bump (NET-3, approved by the coordinator). A

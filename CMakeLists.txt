@@ -490,3 +490,21 @@ if(GE_VIDEO)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${CMAKE_SOURCE_DIR}/tools/shaders_base.txt $<TARGET_FILE_DIR:ge>/Data/shaders_base.txt)
 endif()
+
+# ---------------------------------------------------------------------------
+# Co-op warnings check (coop/ci/warnings_check.sh). The tree builds with -w,
+# so co-op code gets no diagnostics, and an undeclared function compiles as
+# int f() with no word (floats then pass as doubles and come back garbage).
+# This target compiles the co-op files again with warnings on, into objects
+# nothing links: the game's own flags and binary are untouched. Build it
+# with `cmake --build <dir> --target coop_warnings`.
+set(COOP_WARN_SRC ${GAME_SRC} ${PORT_SRC})
+list(FILTER COOP_WARN_SRC INCLUDE REGEX "/coop[^/]*\\.c$")
+add_library(coop_warnings OBJECT EXCLUDE_FROM_ALL ${COOP_WARN_SRC})
+get_target_property(COOP_WARN_OPTS coop_warnings COMPILE_OPTIONS)
+list(REMOVE_ITEM COOP_WARN_OPTS -w)
+set_target_properties(coop_warnings PROPERTIES COMPILE_OPTIONS "${COOP_WARN_OPTS}")
+target_compile_options(coop_warnings PRIVATE -Wall -Wextra -Wno-unused-parameter)
+target_include_directories(coop_warnings PRIVATE $<TARGET_PROPERTY:ge,INCLUDE_DIRECTORIES>)
+target_compile_definitions(coop_warnings PRIVATE $<TARGET_PROPERTY:ge,COMPILE_DEFINITIONS>)
+add_dependencies(coop_warnings ge_buildinfo)
