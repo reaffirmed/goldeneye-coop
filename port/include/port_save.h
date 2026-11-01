@@ -33,6 +33,16 @@ int portSaveCommit(FILE *f);
 /* The full path of a file in Data/Saves (a static buffer). */
 const char *portSavePath(const char *name);
 
+/* Any whole file written safely (settings, profiles, eeprom.bin): the bytes
+ * go to <path>.tmp, which is flushed to the disk and only then renamed over
+ * path, so a crash, a power cut or a full disk mid-write leaves the old file
+ * as it was instead of a short or empty one. portFileWriteEnd: 1 when path
+ * now holds what was written, 0 when it was left alone (the .tmp is gone
+ * either way). portFileWriteAbort drops what was written. */
+FILE *portFileWriteBegin(const char *path, const char *mode);
+int portFileWriteEnd(FILE *f);
+void portFileWriteAbort(FILE *f);
+
 /* At start: back the saves up when this is a different build from the one
  * that wrote them last. */
 void portSaveBootCheck(void);
