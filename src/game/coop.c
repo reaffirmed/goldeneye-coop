@@ -11968,9 +11968,10 @@ static void coopHostileTick(void)
     if (at == -2)
     {
         const char *e = getenv("GE_COOP_TESTHOSTILE");
+        const char *colon = (e != NULL) ? (const char *) strchr((const unsigned char *) e, ':') : NULL;
 
         at = (e != NULL) ? atoi(e) * 60 : -1;
-        mask = (e != NULL && strchr(e, ':') != NULL) ? (s32) strtol(strchr(e, ':') + 1, NULL, 0) : 0x1F;
+        mask = (colon != NULL) ? (s32) strtol(colon + 1, NULL, 0) : 0x1F;
     }
     if (at < 0 || coopNetIsHost() || !coopInMission() || (s32) sMissionTicks != at)
     {
