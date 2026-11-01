@@ -7,8 +7,13 @@
 # Layout (the one handed to friends):
 #   GoldenEye-Coop/ProjectMidas.exe SDL2.dll steam_api.dll steam_appid.txt
 #                  Host co-op.bat Join co-op.bat README-COOP.txt
+#                  LICENSE.txt THIRD_PARTY_NOTICES.txt
 #                  gamecontrollerdb.txt gamecontrollerdefault.txt midas_ini_help.txt
 #                  Data/README.txt Data/shaders_base.txt
+#
+# LICENSE.txt and THIRD_PARTY_NOTICES.txt: the MIT code in the exe (the port
+# itself, Fast3D, glad) asks for its notice in every copy; the notices also
+# credit SDL2 and SDL_GameControllerDB, which ship beside it.
 #
 # steam_api.dll is the 32-bit one from Steamworks.NET Standalone 2025.164.1
 # (Windows-x86, SHA-256 fdafb7c6...). Never packs a ROM.
@@ -34,6 +39,8 @@ for b in "Host co-op.bat" "Join co-op.bat"; do
     sed 's/\r$//; s/$/\r/' "coop/package/$b" > "$dir/$b"
 done
 cp coop/package/README-COOP.txt "$dir/"
+sed 's/\r$//; s/$/\r/' LICENSE > "$dir/LICENSE.txt"
+sed 's/\r$//; s/$/\r/' tools/THIRD_PARTY_NOTICES.txt > "$dir/THIRD_PARTY_NOTICES.txt"
 cp tools/gamecontrollerdb.txt tools/gamecontrollerdefault.txt tools/midas_ini_help.txt "$dir/"
 cp tools/Data_README.txt "$dir/Data/README.txt"
 cp tools/shaders_base.txt "$dir/Data/shaders_base.txt"

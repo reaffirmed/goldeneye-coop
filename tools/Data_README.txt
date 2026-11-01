@@ -16,7 +16,8 @@ The file name and extension do not matter; the game checks the first bytes.
   .n64     word-swapped   40 12 37 80
 
 The image must be the stock (U) cart: 12,582,912 bytes. A modded cart,
-another region or a bad dump is rejected at startup, and the log says why.
+another region, a bad dump or a short copy is rejected at startup, and the
+message says which of those it found (the log has the details).
 
 Where the game looks, in order
 ------------------------------

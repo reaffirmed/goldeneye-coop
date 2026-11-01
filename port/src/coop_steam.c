@@ -998,6 +998,18 @@ static void pump(void)
     sPolls++;
 }
 
+static int sOffWhy;     /* COOPSTEAM_OFF_*: why steamOpen last failed */
+
+int coopSteamOffReason(void)
+{
+    return sReady ? COOPSTEAM_OFF_NONE : sOffWhy;
+}
+
+const char *coopSteamLibName(void)
+{
+    return STEAM_LIB;
+}
+
 static int steamOpen(void)
 {
     char err[1024];
@@ -1007,20 +1019,26 @@ static int steamOpen(void)
     {
         return 1;
     }
-    sLib = LIB_OPEN(STEAM_LIB);
+    if (sLib == NULL)
+    {
+        sLib = LIB_OPEN(STEAM_LIB);
+    }
     if (sLib == NULL)
     {
         portConLogf("ge: steam: %s not found next to the game; co-op is off\n", STEAM_LIB);
+        sOffWhy = COOPSTEAM_OFF_NOLIB;
         return 0;
     }
     if (!loadAll())
     {
+        sOffWhy = COOPSTEAM_OFF_BADLIB;
         return 0;
     }
     writeAppId();
     if (!pIsSteamRunning())
     {
         portConLogf("ge: steam: Steam is not running; start it and log in, then launch again\n");
+        sOffWhy = COOPSTEAM_OFF_NOTRUNNING;
         return 0;
     }
     memset(err, 0, sizeof(err));
@@ -1028,6 +1046,7 @@ static int steamOpen(void)
     if (r != 0)
     {
         portConLogf("ge: steam: init failed (%d): %s\n", r, err);
+        sOffWhy = COOPSTEAM_OFF_INITFAILED;
         return 0;
     }
     pMDInit();

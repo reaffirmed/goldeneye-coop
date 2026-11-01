@@ -50,6 +50,8 @@ void coopMissionComplete(void);
 s32  coopFrontTick(void);
 s32  coopAltBondBegin(s32 k); /* 1: "Bond" is now the k-th living partner (from 0), call coopAltBondEnd */
 void coopAltBondEnd(void);
+s32  coopLostBondBegin(s32 k); /* 1: "Bond" is now the k-th partner whose line went quiet (still standing there), call coopLostBondEnd */
+void coopLostBondEnd(void);
 PropRecord *coopAutogunTarget(PropRecord *gun, f32 aimdist, f32 rot, f32 arcmin, f32 arcmax); /* propobj.c: who a drone gun aims at */
 s32  coopOwnBondCounts(void);         /* 0: a level script's own-Bond check skips the host's body (down, a partner standing) */
 s32  coopLevelFallCheckOff(f32 y);   /* 1: a level script's fall check that co-op leaves to each player's own game */
@@ -752,6 +754,7 @@ s32  coopVoiceMuteRowMask(void);
 /* objective credit (coop_objective.c): the host names who completed each
  * objective and every game shows a toast for a partner's */
 void coopObjNoteActor(s32 player, s32 damage);  /* host: something player did just changed the world */
+s32  coopObjRecentDamage(void);  /* host: who did damage in the last few seconds, or -1 (coop_objective.c) */
 void coopObjNoteSelf(void);     /* this game's own Bond did it: a photo, a room, a pickup, ... */
 void coopObjNoteUse(s32 player);    /* host: player used or planted something; credit for a few seconds */
 void coopObjStatusChanged(s32 index, s32 letter, s32 status);  /* objective_status.c */

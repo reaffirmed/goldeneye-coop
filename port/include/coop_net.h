@@ -39,6 +39,16 @@ int  coopNetIsLobbyMember(unsigned long long id); /* Steam: id is in our lobby; 
 
 /* Steam backend (coop_steam.c), used by coop_net.c when GE_COOP starts with "steam" */
 int  coopSteamInit(const char *spec);
+/* why the last try to open Steam failed, for the CO-OP screen (0 once it opens) */
+enum {
+    COOPSTEAM_OFF_NONE = 0,
+    COOPSTEAM_OFF_NOLIB,        /* steam_api.dll / libsteam_api.so isn't beside the game */
+    COOPSTEAM_OFF_BADLIB,       /* it is, but lacks what the game calls: damaged or the wrong one */
+    COOPSTEAM_OFF_NOTRUNNING,   /* Steam isn't running */
+    COOPSTEAM_OFF_INITFAILED    /* Steam is running but turned the game away (not logged in, offline) */
+};
+int  coopSteamOffReason(void);
+const char *coopSteamLibName(void);
 int  coopSteamIsHost(void);
 int  coopSteamHasPeer(void);
 int  coopSteamPeerConnected(int peer);

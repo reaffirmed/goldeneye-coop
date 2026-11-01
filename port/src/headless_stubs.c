@@ -110,3 +110,101 @@ f32 portInputMouseAimScale(void)
 {
     return 1.0f;
 }
+
+/* Added for the headless build to link again: each returns what video.c,
+ * input_pc.c or gfx_sdl2.cpp give with no midas.ini and no pad attached. */
+
+/* gfx_sdl2.cpp: a forced screenshot's path; no renderer, never taken */
+int ge_shot_force;
+char ge_shot_path[512];
+
+/* video.c */
+void portVideoKbdDigitalMove(s32 *dx, s32 *dy)
+{
+    *dx = 0;
+    *dy = 0;
+}
+
+s32 portHudWideCfg(void)
+{
+    return -1; /* not set: the save's ratio stands */
+}
+
+void portHudWideAdopt(s32 wide)
+{
+    (void)wide;
+}
+
+s32 portCaptionsClassic(void)
+{
+    return 0;
+}
+
+s32 portPartnerFade(void)
+{
+    return 1;
+}
+
+void portVideoBindsResetDefaults(void)
+{
+}
+
+s32 portPlayerCrosshairOwn(s32 player)
+{
+    (void)player;
+    return -2; /* follow the global */
+}
+
+s32 portPlayerCrosshairColor(s32 player)
+{
+    (void)player;
+    return -1; /* the global default */
+}
+
+void portPlayerCrosshairSet(s32 player, s32 rgb)
+{
+    (void)player; (void)rgb;
+}
+
+s32 portTextInputActive(void)
+{
+    return 0;
+}
+
+void portRequestQuit(void)
+{
+}
+
+void portObjectivesHudToggle(void)
+{
+}
+
+/* input_pc.c: no pads */
+s32 portInputGlyphStyle(void)
+{
+    return 0;
+}
+
+s32 portInputDeviceModeRaw(s32 dev)
+{
+    (void)dev;
+    return 0;
+}
+
+s32 portInputPadResetDefaults(s32 dev)
+{
+    (void)dev;
+    return 0;
+}
+
+s32 portInputLayoutInUse(s32 dev)
+{
+    (void)dev;
+    return -1;
+}
+
+const char *portInputLayoutShown(s32 dev)
+{
+    (void)dev;
+    return "";
+}

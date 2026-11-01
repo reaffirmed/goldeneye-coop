@@ -100,6 +100,14 @@ double cos(double);
 
 float  sqrtf(float);
 
+/* PC port: libm functions the game calls that the disabled block below would
+ * declare. Without these the calls are implicit int f() declarations, which
+ * pass float arguments as doubles and read the float result from the wrong
+ * register, so they return garbage. */
+float  fabsf(float);
+float  fmodf(float, float);
+float  tanf(float);
+
 #endif
 
 #if 0

@@ -43,8 +43,10 @@ Working notes for online story co-op (Steam, Spacewar AppID 480), following the 
 The owner approved (2026-10-24) porting code from GoldenEye 007 Plus
 (github.com/Joshua-1248/GoldenEye-007-Plus, an N64 mod of the same decomp with 1-4
 player split-screen campaign co-op) where it helps, improving it where possible.
-GE+ has no blanket license for its own changes, so this fork stays private.
 Every ported piece is listed here with its source file; rewritten pieces say so.
+
+Credit: GoldenEye 007 Plus by Joshua (Joshua-1248). It is credited in
+`README.md` and `tools/THIRD_PARTY_NOTICES.txt`.
 
 | Piece | Source in GE+ | Ported or rewritten |
 | --- | --- | --- |
@@ -1224,7 +1226,15 @@ on the paper) and scroll as before.
 - .github/workflows/coop-missions.yml runs it on every push. The cart image
   comes from the "ci-rom" release as baserom.u.z64.gpg (gpg symmetric,
   passphrase in the CI_ROM_KEY secret), checked against the US sha1 and
-  deleted at the end; without the secret the job only leaves a notice.
+  deleted at the end. Without the secret or the release the mission job
+  shows as skipped and the summary says NOT RUN; on main, coop/story and v*
+  tags of reaffirmed/goldeneye-coop the "cart image" job also fails, so the
+  run is red. The repo is public, so a ci-rom release would be public too:
+  how CI gets the cart image is still open (task board BUILD-2).
+  Until 2026-11-01 a missing secret left a notice and a green job, and all
+  225 runs to then were that 4-11 s skip: neither CI_ROM_KEY nor the ci-rom
+  release had been set up, so these runs had never run in CI. A stage with
+  no result line, or a run with no stages, now fails instead of passing.
 - First run caught a bug: with 2% loss a lost join snapshot datagram left the
   joiner waiting for it for good, and the checksum (which waits for the
   snapshot) never ran. Now the first checksum a second after the last

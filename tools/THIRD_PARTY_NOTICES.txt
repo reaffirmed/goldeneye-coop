@@ -1,8 +1,9 @@
 Project Midas - third-party notices
 ===================================
 
-Project Midas includes code from the projects below. Each keeps its own
-license, reproduced here as its terms require.
+GoldenEye Coop is built on Project Midas. Together they include code from
+the projects below. Each keeps its own license, reproduced here as its terms
+require.
 
   Component                          License     Used in
   Fast3D renderer (port/fast3d)      MIT         every build
@@ -19,6 +20,8 @@ license, reproduced here as its terms require.
   ENet                               MIT         netplay builds
   Perfect Dark decompilation         MIT         netplay builds (via the
                                                  Perfect Dark netplay fork)
+  GoldenEye 007 Plus (guard          credit,     every build
+    targeting in src/game/chr.c)     see below
   gzip 1.2.4 (tools/gzipsrc)         GPL-2.0+    build tools only, not shipped
   puff (tools/extractor)             zlib        build tools only, not shipped
   armips (tools/armips.cpp)          MIT         build tools only, not shipped
@@ -203,6 +206,19 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+GoldenEye 007 Plus
+------------------
+https://github.com/Joshua-1248/GoldenEye-007-Plus, by Joshua (Joshua-1248).
+
+GoldenEye Coop's guard targeting (which player a guard chases, when it
+commits to that player, and when it lets go) is ported from GoldenEye 007
+Plus. The ported pieces are listed in coop/NOTES.md, "Provenance: GoldenEye
+007 Plus".
+
+Thanks to Joshua for GoldenEye 007 Plus, whose split-screen campaign co-op
+showed how guards can choose between several Bonds.
 
 
 gzip 1.2.4

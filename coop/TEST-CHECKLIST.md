@@ -5,10 +5,18 @@ testing so far comes from a script, effect or check that only looks at one
 player. This checklist runs each mission with the **joiner** doing the work
 while the host stays back, so any place that still only sees the host shows up.
 
-How to use it: play each row (or run its rig line), then fill in **Result**
-with `pass`, `fail` (plus a note) or `untestable` (plus why). "Both screens"
-means host and joiner must agree. A row that only shows on the joiner's
-screen while the host's script moved on (or the other way round) is a fail.
+How to use it: play each row (or run its rig line), then set **Result** to one
+of four statuses, with the build, the environment and where the evidence is:
+
+- **PASS**: run on that build and every "both screens" item held.
+- **FAIL**: run and something didn't; the note says what, and the task that tracks it.
+- **BLOCKED**: can't be run in that environment yet; the note says what is missing.
+- **NOT RUN**: not run on that build (no rig line yet, or queued); the note says which.
+
+A result from an older build is kept after "Earlier:" and never counts for the
+current one. "Both screens" means host and joiner must agree. A row that only
+shows on the joiner's screen while the host's script moved on (or the other way
+round) is a fail.
 
 ## Bug families
 
@@ -39,9 +47,25 @@ screen while the host's script moved on (or the other way round) is a fail.
   joiner log the same lines a moment later.
 
 Rig lines use the test rig in `coop/ci/checklist/` (see its README), which drives
-the players with `GE_COOP_STEPS` and the `GE_COOP_TEST*` switches. Results below are
-from the bug-fix branch on 2026-10-29 (heads 620f526 to 93ea314), US cart, Linux
-build, mock Steam. A blank result was not run.
+the players with `GE_COOP_STEPS` and the `GE_COOP_TEST*` switches. A name in
+backticks in the **Rig check** column is a row in `coop/ci/checklist/rows.py`
+(`python3 coop/ci/checklist/rows.py out D2` runs it and judges it from the logs).
+
+**Current results: `main` at 0d88b92 (v0.6.15), 2026-11-01.** Environment "rig":
+the Linux i686 build, two to four copies on one machine over the mock Steam
+(`coop/mock`), US cart, software GL, both players invulnerable unless a row is
+about dying. It is not real Steam and not the internet: a PASS here says the
+game logic agrees, not how it plays across real links. Rows marked "campaign"
+were run by the campaign workstream on the same build and rig; their logs are in
+the project files under `goldeneye-coop/campaign/evidence-0d88b92/`, and QA's under
+`goldeneye-coop/qa/evidence-0d88b92/`. Also on 0d88b92: CI `mission_runs.sh` 20/20
+(lossy link), its three late joins 3/3, `joiner_spots.sh` 4/4, and the objective
+sweep (`rows.py out sweep`) 16/16.
+
+Tally on 0d88b92, 101 rows: 59 PASS, 3 FAIL (ST2 and ST4 when the joiner's line
+drops for 3 s or more during the Statue meeting, fix in PR #114; X9, the split
+after an 8 to 10 s cut, NET-3), 3 BLOCKED (A2, T2, T5), 36 NOT RUN (X3b and X4b are the door and objective halves of X3 and X4, split out because the rig lines do not check them). "Earlier" results are from the bug-fix branch
+on 2026-10-29 and 2026-10-30 (heads 620f526 to 93ea314) unless they say otherwise.
 
 **Fixed: intermittent desync.** In joiner-heavy runs where a blast kills guards
 (Caverns, Jungle, Depot), the joiner sometimes logged "repl: unresolved desync: the
@@ -62,191 +86,191 @@ ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| D1 | ONEPLAYER, SPLITOBJ | Walks into the bungee room alone, jumps | Bungee objective completes on both; both get the ending | `bungee` || pass (rig, 2 and 3 players; failed on 620f526, fixed in 74d3da9) |
-| D2 | ACTION | Shoots out every alarm box (00 Agent) | "Neutralize all alarms" completes on both | || pass (rig: joiner breaks all 4 alarms, 00 Agent) |
-| D3 | KEYITEM | Picks up and places the covert modem on the satellite link (SA+) | Objective completes on both; the host's inventory no longer shows a modem to place | | fail, fixed (rig, 2026-10-30): a modem the joiner threw short fell through the level on the host, so B failed only on the joiner (now on both, as in solo); a modem on the link was not re-run |
-| D4 | ACTION | Uses the mainframe for the data backup (00 Agent) | Completes on both | | not run (rig, 2026-10-30): guard fire in the rig destroyed both mainframes first, with the host doing it too |
-| D5 | LATEJOIN | Joins late after the host raised the alarm | Alarm is sounding on the joiner, guards alerted | `lateAlarm` || pass (rig: drop-in at 35 s sees the alarm on) |
-| D6 | CUTJOIN | Joins during the opening swirl | Joiner spawns into play, not a frozen camera | | |
-| D7 | SCRIPTDEATH | Dies on the bungee platform while the host is far away | Respawns beside the host; jump still possible | | |
+| D1 | ONEPLAYER, SPLITOBJ | Walks into the bungee room alone, jumps | Bungee objective completes on both; both get the ending | `D1` | **PASS** (rig, 0d88b92, `rows.py D1`); also CI `joiner_spots.sh bungee`: A complete, one mission end and a debrief on each. Earlier: pass (rig, 2 and 3 players; failed on 620f526, fixed in 74d3da9). |
+| D2 | ACTION | Shoots out every alarm box (00 Agent) | "Neutralize all alarms" completes on both | `D2` | **PASS** (rig, 0d88b92, `rows.py D2`), 00 Agent: A completes on both, credit player 2; same in `SW-dam`. Earlier: pass (rig: joiner breaks all 4 alarms, 00 Agent). |
+| D3 | KEYITEM | Picks up and places the covert modem on the satellite link (SA+) | Objective completes on both; the host's inventory no longer shows a modem to place | | **NOT RUN** on 0d88b92: no rig line places the modem on the link yet. Earlier: fail, fixed (rig, 2026-10-30): a modem the joiner threw short fell through the level on the host, so B failed only on the joiner (now on both, as in solo); a modem on the link was not re-run. |
+| D4 | ACTION | Uses the mainframe for the data backup (00 Agent) | Completes on both | `D4` | **NOT RUN** on 0d88b92: the rig line (`rows.py D4`: modem flag set, the joiner uses both mainframes; the host logs both uses) never starts the backup, and neither does the host alone (`D4-solo`), so the line misses a step of the script. Earlier: not run (rig, 2026-10-30): guard fire in the rig destroyed both mainframes first, with the host doing it too. |
+| D5 | LATEJOIN | Joins late after the host raised the alarm | Alarm is sounding on the joiner, guards alerted | `D5` | **PASS** (rig, 0d88b92, `rows.py D5`): host raises the alarm at 15 s, the joiner drops in after it and its first world state has the alarm on and stage flag 0x40000000. Earlier: pass (rig: drop-in at 35 s sees the alarm on). |
+| D6 | CUTJOIN | Joins during the opening swirl | Joiner spawns into play, not a frozen camera | `D6` | **PASS** (rig, 0d88b92, `rows.py D6`): host watches its whole intro (no skip), the joiner arrives during it, ends the intro with the host ("the host's intro of stage 33 is over") and plays (its step at 20 s runs). |
+| D7 | SCRIPTDEATH | Dies on the bungee platform while the host is far away | Respawns beside the host; jump still possible | | **PASS** (rig, 0d88b92, campaign run, logs `campaign/evidence-0d88b92/row-runs-2.tgz d7`). |
 
 ## 2. Facility
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| F1 | SPAWN | Reaches Doak's lab first, looking at his spawn spot | Doak appears on both screens; "Contact 006/Doak" objective not failed | `doak` || pass (rig, 2 and 3 players) |
-| F2 | SPLITOBJ | Meets Doak first (the known "objective B failed" flash) | No "failed" message on either screen, even briefly | `doak` || pass (rig: no failed flash) |
-| F3 | KEYITEM | Talks to Doak, then opens the door that needs the decoder | Host receives the decoder (script gives it "to the team"); the joiner can still open the door | | |
-| F4 | ACTION, FX | Plants charges on the bottling-room tanks | Tanks blow on both; "Destroy all tanks" completes on both | || pass (rig: joiner shoots all 10 tanks, objective on both) |
-| F5 | SAMETIME | Both players plant on the same tank in the same second | Counted once; tank blows once | | pass (rig, 2026-10-30): both blow tanks 1 and 2 in the same second; each destroyed once, the same on both |
-| F6 | ONEPLAYER | Reaches the bottling room first; its alarm/timer fires on the joiner's entry | Same timer on both screens | | |
-| F7 | FX | Watches Natalya/the scientist room while the host is elsewhere; guards that hide "when not on screen" vanish | No chr vanishes in front of the joiner | | |
-| F8 | ONEPLAYER | Reaches the exit (Ourumov ending) first | Ending starts for both, once | | pass (rig, 2026-10-30): the joiner on the exit pad (309) starts the ending; one mission end on each |
+| F1 | SPAWN | Reaches Doak's lab first, looking at his spawn spot | Doak appears on both screens; "Contact 006/Doak" objective not failed | `doak` | **PASS** (rig, 0d88b92, campaign run, logs `campaign/evidence-0d88b92/row-runs.tgz doak`): Doak there for the joiner, B completes on both, credit player 2. Earlier: pass (rig, 2 and 3 players). |
+| F2 | SPLITOBJ | Meets Doak first (the known "objective B failed" flash) | No "failed" message on either screen, even briefly | `doak` | **PASS** (rig, 0d88b92, campaign `doak` logs read by QA): no "failed" line for any objective on either side. Earlier: pass (rig: no failed flash). |
+| F3 | KEYITEM | Talks to Doak, then opens the door that needs the decoder | Host receives the decoder (script gives it "to the team"); the joiner can still open the door | | **NOT RUN** on 0d88b92: the campaign run reached the decoder pickup but not the door (`row-runs.tgz f13`). |
+| F4 | ACTION, FX | Plants charges on the bottling-room tanks | Tanks blow on both; "Destroy all tanks" completes on both | | **PASS** (rig, 0d88b92, objective sweep `rows.py SW-facility`: the joiner breaks all 10 tanks, D completes on both, credit player 2). Earlier: pass (rig: joiner shoots all 10 tanks, objective on both). |
+| F5 | SAMETIME | Both players plant on the same tank in the same second | Counted once; tank blows once | `F5` | **PASS** (rig, 0d88b92, `rows.py F5`): both break tanks 1 and 2 in the same second; each destroyed once (level 1) on both. Earlier: pass (rig, 2026-10-30): both blow tanks 1 and 2 in the same second; each destroyed once, the same on both. |
+| F6 | ONEPLAYER | Reaches the bottling room first; its alarm/timer fires on the joiner's entry | Same timer on both screens | | **NOT RUN** on 0d88b92: no rig line yet. |
+| F7 | FX | Watches Natalya/the scientist room while the host is elsewhere; guards that hide "when not on screen" vanish | No chr vanishes in front of the joiner | | **NOT RUN** on 0d88b92: no rig line yet. |
+| F8 | ONEPLAYER | Reaches the exit (Ourumov ending) first | Ending starts for both, once | `F8` | **PASS** (rig, 0d88b92, `rows.py F8`): the joiner on pad 309; one mission end on each. Earlier: pass (rig, 2026-10-30): the joiner on the exit pad (309) starts the ending; one mission end on each. |
 
 ## 3. Runway
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| R1 | KEYITEM | Takes the plane key from the hut | Host's script sees the key collected; plane objective works for whoever boards | `runwayKey` || pass (rig) |
-| R2 | ACTION, FX | Blows up the heavy gun emplacements | Destroyed on both, objective on both | || pass (rig) |
-| R3 | ONEPLAYER | Gets in the plane first | Ending for both | | |
+| R1 | KEYITEM | Takes the plane key from the hut | Host's script sees the key collected; plane objective works for whoever boards | `R1` | **PASS** (rig, 0d88b92, `rows.py R1`): A completes on both; same in `SW-runway`. Earlier: pass (rig). |
+| R2 | ACTION, FX | Blows up the heavy gun emplacements | Destroyed on both, objective on both | | **PASS** (rig, 0d88b92, objective sweep `rows.py SW-runway`: B and C complete on both, credit player 2). Earlier: pass (rig). |
+| R3 | ONEPLAYER | Gets in the plane first | Ending for both | `R3` | **PASS** (rig, 0d88b92, `rows.py R3`): the joiner takes the key and uses the plane (tag 3); one mission end on each, all objectives complete. |
 
 ## 4. Surface 1
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| S1 | ACTION | Shoots the power supply / comms dish | Objective on both | | |
-| S2 | KEYITEM | Takes the bunker key from the guard's body | Host can open the bunker door too | || pass (rig: keys collected, objectives on both) |
-| S3 | ONEPLAYER | Enters the bunker vent first | Mission ends for both | | |
+| S1 | ACTION | Shoots the power supply / comms dish | Objective on both | | **NOT RUN** on 0d88b92: no destroy target in the setup for it; no rig line yet. |
+| S2 | KEYITEM | Takes the bunker key from the guard's body | Host can open the bunker door too | | **PASS** (rig, 0d88b92, objective sweep `rows.py SW-surface`: B and C collected by the joiner, complete on both). Earlier: pass (rig: keys collected, objectives on both). |
+| S3 | ONEPLAYER | Enters the bunker vent first | Mission ends for both | `S3` | **PASS** (rig, 0d88b92, `rows.py S3`): the joiner in the room of pad 46; one mission end on each. |
 
 ## 5. Bunker 1
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| B1 | ACTION, KEYITEM | Uses the camera on the GoldenEye / photo of the main room (gadget-on-object checks) | Objective on both | `bunker1Gadget` || pass for the destroy objective (rig); camera photo not run |
-| B2 | TARGET | Approaches the technician (the unreproduced tester report) | Technician reacts to the joiner, not to the far host | | |
-| B3 | ACTION | Shoots the security cameras | Disabled on both | | |
-| B4 | FX | Stands in the six-door gate (the door storm fixed in fixes-1) | Gate opens once; no network flood | | |
+| B1 | ACTION, KEYITEM | Uses the camera on the GoldenEye / photo of the main room (gadget-on-object checks) | Objective on both | `bunker1Gadget` | **NOT RUN** on 0d88b92: the camera photo has no rig line; the destroy objective passes (`SW-bunker1`). Earlier: pass for the destroy objective (rig); camera photo not run. |
+| B2 | TARGET | Approaches the technician (the unreproduced tester report) | Technician reacts to the joiner, not to the far host | | **NOT RUN** on 0d88b92: queued with the campaign workstream (CAMP). |
+| B3 | ACTION | Shoots the security cameras | Disabled on both | | **PASS** (rig, 0d88b92, objective sweep `rows.py SW-bunker1`: the joiner breaks all four cameras, A completes on both). |
+| B4 | FX | Stands in the six-door gate (the door storm fixed in fixes-1) | Gate opens once; no network flood | | **NOT RUN** on 0d88b92: no rig line yet. |
 
 ## 6. Silo
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| SI1 | ACTION, FX | Plants the charges in the fuel rooms | Charges blow on both | | pass (rig, 2026-10-30): each charge the joiner plants reaches the host ("peer planted objective item"); 3 of 4 rooms in one run, the 4th throw rolls out of its room for the host too |
-| SI2 | KEYITEM | Picks up the circuit board / satellite plans | Objective on both | | pass (rig, 2026-10-30): C and D complete on both, credit to the joiner |
-| SI3 | SPAWN, TARGET | Reaches Ourumov first, looking at his spawn | Ourumov appears and runs for both; drops his key for both | | |
-| SI4 | ONEPLAYER | Starts the escape countdown | Same countdown on both screens | `siloClock` | pass (rig, 2026-10-30): 00 Agent, host 509.6 s and joiner 509.9 s |
-| SI5 | BLEEDOUT | Is down and bleeding out as the countdown ends | Mission fails once, one failure screen on each | | |
-| SI6 | FX | Countdown runs out | Explosions around both players, not just the host | | |
+| SI1 | ACTION, FX | Plants the charges in the fuel rooms | Charges blow on both | | **NOT RUN** on 0d88b92: not re-run. Earlier: pass (rig, 2026-10-30): each charge the joiner plants reaches the host ("peer planted objective item"); 3 of 4 rooms in one run, the 4th throw rolls out of its room for the host too. |
+| SI2 | KEYITEM | Picks up the circuit board / satellite plans | Objective on both | | **PASS** (rig, 0d88b92, objective sweep `rows.py SW-silo`: C and D complete on both, credit player 2). Earlier: pass (rig, 2026-10-30): C and D complete on both, credit to the joiner. |
+| SI3 | SPAWN, TARGET | Reaches Ourumov first, looking at his spawn | Ourumov appears and runs for both; drops his key for both | | **PASS** (rig, 0d88b92, campaign run, logs `campaign/evidence-0d88b92/row-runs.tgz silo_ourumov, si3host`). |
+| SI4 | ONEPLAYER | Starts the escape countdown | Same countdown on both screens | `siloClock` | **NOT RUN** on 0d88b92: not re-run (the countdown starts when a charge settles; no joiner rig line). Earlier: pass (rig, 2026-10-30): 00 Agent, host 509.6 s and joiner 509.9 s. |
+| SI5 | BLEEDOUT | Is down and bleeding out as the countdown ends | Mission fails once, one failure screen on each | | **PASS** (rig, 0d88b92, campaign run, logs `campaign/evidence-0d88b92/row-runs.tgz si5, si5b`). |
+| SI6 | FX | Countdown runs out | Explosions around both players, not just the host | | **NOT RUN** on 0d88b92: no rig line yet. |
 
 ## 7. Frigate
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| FR1 | ONEPLAYER | Enters a hostage room first | Hostage-taker reacts to the joiner; hostages live on both | `hostage` || pass (rig `hostage`) |
-| FR2 | ACTION | Shoots a hostage-taker | Dead on both; hostage freed on both | | |
-| FR3 | FX | A hostage-taker throws a grenade at the joiner | Grenade and blast on both | | |
-| FR4 | KEYITEM, ACTION | Plants the tracker bug on the helicopter | Objective on both | `frigateBug` | |
-| FR5 | ONEPLAYER | Reaches the boat first | Ending for both (fixed in fixes-1) | `frigateBoat` || pass (fixed in fixes-1) |
+| FR1 | ONEPLAYER | Enters a hostage room first | Hostage-taker reacts to the joiner; hostages live on both | `hostage` | **PASS** (rig, 0d88b92, CI `joiner_spots.sh hostage`): guard 1 turns on player 2. Earlier: pass (rig `hostage`). |
+| FR2 | ACTION | Shoots a hostage-taker | Dead on both; hostage freed on both | `FR2` | **PASS** (rig, 0d88b92, `rows.py FR2`) and `FR2-solo`: hostage-taker 1 dies on both; hostage 44 lives, the same as the host alone. |
+| FR3 | FX | A hostage-taker throws a grenade at the joiner | Grenade and blast on both | | **NOT RUN** on 0d88b92: the rig cannot make a hostage-taker throw. |
+| FR4 | KEYITEM, ACTION | Plants the tracker bug on the helicopter | Objective on both | `frigateBug` | **NOT RUN** on 0d88b92: no rig line for the tracker throw yet. |
+| FR5 | ONEPLAYER | Reaches the boat first | Ending for both (fixed in fixes-1) | `FR5` | **PASS** (rig, 0d88b92, `rows.py FR5`): both step off the boat, the joiner comes back on pad 153; one mission end on each (`FR5-hoststays`, host never leaving the start, the same). Earlier: pass (fixed in fixes-1). |
 
 ## 8. Surface 2
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| SU1 | ACTION | Destroys the communications dish / power | Objective on both | || pass (rig: A and B destroy objectives) |
-| SU2 | SPAWN | Watches the reinforcement spawn points | Reinforcements arrive the same on both (Surface 2 spawn fix, #63) | | |
-| SU3 | ONEPLAYER | Enters the bunker first | Ends for both | || pass (rig: joiner enters the objective room, C/D on both) |
+| SU1 | ACTION | Destroys the communications dish / power | Objective on both | | **PASS** (rig, 0d88b92, objective sweep `rows.py SW-surface2`: A and B complete on both, credit player 2). Earlier: pass (rig: A and B destroy objectives). |
+| SU2 | SPAWN | Watches the reinforcement spawn points | Reinforcements arrive the same on both (Surface 2 spawn fix, #63) | | **NOT RUN** on 0d88b92: no rig line yet. |
+| SU3 | ONEPLAYER | Enters the bunker first | Ends for both | `SU3` | **PASS** (rig, 0d88b92, `rows.py SU3`): the joiner on pad 3; the room objective completes on both and one mission end on each. Earlier: pass (rig: joiner enters the objective room, C/D on both). |
 
 ## 9. Bunker 2
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| BU1 | TARGET | Leads Natalya out of the cell, the host far behind | She follows the joiner, doesn't hesitate between players | `bunker2Nat` || pass (rig: host `c27@8`, joiner `GE_COOP_TESTDOOR=1` `o3@8,c13@18,c12@30`; she goes to player 2 and follows them to rooms 26 and 27) |
-| BU2 | FX, ONEPLAYER | Looks back at Natalya while she's out of the host's view | She doesn't teleport in front of the joiner | `bunker2Nat` | |
-| BU3 | KEYITEM | Picks up the GoldenEye key / Boris's clipboard | Collected check works for the host's script | `bunker2Items` || pass (rig: B and D collect objectives on both) |
-| BU4 | ACTION | Stands in front of a drone gun | The host's drone gun fires at the joiner | `dronegun` || pass (rig `dronegun`) |
-| BU5 | SCRIPTDEATH | Dies while Natalya follows the joiner | She switches to the host (or waits), doesn't freeze | || pass (rig: as BU1 then `d@40`; "chr 0 goes to player 1" as the joiner goes down; the guards there then killed her) |
+| BU1 | TARGET | Leads Natalya out of the cell, the host far behind | She follows the joiner, doesn't hesitate between players | `BU1` | **PASS** (rig, 0d88b92, `rows.py BU1`): host far off on chr 27, the joiner opens her cell; she goes to player 2 and never to player 1. Earlier: pass (rig: host `c27@8`, joiner `GE_COOP_TESTDOOR=1` `o3@8,c13@18,c12@30`; she goes to player 2 and follows them to rooms 26 and 27). |
+| BU2 | FX, ONEPLAYER | Looks back at Natalya while she's out of the host's view | She doesn't teleport in front of the joiner | `bunker2Nat` | **PASS** (rig, 0d88b92, campaign run, logs `campaign/evidence-0d88b92/row-runs.tgz bu2`). |
+| BU3 | KEYITEM | Picks up the GoldenEye key / Boris's clipboard | Collected check works for the host's script | `bunker2Items` | **PASS** (rig, 0d88b92, objective sweep `rows.py SW-bunker2`: B, C and D complete on both, credit player 2). Earlier: pass (rig: B and D collect objectives on both). |
+| BU4 | ACTION | Stands in front of a drone gun | The host's drone gun fires at the joiner | `dronegun` | **PASS** (rig, 0d88b92, CI `joiner_spots.sh dronegun`). Earlier: pass (rig `dronegun`). |
+| BU5 | SCRIPTDEATH | Dies while Natalya follows the joiner | She switches to the host (or waits), doesn't freeze | `BU5` | **PASS** (rig, 0d88b92, `rows.py BU5`) (PAR=1 SECSX=4): she goes to player 2, then to player 1 right after "player 2 down". Earlier: pass (rig: as BU1 then `d@40`; "chr 0 goes to player 1" as the joiner goes down; the guards there then killed her). |
 
 ## 10. Statue
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| ST1 | SPAWN | Host waits at the helicopter when Janus's timer starts | Natalya spawns, objective not failed (fixed in fixes-2) | `natalya` || pass (rig `natalya`, 2 and 4 players) |
-| ST2 | TARGET | Talks to Janus with the host nearby | Janus stays facing one player (fixed in fixes-2) | | |
-| ST3 | ACTION | Hits Janus | Mission reacts as for the host's hit (fixed in fixes-2) | | |
-| ST4 | ONEPLAYER | Walks up to Janus | Guards attack and the "too close" fail happens for the joiner too | | |
-| ST5 | KEYITEM | Picks up the flight recorder | Objective on both | || untestable in rig: the recorder sits in the exit room, which ends the mission (as in solo) |
-| ST6 | TARGET | Meets Valentin with a gun out | Valentin's "put your gun away" reacts to the joiner | | |
+| ST1 | SPAWN | Host waits at the helicopter when Janus's timer starts | Natalya spawns, objective not failed (fixed in fixes-2) | `natalya` | **PASS** (rig, 0d88b92, CI `joiner_spots.sh natalya` and `rows.py X8-nat4` with 4 players): D completes. Earlier: pass (rig `natalya`, 2 and 4 players). |
+| ST2 | TARGET | Talks to Janus with the host nearby | Janus stays facing one player (fixed in fixes-2) | | **FAIL** (rig, 0d88b92, campaign, `campaign/evidence-0d88b92/lost-partner-runs.tgz`): when the joiner's line goes quiet 3 s or more during the talk, Valentin contact fails on the host while the joiner shows it complete (3/3 with a 6 s cut). With PR #114 (CAMP-7, in review): PASS, 5/5 cut runs and `row-runs-2.tgz st2f`. |
+| ST3 | ACTION | Hits Janus | Mission reacts as for the host's hit (fixed in fixes-2) | | **PASS** (rig, 0d88b92, campaign run, logs `campaign/evidence-0d88b92/row-runs.tgz st3`). |
+| ST4 | ONEPLAYER | Walks up to Janus | Guards attack and the "too close" fail happens for the joiner too | | **FAIL** (rig, 0d88b92, campaign): fails with a 6 s line cut during the meeting, as ST2. With PR #114 (CAMP-7, in review): matches the host alone (`row-runs-2.tgz st4j` vs `st4h`). |
+| ST5 | KEYITEM | Picks up the flight recorder | Objective on both | `ST5` | **PASS** (rig, 0d88b92, `rows.py ST5`): the joiner takes the recorder without walking into the exit room; E completes on both. Earlier: untestable in rig: the recorder sits in the exit room, which ends the mission (as in solo). |
+| ST6 | TARGET | Meets Valentin with a gun out | Valentin's "put your gun away" reacts to the joiner | | **NOT RUN** on 0d88b92 alone: Valentin's line needs PR #114, a host-only Statue change. With PR #114 on 0d88b92 it passes (rig, campaign, `row-runs-2.tgz st6j2` vs `st6h`). |
 
 ## 11. Archives
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| A1 | CUTJOIN | Joins during the interrogation intro | Joiner starts in play | | |
-| A2 | TARGET | Rescues Natalya | She follows the joiner | | |
-| A3 | ONEPLAYER | Reaches the exit window first | Ends for both | || pass for the pad 152 room objective (rig) |
+| A1 | CUTJOIN | Joins during the interrogation intro | Joiner starts in play | `A1` | **PASS** (rig, 0d88b92, `rows.py A1`): the joiner arrives in the host's intro, ends it with the host and plays; A completes on both. |
+| A2 | TARGET | Rescues Natalya | She follows the joiner | | **BLOCKED** on 0d88b92: the rig cannot stage the rescue (campaign, `row-runs.tgz a2`). |
+| A3 | ONEPLAYER | Reaches the exit window first | Ends for both | `A3` | **PASS** (rig, 0d88b92, `rows.py A3`): A completes on both. Earlier: pass for the pad 152 room objective (rig). |
 
 ## 12. Streets
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| SR1 | ONEPLAYER | Drives the tank (vehicles run on both sides) | "Bond in tank" checks work for the joiner's tank | | |
-| SR2 | ACTION | Meets Valentin / reaches the exit | Ends for both | | pass for the exit (rig, 2026-10-30): the joiner on pad 248; one mission end on each. Jungle (468) and Control (168) exits the same |
-| SR3 | FX | Civilians appear and disappear (Streets reaper fix) | No flicker on the joiner | | |
+| SR1 | ONEPLAYER | Drives the tank (vehicles run on both sides) | "Bond in tank" checks work for the joiner's tank | | **NOT RUN** on 0d88b92: no rig line yet. |
+| SR2 | ACTION | Meets Valentin / reaches the exit | Ends for both | `SR2` | **PASS** (rig, 0d88b92, `rows.py SR2`): the joiner on pad 248; one mission end on each. Jungle (`J-exit`, pad 468) and Control (`C-exit`, pad 168) the same. Earlier: pass for the exit (rig, 2026-10-30): the joiner on pad 248; one mission end on each. Jungle (468) and Control (168) exits the same. |
+| SR3 | FX | Civilians appear and disappear (Streets reaper fix) | No flicker on the joiner | | **NOT RUN** on 0d88b92: no rig line yet. |
 
 ## 13. Depot
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| DE1 | ACTION, FX | Destroys the helicopters and weapon caches | Destroyed on both | || pass (rig: 17 caches); see the desync note |
-| DE2 | SPAWN | Reaches Trevelyan's spawn first, watching it | Trevelyan appears for both | | |
-| DE3 | KEYITEM | Picks up the safe key and opens the safe | Works for the joiner, objective on both | || not run |
-| DE4 | ONEPLAYER | Boards the train first | Ending for both | | pass (rig, 2026-10-30): the joiner reaches the train pad; the ending runs for both |
+| DE1 | ACTION, FX | Destroys the helicopters and weapon caches | Destroyed on both | | **PASS** (rig, 0d88b92, objective sweep `rows.py SW-depot`: all 17 caches; A completes on both; 7 desyncs corrected, none unresolved). Earlier: pass (rig: 17 caches); see the desync note. |
+| DE2 | SPAWN | Reaches Trevelyan's spawn first, watching it | Trevelyan appears for both | | **NOT RUN**, not applicable as written: Depot has no Trevelyan (campaign, 0d88b92 with PR #117). The row needs rewriting to a scripted spawn Depot has. |
+| DE3 | KEYITEM | Picks up the safe key and opens the safe | Works for the joiner, objective on both | | **NOT RUN** on 0d88b92: no rig line yet. Earlier: not run. |
+| DE4 | ONEPLAYER | Boards the train first | Ending for both | `DE4` | **PASS** (rig, 0d88b92, `rows.py DE4`): the joiner on pad 271; one mission end on each. Earlier: pass (rig, 2026-10-30): the joiner reaches the train pad; the ending runs for both. |
 
 ## 14. Train
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| T1 | ACTION | Shoots guard 4 (the known "objective B failed" flash) | No failed flash on the joiner | `trainGuard4` || pass (rig): B fails on both, the same as when the host does it |
-| T2 | TARGET, FX | Frees Natalya and watches her while the host is out of view | No catch-up teleport in front of the joiner | | |
-| T3 | ONEPLAYER | Starts the countdown from the joiner's side (the countdown hand-off) | Same countdown on both, from the host | `trainClock` || pass (rig: countdown values match on both) |
-| T4 | FX | Countdown ends / the floor is cut with the watch | Explosions on both (fixed in fixes-2) | | |
-| T5 | BLEEDOUT | Is down as the countdown runs out | One failure, one screen | | |
-| T6 | KEYITEM | Uses the watch laser on the floor | The cut works for the joiner | | |
+| T1 | ACTION | Shoots guard 4 (the known "objective B failed" flash) | No failed flash on the joiner | `T1` | **PASS** (rig, 0d88b92, `rows.py T1`) and `T1-solo`: no failed flash on the joiner; B did not fail at Agent on either side, the same as the host alone. Earlier: pass (rig): B fails on both, the same as when the host does it. |
+| T2 | TARGET, FX | Frees Natalya and watches her while the host is out of view | No catch-up teleport in front of the joiner | | **BLOCKED** on 0d88b92: the rig cannot stage her rescue (campaign, `row-runs.tgz t2`). |
+| T3 | ONEPLAYER | Starts the countdown from the joiner's side (the countdown hand-off) | Same countdown on both, from the host | `trainClock` | **NOT RUN** on 0d88b92: not re-run. Earlier: pass (rig: countdown values match on both). |
+| T4 | FX | Countdown ends / the floor is cut with the watch | Explosions on both (fixed in fixes-2) | | **NOT RUN** on 0d88b92: no rig line yet. |
+| T5 | BLEEDOUT | Is down as the countdown runs out | One failure, one screen | | **BLOCKED** on 0d88b92: the countdown cannot be staged in the rig (campaign, `row-runs-2.tgz t5base`); needs a real run to the last car. |
+| T6 | KEYITEM | Uses the watch laser on the floor | The cut works for the joiner | | **NOT RUN** on 0d88b92: no rig line yet. |
 
 ## 15. Jungle
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| J1 | TARGET | Walks with Natalya | She follows, doesn't attack the joiner (fixed in fixes-2) | || untestable in rig (as BU1) |
-| J2 | ONEPLAYER | Meets Xenia first, the host far away | Xenia's intro (text and music) plays when the joiner sees her, not when the host does | `xenia` || untestable in rig (players can see her spot from the start); needs a hands-on run |
-| J3 | ACTION | Kills Xenia | Objective on both | | |
-| J4 | ACTION | Destroys the drone guns | Objective on both | || pass (rig: drone guns A and C on both); see the desync note |
-| J5 | SCRIPTDEATH | Dies on the bridge while Natalya follows | She keeps going with the host | || untestable in rig (as BU1) |
+| J1 | TARGET | Walks with Natalya | She follows, doesn't attack the joiner (fixed in fixes-2) | | **PASS** (rig, 0d88b92, campaign run, logs `campaign/evidence-0d88b92/row-runs.tgz j1, j1b..j1d`). Earlier: untestable in rig (as BU1). |
+| J2 | ONEPLAYER | Meets Xenia first, the host far away | Xenia's intro (text and music) plays when the joiner sees her, not when the host does | `xenia` | **NOT RUN** on 0d88b92: queued with the campaign workstream (CAMP). Earlier: untestable in rig (players can see her spot from the start); needs a hands-on run. |
+| J3 | ACTION | Kills Xenia | Objective on both | | **PASS** (rig, 0d88b92, campaign, `row-runs-2.tgz j3`): B completes on both. Separate defect: the kill credit goes to the host, because Xenia takes about 7 s to die and the credit window is 5 s (CAMP-8). |
+| J4 | ACTION | Destroys the drone guns | Objective on both | | **PASS** (rig, 0d88b92, objective sweep `rows.py SW-jungle`: A and C complete on both, credit player 2; 4 desyncs corrected). Earlier: pass (rig: drone guns A and C on both); see the desync note. |
+| J5 | SCRIPTDEATH | Dies on the bridge while Natalya follows | She keeps going with the host | | **PASS** (rig, 0d88b92, campaign run, logs `campaign/evidence-0d88b92/row-runs.tgz j5`). Earlier: untestable in rig (as BU1). |
 
 ## 16. Control
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| C1 | TARGET | Escorts Natalya to the console | She stays at the console while the joiner guards her | `controlNat` || untestable in rig (as BU1) |
-| C2 | FX, ONEPLAYER | Watches Natalya while the host is out of view | No catch-up teleport in front of the joiner | `controlNat` | |
-| C3 | ACTION | Breaks the console Natalya is using | Mission fails on both, as in solo | | |
-| C4 | ACTION | Shoots Boris | Same as solo (Boris surrenders or the mission fails) on both | | |
-| C5 | ACTION, FX | Destroys the GoldenEye mainframe | Destroyed on both, objective on both | || pass (rig: mainframe objective C on both) |
+| C1 | TARGET | Escorts Natalya to the console | She stays at the console while the joiner guards her | `controlNat` | **PASS** (rig, 0d88b92, campaign run, logs `campaign/evidence-0d88b92/row-runs.tgz c12`). Earlier: untestable in rig (as BU1). |
+| C2 | FX, ONEPLAYER | Watches Natalya while the host is out of view | No catch-up teleport in front of the joiner | `controlNat` | **PASS** (rig, 0d88b92, campaign run, logs `campaign/evidence-0d88b92/row-runs.tgz c12`). |
+| C3 | ACTION | Breaks the console Natalya is using | Mission fails on both, as in solo | | **NOT RUN** on 0d88b92 alone: the run was on 0d88b92 with PR #117. With #117 it passes (rig, campaign, `row-runs-3.tgz c3j2` vs `c3h2`): when either player breaks console 37 (Natalya's), B fails and the mission ends without completing on both, the same as the host alone; consoles 35 and 36 (`c3j`, `c3h`) fail nothing, also the same on both. |
+| C4 | ACTION | Shoots Boris | Same as solo (Boris surrenders or the mission fails) on both | | **PASS** (rig, 0d88b92, campaign, `row-runs-2.tgz c4j2` vs `c4h2`): the same as the host alone. |
+| C5 | ACTION, FX | Destroys the GoldenEye mainframe | Destroyed on both, objective on both | | **PASS** (rig, 0d88b92, objective sweep `rows.py SW-control`: C completes on both, credit player 2). Earlier: pass (rig: mainframe objective C on both). |
 
 ## 17. Caverns
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| CA1 | ACTION | Destroys the comms equipment / radio | Objective on both | || pass (rig: A, B, C on both); D and E fail on both, the same when the host does it; see the desync note |
-| CA2 | TARGET | Meets Trevelyan's taunt spot first | Taunt aimed at the joiner | | |
-| CA3 | ONEPLAYER | Reaches the lift first | Ends for both | | pass (rig, 2026-10-30): the joiner on the lift pad (369); one ending, one mission end on each |
+| CA1 | ACTION | Destroys the comms equipment / radio | Objective on both | | **PASS** (rig, 0d88b92, objective sweep `rows.py SW-caverns`: A, B, C complete and D, E fail on both, the same when the host does it). Earlier: pass (rig: A, B, C on both); D and E fail on both, the same when the host does it; see the desync note. |
+| CA2 | TARGET | Meets Trevelyan's taunt spot first | Taunt aimed at the joiner | | **NOT RUN** on 0d88b92: the campaign run never reached the taunt spot (`row-runs.tgz caverns_alec`). |
+| CA3 | ONEPLAYER | Reaches the lift first | Ends for both | `CA3` | **PASS** (rig, 0d88b92, `rows.py CA3`): the joiner on pad 369; one mission end on each. Earlier: pass (rig, 2026-10-30): the joiner on the lift pad (369); one ending, one mission end on each. |
 
 ## 18. Cradle
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| CR1 | HURT | Shoots Trevelyan | Same small twitch as the host sees (fixed in fixes-2) | | |
-| CR2 | ACTION, FX | Destroys the control console | Blows on both, objective on both | || pass (rig) |
-| CR3 | ONEPLAYER | Corners Trevelyan on the platform first | Ending for both | | |
-| CR4 | SCRIPTDEATH | Falls off the cradle | That player's own death, not a mission fail for both | | |
+| CR1 | HURT | Shoots Trevelyan | Same small twitch as the host sees (fixed in fixes-2) | | **NOT RUN** on 0d88b92: the campaign run matches the host alone (`row-runs-2.tgz cr1`), but the twitch is not in the logs: needs someone watching. |
+| CR2 | ACTION, FX | Destroys the control console | Blows on both, objective on both | | **PASS** (rig, 0d88b92, objective sweep `rows.py SW-cradle`: A and B complete on both). Earlier: pass (rig). |
+| CR3 | ONEPLAYER | Corners Trevelyan on the platform first | Ending for both | | **NOT RUN** on 0d88b92: needs hands-on play; the campaign workstream could not stage it in the rig (`row-runs-3.tgz cr3j`, `cr3h`). |
+| CR4 | SCRIPTDEATH | Falls off the cradle | That player's own death, not a mission fail for both | | **NOT RUN** on 0d88b92: needs hands-on play; the campaign workstream could not stage the fall in the rig. |
 
 ## 19. Aztec
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| AZ1 | SPAWN, TARGET | Reaches Jaws first | Jaws spawns and fights the joiner | | |
-| AZ2 | KEYITEM, ACTION | Reprograms the shuttle guidance | Objective on both | | pass (rig, 2026-10-30): the joiner uses both guidance items; A completes on both |
-| AZ3 | FX | Watches a guard the script removes "when not on screen" | It doesn't vanish in front of the joiner | | |
-| AZ4 | ONEPLAYER, FX | Launches the shuttle | Launch on both, ends for both | | pass (rig, 2026-10-30): the joiner closes the doors and the launch runs; B on both, both debrief complete |
+| AZ1 | SPAWN, TARGET | Reaches Jaws first | Jaws spawns and fights the joiner | | **PASS** (rig, 0d88b92, campaign run, logs `campaign/evidence-0d88b92/row-runs.tgz aztec_jaws`). |
+| AZ2 | KEYITEM, ACTION | Reprograms the shuttle guidance | Objective on both | | **NOT RUN** on 0d88b92: not re-run. Earlier: pass (rig, 2026-10-30): the joiner uses both guidance items; A completes on both. |
+| AZ3 | FX | Watches a guard the script removes "when not on screen" | It doesn't vanish in front of the joiner | | **NOT RUN** on 0d88b92: no rig line yet. |
+| AZ4 | ONEPLAYER, FX | Launches the shuttle | Launch on both, ends for both | | **NOT RUN** on 0d88b92: not re-run. Earlier: pass (rig, 2026-10-30): the joiner closes the doors and the launch runs; B on both, both debrief complete. |
 
 ## 20. Egyptian
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| E1 | KEYITEM | Takes the Golden Gun | Host's script sees it | || pass (rig) |
-| E2 | TARGET | Fights Baron Samedi | Samedi appears and moves the same on both | | |
-| E3 | ONEPLAYER | Reaches the "Bond must be in room" triggers first | Fire for the joiner | | |
+| E1 | KEYITEM | Takes the Golden Gun | Host's script sees it | | **PASS** (rig, 0d88b92, objective sweep `rows.py SW-egypt`: A completes on both, credit player 2). Earlier: pass (rig). |
+| E2 | TARGET | Fights Baron Samedi | Samedi appears and moves the same on both | | **PASS** (rig, 0d88b92, campaign run, logs `campaign/evidence-0d88b92/row-runs.tgz egypt_samedi`). |
+| E3 | ONEPLAYER | Reaches the "Bond must be in room" triggers first | Fire for the joiner | | **NOT RUN** on 0d88b92: no rig line yet. |
 
 ---
 
@@ -254,14 +278,17 @@ ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 
 | # | Family | What to do | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| X1 | SCRIPTDEATH | Die during a cutscene (fade) | The scene ends with both alive or respawned | | |
-| X2 | SAMETIME | Both press the same console / switch on one frame | One activation | | pass (rig, 2026-10-30): both press Aztec's launch console in the same second; the doors and launch run once |
-| X3 | LATEJOIN | Late join after doors opened and alarm raised | Doors and alarm as the host's | `lateAlarm` || pass for the alarm (rig); doors not checked |
-| X4 | LATEJOIN | Host leaves mid-mission (migration) | New host keeps the alarm, doors and objectives | | |
-| X5 | CUTJOIN | Drop in during the intro swirl or an end cutscene | Joiner arrives in play or in the same scene | | fail, fixed (rig, 2026-10-30): a joiner dropping into the Dam bungee ending could debrief twice; now once |
-| X6 | SPLITOBJ | End every mission and compare the two results screens | Same objective list and states | every run || pass on 17 missions (rig sweep) |
-| X7 | MANY | Repeat the escort rows (BU1, C1, J1) with 3 and 4 players | Followers pick one player and stay on them | | |
-| X8 | MANY | Repeat the spawn rows (F1, SI3, ST1) with 3 and 4 players | Spawns still happen | || pass (Facility Doak 3 players, Statue Natalya 4 players) |
+| X1 | SCRIPTDEATH | Die during a cutscene (fade) | The scene ends with both alive or respawned | | **PASS** (rig, 0d88b92, campaign run, logs `campaign/evidence-0d88b92/row-runs-2.tgz x1, x1b`). |
+| X2 | SAMETIME | Both press the same console / switch on one frame | One activation | | **NOT RUN** on 0d88b92: not re-run. Earlier: pass (rig, 2026-10-30): both press Aztec's launch console in the same second; the doors and launch run once. |
+| X3 | LATEJOIN | Late join after the alarm is raised | Alarm and stage flag as the host's | `X3` | **PASS** (rig, 0d88b92, `rows.py X3`): the alarm and stage flag as the host's. Earlier: pass for the alarm (rig). |
+| X3b | LATEJOIN | Late join after doors were opened | Doors as the host's | | **NOT RUN** on 0d88b92: `rows.py X3` does not check doors; no rig line yet. Earlier: not checked. |
+| X4 | LATEJOIN | Host leaves mid-mission (migration) | New host keeps the alarm and stage flags | `X4` | **PASS** (rig, 0d88b92, `rows.py X4`): the host hands over 3 s after raising the alarm; the new host keeps the alarm on and stage flag 0x40000000. |
+| X4b | LATEJOIN | Host leaves mid-mission (migration) | New host keeps the doors and objectives | | **NOT RUN** on 0d88b92: `rows.py X4` does not check doors or objectives; no rig line yet. |
+| X5 | CUTJOIN | Drop in during the intro swirl or an end cutscene | Joiner arrives in play or in the same scene | `X5` | **PASS** (rig, 0d88b92, `rows.py X5`): a joiner dropping into the Dam bungee ending; one mission end on each. Earlier: fail, fixed (rig, 2026-10-30): a joiner dropping into the Dam bungee ending could debrief twice; now once. |
+| X6 | SPLITOBJ | End every mission and compare the two results screens | Same objective list and states | every run | **PASS** (rig, 0d88b92): the objective sweep (16 missions) and CI `mission_runs.sh` (20 missions, lossy link) end with the same objective states on both. Earlier: pass on 17 missions (rig sweep). |
+| X7 | MANY | Repeat the escort rows (BU1, C1, J1) with 3 and 4 players | Followers pick one player and stay on them | | **PASS** (rig, 0d88b92, campaign run, logs `campaign/evidence-0d88b92/row-runs.tgz x7_4`), 4 players. |
+| X8 | MANY | Repeat the spawn rows (F1, SI3, ST1) with 3 and 4 players | Spawns still happen | `X8-doak3` | **PASS** (rig, 0d88b92, `rows.py X8-doak3`) (Facility Doak, 3 players) and `X8-nat4` (Statue Natalya, 4 players). Earlier: pass (Facility Doak 3 players, Statue Natalya 4 players). |
+| X9 | LATEJOIN | Cut the line between host and joiner for 8 to 10 s mid-mission, then restore it | One game again: the joiner rejoins the host (or a documented tie-break), never two hosts | rig `CUT=1:50:8`, `CUT=2:50:10` (netcode workstream) | **FAIL** (rig, 0d88b92, reported by the netcode workstream, task NET-3; not re-run by QA): the joiner takes over and hosts alone, the old host keeps hosting, and they never merge (the new host logs "not in our lobby"). Needs a protocol change. Logs: `goldeneye-coop/net/split-brain/` (`README.txt`; `main-summary.txt` and `logs.tgz` `res-base/joiner-cut10` for 0d88b92, a 10 s joiner cut at 50 s; `pr116-summary.txt` for PR #116). The "result: PASS" in `main-summary.txt` is from the old runner, which had no split check; read the logs, which show two hosts. |
 
 ## Code audit notes
 
