@@ -296,6 +296,15 @@ int portSaveCommit(FILE *f)
 
 /* ---- backups -------------------------------------------------------------- */
 
+/* not copied into a backup: the build stamp, and a .tmp a killed write left
+ * behind (portFileWriteBegin starts that file over, so it is never needed) */
+static int saveSkipName(const char *name)
+{
+    size_t len = strlen(name);
+
+    return strcmp(name, "build.txt") == 0 || (len > 4 && strcmp(name + len - 4, ".tmp") == 0);
+}
+
 /* every plain file in dir, copied into to; the count. *failed counts the
  * ones that couldn't be copied whole */
 static int saveCopyDir(const char *dir, const char *to, int *failed)
@@ -315,7 +324,7 @@ static int saveCopyDir(const char *dir, const char *to, int *failed)
     }
     do
     {
-        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && strcmp(fd.cFileName, "build.txt") != 0)
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && !saveSkipName(fd.cFileName))
         {
             snprintf(from, sizeof(from), "%s/%s", dir, fd.cFileName);
             snprintf(dst, sizeof(dst), "%s/%s", to, fd.cFileName);
@@ -342,7 +351,7 @@ static int saveCopyDir(const char *dir, const char *to, int *failed)
     while ((e = readdir(d)) != NULL)
     {
         snprintf(from, sizeof(from), "%s/%s", dir, e->d_name);
-        if (stat(from, &st) == 0 && S_ISREG(st.st_mode) && strcmp(e->d_name, "build.txt") != 0)
+        if (stat(from, &st) == 0 && S_ISREG(st.st_mode) && !saveSkipName(e->d_name))
         {
             snprintf(dst, sizeof(dst), "%s/%s", to, e->d_name);
             if (saveCopy(from, dst))

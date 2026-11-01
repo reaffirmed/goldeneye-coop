@@ -96,6 +96,31 @@ static int countDirs(const char *path)
     return n;
 }
 
+/* how many backups under path hold a file called name */
+static int backupsWith(const char *path, const char *name)
+{
+    DIR *d = opendir(path);
+    struct dirent *e;
+    char file[1600];
+    struct stat st;
+    int n = 0;
+
+    if (d == NULL)
+    {
+        return 0;
+    }
+    while ((e = readdir(d)) != NULL)
+    {
+        if (e->d_name[0] != '.')
+        {
+            snprintf(file, sizeof(file), "%s/%s/%s", path, e->d_name, name);
+            n += stat(file, &st) == 0;
+        }
+    }
+    closedir(d);
+    return n;
+}
+
 int main(int argc, char **argv)
 {
     char file[1300], tmp[1320];
@@ -168,10 +193,15 @@ int main(int argc, char **argv)
         fclose(f);
     }
 
-    /* 5: a new build backs the saves up and stamps build.txt */
+    /* 5: a new build backs the saves up and stamps build.txt; a .tmp left by a
+     * killed write is not part of the backup */
     put(portSavePath("build.txt"), "aaaaaaaaa\n");
     put(portSavePath("eeprom.bin"), "folders");
+    put(portSavePath("eeprom.bin.tmp"), "fol");
     portSaveBootCheck();
+    CHECK(backupsWith(portRootPath("Data/Saves/Backups"), "eeprom.bin") == 1, "backup: eeprom.bin not backed up");
+    CHECK(backupsWith(portRootPath("Data/Saves/Backups"), "eeprom.bin.tmp") == 0, "backup: a leftover .tmp was backed up");
+    unlink(portSavePath("eeprom.bin.tmp"));
     got = slurp(portSavePath("build.txt"));
     CHECK(got != NULL && strncmp(got, PORT_BUILD_COMMIT, strlen(PORT_BUILD_COMMIT)) == 0, "backup: build.txt not stamped (%s)", got);
     CHECK(countDirs(portRootPath("Data/Saves/Backups")) == 1, "backup: %d backups, want 1",
