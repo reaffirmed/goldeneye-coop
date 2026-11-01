@@ -90,5 +90,11 @@ while [ $# -gt 0 ]; do
     done
     wait
 done
+# Every check asked for needs its own result line: one whose run died without
+# reporting is a failure, and so is a run of no checks at all, never a pass.
+[ -n "$(echo $CHECKS)" ] || echo "(none) FAIL: no checks to run 0s" >> "$OUT/summary.txt"
+for want in $CHECKS; do
+    grep -q "^$want \(PASS\|FAIL\)" "$OUT/summary.txt" || echo "$want FAIL: no result (its run died without reporting) 0s" >> "$OUT/summary.txt"
+done
 cat "$OUT/summary.txt"
 ! grep -q " FAIL" "$OUT/summary.txt"

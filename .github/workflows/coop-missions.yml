@@ -11,7 +11,11 @@ name: Co-op mission runs
 #   gpg --symmetric --cipher-algo AES256 -o baserom.u.z64.gpg baserom.u.z64
 #   gh release create ci-rom baserom.u.z64.gpg --prerelease
 #   gh secret set CI_ROM_KEY
-# Without the secret (forks, or before it is set up) the job only says so.
+#
+# A missing key or release is never a pass. On this repository the "cart
+# image" job fails and says what to set up, so the run is red; the mission
+# job then shows as skipped, never green. On a fork (no secrets) the cart
+# image job warns and the mission job is skipped.
 on:
   push:
     paths-ignore:
@@ -28,38 +32,65 @@ env:
   SDL2_VERSION: 2.30.11
   SDL2_SRC_SHA1: f3cdd91df44653518d4f3db5fdc775170016aa85
   BASEROM_US_SHA1: abe01e4aeb033b6c0836819f549c791b26cfde83
-  CI_ROM_KEY: ${{ secrets.CI_ROM_KEY }}
+  # the repository whose runs must have the cart image; forks only warn
+  CANONICAL_REPO: reaffirmed/goldeneye-coop
 
 concurrency:
   group: coop-missions-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  cart-image:
+    name: cart image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      have: ${{ steps.key.outputs.have }}
+    steps:
+      - name: Check for the cart image key and release
+        id: key
+        env:
+          CI_ROM_KEY: ${{ secrets.CI_ROM_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          missing=""
+          [ -n "$CI_ROM_KEY" ] || missing="the CI_ROM_KEY secret"
+          if ! gh release view ci-rom --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null \
+              | grep -qx 'baserom.u.z64.gpg'; then
+            missing="${missing:+$missing and }the ci-rom release with baserom.u.z64.gpg"
+          fi
+          if [ -z "$missing" ]; then
+            echo "have=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "have=0" >> "$GITHUB_OUTPUT"
+          msg="Co-op mission runs did NOT run: $GITHUB_REPOSITORY is missing $missing (setup steps at the top of .github/workflows/coop-missions.yml). This is a CI setup gap, not a failure in the code under test."
+          { echo '### Co-op mission runs: not run'; echo; echo "$msg"; } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$GITHUB_REPOSITORY" = "$CANONICAL_REPO" ]; then
+            echo "::error title=Co-op mission runs not run::$msg"
+            exit 1
+          fi
+          echo "::warning title=Co-op mission runs not run::$msg"
+
   missions:
+    needs: cart-image
+    if: needs.cart-image.outputs.have == '1'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read
+    env:
+      CI_ROM_KEY: ${{ secrets.CI_ROM_KEY }}
 
     steps:
-      - name: Check for the cart image key
-        id: key
-        run: |
-          if [ -z "$CI_ROM_KEY" ]; then
-            echo "::notice::No CI_ROM_KEY secret: the co-op mission runs need the encrypted cart image (see the top of coop-missions.yml) and were skipped"
-            echo "have=0" >> "$GITHUB_OUTPUT"
-          else
-            echo "have=1" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Checkout repository
-        if: steps.key.outputs.have == '1'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
 
       - name: Install Linux (i686) build and run dependencies
-        if: steps.key.outputs.have == '1'
         # the runners' apt mirror sometimes crawls: scripts/ci_apt_install.sh
         # retries from another mirror instead of waiting it out
         timeout-minutes: 35
@@ -72,7 +103,6 @@ jobs:
             xvfb xauth libgl1:i386 libgl1-mesa-dri:i386 libglx-mesa0:i386
 
       - name: Cache SDL2 (i686) build
-        if: steps.key.outputs.have == '1'
         id: cache-sdl2-linux
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -80,7 +110,7 @@ jobs:
           key: sdl2-linux-i686-${{ env.SDL2_VERSION }}-v2
 
       - name: Build SDL2 from source (i686)
-        if: steps.key.outputs.have == '1' && steps.cache-sdl2-linux.outputs.cache-hit != 'true'
+        if: steps.cache-sdl2-linux.outputs.cache-hit != 'true'
         run: |
           wget -O sdl2-src.tar.gz "https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-${SDL2_VERSION}.tar.gz"
           echo "${SDL2_SRC_SHA1}  sdl2-src.tar.gz" | sha1sum -c -
@@ -98,7 +128,6 @@ jobs:
           cmake --install sdl2-build
 
       - name: Build the game and the mock Steam
-        if: steps.key.outputs.have == '1'
         run: |
           cmake -B build_pc -DCMAKE_BUILD_TYPE=Release -DGE_VIDEO=ON -DSDL2_LINUX_ROOT="$HOME/sdl2-linux-i686"
           cmake --build build_pc -j$(nproc)
@@ -106,7 +135,6 @@ jobs:
           gcc -m32 -shared -fPIC -O1 -o build_pc/mock/libsteam_api.so coop/mock/steam_mock.c
 
       - name: Get and decrypt the cart image
-        if: steps.key.outputs.have == '1'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -117,21 +145,20 @@ jobs:
           echo "${BASEROM_US_SHA1}  build_pc/Data/baserom.u.z64" | sha1sum -c -
 
       - name: Run every mission with two players
-        if: steps.key.outputs.have == '1'
         env:
           STAGES: ${{ github.event.inputs.stages }}
         run: PAR=$(nproc) coop/ci/mission_runs.sh build_pc mission-runs
 
       - name: Join three missions already under way
-        if: steps.key.outputs.have == '1' && github.event.inputs.stages == ''
+        if: github.event.inputs.stages == ''
         run: JOINAFTER=30 TESTEND=3000 PAR=3 coop/ci/mission_runs.sh build_pc mission-runs/late dam facility frigate
 
       - name: Spot checks with the joiner acting
-        if: steps.key.outputs.have == '1' && github.event.inputs.stages == ''
+        if: github.event.inputs.stages == ''
         run: coop/ci/joiner_spots.sh build_pc mission-runs/joiner
 
       - name: Summary
-        if: always() && steps.key.outputs.have == '1'
+        if: always()
         run: |
           [ -f mission-runs/summary.txt ] || exit 0
           { echo '### Co-op mission runs'; echo; echo '```'; cat mission-runs/summary.txt; echo '```'
@@ -140,7 +167,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the logs
-        if: always() && steps.key.outputs.have == '1'
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coop-mission-runs
