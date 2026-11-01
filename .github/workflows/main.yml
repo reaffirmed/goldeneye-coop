@@ -161,3 +161,51 @@ jobs:
           name: ProjectMidas-windows-x86
           path: build_win/ProjectMidas.exe
           retention-days: 3
+
+  # GE_SANITIZE: the headless game built with ASan + UBSan, every finding fatal
+  # (-fno-sanitize-recover=all), and the cart-free tests built the same way.
+  # Nothing is uploaded. The two-player mission runs under this build need the
+  # cart image, so they are in coop-missions.yml (task board BUILD-4).
+  sanitize-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Install Linux (i686) build dependencies
+        # headless: no SDL, no X, so the multilib compilers are all it needs
+        timeout-minutes: 35
+        run: ./scripts/ci_apt_install.sh cmake gcc-multilib g++-multilib
+
+      - name: Configure and build with ASan + UBSan (headless)
+        run: |
+          cmake -B build_san -DCMAKE_BUILD_TYPE=Debug -DGE_SANITIZE=ON
+          cmake --build build_san -j$(nproc)
+
+      - name: Cart-free tests under ASan + UBSan
+        # the same tests build-linux runs, with the sanitizers on: a finding
+        # stops the test with a report and a non-zero exit
+        env:
+          SAN: -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all
+        run: |
+          # shellcheck disable=SC2086
+          gcc -m32 -O1 -w -fms-extensions $SAN -I. -Iinclude -Iinclude/PR -Iinclude/ultra64 -Iport/include -Isrc -Isrc/game \
+            -DNONMATCHING -DAVOID_UB -D_LANGUAGE_C -o interp_test coop/ci/interp_test.c -lm
+          ./interp_test
+          # shellcheck disable=SC2086
+          gcc -O1 -Wall $SAN -Iport/include -o update_test coop/ci/update_test.c port/src/port_update_util.c
+          mkdir -p ziptest/src/sub && head -c 300000 /dev/urandom > ziptest/src/rand.bin
+          seq 1 200000 > ziptest/src/seq.txt && : > ziptest/src/empty.txt && cp port/src/video.c ziptest/src/sub/
+          (cd ziptest/src && zip -qr ../d.zip . && zip -qr0 ../s.zip . && zip -qr9 ../d9.zip .)
+          ./update_test ziptest/d.zip ziptest/src ziptest/s.zip ziptest/src ziptest/d9.zip ziptest/src
+          # shellcheck disable=SC2086
+          gcc -O1 -Wall $SAN -Iport/include -Ibuild_san/generated -o save_test coop/ci/save_test.c port/src/port_save.c
+          ./save_test "$(mktemp -d)"
+          # shellcheck disable=SC2086
+          gcc -O1 -Wall $SAN -Iport/include -Ibuild_san/generated -o update_resume_test \
+            coop/ci/update_resume_test.c port/src/port_update.c port/src/port_update_util.c -lpthread
+          ./update_resume_test "$(mktemp -d)"

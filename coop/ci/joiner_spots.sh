@@ -73,6 +73,8 @@ run_check() {
     grep -q "$want" "$wl" || why="${why:+$why; }no \"$want\" in the $log's log"
     if grep -q "unresolved desync" "$hl" "$jl"; then why="${why:+$why; }unresolved desync"; fi
     if grep -qi "segmentation\|signal 11\|assert\|crash" "$hl" "$jl"; then why="${why:+$why; }crash in log"; fi
+    # a GE_SANITIZE build: ASan and UBSan stop the game and print one of these
+    if grep -q "runtime error: \|ERROR: AddressSanitizer" "$hl" "$jl"; then why="${why:+$why; }sanitizer report (see the log)"; fi
     if [ -z "$why" ]; then
         echo "$ck PASS $((SECONDS - t0))s"
     else
