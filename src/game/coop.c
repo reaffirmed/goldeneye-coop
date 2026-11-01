@@ -4889,6 +4889,13 @@ static ChrRecord *coopMirrorSpawn(CoopGuardEnt *e)
 static void coopMirrorDying(ChrRecord *chr)
 {
     chr->actiontype = ACT_DIE;
+    /* as the game's own deaths set them (chraction.c): if we take over as host
+     * before the host's AI sync covers this chr, chrlvTickDie runs it, and
+     * notifychrindex is where chrlvIterateGuardSeeShotDie starts in g_ChrSlots
+     * (left over from the slot's last action it read out of bounds and crashed) */
+    chr->act_die.notifychrindex = 0;
+    chr->act_die.thudframe1 = -1.0f;
+    chr->act_die.thudframe2 = -1.0f;
     chr->act_die.timeextra = 0.0f;
     chr->act_die.elapseextra = 0.0f;
     portConLogf("ge: coop: guard %d is dying here: its body no longer blocks\n", chr->chrnum);
@@ -9782,6 +9789,28 @@ static void coopTakeOverWorld(void)
 {
     s32 i, n = 0, dead = 0;
 
+    if (getenv("GE_COOP_TESTDYINGTAKEOVER") != NULL)
+    {   /* GE_COOP_TESTDYINGTAKEOVER=1: as we take over, the first living guard is one the
+         * host said is dying a moment ago, in a slot with no AI sync (a mirror respawned
+         * into another slot), its act_init.padding[0] still -1 from chrlvActorFadeAway:
+         * the takeover crash in chrlvIterateGuardSeeShotDie (harness only) */
+        for (i = 0; g_ChrSlots != NULL && i < g_NumChrSlots && i < COOP_MAX_CHRS; i++)
+        {
+            ChrRecord *chr = &g_ChrSlots[i];
+
+            if (chr->model != NULL && chr->prop != NULL && !coopIsPlayerChr(chr) && chr->actiontype != ACT_DEAD
+                && chr->actiontype != ACT_DIE)
+            {
+                chr->act_init.padding[0] = -1;
+                coopMirrorDying(chr);
+                sAiSyncHave[i] = 0;
+                portConLogf("ge: coop: testdyingtakeover: chr %d dying with no AI sync, index %d\n", chr->chrnum,
+                            chr->act_init.padding[0]);
+                break;
+            }
+        }
+    }
+
     for (i = 0; g_ChrSlots != NULL && i < g_NumChrSlots && i < COOP_MAX_CHRS; i++)
     {
         ChrRecord *chr = &g_ChrSlots[i];
@@ -9794,6 +9823,13 @@ static void coopTakeOverWorld(void)
         sChrTarget[i].closer = -1;
         if (!sAiSyncHave[i] || chr->model == NULL || chr->prop == NULL || coopIsPlayerChr(chr) || chr->chrnum != e->chrnum)
         {
+            if (chr->model != NULL && (chr->actiontype == ACT_DIE || chr->actiontype == ACT_ARGH)
+                && (chr->act_init.padding[0] < 0 || chr->act_init.padding[0] >= g_NumChrSlots))
+            {   /* no AI sync for it (a mirror respawned into another slot): its death
+                 * ticks here now, from the start of g_ChrSlots (chrlvIterateGuardSeeShotDie) */
+                portConLogf("ge: coop: chr %d was dying with no AI sync: its death goes on here\n", chr->chrnum);
+                chr->act_init.padding[0] = 0;
+            }
             continue;
         }
         if (e->ailist != 0xFFFF && ailistFindById(e->ailist) != NULL)
