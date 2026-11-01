@@ -7857,11 +7857,15 @@ void portInputPadMerge(s32 idx, OSContPad *pad)
         }
         if (s_SkipIntro && idx == 0)
         {   /* GE_SKIPINTRO=1: tap A through the mission intro cameras
-             * (2-tick presses, one per ~2/3s, first 15s only - stops
-             * before it could cycle weapons in gameplay) */
+             * (2-tick presses, one per ~2/3s). Only while the intro or
+             * swirl camera runs: it never reaches gameplay (weapon cycling)
+             * or the menus, where a tap on the co-op lobby pressed Leave
+             * Lobby or opened character select (GE_COOP_LOBBY runs) */
+            extern s32 g_CameraMode;
             static u32 sitick;
             u32 t = sitick++;
-            if (t > 60u && t < 900u && (t % 40u) < 2u)
+            if ((g_CameraMode == 1 || g_CameraMode == 2 || g_CameraMode == 3) /* INTRO, FADESWIRL, SWIRL */
+                && t > 60u && (t % 40u) < 2u)
             {
                 pad->button |= CONT_A;
             }
