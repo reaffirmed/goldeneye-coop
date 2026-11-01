@@ -6,7 +6,7 @@ Status: proposal, written after v0.6.15 (2026-11-01). Nothing here is decided un
 
 v0.6.15 is feature complete for what the README promises. Story co-op for 2 to 4 players has host-authoritative sync, drop-in, host migration, revive and lives, own-character cutscenes, votes, spectate, voice, pings and a debrief. Versus has every arena and scenario online, the host's rules, leaving and migration, and end screens that agree on every PC. Around the game there is the updater, Steam and Discord presence, F8 reports and the accessibility options.
 
-What is missing is mostly **proof**, not features. Most testing so far is the rig (two to four copies over the mock Steam on one machine) and the two-player CI mission runs, which join and finish every mission on Agent but don't play the objectives. Half of the co-op test checklist has never been run, and three and four players have had far less play than two.
+What is missing is mostly **proof**, not features. Most testing so far is the rig (two to four copies over the mock Steam on one machine) and the local two-player mission runs (`coop/ci/mission_runs.sh`), which join and finish every mission on Agent but don't play the objectives. The GitHub "Co-op mission runs" workflow skips them without the cart key and still reports success, so a green check there is not mission coverage. No checklist row yet records a pass by human players over real Steam. Half of the co-op test checklist has never been run, and three and four players have had far less play than two.
 
 So 1.0 is mainly a testing and hardening release, plus one protocol change that should land before we promise compatibility.
 
@@ -59,10 +59,11 @@ One `COOP_VERSION` bump carrying every hello-packet change, so 1.0 doesn't need 
 | Custom weapon sets online (eight weapons) | Versus bar 3. Same blocker. | 1 day |
 | Cart fingerprint in lobby data, the join handshake and the Public Games filter | Compatibility bar 2. The mod-hash half waits for Midas to publish its mod format. | 1 to 2 days |
 | Drop-In row for the host: Open, Friends Only, Off | From the Rare memo; cheap to add while the hello packet is open. | Half a day |
+| A mission-run gate that can't pass by skipping: `coop-missions.yml` reports neutral or failed when the cart key is missing on `main` and on tags, and the key is set up (or the runs are done locally with the log attached to the release PR) | So the protocol bump is actually regression-tested. Today the workflow has skipped every step in its last 100 runs and reported success. | Half a day |
 | Room in the hello packet for later | A few reserved fields so 1.x can add host rows without a bump. | Small |
 | Rig checks for every new row, versus sweep rerun, co-op regression | | 1 day |
 
-**Exit:** v0.7.0 released, the versus sweep (`versus-test-checklist-results.md`) and the two-player CI mission runs pass, and older builds get the "update needed" panel.
+**Exit:** v0.7.0 released, the versus sweep (`versus-test-checklist-results.md`) and the two-player mission runs pass (through the fixed gate, or locally with the log attached to the release PR), and older builds get the "update needed" panel.
 
 ### 0.8: the story test pass
 
@@ -79,6 +80,8 @@ Run everything the checklist hasn't, and fix what turns up.
 | 3 and 4 player escort and spawn rows (X7, X8) | Half a day |
 | Bunker 2: a joiner's punches missing the cell guard. Reproduce from the next F8 report or close it after the 0.9 sessions | Open-ended |
 | Add a short versus run to CI (two copies, one match to the end screen), so versus has a regression check like co-op | Half a day |
+| Turn compiler warnings back on for the co-op files (today the global `-w` hides every warning in them) and fix what shows up | Half a day to a day |
+| Run the existing `GE_SANITIZE` build (ASan and UBSan) through the mission runs and the versus sweep; it isn't run anywhere today | Half a day, plus fixes |
 
 **Exit:** every row in `coop/TEST-CHECKLIST.md` has a result, every `fail` is fixed and re-run, and the mission risk map has no "untested theory" left.
 
@@ -88,7 +91,7 @@ Real people, real Steam, real distances. 0.9.x builds take fixes only.
 
 | Item | Notes |
 | --- | --- |
-| Play sessions over Steam | At least: a full 2-player campaign; a 4-player session across the acts; a session with a joiner on another continent; a versus night with every scenario, Flag Tag to the end, team picks, a 4-player match, someone quitting and the host leaving. |
+| Play sessions over Steam | Each one records its passes in the checklist as human, real Steam, so the checklist can tell them from rig passes. At least: a full 2-player campaign; a 4-player session across the acts; a session with a joiner on another continent; a versus night with every scenario, Flag Tag to the end, team picks, a 4-player match, someone quitting and the host leaving. |
 | Updater path test | From v0.3.0, v0.6.6 and v0.6.15 to the candidate. |
 | Read-only installs | **Decision:** move saves and settings to a per-user folder (with a one-time move of existing saves) for 1.0, or keep "unzip to a folder you own" as a documented 1.0 limitation. It is a known issue in every recent release's notes. |
 | Linux | **Decision:** ship a Linux release zip alongside the Windows one, or say plainly that Linux players build from source. The README badge says Windows and Linux, but only `-win32.zip` is released. The blank-triangle workaround stays documented either way. |
@@ -108,8 +111,11 @@ What stands between v0.6.15 and the 1.0 bar, with where each is recorded.
 5. **No team picking and no custom weapon sets online.** Both need the protocol bump in 0.7. Source: the versus review, items 11 and 12.
 6. **No cart or mod check between players.** Safe today only because the loader accepts the stock US cart alone. Source: the mod support thread.
 7. **Bunker 2 punches**, reported once, not reproduced in six rig runs. Source: v0.6.14 and v0.6.15 release notes.
-8. **GoldenEye 007 Plus provenance.** The guard targeting state machine is ported from GoldenEye 007 Plus, which has no published license for its own changes, and `coop/NOTES.md` still says the fork was meant to stay private for that reason. Now that releases are public this needs settling before 1.0: written permission from its author, or a rewrite of the ported pieces listed in the NOTES provenance table. While on licensing, confirm the encrypted CI cart (the `ci-rom` release asset) is not on a public release.
+8. **GoldenEye 007 Plus provenance.** The guard targeting state machine is ported from GoldenEye 007 Plus, which has no published license for its own changes, and `coop/NOTES.md` still says the fork was meant to stay private for that reason. Now that releases are public this needs settling before 1.0: written permission from its author, or a rewrite of the ported pieces listed in the NOTES provenance table. This stays an open owner decision. Either way `coop/NOTES.md` still says "this fork stays private", which is no longer true and should be corrected. Separately, no encrypted CI cart is published: there is no `ci-rom` release, draft or published (checked 2026-11-01). If one is added for CI, it must not be a public asset.
 9. **Read-only installs and Linux packaging**, both waiting on a decision (see 0.9).
+10. **The GitHub mission-run workflow can pass without running anything.** It skips every step without the cart key and reports success. Fix in 0.7.
+11. **No real-Steam human passes on record.** Every checklist pass is from the rig or doesn't say. 0.9's sessions fill this in.
+12. **Co-op code builds with every warning off, and the sanitizer build is never run.** Both are cheap ways to find bugs before players do. In 0.8.
 
 Not blockers: the Facility "objective B failed" flash (not seen in the 2026-10-31 recheck), the versus death drop logging as "host guard 30000" (log only), and the per-bullet dust puff events (working, could be trimmed).
 
