@@ -10500,7 +10500,15 @@ void coopScriptSetsFlags(void *script, void *chr, u32 newbits)
     if (p < 0 && chr != NULL && sEnabled > 0 && coopNetIsHost())
     {   /* a chr's own script (Valentin, Janus, a scientist): the player it is
          * dealing with, the one its "Bond" is right now */
+        ChrRecord *c = (ChrRecord *) chr;
+        bool global;
+
         p = (sTickChr == chr && g_CoopPropOverride != NULL) ? coopPlayerOfProp(g_CoopPropOverride) : -1;
+        if (p < 0 && c->ailist != NULL && chraiGetAIListID(c->ailist, &global) >= 0x1000)
+        {   /* a level script that watches the world, not a player (Jungle's "Xenia is
+             * dying"): whoever hurt something in the last few seconds did it */
+            p = coopObjRecentDamage();
+        }
         p = (p >= 0) ? p : coopSelf();
     }
     if (p >= 0)
