@@ -476,7 +476,10 @@ typedef struct
 {
     s32 lastupdate60;
     s32 laststimulus60;
+    s32 follow60;       /* its last "run / walk to Bond" (an escort following), -1 none */
+    s32 closer60;       /* since when player closer has been much nearer than the one it follows */
     s8 target;
+    s8 closer;
 } CoopChrTarget;
 
 #define COOP_MAX_CHRS 256
@@ -488,6 +491,9 @@ static StandTile *sAimSavedStan;
 PropRecord *g_CoopPropOverride;     /* read by getCurrentPlayerProp() */
 static ChrRecord *sAltChr;          /* the guard coopChrAltBegin is trying other players for */
 static s32 sAltFrom = -1;           /* the player it is on outside those tries */
+static s8 sAltOrder[COOP_MAX_PLAYERS];  /* the other players for those tries, nearest first */
+static f32 sAltDist2[COOP_MAX_PLAYERS];
+static s32 sAltCount;
 
 static s32 sEvForwarding;   /* host: passing a joiner's event on, keep its sender */
 
@@ -2046,7 +2052,9 @@ void coopStageStart(void)
     {
         sChrTarget[i].lastupdate60 = -1;
         sChrTarget[i].laststimulus60 = -1;
+        sChrTarget[i].follow60 = -1;
         sChrTarget[i].target = -1;
+        sChrTarget[i].closer = -1;
     }
     for (i = 0; i < COOP_MAX_CHRS; i++)
     {
@@ -3601,6 +3609,22 @@ static PropRecord *coopTargetProp(s32 t)
     return (t == COOPTGT_LOCAL) ? g_CurrentPlayer->prop : sR[t].puppet;
 }
 
+/* where player t is for the guards: a partner's lag-compensated spot when there is one */
+static coord3d *coopTargetPos(s32 t)
+{
+    return (t != COOPTGT_LOCAL && sR[t].aimStan != NULL) ? &sR[t].aimPos : &coopTargetProp(t)->pos;
+}
+
+static f32 coopChrDist2To(ChrRecord *chr, s32 t)
+{
+    coord3d *p = coopTargetPos(t);
+    f32 dx = p->f[0] - chr->prop->pos.f[0];
+    f32 dy = p->f[1] - chr->prop->pos.f[1];
+    f32 dz = p->f[2] - chr->prop->pos.f[2];
+
+    return dx * dx + dy * dy + dz * dz;
+}
+
 static s32 coopAnyRemoteTargetable(void)
 {
     s32 t;
@@ -3639,18 +3663,13 @@ static s32 coopNearestTarget(ChrRecord *chr)
 
     for (t = 0; t < COOPTGT_COUNT; t++)
     {
-        PropRecord *p;
-        f32 dx, dy, dz, d2;
+        f32 d2;
 
         if (!coopTargetable(t))
         {
             continue;
         }
-        p = coopTargetProp(t);
-        dx = p->pos.f[0] - chr->prop->pos.f[0];
-        dy = p->pos.f[1] - chr->prop->pos.f[1];
-        dz = p->pos.f[2] - chr->prop->pos.f[2];
-        d2 = dx * dx + dy * dy + dz * dz;
+        d2 = coopChrDist2To(chr, t);
         if (d2 < bestd2)
         {
             bestd2 = d2;
@@ -3677,6 +3696,79 @@ static s32 coopActionAllowsScan(ChrRecord *chr)
         default:
             return FALSE;
     }
+}
+
+/* An escort (Natalya, the Control technician) that ran or walked to Bond
+ * keeps the player it went to while it waits: the scan below handed it the
+ * next player every fifth of a second, so with the team split up each run
+ * went to whoever the turn had reached. It moves on to another player when
+ * that one has been under half as far and 10 m nearer for 3 s while it
+ * stood (its leader out of reach); a dead or departed leader is dropped at
+ * once (coopChrTarget). Its script's own checks ("Bond within 10 m") still
+ * hand it to the player that passes them. */
+#define COOP_FOLLOW_SWAP    (3 * 60)
+#define COOP_FOLLOW_NEARER  1000.0f
+
+static s32 coopChrFollowLeader(ChrRecord *chr, CoopChrTarget *st)
+{
+    s32 t, best = -1;
+    f32 lead2 = coopChrDist2To(chr, st->target), bestd2 = 1.0e30f;
+    f32 lead, near;
+
+    for (t = 0; t < COOPTGT_COUNT; t++)
+    {
+        if (t != st->target && coopTargetable(t))
+        {
+            f32 d2 = coopChrDist2To(chr, t);
+
+            if (d2 < bestd2)
+            {
+                bestd2 = d2;
+                best = t;
+            }
+        }
+    }
+    lead = sqrtf(lead2);
+    near = sqrtf(bestd2);
+    if (best < 0 || near * 2.0f >= lead || lead - near < COOP_FOLLOW_NEARER)
+    {
+        st->closer = -1;
+        return st->target;
+    }
+    if (st->closer != best)
+    {
+        st->closer = (s8) best;
+        st->closer60 = g_GlobalTimer;
+    }
+    else if (g_GlobalTimer - st->closer60 >= COOP_FOLLOW_SWAP)
+    {
+        portConLogf("ge: coop: chr %d follows player %d now (%.0f m away, player %d %.0f m)\n", chr->chrnum, best + 1,
+                    near / 100.0f, st->target + 1, lead / 100.0f);
+        st->target = (s8) best;
+        st->lastupdate60 = g_GlobalTimer;
+        st->closer = -1;
+    }
+    return st->target;
+}
+
+/* host, chrGoToBond: the chr is on its way to whoever is Bond in its tick */
+void coopChrFollowed(ChrRecord *chr)
+{
+    CoopChrTarget *st;
+    s32 t = coopChrCurrentTarget();
+
+    if (sEnabled <= 0 || !coopNetIsHost() || coopVersus() || chr == NULL || coopIsPlayerChr(chr)
+        || (st = coopChrState(chr)) == NULL)
+    {
+        return;
+    }
+    if (st->follow60 < 0 || st->target != t)
+    {
+        portConLogf("ge: coop: chr %d goes to player %d\n", chr->chrnum, t + 1);
+    }
+    st->follow60 = g_GlobalTimer;
+    st->target = (s8) t;
+    st->closer = -1;
 }
 
 /* Acquire -> commit -> release (from GE+): a passive guard scans players a
@@ -3707,6 +3799,11 @@ static s32 coopChrTarget(ChrRecord *chr)
         else if (!coopActionAllowsScan(chr))
         {
             return st->target;
+        }
+
+        if (st->follow60 >= 0)
+        {   /* following: stay with that player */
+            return coopChrFollowLeader(chr, st);
         }
 
         if (g_GlobalTimer - st->lastupdate60 < 12)
@@ -3839,20 +3936,35 @@ s32 coopChrAltBegin(ChrRecord *chr, s32 k)
             sAltChr = NULL;
             return 0;
         }
+        sAltCount = 0;
+        for (t = 0; t < COOPTGT_COUNT; t++)
+        {   /* nearest first: a check any of them passes keeps the nearest that does */
+            if (t != sAltFrom && coopTargetable(t))
+            {
+                f32 d2 = coopChrDist2To(chr, t);
+                s32 j = sAltCount++;
+
+                while (j > 0 && sAltDist2[j - 1] > d2)
+                {
+                    sAltOrder[j] = sAltOrder[j - 1];
+                    sAltDist2[j] = sAltDist2[j - 1];
+                    j--;
+                }
+                sAltOrder[j] = (s8) t;
+                sAltDist2[j] = d2;
+            }
+        }
     }
     else if (sAltChr != chr)
     {
         return 0;
     }
-    for (t = 0; t < COOPTGT_COUNT; t++)
+    if (k >= sAltCount || !coopTargetable(sAltOrder[k]))
     {
-        if (t != sAltFrom && coopTargetable(t) && k-- == 0)
-        {
-            coopChrUseTarget(chr, t);
-            return 1;
-        }
+        return 0;
     }
-    return 0;
+    coopChrUseTarget(chr, sAltOrder[k]);
+    return 1;
 }
 
 void coopChrAltEnd(ChrRecord *chr)
@@ -3883,6 +3995,35 @@ void coopChrAltKeep(ChrRecord *chr, s32 stimulus)
         st->laststimulus60 = g_GlobalTimer;
     }
     sAltFrom = t;
+}
+
+/* host: retail stops every moving chr once 10 guards have seen Bond in the
+ * last two seconds. That count takes in the guards fighting each partner, so
+ * a co-op fight reached it far sooner and froze escorts and guards mid-run;
+ * each player in the mission gets the solo 10. */
+s32 coopSeenBondCap(void)
+{
+    extern s32 g_SeenBondRecentlyGuardCount;
+    static s32 logged60;
+    s32 p, n = 1;
+
+    if (sEnabled <= 0 || !coopNetIsHost() || coopVersus())
+    {
+        return 10;
+    }
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        if (coopRemoteHere(p))
+        {
+            n++;
+        }
+    }
+    if (g_SeenBondRecentlyGuardCount >= 10 && (g_GlobalTimer - logged60 >= 300 || g_GlobalTimer < logged60))
+    {
+        logged60 = g_GlobalTimer;
+        portConLogf("ge: coop: %d guards saw a player just now (chrs stop at %d)\n", g_SeenBondRecentlyGuardCount, 10 * n);
+    }
+    return 10 * n;
 }
 
 /* host, in a guard's tick: the player that is "Bond" for it, 0 our own
@@ -9417,6 +9558,8 @@ static void coopTakeOverWorld(void)
         sChrTarget[i].target = -1;
         sChrTarget[i].lastupdate60 = -1;
         sChrTarget[i].laststimulus60 = -1;
+        sChrTarget[i].follow60 = -1;
+        sChrTarget[i].closer = -1;
         if (!sAiSyncHave[i] || chr->model == NULL || chr->prop == NULL || coopIsPlayerChr(chr) || chr->chrnum != e->chrnum)
         {
             continue;

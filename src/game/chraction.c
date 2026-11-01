@@ -41,6 +41,13 @@
 #endif
 
 #ifndef TARGET_N64
+/* co-op: the solo budget of guards that saw Bond just now, for each player */
+#define SEEN_BOND_CAP coopSeenBondCap()
+#else
+#define SEEN_BOND_CAP 10
+#endif
+
+#ifndef TARGET_N64
 /* co-op: "Bond" for the guard being ticked may be the peer's puppet */
 #define PORT_COOP_TANKFLAGS(f)       coopGuardTankFlags(f)
 #define PORT_COOP_DUCKHEIGHT()       coopTargetDuckingHeight()
@@ -5148,7 +5155,7 @@ bool chrGoToPad(ChrRecord *self, s32 padid, SPEED speed)
     coord3d region;
     StandTile *stan; //sp28 - wow, deliberate duplicate...
 
-    if ((padid >= 0) && chrIsNotDeadOrShot(self) && (g_SeenBondRecentlyGuardCount < 10))
+    if ((padid >= 0) && chrIsNotDeadOrShot(self) && (g_SeenBondRecentlyGuardCount < SEEN_BOND_CAP))
     {
         padid = chrResolvePadId(self, padid);
         if (isNotBoundPad(padid))
@@ -9583,7 +9590,7 @@ void chrlvTickGoPos(ChrRecord *self)
         }
     }
 
-    if (g_SeenBondRecentlyGuardCount >= 0xA)
+    if (g_SeenBondRecentlyGuardCount >= SEEN_BOND_CAP)
     {
         chrlvKneelingAnimationRelated7F023E48(self);
 
@@ -10720,12 +10727,15 @@ bool chrGoToBond(ChrRecord *self, SPEED speed)
 {
     PropRecord *bondprop;
 
-    if (chrIsNotDeadOrShot(self) && (g_SeenBondRecentlyGuardCount < 10))
+    if (chrIsNotDeadOrShot(self) && (g_SeenBondRecentlyGuardCount < SEEN_BOND_CAP))
     {
         bondprop = getCurrentPlayerProp();
 
         if (plot_course_for_actor(self, &bondprop->pos, bondprop->stan, speed))
         {
+#ifndef TARGET_N64
+            coopChrFollowed(self);
+#endif
             return TRUE;
         }
     }
@@ -10742,7 +10752,7 @@ bool chrGoToChr(ChrRecord *self, s32 chrid, SPEED speed)
     ChrRecord *chr;
     PropRecord *chrprop;
 
-    if (chrIsNotDeadOrShot(self) && (g_SeenBondRecentlyGuardCount < 10))
+    if (chrIsNotDeadOrShot(self) && (g_SeenBondRecentlyGuardCount < SEEN_BOND_CAP))
     {
         chr = chrFindById(self, chrid);
         if (chr && chr->model && chr->prop)

@@ -141,11 +141,11 @@ ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| BU1 | TARGET | Leads Natalya out of the cell, the host far behind | She follows the joiner, doesn't hesitate between players | `bunker2Nat` || untestable in rig (her follow needs the story up to it); needs a hands-on run |
+| BU1 | TARGET | Leads Natalya out of the cell, the host far behind | She follows the joiner, doesn't hesitate between players | `bunker2Nat` || pass (rig: host `c27@8`, joiner `GE_COOP_TESTDOOR=1` `o3@8,c13@18,c12@30`; she goes to player 2 and follows them to rooms 26 and 27) |
 | BU2 | FX, ONEPLAYER | Looks back at Natalya while she's out of the host's view | She doesn't teleport in front of the joiner | `bunker2Nat` | |
 | BU3 | KEYITEM | Picks up the GoldenEye key / Boris's clipboard | Collected check works for the host's script | `bunker2Items` || pass (rig: B and D collect objectives on both) |
 | BU4 | ACTION | Stands in front of a drone gun | The host's drone gun fires at the joiner | `dronegun` || pass (rig `dronegun`) |
-| BU5 | SCRIPTDEATH | Dies while Natalya follows the joiner | She switches to the host (or waits), doesn't freeze | || untestable in rig (as BU1) |
+| BU5 | SCRIPTDEATH | Dies while Natalya follows the joiner | She switches to the host (or waits), doesn't freeze | || pass (rig: as BU1 then `d@40`; "chr 0 goes to player 1" as the joiner goes down; the guards there then killed her) |
 
 ## 10. Statue
 

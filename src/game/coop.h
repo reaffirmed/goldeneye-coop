@@ -14,6 +14,8 @@ extern PropRecord *g_CoopPropOverride;
 s32  coopChrTickBegin(ChrRecord *chr); /* 0: skip (client mirrors the host) */
 void coopChrTickEnd(void);
 void coopChrStimulus(ChrRecord *chr);
+void coopChrFollowed(ChrRecord *chr);            /* host, chrGoToBond: an escort stays with the player it went to */
+s32  coopSeenBondCap(void);                      /* chrs stop moving at this many guards that saw Bond just now (10 solo) */
 s32  coopChrSlot(const ChrRecord *chr);           /* its index in g_ChrSlots, or -1 */
 s32  coopChrAltBegin(ChrRecord *chr, s32 k);     /* host: a failed "Bond" check, try the k-th other player (1: they are Bond now) */
 void coopChrAltEnd(ChrRecord *chr);              /* that try failed too: the guard's own target again */
