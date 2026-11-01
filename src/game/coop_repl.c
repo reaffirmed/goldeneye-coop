@@ -834,8 +834,11 @@ static void coopReplRecvReq(const CoopReplReqPkt *p, s32 len, s32 from)
         coopReplSendSnapshot(from);
         return;
     }
-    if (p->join && sOut[from].seen && sOut[from].snapAt < 0)
-    {   /* asked again: none of it got there */
+    if (p->join && sOut[from].seen && sOut[from].snapAt < 0 && sTick - sOut[from].earlyAt >= 20)
+    {   /* asked again: none of it got there. A joiner asks once a second (20 ticks here allows
+         * for a host running at a third of the joiner's frame rate); much more often than
+         * that is a broken or hostile one, and each answer is the whole snapshot (a dozen
+         * packets and every live item): a flood of asks filled the host's upload */
         sOut[from].earlyAt = sTick;
         coopReplSendSnapshot(from);
         return;

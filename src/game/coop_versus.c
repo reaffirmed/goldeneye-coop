@@ -876,7 +876,7 @@ static ObjectRecord *coopVsSetupObj(s32 ofs, s32 type)
 {
     ObjectRecord *obj;
 
-    if (g_CurrentSetup.propDefs == NULL || ofs < 0)
+    if (g_CurrentSetup.propDefs == NULL || !coopExtSetupRecOk(ofs))
     {
         return NULL;
     }

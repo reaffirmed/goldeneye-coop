@@ -404,6 +404,9 @@ static void coopSeenTick(void);
 static void coopSeenReset(void);
 static s32 sDefsBytes;  /* size of the stage's setup prop defs */
 static void *sDefsBase;
+#define COOP_DEFS_MAPBYTES 0x40000
+static u8 sDefsStart[COOP_DEFS_MAPBYTES / 4 / 8];  /* a bit per word: a record starts there (coopSetupRecOk) */
+static s32 sDefsMapped;
 static u32 sTick;
 static s32 sWorldFrom;  /* the player whose WORLD coopApplyWorld is applying */
 
@@ -461,6 +464,7 @@ typedef struct
     u32 evLastSend;
     s32 ackDirty;
     u32 session;        /* the peer's session, 0 until heard */
+    u32 oldSession[2];  /* its last two before that: a late packet from one is dropped (coopChanSession) */
     CoopHelloPkt hello; /* its last hello */
     u32 helloTick;
     s32 helloSeen;
@@ -546,6 +550,7 @@ static void coopApplyWorld(CoopWorldPkt *p);
 static void coopCradleFallTick(void);
 static s32 sClockSet;
 static s32 coopSetupOfs(void *rec);
+static s32 coopSetupRecOk(s32 ofs);
 static StandTile *coopFindStan(coord3d *pos, StandTile *from, coord3d *frompos);
 static s32 coopIsMirroringClient(void);
 static void coopSendGuards(void);
@@ -566,6 +571,7 @@ static void coopPredictShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 we
 static void coopPredictReset(void);
 static void coopClientGunfire(void);
 static void coopHarnessTick(void);
+static void coopHostileTick(void);
 static void coopPuppetRemove(CoopRemote *r);
 static s32 coopNetInitFirst(void);
 static u32 coopNowMs(void);
@@ -869,22 +875,155 @@ static void coopChanRestart(s32 c)
     }
 }
 
-static void coopChanSession(s32 c, u32 session)
+/* The peer's session as a packet gives it. 1: the packet is from one of its
+ * sessions that is over (sent before it restarted, and came late: jitter, or a
+ * queue the transport hadn't flushed): drop it. Before, such a packet read as
+ * one more restart, so the channel started over twice (every event queued to
+ * the peer in between was lost), and its old events, numbered from 1 again,
+ * were applied a second time (a door toggled back, a pickup taken twice). */
+static s32 coopChanSession(s32 c, u32 session)
 {
     CoopChan *ch = &sChan[c];
 
     if (session == 0 || session == ch->session)
     {
-        return;
+        return 0;
+    }
+    if ((session == ch->oldSession[0] || session == ch->oldSession[1]) && ch->session != 0)
+    {   /* (with no session yet, a slot just handed over: the same game coming back keeps its session) */
+        static u32 stale;
+
+        if ((stale++ % 64) == 0)
+        {
+            portConLogf("ge: coop: a packet from player %d's earlier session came late, dropped [%u so far]\n",
+                        coopPlayerOfChan(c) + 1, stale);
+        }
+        return 1;
     }
     if (ch->session != 0)
     {
+        ch->oldSession[1] = ch->oldSession[0];
+        ch->oldSession[0] = ch->session;
         coopChanRestart(c);
     }
     ch->session = session;
+    return 0;
 }
 
+extern s32 explosionImpactTypeCount(void);
+extern s32 getMaxNumRooms(void);
+
 static void coopApplyEvent(CoopEvent *ev);
+
+/* ---- who may say what ------------------------------------------------------
+ * The host is the authority. A joiner speaks only for itself (the host stamps
+ * `from` on everything it takes from a joiner), and some kinds are the host's
+ * word alone: a guard's hit, the host's script commands, notes about players,
+ * End All, a smarter guard's bark, a guard's dropped gun. Before this a
+ * joiner's EVENTS could carry any of them, and the host applied the ones for
+ * itself and passed the rest on to the other joiners with the joiner's number
+ * on them: one joiner (a stranger from Public Games, or a broken build) could
+ * end everyone's mission, run script commands on another joiner's game (whose
+ * copy of the command overflowed a 32-byte buffer), mark players as gone, or
+ * hit anyone for any damage. Kinds a joiner sends only to the host (its shots
+ * on guards, lives, guards it has seen, its ending, its vote) are never passed
+ * on. Versus kinds are left as they are: every PC is the word on its own
+ * hits and kills there by design. */
+
+/* 1: only the host may originate an event like this */
+static s32 coopEventHostOnly(const CoopEvent *ev)
+{
+    switch (ev->kind)
+    {
+        case COOPEV_HIT:
+            return !ev->u.hit.friendly;     /* a guard's; a partner's own shot (friendly) is anyone's */
+        case COOPEV_AICMD:
+        case COOPEV_PLAYERNOTE:
+        case COOPEV_ENDALL:
+        case COOPEV_OBJDONE:
+        case COOPEV_TEAMTIME:
+        case COOPEV_CAMPAIGN:
+        case COOPEV_BARK:
+        case COOPEV_CINEMA:
+            return 1;
+        case COOPEV_DROP:
+            return !coopVersus();           /* co-op: a guard's drop; versus: the dropper's own */
+        default:
+            return 0;
+    }
+}
+
+/* 1: a joiner sends this kind to the host alone (never to be passed on) */
+static s32 coopEventToHostOnly(const CoopEvent *ev)
+{
+    switch (ev->kind)
+    {
+        case COOPEV_SHOTCHR:
+        case COOPEV_LIVES:
+        case COOPEV_SEEN:
+        case COOPEV_ENDING:
+        case COOPEV_VOTE:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+/* the parts of an event its handlers take on trust, made safe (a joiner's, or a host's) */
+static s32 coopEventSane(CoopEvent *ev)
+{
+    if (ev->kind == COOPEV_HIT && !(ev->u.hit.damage >= 0.0f && ev->u.hit.damage <= 100.0f))
+    {
+        return 0;   /* NaN, negative (a heal) or absurd */
+    }
+    if (ev->kind == COOPEV_AICMD && ev->u.ai.len > sizeof(ev->u.ai.cmd))
+    {
+        return 0;
+    }
+    if (ev->kind == COOPEV_PLAYERNOTE)
+    {
+        ev->u.note.name[sizeof(ev->u.note.name) - 1] = '\0';
+    }
+    return 1;
+}
+
+/* host: a joiner's event, `from` already stamped. 1 to take it (apply and/or pass on) */
+static s32 coopEventFromJoinerOk(CoopEvent *ev)
+{
+    static u32 refused;
+
+    if (coopEventHostOnly(ev) || !coopEventSane(ev))
+    {
+        if ((refused++ % 64) == 0)
+        {
+            portConLogf("ge: coop: refused event kind %d from player %d (only the host sends it) [%u so far]\n",
+                        ev->kind, ev->from + 1, refused);
+        }
+        return 0;
+    }
+    if (coopEventToHostOnly(ev))
+    {
+        ev->to = 0;     /* ours alone */
+    }
+    return 1;
+}
+
+/* joiner: an event from the host (its own, or a joiner's it passed on). 1 to apply it */
+static s32 coopEventFromHostOk(CoopEvent *ev)
+{
+    static u32 refused;
+
+    if ((ev->from != 0 && (coopEventHostOnly(ev) || coopEventToHostOnly(ev))) || !coopEventSane(ev))
+    {
+        if ((refused++ % 64) == 0)
+        {
+            portConLogf("ge: coop: dropped event kind %d said to be from player %d [%u so far]\n", ev->kind, ev->from + 1,
+                        refused);
+        }
+        return 0;
+    }
+    return 1;
+}
 
 /* an EVENTS packet on channel c */
 static void coopRecvEvents(s32 c, CoopEventsPkt *e)
@@ -892,7 +1031,10 @@ static void coopRecvEvents(s32 c, CoopEventsPkt *e)
     CoopChan *ch = &sChan[c];
     u32 k;
 
-    coopChanSession(c, e->session);
+    if (coopChanSession(c, e->session))
+    {
+        return;     /* from a session of theirs that is over (it came late): its events were applied, or are void */
+    }
     if ((s32) (e->ack - (ch->outNext - 1)) > 0)
     {   /* it acks events we never sent: it is still talking to the game we were
          * before we restarted (a rejoin), and hasn't seen our new session yet.
@@ -926,6 +1068,10 @@ static void coopRecvEvents(s32 c, CoopEventsPkt *e)
         if (coopNetIsHost())
         {
             ev.from = (u8) coopPlayerOfChan(c);   /* a joiner can only speak for itself */
+            if (!coopEventFromJoinerOk(&ev))
+            {
+                continue;
+            }
             if (ev.to != 0)
             {   /* for another joiner, or everyone: pass it on */
                 sEvForwarding = 1;
@@ -937,7 +1083,7 @@ static void coopRecvEvents(s32 c, CoopEventsPkt *e)
                 continue;
             }
         }
-        else if (ev.to != COOP_ALL && ev.to != coopSelf())
+        else if ((ev.to != COOP_ALL && ev.to != coopSelf()) || !coopEventFromHostOk(&ev))
         {
             continue;
         }
@@ -955,6 +1101,36 @@ static void coopRecvState(s32 c, CoopStatePkt *p)
     CoopRemote *r;
     s32 q;
 
+    if (p->bodynum < 0 || p->bodynum >= BODIES_MAX || p->headnum >= BODIES_MAX
+        || !(p->pos[0] > -1e7f && p->pos[0] < 1e7f && p->pos[1] > -1e7f && p->pos[1] < 1e7f && p->pos[2] > -1e7f
+             && p->pos[2] < 1e7f && p->yaw > -100.0f && p->yaw < 100.0f))   /* false for NaN too (no fabsf: see the notes) */
+    {   /* the body and head index the character table unchecked (coopPuppetSpawn), and a
+         * position that isn't a number poisons the floor search and the drawing: a broken
+         * or hostile sender's STATE is dropped here, before the host passes it on */
+        static u32 bad;
+
+        if ((bad++ % 64) == 0)
+        {
+            portConLogf("ge: coop: dropped a STATE from channel %d (body %d head %d) [%u so far]\n", c, (int) p->bodynum,
+                        (int) p->headnum, bad);
+        }
+        return;
+    }
+    for (q = 0; q < COOP_SHOTS_KEPT; q++)
+    {   /* a shot's impact type and room index the game's tables as they are (coopLookPlayShot):
+         * out of range, it plays as a plain spark with no bullet hole */
+        CoopShot *s = &p->look.shot[q];
+
+        if (s->impact >= explosionImpactTypeCount())
+        {
+            s->impact = -1;
+        }
+        if (s->room < 0 || s->room >= getMaxNumRooms())
+        {
+            s->room = 0;
+            s->impact = -1;
+        }
+    }
     if (coopNetIsHost())
     {
         static u8 relayed[COOP_NET_MAX_PEERS][COOP_NET_MAX_PEERS];
@@ -1464,7 +1640,19 @@ static void coopPollNet(void)
             {   /* an older build's: no link numbers */
                 memset(buf + n, 0, sizeof(CoopHelloPkt) - (size_t) n);
             }
-            coopChanSession(c, ((CoopHelloPkt *) buf)->session);
+            if (coopChanSession(c, ((CoopHelloPkt *) buf)->session))
+            {
+                continue;
+            }
+            {   /* the roster's names are drawn and printed as strings */
+                CoopHelloPkt *hp = (CoopHelloPkt *) buf;
+                s32 k;
+
+                for (k = 0; k < COOP_MAX_PLAYERS; k++)
+                {
+                    hp->roster[k].name[sizeof(hp->roster[k].name) - 1] = '\0';
+                }
+            }
             ch->hello = *(CoopHelloPkt *) buf;
             if (!coopNetIsHost())
             {
@@ -2606,6 +2794,7 @@ void coopChecklistTick(void);   /* coop_checklist.c (harness only) */
 static void coopHarnessTick(void)
 {
     coopChecklistTick();
+    coopHostileTick();
     if (coopNetIsHost() && coopPartnerHere())
     {   /* GE_COOP_TESTFADE=1: the host's "script" fades to black at 15 s and back at 18 s (harness only) */
         static s32 testfade = -1;
@@ -6374,7 +6563,7 @@ static void coopApplyDoor(s32 doorofs, s32 state)
 {
     DoorRecord *door;
 
-    if (coopSetupOfs((u8 *) g_CurrentSetup.propDefs + doorofs) < 0)
+    if (!coopSetupRecOk(doorofs))
     {
         return;
     }
@@ -6414,9 +6603,50 @@ static s32 coopSetupOfs(void *rec)
         }
         sDefsBase = base;
         sDefsBytes = (s32) ((u8 *) it - base);
+        memset(sDefsStart, 0, sizeof(sDefsStart));
+        sDefsMapped = sDefsBytes <= COOP_DEFS_MAPBYTES;
+        for (it = (PropDefHeaderRecord *) base; sDefsMapped && it->type != PROPDEF_END;
+             it = (PropDefHeaderRecord *) ((u32 *) it + sizepropdef(it)))
+        {
+            s32 w = (s32) ((u8 *) it - base) / 4;
+
+            sDefsStart[w >> 3] |= (u8) (1 << (w & 7));
+        }
     }
     ofs = (s32) ((u8 *) rec - base);
     return (ofs >= 0 && ofs < sDefsBytes) ? ofs : -1;
+}
+
+/* 1 when ofs (from the network) is where a setup record starts. A range check
+ * alone let any offset through, so a record's fields were read (and written:
+ * doors, damage, the tank's place) from the middle of another one, or from
+ * past the last one when the offset was near the end */
+static s32 coopSetupRecOk(s32 ofs)
+{
+    u8 *base = (u8 *) g_CurrentSetup.propDefs;
+    PropDefHeaderRecord *it;
+
+    if (base == NULL || coopSetupOfs(base) < 0 || ofs < 0 || ofs >= sDefsBytes || (ofs & 3) != 0)
+    {
+        return 0;
+    }
+    if (sDefsMapped)
+    {
+        return (sDefsStart[(ofs / 4) >> 3] >> ((ofs / 4) & 7)) & 1;
+    }
+    for (it = (PropDefHeaderRecord *) base; it->type != PROPDEF_END; it = (PropDefHeaderRecord *) ((u32 *) it + sizepropdef(it)))
+    {   /* a stage bigger than the map: walk it */
+        if ((u8 *) it - base == ofs)
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+s32 coopExtSetupRecOk(s32 ofs)
+{
+    return coopSetupRecOk(ofs);
 }
 
 /* ---- objects ---------------------------------------------------------------
@@ -6489,7 +6719,7 @@ static void coopApplyObjDamage(CoopEvent *ev)
     ObjectRecord *obj;
     coord3d pos;
 
-    if (g_CurrentSetup.propDefs == NULL || coopSetupOfs((u8 *) g_CurrentSetup.propDefs + ev->u.obj.objofs) < 0)
+    if (g_CurrentSetup.propDefs == NULL || !coopSetupRecOk(ev->u.obj.objofs))
     {
         return;
     }
@@ -6583,7 +6813,7 @@ static void coopApplyObjKnock(CoopEvent *ev)
     s32 i;
 
     if (ev->u.knock.stage != bossGetStageNum() || !coopInMission() || g_CurrentSetup.propDefs == NULL
-        || coopSetupOfs((u8 *) g_CurrentSetup.propDefs + ev->u.knock.objofs) < 0)
+        || !coopSetupRecOk(ev->u.knock.objofs))
     {
         return;
     }
@@ -6695,7 +6925,7 @@ static void coopApplyObjUse(CoopEvent *ev)
     ObjectRecord *obj;
 
     if (ev->u.use.stage != bossGetStageNum() || !coopInMission() || g_CurrentSetup.propDefs == NULL
-        || coopSetupOfs((u8 *) g_CurrentSetup.propDefs + ev->u.use.objofs) < 0)
+        || !coopSetupRecOk(ev->u.use.objofs))
     {
         return;
     }
@@ -7136,7 +7366,7 @@ static s32 coopTeamPickTry(s32 i)
     PropRecord *prop;
     TICKOP op;
 
-    if (coopSetupOfs((u8 *) g_CurrentSetup.propDefs + sTeamPick[i]) < 0)
+    if (!coopSetupRecOk(sTeamPick[i]))
     {
         return 1;
     }
@@ -7239,7 +7469,7 @@ static void coopApplyPickup(CoopEvent *ev)
     s32 i;
 
     if (ev->u.pick.stage != bossGetStageNum() || g_CurrentSetup.propDefs == NULL
-        || coopSetupOfs((u8 *) g_CurrentSetup.propDefs + ev->u.pick.objofs) < 0)
+        || !coopSetupRecOk(ev->u.pick.objofs))
     {
         return;
     }
@@ -9802,6 +10032,12 @@ static void coopRecvBye(s32 c, CoopByePkt *b)
 {
     s32 p = coopPlayerOfChan(c);
 
+    if (b->session != 0 && sChan[c].session != 0 && b->session != sChan[c].session
+        && (b->session == sChan[c].oldSession[0] || b->session == sChan[c].oldSession[1]))
+    {   /* a goodbye from before it came back (three copies go out; one can come late): it is still here */
+        portConLogf("ge: coop: a goodbye from player %d's earlier session came late, ignored\n", p + 1);
+        return;
+    }
     if (coopNetIsHost())
     {
         if (sR[p].valid || coopLobbyPlayerHere(p))
@@ -9977,6 +10213,8 @@ static void coopSessionTick(void)
                 {   /* and its event channel starts again now: an ack we sent from the old one
                      * before its first packet came would tell the new game its events were in */
                     coopChanRestart(c);
+                    sChan[c].oldSession[1] = sChan[c].oldSession[0];
+                    sChan[c].oldSession[0] = sChan[c].session;  /* its late packets are not the newcomer's */
                     sChan[c].session = 0;
                 }
             }
@@ -10980,6 +11218,31 @@ extern void *g_CoopAiEntity;
 
 s32 chraiGetAIListID(AIRecord *AIList, bool *isGlobalAIList);
 
+/* 1 when offset is where a command of the list starts (walked from its top to
+ * its end): an offset from the network is only used once it is one */
+static s32 coopAiOffsetOk(u8 *list, s32 offset)
+{
+    s32 at = 0;
+    s32 steps;
+
+    for (steps = 0; offset >= 0 && at < offset && steps < 0x10000; steps++)
+    {
+        s32 len;
+
+        if (list[at] == AI_EndList)
+        {
+            return 0;
+        }
+        len = chraiitemsize(list, at);
+        if (len <= 0)
+        {
+            return 0;
+        }
+        at += len;
+    }
+    return offset >= 0 && at == offset;
+}
+
 static s32 sEndingWait;         /* joiner: ticks our copy has waited at an ending, this stage */
 static s32 sEndingWaitStage = -1;
 
@@ -11036,6 +11299,11 @@ static void coopEndingApply(const u8 *raw, s32 from)
         return;
     }
     list = ailistFindById(m.list);
+    if (list != NULL && !coopAiOffsetOk((u8 *) list, m.offset))
+    {   /* not where a command of that list starts: read anywhere before (any joiner could crash the host) */
+        portConLogf("ge: coop: player %d's ending (list %04x at %d) is not in that list\n", from + 1, m.list, m.offset);
+        return;
+    }
     if (list == NULL || ((u8 *) list)[m.offset] != AI_BondDisableDamageAndPickups)
     {
         portConLogf("ge: coop: player %d's ending (list %04x at %d) is not one here\n", from + 1, m.list, m.offset);
@@ -11073,7 +11341,7 @@ static void coopEndingApply(const u8 *raw, s32 from)
             return;
         }
     }
-    else if (m.who >= 0 && coopSetupOfs((u8 *) g_CurrentSetup.propDefs + m.who) >= 0)
+    else if (m.who >= 0 && coopSetupRecOk(m.who))
     {
         ObjectRecord *o = (ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + m.who);
 
@@ -11542,5 +11810,129 @@ void coopReplTeamPick(ObjectRecord *obj)
     if (i >= 0 && coopTeamPickTry(i))
     {
         sTeamPickDone[i] = 1;
+    }
+}
+
+/* ---- harness: a hostile joiner ------------------------------------------------
+ * GE_COOP_TESTHOSTILE=<s>[:<mask>] on a joiner: <s> seconds into the mission it
+ * sends what only a broken or hostile game would, once, to check that the host
+ * and the other joiners refuse it (coop/ci/net_scenarios.sh, scenario
+ * "hostile"). Mask bits (default 0x1F, the ones an unfixed build survives):
+ *   0x01 End All, to everyone              0x02 a guard's hit (0.5) on the host
+ *   0x04 "player 3 disconnected", to all   0x08 a NaN friendly hit, to all
+ *   0x10 a 200-byte script command, to all 0x20 a STATE with body 5000
+ *   0x40 an ending at offset 0x7FFF0000    0x80 a tank at offset 0x7FFFFF00
+ * The last three crash an unfixed host or joiner; they are for the fixed one. */
+static void coopHostileTick(void)
+{
+    static s32 at = -2, mask;
+    CoopEvent ev;
+
+    if (at == -2)
+    {
+        const char *e = getenv("GE_COOP_TESTHOSTILE");
+
+        at = (e != NULL) ? atoi(e) * 60 : -1;
+        mask = (e != NULL && strchr(e, ':') != NULL) ? (s32) strtol(strchr(e, ':') + 1, NULL, 0) : 0x1F;
+    }
+    if (at < 0 || coopNetIsHost() || !coopInMission() || (s32) sMissionTicks != at)
+    {
+        return;
+    }
+    portConLogf("ge: coop: testhostile: sending mask %x\n", mask);
+    if (mask & 0x01)
+    {
+        memset(&ev, 0, sizeof(ev));
+        ev.kind = COOPEV_ENDALL;
+        coopQueueEventTo(&ev, COOP_ALL);
+    }
+    if (mask & 0x02)
+    {
+        memset(&ev, 0, sizeof(ev));
+        ev.kind = COOPEV_HIT;
+        ev.u.hit.damage = 0.5f;
+        ev.u.hit.chrnum = -1;
+        coopQueueEventTo(&ev, 0);
+    }
+    if (mask & 0x04)
+    {
+        memset(&ev, 0, sizeof(ev));
+        ev.kind = COOPEV_PLAYERNOTE;
+        ev.u.note.player = 2;
+        ev.u.note.what = COOPNOTE_GONE;
+        memset(ev.u.note.name, 'x', sizeof(ev.u.note.name));    /* no terminator */
+        coopQueueEventTo(&ev, COOP_ALL);
+    }
+    if (mask & 0x08)
+    {
+        u32 nan = 0x7FC00000u;
+
+        memset(&ev, 0, sizeof(ev));
+        ev.kind = COOPEV_HIT;
+        memcpy(&ev.u.hit.damage, &nan, sizeof(nan));
+        ev.u.hit.chrnum = -1;
+        ev.u.hit.friendly = 1;
+        coopQueueEventTo(&ev, COOP_ALL);
+    }
+    if (mask & 0x10)
+    {
+        memset(&ev, 0, sizeof(ev));
+        ev.kind = COOPEV_AICMD;
+        ev.u.ai.chrnum = -1;
+        ev.u.ai.len = 200;
+        coopQueueEventTo(&ev, COOP_ALL);
+    }
+    if (mask & 0x20)
+    {
+        CoopStatePkt p;
+        PropRecord *bond = getCurrentPlayerProp();
+
+        memset(&p, 0, sizeof(p));
+        p.magic = COOP_MAGIC;
+        p.version = COOP_VERSION;
+        p.type = COOPPKT_STATE;
+        p.tick = sTick + 100000;
+        p.stage = bossGetStageNum();
+        p.pos[0] = bond->pos.f[0];
+        p.pos[1] = bond->pos.f[1];
+        p.pos[2] = bond->pos.f[2];
+        p.bodynum = 5000;
+        p.headnum = 5000;
+        p.ms = coopNowMs();
+        coopNetSendTo(0, &p, sizeof(p));
+    }
+    if (mask & 0x40)
+    {
+        CoopEndingMsg m;
+        bool global;
+        s32 i;
+
+        memset(&m, 0, sizeof(m));
+        m.stage = bossGetStageNum();
+        m.offset = 0x7FFF0000;
+        for (i = 0; i < g_NumChrSlots; i++)
+        {
+            if (g_ChrSlots[i].model != NULL && g_ChrSlots[i].ailist != NULL)
+            {
+                m.list = (u16) chraiGetAIListID(g_ChrSlots[i].ailist, &global);
+                break;
+            }
+        }
+        coopDesignSend(COOPEV_ENDING, 0, &m, sizeof(m));
+    }
+    if (mask & 0x80)
+    {
+        u8 raw[48];
+        u32 *h = (u32 *) raw;
+
+        memset(raw, 0, sizeof(raw));
+        h[0] = COOP_MAGIC;
+        ((u16 *) raw)[2] = COOP_VERSION;
+        ((u16 *) raw)[3] = COOPPKT_TANK;
+        h[2] = (u32) bossGetStageNum();
+        h[3] = 0x7FFFFF00u;
+        raw[16] = 1;
+        raw[17] = 1;
+        coopNetSendTo(0, raw, sizeof(raw));
     }
 }

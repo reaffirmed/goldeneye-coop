@@ -146,7 +146,7 @@ void coopTankPacket(const void *raw, s32 len, s32 from)
     memcpy(&p, raw, sizeof(p));
     player = (from == 0) ? p.player : from;     /* the host passes joiners' on */
     if (player < 0 || player >= COOP_MAX_PLAYERS || player == coopExtSelf() || p.stage != bossGetStageNum()
-        || p.tankofs < 0 || g_CurrentSetup.propDefs == NULL)
+        || !coopExtSetupRecOk(p.tankofs) || g_CurrentSetup.propDefs == NULL)
     {
         return;
     }

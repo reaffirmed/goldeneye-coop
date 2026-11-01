@@ -637,6 +637,7 @@ typedef struct
 } CoopExtView;
 void coopExtSend(s32 kind, s32 to, const void *payload, s32 len);
 s32  coopExtSetupOfs(void *rec);         /* a setup object's byte offset in the prop defs, -1 not one */
+s32  coopExtSetupRecOk(s32 ofs);         /* 1: a byte offset from the network is where a setup record starts */
 s32  coopExtSelf(void);
 s32  coopExtIsHost(void);
 u32  coopExtMissionTicks(void);
