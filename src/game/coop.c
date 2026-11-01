@@ -6878,6 +6878,8 @@ s32 coopAnyPlayerLeaves(u8 *list)
     return bossGetStageNum() == LEVELID_STATUE && chraiGetAIListID((AIRecord *) list, &global) == 0x1000;
 }
 
+static s32 coopRemoteStandsHere(s32 p);
+
 s32 coopLeashBroken(ChrRecord *self, s32 pad, f32 radius)
 {
     u8 near = 0;
@@ -6888,9 +6890,9 @@ s32 coopLeashBroken(ChrRecord *self, s32 pad, f32 radius)
     {
         f32 d;
 
-        if (p == 0 ? !coopOwnBondCounts() : !coopRemoteAliveHere(p))
+        if (p == 0 ? !coopOwnBondCounts() : !coopRemoteStandsHere(p))
         {
-            continue;   /* down or gone: not on the leash */
+            continue;   /* down or gone: not on the leash (a lost line still stands where it was) */
         }
         g_CoopPropOverride = (p == 0) ? NULL : sR[p].puppet;
         d = chrGetDistanceFromBondToPad(self, pad);
@@ -10173,6 +10175,48 @@ s32 coopAltBondBegin(s32 k)
 void coopAltBondEnd(void)
 {
     g_CoopPropOverride = NULL;
+}
+
+/* host: a partner whose line has gone quiet (lost, not yet dropped) still
+ * stands where it was last seen. Guards and "is Bond here" checks leave it
+ * be (coopRemoteAliveHere), but the checks that ask whether every player has
+ * walked away from a scene must still count it there: a 3 s hiccup while the
+ * joiner stood at Valentin made his "Bond walked off" check pass for the far
+ * host alone, and the contact failed for the team (and only on the host).
+ * k from 0: the k-th such partner as Bond, for both chr and level scripts;
+ * coopLostBondEnd puts the Bond the caller had back. */
+static PropRecord *sLostSavedOverride;
+
+static s32 coopRemoteStandsHere(s32 p)
+{
+    return coopRemoteHere(p) && !sR[p].st.dead && sR[p].puppet != NULL && sR[p].puppet->chr != NULL
+        && sR[p].puppet->stan != NULL;
+}
+
+s32 coopLostBondBegin(s32 k)
+{
+    s32 p;
+
+    if (sEnabled <= 0 || !coopNetIsHost() || coopVersus())
+    {
+        return 0;
+    }
+    for (p = 1; p < COOP_MAX_PLAYERS; p++)
+    {
+        if (sR[p].lost && coopRemoteStandsHere(p) && k-- == 0)
+        {
+            sLostSavedOverride = g_CoopPropOverride;
+            g_CoopPropOverride = sR[p].puppet;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void coopLostBondEnd(void)
+{
+    g_CoopPropOverride = sLostSavedOverride;
+    sLostSavedOverride = NULL;
 }
 
 /* A drone gun's target: the nearest living player inside its range and arc
