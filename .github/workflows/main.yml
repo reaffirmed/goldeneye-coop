@@ -97,6 +97,24 @@ jobs:
           (cd ziptest/src && zip -qr ../d.zip . && zip -qr0 ../s.zip . && zip -qr9 ../d9.zip .)
           ./update_test ziptest/d.zip ziptest/src ziptest/s.zip ziptest/src ziptest/d9.zip ziptest/src
 
+      - name: Save writes are all or nothing (no cart needed)
+        # port_save.c: settings and saves are replaced whole, never left half
+        # written, and the new-build backup is all or nothing (/dev/full plays
+        # a full disk). Needs build_pc/generated/port_buildinfo.h from the
+        # configure above (coop/ci/save_test.c)
+        run: |
+          gcc -O1 -Wall -Iport/include -Ibuild_pc/generated -o save_test coop/ci/save_test.c port/src/port_save.c
+          ./save_test "$(mktemp -d)"
+
+      - name: Updater finishes a swap that was cut off (no cart needed)
+        # port_update.c resumeSwap: an install killed half way through the
+        # file swap is finished, or dropped, on the next start
+        # (coop/ci/update_resume_test.c)
+        run: |
+          gcc -O1 -Wall -Iport/include -Ibuild_pc/generated -o update_resume_test \
+            coop/ci/update_resume_test.c port/src/port_update.c port/src/port_update_util.c -lpthread
+          ./update_resume_test "$(mktemp -d)"
+
       # upload-artifact drops file permissions, so the binary goes up inside a
       # tar that keeps its exec bit (G334). It still needs an i386 libSDL2 on
       # the machine that runs it: the RUNPATH points at the runner's own copy.
