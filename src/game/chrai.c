@@ -2134,6 +2134,11 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                         far = distance < chrGetDistanceToBond(ChrEntityp);
                         COOP_ALT_DONE(!far, 0);
                     }
+                    for (coopk = 0; far && coopLostBondBegin(coopk); coopk++) /* co-op: a partner whose line went quiet still stands there */
+                    {
+                        far = distance < chrGetDistanceToBond(ChrEntityp);
+                        coopLostBondEnd();
+                    }
 #endif
                     if (far)
                     {
@@ -2265,6 +2270,11 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                         {
                             far = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
                             coopAltBondEnd();
+                        }
+                        for (coopk = 0; far && coopLostBondBegin(coopk); coopk++) /* co-op: a partner whose line went quiet still stands there */
+                        {
+                            far = value < chrGetDistanceFromBondToPad(ChrEntityp, pad);
+                            coopLostBondEnd();
                         }
                     }
 #endif
