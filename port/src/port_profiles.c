@@ -74,6 +74,7 @@
 
 extern const char *portRootPath(const char *name); /* main.c: <exe dir>/name */
 extern void portConLogf(const char *fmt, ...);       /* port_console.c */
+#include "port_save.h"   /* portFileWriteBegin: replaced whole, never half-written */
 extern s32 portVideoIniSetKey(const char *key, const char *value);
 
 /* input_pc.c - by pad SLOT, which is what a player is */
@@ -758,15 +759,14 @@ static s32 profWriteText(const char *clean, const char *text)
     FILE *f;
 
     profEnsureDir();
-    f = fopen(profPath(clean), "w");
+    f = portFileWriteBegin(profPath(clean), "w");
     if (f == NULL)
     {
         portConLogf("ge: profiles: cannot write %s\n", profPath(clean));
         return 0;
     }
     fputs(text, f);
-    fclose(f);
-    return 1;
+    return portFileWriteEnd(f);
 }
 
 /**

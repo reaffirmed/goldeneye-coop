@@ -1197,15 +1197,27 @@ const u8 *romdataSeg(const char *name, u32 *size)
 
 /* Why the candidate files were refused, for the missing-ROM message box: wrong
  * cart, ROM still inside a .zip, or no ROM at all. Files like Data's own
- * README.txt, desktop.ini and Thumbs.db don't count as ROM attempts. */
+ * README.txt, desktop.ini and Thumbs.db don't count as ROM attempts. A
+ * refused cart is sorted by its header, so the box can say what it was: the
+ * European or Japanese GoldenEye, a changed or short (U) image, or another
+ * game. */
 static int sRefusedCarts;    /* N64 images, or cart-sized files, that were refused */
 static int sRefusedArchives; /* a .zip/.7z/.rar/.gz: the ROM was never extracted */
+static int sRefusedPal;      /* GoldenEye, European cart (NGEP) */
+static int sRefusedJp;       /* GoldenEye, Japanese cart (NGEJ) */
+static int sRefusedChanged;  /* GoldenEye (U) by its header, but not the retail image: a mod, a hack or a bad dump */
+static int sRefusedShort;    /* GoldenEye by its header, but cut short (an incomplete download or copy) */
+static int sRefusedOther;    /* another N64 game */
+static char sOtherTitle[24]; /* the first other game's header title */
+static char sNamedMissing[300]; /* a ROM named on the command line or in midas.ini that isn't there */
+static char sNamedBy[80];       /* ...and where it was named, as a sentence */
 
 static void romdataNoteRefusal(const char *path)
 {
     FILE *f = fopen(path, "rb");
-    u8 m[4];
+    u8 m[0x40];
     long len;
+    enum romorder order;
 
     if (f == NULL) {
         return;
@@ -1213,9 +1225,13 @@ static void romdataNoteRefusal(const char *path)
     fseek(f, 0, SEEK_END);
     len = ftell(f);
     fseek(f, 0, SEEK_SET);
+    memset(m, 0, sizeof(m));
     if (fread(m, 1, 4, f) != 4) {
         fclose(f);
         return;
+    }
+    if (fread(m + 4, 1, sizeof(m) - 4, f) != sizeof(m) - 4) {
+        memset(m + 4, 0, sizeof(m) - 4);
     }
     fclose(f);
     if ((m[0] == 0x50 && m[1] == 0x4B && m[2] == 0x03 && m[3] == 0x04)     /* zip */
@@ -1223,8 +1239,79 @@ static void romdataNoteRefusal(const char *path)
         || (m[0] == 0x52 && m[1] == 0x61 && m[2] == 0x72 && m[3] == 0x21)  /* rar */
         || (m[0] == 0x1F && m[1] == 0x8B)) {                               /* gzip */
         sRefusedArchives++;
-    } else if (romdataDetectOrder(m) != ORDER_UNKNOWN || len >= (long) (ROMDATA_ROM_SIZE / 2)) {
-        sRefusedCarts++;
+        return;
+    }
+    order = romdataDetectOrder(m);
+    if (order == ORDER_UNKNOWN && len < (long) (ROMDATA_ROM_SIZE / 2)) {
+        return;     /* not a cart: a README, a picture, ... */
+    }
+    sRefusedCarts++;
+    if (order == ORDER_UNKNOWN) {
+        return;     /* cart-sized, but no N64 header: the generic words */
+    }
+    romdataNormalise(m, sizeof(m), order);
+    if (memcmp(m + 0x20, "GOLDENEYE", 9) == 0 || memcmp(m + 0x3B, "NGE", 3) == 0) {
+        if (m[0x3E] == 'P') {
+            sRefusedPal++;
+        } else if (m[0x3E] == 'J') {
+            sRefusedJp++;
+        } else if (len < (long) ROMDATA_ROM_SIZE) {
+            sRefusedShort++;
+        } else {
+            sRefusedChanged++;
+        }
+    } else {
+        if (sRefusedOther++ == 0) {
+            int i;
+
+            memcpy(sOtherTitle, m + 0x20, 20);
+            sOtherTitle[20] = '\0';
+            for (i = 0; i < 20; i++) {
+                if ((u8) sOtherTitle[i] < 0x20 || (u8) sOtherTitle[i] > 0x7E) {
+                    sOtherTitle[i] = ' ';
+                }
+            }
+            for (i = 20; i > 0 && sOtherTitle[i - 1] == ' '; i--) {
+                sOtherTitle[i - 1] = '\0';
+            }
+        }
+    }
+}
+
+/* a ROM named outright (dropped on the exe, --rom-file, GE_ROM, midas.ini)
+ * that couldn't be loaded: missing, or refused like any other */
+static void romdataNoteNamed(const char *path, const char *by)
+{
+    if (!romdataIsFile(path)) {
+        if (sNamedMissing[0] == '\0') {
+            snprintf(sNamedMissing, sizeof(sNamedMissing), "%s", path);
+            snprintf(sNamedBy, sizeof(sNamedBy), "%s", by);
+        }
+        return;
+    }
+    romdataNoteRefusal(path);
+}
+
+/* what the refused carts were, one line each, for the message box */
+static void romdataRefusedLines(char *out, size_t n)
+{
+    size_t used = 0;
+
+    out[0] = '\0';
+#define ROMDATA_LINE(cond, ...) \
+    if ((cond) && used < n) { \
+        used += (size_t) snprintf(out + used, n - used, __VA_ARGS__); \
+    }
+    ROMDATA_LINE(sRefusedPal > 0, "- GoldenEye 007 for Europe (PAL). This game needs the USA cart.\n")
+    ROMDATA_LINE(sRefusedJp > 0, "- GoldenEye 007 for Japan. This game needs the USA cart.\n")
+    ROMDATA_LINE(sRefusedChanged > 0,
+                 "- GoldenEye 007 (USA), but not the retail image: a modded or patched ROM, or a bad dump.\n")
+    ROMDATA_LINE(sRefusedShort > 0, "- GoldenEye 007, but cut short: an incomplete download or copy.\n")
+    ROMDATA_LINE(sRefusedOther > 0, "- Another N64 game%s%s%s.\n", sOtherTitle[0] != '\0' ? " (\"" : "", sOtherTitle,
+                 sOtherTitle[0] != '\0' ? "\")" : "")
+#undef ROMDATA_LINE
+    if (used >= n && n > 0) {
+        out[n - 1] = '\0';
     }
 }
 
@@ -1269,22 +1356,22 @@ s32 romdataInit(int argc, char **argv)
 
     if (argvrom != NULL) {
         if (romdataTryLoad(argvrom, ROMSRC_ARGV, 0)) goto done;
-        romdataNoteRefusal(argvrom);
+        romdataNoteNamed(argvrom, "The file dropped on the game isn't there");
     }
     if (flagrom != NULL) {
         if (romdataTryLoad(flagrom, ROMSRC_ARGFLAG, 0)) goto done;
-        romdataNoteRefusal(flagrom);
+        romdataNoteNamed(flagrom, "--rom-file names a file that isn't there");
     }
     e = getenv("GE_ROM");
     if (e != NULL && e[0] != '\0') {
         if (romdataTryLoad(e, ROMSRC_ENV, 0)) goto done;
-        romdataNoteRefusal(e);
+        romdataNoteNamed(e, "GE_ROM names a file that isn't there");
     }
     if (sIniRom[0] != '\0') {
         char p[1200];
         romdataResolve(p, sizeof(p), sIniRom);
         if (romdataTryLoad(p, ROMSRC_INI, 0)) goto done;
-        romdataNoteRefusal(p);
+        romdataNoteNamed(p, "midas.ini [data] rom= names a file that isn't there");
     }
     {
         static char names[ROMDATA_LIST_MAX][256];
@@ -1325,31 +1412,36 @@ s32 romdataInit(int argc, char **argv)
          * different messages. Only real attempts count (N64 images or
          * cart-sized files), and a packed ROM is named as such so a README or
          * .zip is never called "a modded ROM". */
-        char msg[1700];
+        char msg[2400], what[600], named[400] = "";
         const char *dir = portRootPath(ROMDATA_DATA_DIR);
 
+        romdataRefusedLines(what, sizeof(what));
+        if (sNamedMissing[0] != '\0') {
+            snprintf(named, sizeof(named), "\n%s:\n%s\n", sNamedBy, sNamedMissing);
+        }
         if (sRefusedCarts > 0) {
             snprintf(msg, sizeof(msg),
                      "No usable GoldenEye 007 ROM found in ./%s.\n\n"
-                     "%d cart image(s) were found, but none of them is a stock GoldenEye 007 (U) cart: "
-                     "a modded ROM, another region, or a bad dump.\n"
+                     "%d cart image(s) were found, but none of them is a stock GoldenEye 007 (USA) cart%s\n%s%s"
                      "Please provide your ROM into this folder and try again.\n\n"
                      "Looked in:\n%s",
-                     ROMDATA_DATA_DIR, sRefusedCarts, dir);
+                     ROMDATA_DATA_DIR, sRefusedCarts,
+                     what[0] != '\0' ? ". They are:" : ": a modded ROM, another region, or a bad dump.",
+                     what, named, dir);
         } else if (sRefusedArchives > 0) {
             snprintf(msg, sizeof(msg),
                      "No GoldenEye 007 ROM found in ./%s.\n\n"
                      "The ROM is still packed in an archive (.zip/.7z/...). "
-                     "Extract the .z64, .v64 or .n64 file from it into this folder and try again.\n\n"
+                     "Extract the .z64, .v64 or .n64 file from it into this folder and try again.\n%s\n"
                      "Looked in:\n%s",
-                     ROMDATA_DATA_DIR, dir);
+                     ROMDATA_DATA_DIR, named, dir);
         } else {
             snprintf(msg, sizeof(msg),
                      "No GoldenEye 007 ROM found in ./%s.\n"
-                     "Please provide your ROM into this folder and try again.\n\n"
+                     "Please provide your ROM into this folder and try again.\n%s\n"
                      "Looked in:\n%s\n\n"
                      "The ROM may be .z64, .v64 or .n64. You can also drag one onto the game.",
-                     ROMDATA_DATA_DIR, dir);
+                     ROMDATA_DATA_DIR, named, dir);
         }
         portConLogf("ge: romdata: %s\n", msg);
         fflush(stderr);

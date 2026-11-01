@@ -60,7 +60,7 @@ This is an unofficial fan project. It contains no game assets: every player need
 
 ## Download and play
 
-1. Download `GoldenEye-Coop-win32.zip` from the [latest release](https://github.com/reaffirmed/goldeneye-coop/releases/latest) and unzip it to a folder you own (not Program Files: the game saves and updates in its own folder).
+1. Download `GoldenEye-Coop-<version>-win32.zip` (for example `GoldenEye-Coop-v0.6.15-win32.zip`) from the [latest release](https://github.com/reaffirmed/goldeneye-coop/releases/latest) and unzip it to a folder you own (not Program Files: the game saves and updates in its own folder).
 2. Put your GoldenEye 007 (USA) cart image in the `Data` folder. See `Data/README.txt` for the accepted formats.
 3. Have Steam running and signed in. Nobody has to own anything on Steam: the game connects as Valve's free "Spacewar" test app, so friends see you as playing Spacewar.
 4. Run `ProjectMidas.exe` and pick **CO-OP** from the main menu.
@@ -168,7 +168,7 @@ sudo apt install libsdl2-2.0-0:i386 libgl1:i386
 | --- | --- |
 | `midas.ini` | Settings. Written on first run; delete it to restore the defaults. See `midas_ini_help.txt`. |
 | `Data/` | Your cart image goes here. |
-| `Data/Saves/` | Save file (`eeprom.bin`) and the co-op campaign record and character pick (`coop_*.txt`). |
+| `Data/Saves/` | Save file (`eeprom.bin`) and the co-op campaign record, character pick and the host's last lobby rules (`coop_*.txt`). |
 | `Data/Saves/Backups/` | A copy of the saves from before each new build first ran, newest five kept. |
 | `Data/Profiles/` | Player profiles and lifetime multiplayer stats. |
 | `Data/Logs/ge_direct.log` | The run log on Windows. |

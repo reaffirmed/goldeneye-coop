@@ -1,5 +1,5 @@
-GoldenEye 007 story co-op (private build)
-=========================================
+GoldenEye Coop: story co-op and versus for GoldenEye 007
+========================================================
 
 Two to four players play the solo missions together over Steam, or play
 multiplayer against each other (see Versus). Nobody has to open ports or type
@@ -11,7 +11,7 @@ You need
   friends, or anyone who finds a Public game (see step 2). Nobody has to own anything: the game connects as Valve's free
   "Spacewar" test app, so Steam will show you both as "playing Spacewar".
 - Your own GoldenEye 007 (USA) cart image in the Data folder (see
-  Data\README if present). The image is not included.
+  Data\README.txt). The image is not included.
 
 Playing
 -------
@@ -296,11 +296,13 @@ screen asks "v... is out. Update now?" with three answers:
   newer one.
 Whatever you pick, the PLAY tab of the CO-OP screen also shows "Update to
 v..." at the top. Pick it and the game downloads the new zip, checks it against the checksum GitHub lists for it,
-and replaces its own files (ProjectMidas.exe, the DLLs, the .bat files and
-these notes). Then pick "Restart Now" (from the Files screen's prompt it
+and replaces its own files (ProjectMidas.exe, the DLLs, the .bat files,
+these notes and the license files). Then pick "Restart Now" (from the Files screen's prompt it
 restarts by itself). Your cart image, saves, profiles,
 reports and midas.ini are never touched, and the download is thrown away if
-it doesn't match. If a file can't be replaced, everything is put back.
+it doesn't match. If a file can't be replaced, everything is put back. If
+the game is closed, crashes or loses power half way through replacing them,
+the next start finishes the job and offers "Restart Now".
 - A host turned you away with "Update needed to join": the game looks for
   the update at once and offers it, so you can install it and join again.
   If the host is the one on the old version, it says so.

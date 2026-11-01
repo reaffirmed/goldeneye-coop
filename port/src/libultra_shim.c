@@ -1615,25 +1615,32 @@ static void eepromLoad(void)
     }
 }
 
+/* eeprom.bin holds every solo folder: written through a .tmp that replaces it
+ * only once it is whole on the disk (port_save.c), so a crash or a power cut
+ * mid-save keeps the last good file instead of a short or empty one */
 static void eepromFlush(void)
 {
-    extern FILE *portRootFopen(const char *name, const char *mode);
     extern const char *portRootPath(const char *name);
+    extern FILE *portFileWriteBegin(const char *path, const char *mode);
+    extern int portFileWriteEnd(FILE *f);
+    static int warned;
+    char path[1024];
     FILE *f;
 
     eepromEnsureDir();
-    f = portRootFopen(PORT_EEPROM_FILE, "wb");
-    if (f == NULL) {
-        static int warned;
-        if (!warned) {
-            warned = 1;
-            portConLogf("ge: cannot write %s - saves are memory-only\n",
-                    portRootPath(PORT_EEPROM_FILE));
+    snprintf(path, sizeof(path), "%s", portRootPath(PORT_EEPROM_FILE));
+    f = portFileWriteBegin(path, "wb");
+    if (f != NULL) {
+        fwrite(sEeprom, 1, sizeof(sEeprom), f);
+        if (portFileWriteEnd(f)) {
+            warned = 0;
+            return;
         }
-        return;
     }
-    fwrite(sEeprom, 1, sizeof(sEeprom), f);
-    fclose(f);
+    if (!warned) {
+        warned = 1;
+        portConLogf("ge: cannot write %s - this save is memory-only until a write works\n", path);
+    }
 }
 
 s32 osEepromProbe(OSMesgQueue *mq)

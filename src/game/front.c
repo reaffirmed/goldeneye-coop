@@ -12754,7 +12754,7 @@ Gfx *constructor_menu1D_cooplobby(Gfx *DL)
     }
     DL = coopMwHints(DL);
     DL = coopScreenErrorRender(DL);     /* why we are back here, or a join that failed (coop_screens.c) */
-    if (coop_lobby_hot >= 0 && !g_portMenuMouseOwns && !coop_charsel_open)
+    if (coop_lobby_hot >= 0 && frontCursorSnapAllowed() && !coop_charsel_open)
     {   /* a pad or the keys picked the row: its bar shows it, as MW2's do */
         return DL;
     }

@@ -21,7 +21,11 @@
  *   3. swaps each one in beside the exe: the old file is renamed <name>.old
  *      (Windows lets a running exe and its loaded DLLs be renamed, not
  *      overwritten), the new one moved into its place. Any failure puts back
- *      every file moved so far. Data/Update/installed.txt lists them;
+ *      every file moved so far. Data/Update/pending.txt lists them before
+ *      the first one moves, and becomes installed.txt once the last has: if
+ *      the game is killed or the power goes in between, the next start finds
+ *      pending.txt and finishes the swap from Data/Update/new/ (resumeSwap),
+ *      so the folder is never left half old, half new;
  *   4. Restart starts the new exe with "-updatewait <our pid>" and quits the
  *      normal way (the ini saver runs). The new game waits for us to be gone,
  *      then deletes the .old files (portUpdateBoot).
@@ -42,6 +46,7 @@
 #include <windows.h>
 #include <winhttp.h>
 #include <direct.h>
+#include <io.h>
 #include <process.h>
 #define rmdir _rmdir
 #else
@@ -77,6 +82,8 @@ extern void portRequestQuit(void);      /* video.c: the close box's quit */
 #define UPD_AGENT       "GoldenEye-Coop-Updater"
 #define UPD_DIR         "Data/Update"
 #define UPD_SKIPFILE    UPD_DIR "/skip.txt"
+#define UPD_PENDING     UPD_DIR "/pending.txt"     /* a swap under way: see resumeSwap */
+#define UPD_INSTALLED   UPD_DIR "/installed.txt"   /* a swap done: tidyUp after the restart */
 #define UPD_MAX_ZIP     (64L * 1024 * 1024)
 #define UPD_MAX_FILES   64
 
@@ -200,6 +207,20 @@ static int canWrite(const char *path)
     }
     fclose(f);
     return 1;
+}
+
+/* flush to the disk, then close: a file about to be renamed into place must
+ * not turn up empty after a power cut. 0 on success */
+static int syncClose(FILE *f)
+{
+    int ok = fflush(f) == 0 && !ferror(f);
+
+#ifdef _WIN32
+    ok = ok && _commit(_fileno(f)) == 0;
+#else
+    ok = ok && fsync(fileno(f)) == 0;
+#endif
+    return (fclose(f) == 0 && ok) ? 0 : -1;
 }
 
 static unsigned char *readFile(const char *path, long *len)
@@ -621,7 +642,7 @@ static int unpack(const unsigned char *zip, size_t len, struct Staged *staged, i
         snprintf(dest, sizeof(dest), UPD_DIR "/new/%s", rel);
         makeParents(rootPathCopy(dest));
         f = fopen(rootPathCopy(dest), "wb");
-        if (f == NULL || fwrite(data, 1, e.size, f) != e.size || fclose(f) != 0)
+        if (f == NULL || fwrite(data, 1, e.size, f) != e.size || syncClose(f) != 0)
         {
             free(data);
             setFailed("Couldn't unpack the update (disk full?)");
@@ -632,6 +653,33 @@ static int unpack(const unsigned char *zip, size_t len, struct Staged *staged, i
         count++;
     }
     return count;
+}
+
+/* the list of files a swap moves, put in place whole before the first one
+ * moves: "<from> <to> <zip>" then one path a line. 0 on success */
+static int writeList(const char *path, const char *tag, const char *zip, const struct Staged *staged, int count)
+{
+    char tmp[300];
+    FILE *f;
+    int i;
+
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    f = fopen(rootPathCopy(tmp), "w");
+    if (f == NULL)
+    {
+        return -1;
+    }
+    fprintf(f, "%s %s %s\n", sOwn[0] != '\0' ? sOwn : "unknown", tag, zip);
+    for (i = 0; i < count; i++)
+    {
+        fprintf(f, "%s\n", staged[i].rel);
+    }
+    if (syncClose(f) != 0 || moveFile(rootPathCopy(tmp), rootPathCopy(path)) != 0)
+    {
+        remove(rootPathCopy(tmp));
+        return -1;
+    }
+    return 0;
 }
 
 /* put back the first `done` files swapped in */
@@ -665,7 +713,6 @@ static void doInstall(void)
     unsigned char *zip;
     long len = 0;
     int count, i;
-    FILE *f;
 
     lock();
     if (sAsset < 0)
@@ -744,7 +791,13 @@ static void doInstall(void)
         return;
     }
 
-    /* 3: swap: the old file aside as <name>.old, the new one in */
+    /* 3: swap: the old file aside as <name>.old, the new one in. The list
+     * goes down first, so a swap cut off half way is finished next start */
+    if (writeList(UPD_PENDING, tag, a.name, staged, count) != 0)
+    {
+        setFailed("Couldn't start the install (disk full?)");
+        return;
+    }
     for (i = 0; i < count; i++)
     {
         char target[1200], old[1200], src[1200];
@@ -760,6 +813,7 @@ static void doInstall(void)
         {
             portConLogf("ge: update: can't move %s aside\n", staged[i].rel);
             rollBack(staged, i, hadold);
+            remove(rootPathCopy(UPD_PENDING));
             setFailed("A game file is in use; close other copies and retry");
             return;
         }
@@ -771,6 +825,7 @@ static void doInstall(void)
                 moveFile(old, target);
             }
             rollBack(staged, i, hadold);
+            remove(rootPathCopy(UPD_PENDING));
             setFailed("Couldn't replace the game files");
             return;
         }
@@ -781,15 +836,10 @@ static void doInstall(void)
         }
 #endif
     }
-    f = fopen(rootPathCopy(UPD_DIR "/installed.txt"), "w");
-    if (f != NULL)
+    /* every file is in: the swap is done (tidyUp clears up after the restart) */
+    if (moveFile(rootPathCopy(UPD_PENDING), rootPathCopy(UPD_INSTALLED)) != 0)
     {
-        fprintf(f, "%s %s %s\n", sOwn[0] != '\0' ? sOwn : "unknown", tag, a.name);
-        for (i = 0; i < count; i++)
-        {
-            fprintf(f, "%s\n", staged[i].rel);
-        }
-        fclose(f);
+        portConLogf("ge: update: couldn't mark the install done; the next start will check it\n");
     }
     portConLogf("ge: update: installed %s (%d files); restart to play it\n", tag, count);
     sState = PORTUPD_READY;
@@ -881,7 +931,7 @@ static void waitForOld(unsigned long pid)
  * `to` gets the release installed ("" when there was no update) */
 static void tidyUp(char *to, size_t tocap)
 {
-    char *list = rootPathCopy(UPD_DIR "/installed.txt");
+    char *list = rootPathCopy(UPD_INSTALLED);
     FILE *f = fopen(list, "r");
     char line[300], from[48] = "", zip[160] = "";
     int left = 0;
@@ -925,6 +975,92 @@ static void tidyUp(char *to, size_t tocap)
         rmdir(rootPathCopy(UPD_DIR "/new"));
     }
     portConLogf("ge: update: now on %s (was %s)%s\n", to, from, left ? ", some old files are still in use" : "");
+}
+
+/* pending.txt at start: an install was cut off mid-swap (the game killed,
+ * a crash, the power). Some files are new, some old. Finish it from
+ * Data/Update/new/, where every file not yet moved still is: a file is
+ * moved out of there only as its last step. `to` gets the release it
+ * finishes ("" when there was none, or it was dropped). */
+static void resumeSwap(char *to, size_t tocap)
+{
+    char *list = rootPathCopy(UPD_PENDING);
+    FILE *f = fopen(list, "r");
+    char line[300], from[48] = "", zip[160] = "";
+    int moved = 0, failed = 0;
+
+    to[0] = '\0';
+    if (f == NULL)
+    {
+        return;
+    }
+    if (fgets(line, sizeof(line), f) == NULL || tocap < 48 || sscanf(line, "%47s %47s %159s", from, to, zip) < 2)
+    {   /* never written whole (writeList renames it into place last): no file moved */
+        fclose(f);
+        remove(list);
+        to[0] = '\0';
+        return;
+    }
+    if (sOwn[0] != '\0' && portUpdCompareVersions(sOwn, to) == 1)
+    {   /* a newer build than that install was unzipped over the folder since:
+         * it wins, the old download's files stay where they are */
+        portConLogf("ge: update: dropping the cut-off install of %s, this is %s\n", to, sOwn);
+        fclose(f);
+        remove(list);
+        to[0] = '\0';
+        return;
+    }
+    while (fgets(line, sizeof(line), f) != NULL)
+    {
+        char rel[300], src[1200], target[1200], old[1200];
+
+        line[strcspn(line, "\r\n")] = '\0';
+        if (!portUpdPathAllowed(line))
+        {
+            continue;
+        }
+        snprintf(rel, sizeof(rel), UPD_DIR "/new/%s", line);
+        snprintf(src, sizeof(src), "%s", portRootPath(rel));
+        snprintf(target, sizeof(target), "%s", portRootPath(line));
+        snprintf(old, sizeof(old), "%s.old", target);
+        if (!fileExists(src))
+        {
+            continue;   /* moved in before the cut */
+        }
+        makeParents(target);
+        if (fileExists(target) && moveFile(target, old) != 0)
+        {
+            portConLogf("ge: update: can't move %s aside to finish the install\n", line);
+            failed++;
+            continue;
+        }
+        if (moveFile(src, target) != 0)
+        {
+            portConLogf("ge: update: can't put %s in place to finish the install\n", line);
+            moveFile(old, target);
+            failed++;
+            continue;
+        }
+#ifndef _WIN32
+        if (strcmp(line, sExe) == 0)
+        {
+            chmod(target, 0755);
+        }
+#endif
+        moved++;
+    }
+    fclose(f);
+    if (failed > 0)
+    {   /* pending.txt stays: the next start tries again */
+        portConLogf("ge: update: the install of %s was cut off; %d file(s) moved in now, %d still can't be\n", to, moved, failed);
+        to[0] = '\0';
+        return;
+    }
+    if (moveFile(list, rootPathCopy(UPD_INSTALLED)) != 0)
+    {
+        portConLogf("ge: update: finished the cut-off install of %s but couldn't mark it done\n", to);
+    }
+    portConLogf("ge: update: finished the install of %s that was cut off (%d file(s) moved in now)\n", to, moved);
 }
 
 void portUpdateBoot(int argc, char **argv)
@@ -975,14 +1111,29 @@ void portUpdateBoot(int argc, char **argv)
         }
     }
     {
-        char to[48];
+        char to[48], resumed[48];
         int updated = 0;
 
         for (i = 1; i < argc; i++)
         {
             updated |= strcmp(argv[i], "-updatewait") == 0;
         }
-        tidyUp(to, sizeof(to));
+        to[0] = '\0';
+        resumeSwap(resumed, sizeof(resumed));
+        if (resumed[0] != '\0' && strcmp(resumed, sOwn) != 0)
+        {   /* this is the old build, the folder now holds the new one: offer
+             * Restart as after any install, and leave the .old files (this
+             * exe among them) for the new build to clear */
+            lock();
+            snprintf(sLatest, sizeof(sLatest), "%s", resumed);
+            unlock();
+            sState = PORTUPD_READY;
+            portConLogf("ge: update: restart to play %s\n", resumed);
+        }
+        else
+        {
+            tidyUp(to, sizeof(to));
+        }
         if (fake != NULL && updated && to[0] != '\0')
         {   /* harness: the "new" build is this one; it is the release it was installed as */
             snprintf(sOwn, sizeof(sOwn), "%s", to);
@@ -1019,7 +1170,10 @@ void portUpdateTick(void)
     if (!sStarted)
     {
         sStarted = 1;
-        if (portUpdateEnabled())
+        if (sState == PORTUPD_READY)
+        {   /* a cut-off install was finished at boot: Restart is the offer */
+        }
+        else if (portUpdateEnabled())
         {
             startJob(JOB_CHECK_QUIET);
         }

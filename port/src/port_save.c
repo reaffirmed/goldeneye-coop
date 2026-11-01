@@ -15,6 +15,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <direct.h>
+#include <io.h>
 #else
 #include <sys/stat.h>
 #include <dirent.h>
@@ -29,7 +30,6 @@ extern void portConLogf(const char *fmt, ...);
 #define SAVE_DIR      "Data/Saves"
 #define SAVE_HEADER   "#ge-save "
 #define SAVE_BACKUPS  5
-#define SAVE_OPEN_MAX 4
 
 /* files older builds kept beside the game; the backup takes them too */
 static const char *const sLegacy[] = { "coop_campaign.txt", "coop_character.txt" };
@@ -61,18 +61,46 @@ const char *portSavePath(const char *name)
 static int saveReplace(const char *from, const char *to)
 {
 #ifdef _WIN32
-    return MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+    int tries;
+
+    /* a virus scanner or the search indexer can hold the old file open for a
+     * moment: try again before giving up */
+    for (tries = 0; tries < 5; tries++)
+    {
+        if (MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        {
+            return 1;
+        }
+        Sleep(20);
+    }
+    return 0;
 #else
     return rename(from, to) == 0;
 #endif
 }
 
+/* everything written so far on its way to the disk, not just to the OS */
+static int saveSync(FILE *f)
+{
+    if (fflush(f) != 0)
+    {
+        return 0;
+    }
+#ifdef _WIN32
+    return _commit(_fileno(f)) == 0;
+#else
+    return fsync(fileno(f)) == 0;
+#endif
+}
+
+/* 1 only when every byte made it */
 static int saveCopy(const char *from, const char *to)
 {
     char buf[8192];
     FILE *in = fopen(from, "rb");
     FILE *out;
     size_t n;
+    int ok = 1;
 
     if (in == NULL)
     {
@@ -86,11 +114,105 @@ static int saveCopy(const char *from, const char *to)
     }
     while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
     {
-        fwrite(buf, 1, n, out);
+        if (fwrite(buf, 1, n, out) != n)
+        {
+            ok = 0;
+            break;
+        }
+    }
+    if (ferror(in))
+    {
+        ok = 0;
     }
     fclose(in);
-    fclose(out);
+    if (fclose(out) != 0)
+    {
+        ok = 0;
+    }
+    return ok;
+}
+
+/* ---- whole-file writes ------------------------------------------------------ */
+
+#define SAVE_WRITES_MAX 8
+
+static struct
+{
+    FILE *f;
+    char path[1300];
+} sWrites[SAVE_WRITES_MAX];
+
+FILE *portFileWriteBegin(const char *path, const char *mode)
+{
+    char tmp[1320];
+    FILE *f;
+    int i;
+
+    if (path == NULL || strlen(path) >= sizeof(sWrites[0].path))
+    {
+        return NULL;
+    }
+    for (i = 0; i < SAVE_WRITES_MAX && sWrites[i].f != NULL; i++)
+    {
+    }
+    if (i == SAVE_WRITES_MAX)
+    {
+        portConLogf("ge: saves: too many files open to write %s\n", path);
+        return NULL;
+    }
+    snprintf(sWrites[i].path, sizeof(sWrites[i].path), "%s", path);
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    f = fopen(tmp, mode);
+    if (f == NULL)
+    {
+        portConLogf("ge: saves: can't write %s\n", tmp);
+        return NULL;
+    }
+    sWrites[i].f = f;
+    return f;
+}
+
+int portFileWriteEnd(FILE *f)
+{
+    char tmp[1320];
+    int i, ok;
+
+    for (i = 0; f != NULL && i < SAVE_WRITES_MAX && sWrites[i].f != f; i++)
+    {
+    }
+    if (f == NULL || i == SAVE_WRITES_MAX)
+    {
+        return 0;
+    }
+    sWrites[i].f = NULL;
+    ok = !ferror(f) && saveSync(f);
+    ok = (fclose(f) == 0) && ok;
+    snprintf(tmp, sizeof(tmp), "%s.tmp", sWrites[i].path);
+    if (!ok || !saveReplace(tmp, sWrites[i].path))
+    {
+        portConLogf("ge: saves: couldn't save %s (the old one is kept)\n", sWrites[i].path);
+        remove(tmp);
+        return 0;
+    }
     return 1;
+}
+
+void portFileWriteAbort(FILE *f)
+{
+    char tmp[1320];
+    int i;
+
+    for (i = 0; f != NULL && i < SAVE_WRITES_MAX && sWrites[i].f != f; i++)
+    {
+    }
+    if (f == NULL || i == SAVE_WRITES_MAX)
+    {
+        return;
+    }
+    sWrites[i].f = NULL;
+    fclose(f);
+    snprintf(tmp, sizeof(tmp), "%s.tmp", sWrites[i].path);
+    remove(tmp);
 }
 
 /* ---- reading -------------------------------------------------------------- */
@@ -152,68 +274,40 @@ FILE *portSaveOpenRead(const char *name, const char *legacy, int *version)
 
 /* ---- writing -------------------------------------------------------------- */
 
-static struct
-{
-    FILE *f;
-    char path[1300];
-} sOpen[SAVE_OPEN_MAX];
-
 FILE *portSaveOpenWrite(const char *name, const char *kind, int version)
 {
-    char tmp[1320];
+    char path[1300];
     FILE *f;
-    int i;
 
-    for (i = 0; i < SAVE_OPEN_MAX && sOpen[i].f != NULL; i++)
-    {
-    }
-    if (i == SAVE_OPEN_MAX)
-    {
-        return NULL;
-    }
     saveEnsureDir();
-    snprintf(sOpen[i].path, sizeof(sOpen[i].path), "%s", portSavePath(name));
-    snprintf(tmp, sizeof(tmp), "%s.tmp", sOpen[i].path);
-    f = fopen(tmp, "w");
-    if (f == NULL)
+    snprintf(path, sizeof(path), "%s", portSavePath(name));
+    f = portFileWriteBegin(path, "w");
+    if (f != NULL)
     {
-        portConLogf("ge: saves: can't write %s\n", tmp);
-        return NULL;
+        fprintf(f, SAVE_HEADER "%s %d %s\n", kind, version, PORT_BUILD_COMMIT);
     }
-    fprintf(f, SAVE_HEADER "%s %d %s\n", kind, version, PORT_BUILD_COMMIT);
-    sOpen[i].f = f;
     return f;
 }
 
 int portSaveCommit(FILE *f)
 {
-    char tmp[1320];
-    int i, ok;
-
-    for (i = 0; i < SAVE_OPEN_MAX && sOpen[i].f != f; i++)
-    {
-    }
-    if (f == NULL || i == SAVE_OPEN_MAX)
-    {
-        return 0;
-    }
-    sOpen[i].f = NULL;
-    ok = fflush(f) == 0 && !ferror(f);
-    ok = (fclose(f) == 0) && ok;
-    snprintf(tmp, sizeof(tmp), "%s.tmp", sOpen[i].path);
-    if (!ok || !saveReplace(tmp, sOpen[i].path))
-    {
-        portConLogf("ge: saves: couldn't save %s (the old one is kept)\n", sOpen[i].path);
-        remove(tmp);
-        return 0;
-    }
-    return 1;
+    return portFileWriteEnd(f);
 }
 
 /* ---- backups -------------------------------------------------------------- */
 
-/* every plain file in dir, copied into to; the count */
-static int saveCopyDir(const char *dir, const char *to)
+/* not copied into a backup: the build stamp, and a .tmp a killed write left
+ * behind (portFileWriteBegin starts that file over, so it is never needed) */
+static int saveSkipName(const char *name)
+{
+    size_t len = strlen(name);
+
+    return strcmp(name, "build.txt") == 0 || (len > 4 && strcmp(name + len - 4, ".tmp") == 0);
+}
+
+/* every plain file in dir, copied into to; the count. *failed counts the
+ * ones that couldn't be copied whole */
+static int saveCopyDir(const char *dir, const char *to, int *failed)
 {
     char from[1300], dst[1300];
     int n = 0;
@@ -230,11 +324,18 @@ static int saveCopyDir(const char *dir, const char *to)
     }
     do
     {
-        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && strcmp(fd.cFileName, "build.txt") != 0)
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && !saveSkipName(fd.cFileName))
         {
             snprintf(from, sizeof(from), "%s/%s", dir, fd.cFileName);
             snprintf(dst, sizeof(dst), "%s/%s", to, fd.cFileName);
-            n += saveCopy(from, dst);
+            if (saveCopy(from, dst))
+            {
+                n++;
+            }
+            else
+            {
+                (*failed)++;
+            }
         }
     } while (FindNextFileA(h, &fd));
     FindClose(h);
@@ -250,10 +351,17 @@ static int saveCopyDir(const char *dir, const char *to)
     while ((e = readdir(d)) != NULL)
     {
         snprintf(from, sizeof(from), "%s/%s", dir, e->d_name);
-        if (stat(from, &st) == 0 && S_ISREG(st.st_mode) && strcmp(e->d_name, "build.txt") != 0)
+        if (stat(from, &st) == 0 && S_ISREG(st.st_mode) && !saveSkipName(e->d_name))
         {
             snprintf(dst, sizeof(dst), "%s/%s", to, e->d_name);
-            n += saveCopy(from, dst);
+            if (saveCopy(from, dst))
+            {
+                n++;
+            }
+            else
+            {
+                (*failed)++;
+            }
         }
     }
     closedir(d);
@@ -381,7 +489,7 @@ void portSaveBootCheck(void)
     char last[64] = "";
     char base[1300], dir[1400], stamp[32];
     FILE *f;
-    int n, i;
+    int n, i, failed = 0;
     time_t t = time(NULL);
     struct tm *lt = localtime(&t);
 
@@ -412,13 +520,34 @@ void portSaveBootCheck(void)
     snprintf(dir, sizeof(dir), "%s/%s-%s", base, last[0] != '\0' ? last : "older", stamp);
     saveMkdir(base);
     saveMkdir(dir);
-    n = saveCopyDir(portRootPath(SAVE_DIR), dir);
+    n = saveCopyDir(portRootPath(SAVE_DIR), dir, &failed);
     for (i = 0; i < (int) (sizeof(sLegacy) / sizeof(sLegacy[0])); i++)
     {
         char to[1500];
+        FILE *probe = fopen(portRootPath(sLegacy[i]), "rb");
 
+        if (probe == NULL)
+        {
+            continue;   /* most installs never had it */
+        }
+        fclose(probe);
         snprintf(to, sizeof(to), "%s/%s", dir, sLegacy[i]);
-        n += saveCopy(portRootPath(sLegacy[i]), to);
+        if (saveCopy(portRootPath(sLegacy[i]), to))
+        {
+            n++;
+        }
+        else
+        {
+            failed++;
+        }
+    }
+    if (failed > 0)
+    {   /* a half backup is no backup: keep the old ones, and try again next
+         * launch (build.txt stays as it was) */
+        portConLogf("ge: saves: new build (%s, last %s): %d file(s) couldn't be backed up to %s (disk full?); "
+                    "will try again next start\n", PORT_BUILD_COMMIT, last[0] != '\0' ? last : "unknown", failed, dir);
+        saveRemoveDir(dir);
+        return;
     }
     if (n == 0)
     {
@@ -430,10 +559,10 @@ void portSaveBootCheck(void)
                     PORT_BUILD_COMMIT, last[0] != '\0' ? last : "unknown", n, dir);
         savePruneBackups(base);
     }
-    f = fopen(portSavePath("build.txt"), "w");
+    f = portFileWriteBegin(portSavePath("build.txt"), "w");
     if (f != NULL)
     {
         fprintf(f, "%s\n", PORT_BUILD_COMMIT);
-        fclose(f);
+        portFileWriteEnd(f);
     }
 }

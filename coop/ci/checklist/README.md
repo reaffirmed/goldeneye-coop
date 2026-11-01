@@ -22,3 +22,18 @@ Data/baserom.u.z64 and mock/libsteam_api.so), then from the repo root:
     python3 coop/ci/checklist/cmp.py out               # host vs joiner objective states
 
 A pair stops on its own once the steps are done ("steps: finished").
+
+Rows by name (`rows.py`): each row of TEST-CHECKLIST.md that has a rig line is a
+named entry there, with the log lines that decide it. It runs pair.sh, party.sh
+or solo.sh for you, PAR pairs at once, and prints PASS or the check that failed:
+
+    python3 coop/ci/checklist/rows.py out/rows D2 F5 X3     # some rows
+    python3 coop/ci/checklist/rows.py out/rows sweep        # the objective sweep, one SW-<stage> per mission
+    python3 coop/ci/checklist/rows.py --judge out/rows D2   # read old logs again, no run
+
+Keep PAR at most half the cores (default 2). The steps are timed in mission
+seconds, and on a loaded machine software GL runs the game well below full
+speed: with 3 pairs on 4 cores the sweep's steps never got to run before the
+pair was killed. SECSX (default 2.5) is how much wall time a pair gets per
+mission second. A FAIL is a lead, not a verdict: read the logs first, since a
+step that missed its target also fails a check.
