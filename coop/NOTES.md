@@ -43,8 +43,10 @@ Working notes for online story co-op (Steam, Spacewar AppID 480), following the 
 The owner approved (2026-10-24) porting code from GoldenEye 007 Plus
 (github.com/Joshua-1248/GoldenEye-007-Plus, an N64 mod of the same decomp with 1-4
 player split-screen campaign co-op) where it helps, improving it where possible.
-GE+ has no blanket license for its own changes, so this fork stays private.
 Every ported piece is listed here with its source file; rewritten pieces say so.
+
+Credit: GoldenEye 007 Plus by Joshua (Joshua-1248). It is credited in
+`README.md` and `tools/THIRD_PARTY_NOTICES.txt`.
 
 | Piece | Source in GE+ | Ported or rewritten |
 | --- | --- | --- |
