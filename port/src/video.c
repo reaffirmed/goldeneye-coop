@@ -4926,11 +4926,12 @@ static void videoIniWritableCheck(void)
         fclose(f);
         return;
     }
-    portConLogf("ge: midas.ini: the game folder is not writable, settings will not be saved\n");
-    portShowErrorBox("Project Midas: settings will not be saved",
-                     "Project Midas cannot write midas.ini in its own folder, so any settings you change "
-                     "will be lost when you quit.\n\n"
-                     "Move the game folder somewhere you can write to, such as C:\\Games\\ProjectMidas. "
+    portConLogf("ge: midas.ini: the game folder is not writable, settings and saves will not be kept\n");
+    portShowErrorBox("GoldenEye Coop: nothing will be saved",
+                     "The game can't write to its own folder, so your settings, mission progress, "
+                     "co-op campaign and profiles will be lost when you quit, and the updater can't "
+                     "install updates.\n\n"
+                     "Move the game folder somewhere you can write to, such as C:\\Games\\GoldenEye-Coop. "
                      "Avoid Program Files. If the folder is under Documents or Desktop, Windows "
                      "Controlled Folder Access may be blocking it.");
 }
