@@ -62,9 +62,9 @@ the project files under `goldeneye-coop/campaign/evidence-0d88b92/`, and QA's un
 (lossy link), its three late joins 3/3, `joiner_spots.sh` 4/4, and the objective
 sweep (`rows.py out sweep`) 16/16.
 
-Tally on 0d88b92, 99 rows: 60 PASS, 3 FAIL (ST2 and ST4 when the joiner's line
+Tally on 0d88b92, 101 rows: 60 PASS, 3 FAIL (ST2 and ST4 when the joiner's line
 drops for 3 s or more during the Statue meeting, fix in PR #114; X9, the split
-after an 8 to 10 s cut, NET-3), 3 BLOCKED (A2, T2, T5), 33 NOT RUN. "Earlier" results are from the bug-fix branch
+after an 8 to 10 s cut, NET-3), 3 BLOCKED (A2, T2, T5), 35 NOT RUN (X3b and X4b are the door and objective halves of X3 and X4, split out because the rig lines do not check them). "Earlier" results are from the bug-fix branch
 on 2026-10-29 and 2026-10-30 (heads 620f526 to 93ea314) unless they say otherwise.
 
 **Fixed: intermittent desync.** In joiner-heavy runs where a blast kills guards
@@ -180,7 +180,7 @@ ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 | ST3 | ACTION | Hits Janus | Mission reacts as for the host's hit (fixed in fixes-2) | | **PASS** (rig, 0d88b92, campaign run, logs `campaign/evidence-0d88b92/row-runs.tgz st3`). |
 | ST4 | ONEPLAYER | Walks up to Janus | Guards attack and the "too close" fail happens for the joiner too | | **FAIL** (rig, 0d88b92, campaign): fails with a 6 s line cut during the meeting, as ST2. With PR #114 (CAMP-7, in review): matches the host alone (`row-runs-2.tgz st4j` vs `st4h`). |
 | ST5 | KEYITEM | Picks up the flight recorder | Objective on both | `ST5` | **PASS** (rig, 0d88b92, `rows.py ST5`): the joiner takes the recorder without walking into the exit room; E completes on both. Earlier: untestable in rig: the recorder sits in the exit room, which ends the mission (as in solo). |
-| ST6 | TARGET | Meets Valentin with a gun out | Valentin's "put your gun away" reacts to the joiner | | **PASS** (rig, 0d88b92 with PR #114, a host-only Statue change; campaign, `row-runs-2.tgz st6j2` vs `st6h`). |
+| ST6 | TARGET | Meets Valentin with a gun out | Valentin's "put your gun away" reacts to the joiner | **NOT RUN** on 0d88b92 alone: Valentin's line needs PR #114, a host-only Statue change. With PR #114 on 0d88b92 it passes (rig, campaign, `row-runs-2.tgz st6j2` vs `st6h`). |
 
 ## 11. Archives
 
@@ -203,7 +203,7 @@ ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
 | DE1 | ACTION, FX | Destroys the helicopters and weapon caches | Destroyed on both | | **PASS** (rig, 0d88b92, objective sweep `rows.py SW-depot`: all 17 caches; A completes on both; 7 desyncs corrected, none unresolved). Earlier: pass (rig: 17 caches); see the desync note. |
-| DE2 | SPAWN | Reaches Trevelyan's spawn first, watching it | Trevelyan appears for both | | **NOT RUN** on 0d88b92: queued with the campaign workstream (CAMP). |
+| DE2 | SPAWN | Reaches Trevelyan's spawn first, watching it | Trevelyan appears for both | **NOT RUN**, not applicable as written: Depot has no Trevelyan (campaign, 0d88b92 with PR #117). The row needs rewriting to a scripted spawn Depot has. |
 | DE3 | KEYITEM | Picks up the safe key and opens the safe | Works for the joiner, objective on both | | **NOT RUN** on 0d88b92: no rig line yet. Earlier: not run. |
 | DE4 | ONEPLAYER | Boards the train first | Ending for both | `DE4` | **PASS** (rig, 0d88b92, `rows.py DE4`): the joiner on pad 271; one mission end on each. Earlier: pass (rig, 2026-10-30): the joiner reaches the train pad; the ending runs for both. |
 
@@ -234,7 +234,7 @@ ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 | --- | --- | --- | --- | --- | --- |
 | C1 | TARGET | Escorts Natalya to the console | She stays at the console while the joiner guards her | `controlNat` | **PASS** (rig, 0d88b92, campaign run, logs `campaign/evidence-0d88b92/row-runs.tgz c12`). Earlier: untestable in rig (as BU1). |
 | C2 | FX, ONEPLAYER | Watches Natalya while the host is out of view | No catch-up teleport in front of the joiner | `controlNat` | **PASS** (rig, 0d88b92, campaign run, logs `campaign/evidence-0d88b92/row-runs.tgz c12`). |
-| C3 | ACTION | Breaks the console Natalya is using | Mission fails on both, as in solo | | **NOT RUN** on 0d88b92: queued with the campaign workstream (CAMP). |
+| C3 | ACTION | Breaks the console Natalya is using | Mission fails on both, as in solo | **PASS** (rig, 0d88b92 with PR #117, campaign, `row-runs-3.tgz c3j2` vs `c3h2`): when either player breaks console 37 (Natalya's), B fails and the mission ends without completing on both, the same as the host alone. Consoles 35 and 36 (`c3j`, `c3h`) fail nothing, also the same on both. |
 | C4 | ACTION | Shoots Boris | Same as solo (Boris surrenders or the mission fails) on both | | **PASS** (rig, 0d88b92, campaign, `row-runs-2.tgz c4j2` vs `c4h2`): the same as the host alone. |
 | C5 | ACTION, FX | Destroys the GoldenEye mainframe | Destroyed on both, objective on both | | **PASS** (rig, 0d88b92, objective sweep `rows.py SW-control`: C completes on both, credit player 2). Earlier: pass (rig: mainframe objective C on both). |
 
@@ -252,8 +252,8 @@ ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 | --- | --- | --- | --- | --- | --- |
 | CR1 | HURT | Shoots Trevelyan | Same small twitch as the host sees (fixed in fixes-2) | | **NOT RUN** on 0d88b92: the campaign run matches the host alone (`row-runs-2.tgz cr1`), but the twitch is not in the logs: needs someone watching. |
 | CR2 | ACTION, FX | Destroys the control console | Blows on both, objective on both | | **PASS** (rig, 0d88b92, objective sweep `rows.py SW-cradle`: A and B complete on both). Earlier: pass (rig). |
-| CR3 | ONEPLAYER | Corners Trevelyan on the platform first | Ending for both | | **NOT RUN** on 0d88b92: queued with the campaign workstream (CAMP). |
-| CR4 | SCRIPTDEATH | Falls off the cradle | That player's own death, not a mission fail for both | | **NOT RUN** on 0d88b92: queued with the campaign workstream (CAMP). |
+| CR3 | ONEPLAYER | Corners Trevelyan on the platform first | Ending for both | **NOT RUN** on 0d88b92: needs hands-on play; the campaign workstream could not stage it in the rig (`row-runs-3.tgz cr3j`, `cr3h`). |
+| CR4 | SCRIPTDEATH | Falls off the cradle | That player's own death, not a mission fail for both | **NOT RUN** on 0d88b92: needs hands-on play; the campaign workstream could not stage the fall in the rig. |
 
 ## 19. Aztec
 
@@ -280,13 +280,15 @@ ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 | --- | --- | --- | --- | --- | --- |
 | X1 | SCRIPTDEATH | Die during a cutscene (fade) | The scene ends with both alive or respawned | | **PASS** (rig, 0d88b92, campaign run, logs `campaign/evidence-0d88b92/row-runs-2.tgz x1, x1b`). |
 | X2 | SAMETIME | Both press the same console / switch on one frame | One activation | | **NOT RUN** on 0d88b92: not re-run. Earlier: pass (rig, 2026-10-30): both press Aztec's launch console in the same second; the doors and launch run once. |
-| X3 | LATEJOIN | Late join after doors opened and alarm raised | Doors and alarm as the host's | `X3` | **PASS** (rig, 0d88b92, `rows.py X3`): the alarm and stage flag as the host's; doors not checked. Earlier: pass for the alarm (rig); doors not checked. |
-| X4 | LATEJOIN | Host leaves mid-mission (migration) | New host keeps the alarm, doors and objectives | `X4` | **PASS** (rig, 0d88b92, `rows.py X4`): the host hands over 3 s after raising the alarm; the new host keeps the alarm on and stage flag 0x40000000 (doors and objectives not checked). |
+| X3 | LATEJOIN | Late join after the alarm is raised | Alarm and stage flag as the host's | `X3` | **PASS** (rig, 0d88b92, `rows.py X3`): the alarm and stage flag as the host's. Earlier: pass for the alarm (rig). |
+| X3b | LATEJOIN | Late join after doors were opened | Doors as the host's | | **NOT RUN** on 0d88b92: `rows.py X3` does not check doors; no rig line yet. Earlier: not checked. |
+| X4 | LATEJOIN | Host leaves mid-mission (migration) | New host keeps the alarm and stage flags | `X4` | **PASS** (rig, 0d88b92, `rows.py X4`): the host hands over 3 s after raising the alarm; the new host keeps the alarm on and stage flag 0x40000000. |
+| X4b | LATEJOIN | Host leaves mid-mission (migration) | New host keeps the doors and objectives | | **NOT RUN** on 0d88b92: `rows.py X4` does not check doors or objectives; no rig line yet. |
 | X5 | CUTJOIN | Drop in during the intro swirl or an end cutscene | Joiner arrives in play or in the same scene | `X5` | **PASS** (rig, 0d88b92, `rows.py X5`): a joiner dropping into the Dam bungee ending; one mission end on each. Earlier: fail, fixed (rig, 2026-10-30): a joiner dropping into the Dam bungee ending could debrief twice; now once. |
 | X6 | SPLITOBJ | End every mission and compare the two results screens | Same objective list and states | every run | **PASS** (rig, 0d88b92): the objective sweep (16 missions) and CI `mission_runs.sh` (20 missions, lossy link) end with the same objective states on both. Earlier: pass on 17 missions (rig sweep). |
 | X7 | MANY | Repeat the escort rows (BU1, C1, J1) with 3 and 4 players | Followers pick one player and stay on them | | **PASS** (rig, 0d88b92, campaign run, logs `campaign/evidence-0d88b92/row-runs.tgz x7_4`), 4 players. |
 | X8 | MANY | Repeat the spawn rows (F1, SI3, ST1) with 3 and 4 players | Spawns still happen | `X8-doak3` | **PASS** (rig, 0d88b92, `rows.py X8-doak3`) (Facility Doak, 3 players) and `X8-nat4` (Statue Natalya, 4 players). Earlier: pass (Facility Doak 3 players, Statue Natalya 4 players). |
-| X9 | LATEJOIN | Cut the line between host and joiner for 8 to 10 s mid-mission, then restore it | One game again: the joiner rejoins the host (or a documented tie-break), never two hosts | rig `CUT=1:50:8`, `CUT=2:50:10` (netcode workstream) | **FAIL** (rig, 0d88b92, reported by the netcode workstream, task NET-3; not re-run by QA): the joiner takes over and hosts alone, the old host keeps hosting, and they never merge (the new host logs "not in our lobby"). Needs a protocol change. |
+| X9 | LATEJOIN | Cut the line between host and joiner for 8 to 10 s mid-mission, then restore it | One game again: the joiner rejoins the host (or a documented tie-break), never two hosts | rig `CUT=1:50:8`, `CUT=2:50:10` (netcode workstream) | **FAIL** (rig, 0d88b92, reported by the netcode workstream, task NET-3; not re-run by QA): the joiner takes over and hosts alone, the old host keeps hosting, and they never merge (the new host logs "not in our lobby"). Needs a protocol change. Logs: `goldeneye-coop/net/split-brain/` (`README.txt`; `main-summary.txt` and `logs.tgz` `res-base/joiner-cut10` for 0d88b92, a 10 s joiner cut at 50 s; `pr116-summary.txt` for PR #116). The "result: PASS" in `main-summary.txt` is from the old runner, which had no split check; read the logs, which show two hosts. |
 
 ## Code audit notes
 

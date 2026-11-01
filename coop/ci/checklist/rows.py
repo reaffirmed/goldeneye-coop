@@ -104,9 +104,11 @@ ROWS = {
             ['=h:mission end', '=j:mission end']),
     # ---- Train
     'T1': ('train', 0, f'{INV} GE_COOP_WATCH=4', f'{INV} GE_COOP_WATCH=4 GE_COOP_STEPS=c4@10,k4@12', 40, 2,
-           ['b:objective 1 \\(B\\) is now failed']),
+           # B never fails at Agent, not even solo: the row is that the
+           # joiner sees no failed flash either
+           ['!h:objective 1 \\(B\\) is now failed', '!j:objective 1 \\(B\\) is now failed', 'j:step k4 at \\d+ s done']),
     'T1-solo': ('train', 0, f'{INV} GE_COOP_WATCH=4 GE_COOP_STEPS=c4@10,k4@12', '', 40, 2,
-                ['h:objective 1 \\(B\\) is now failed'], 1),
+                ['!h:objective 1 \\(B\\) is now failed', 'h:step k4 at \\d+ s done'], 1),
     # ---- Caverns
     'CA3': ('caverns', 0, INV, f'{INV} GE_COOP_STEPS=p369@10', 80, 2,
             ['=h:mission end', '=j:mission end']),
