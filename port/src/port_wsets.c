@@ -42,6 +42,7 @@
 
 extern const char *portRootPath(const char *name);   /* main.c */
 extern void portConLogf(const char *fmt, ...);         /* port_console.c */
+#include "port_save.h"   /* portFileWriteBegin: replaced whole, never half-written */
 
 static char sNames[WSET_MAX][WSET_NAME_MAX];
 static s32 sCount = -1;
@@ -278,7 +279,7 @@ s32 portWsetSave(const char *name, const s32 items[8])
     s32 k;
 
     wsetEnsureDir();
-    f = fopen(wsetPath(name), "w");
+    f = portFileWriteBegin(wsetPath(name), "w");
     if (f == NULL)
     {
         portConLogf("ge: wsets: cannot write %s\n", wsetPath(name));
@@ -291,9 +292,8 @@ s32 portWsetSave(const char *name, const s32 items[8])
     {
         fprintf(f, "slot%d=%d\n", (int) k + 1, (int) items[k]);
     }
-    fclose(f);
     sCount = -1;
-    return 1;
+    return portFileWriteEnd(f);
 }
 
 s32 portWsetDelete(const char *name)

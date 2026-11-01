@@ -42,6 +42,7 @@
 
 extern const char *portRootPath(const char *name);   /* main.c */
 extern void portConLogf(const char *fmt, ...);         /* port_console.c */
+#include "port_save.h"   /* portFileWriteBegin: replaced whole, never half-written */
 
 static char sNames[MPSET_MAX][MPSET_NAME_MAX];
 static s32 sCount = -1;
@@ -182,18 +183,16 @@ s32 portMpSetRead(const char *name, char *buf, s32 size)
 s32 portMpSetWrite(const char *name, const char *text)
 {
     FILE *f;
-    s32 bad;
 
     mpsetEnsureDir();
-    f = fopen(mpsetPath(name), "w");
+    f = portFileWriteBegin(mpsetPath(name), "w");
     if (f == NULL)
     {
         portConLogf("ge: mpsettings: cannot write %s\n", mpsetPath(name));
         return 0;
     }
     fputs(text, f);
-    bad = ferror(f);
-    if (fclose(f) != 0 || bad)
+    if (!portFileWriteEnd(f))
     {
         portConLogf("ge: mpsettings: cannot write %s\n", mpsetPath(name));
         return 0;
