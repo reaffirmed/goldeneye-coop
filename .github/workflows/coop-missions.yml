@@ -11,11 +11,14 @@ name: Co-op mission runs
 #   gpg --symmetric --cipher-algo AES256 -o baserom.u.z64.gpg baserom.u.z64
 #   gh release create ci-rom baserom.u.z64.gpg --prerelease
 #   gh secret set CI_ROM_KEY
+# This repository is public, so a release asset (prerelease included) is
+# public too: how the cart image is hosted for CI is still to be decided
+# (task board BASE-02). Don't create ci-rom until it is.
 #
-# A missing key or release is never a pass. On this repository the "cart
-# image" job fails and says what to set up, so the run is red; the mission
-# job then shows as skipped, never green. On a fork (no secrets) the cart
-# image job warns and the mission job is skipped.
+# A missing key or release is never a pass. The mission job is then skipped
+# (shown as skipped, never green) and the step summary says NOT RUN. On main,
+# coop/story and v* tags of this repository the "cart image" job also fails,
+# so the run is red there; feature branches and forks get a warning.
 on:
   push:
     paths-ignore:
@@ -32,7 +35,8 @@ env:
   SDL2_VERSION: 2.30.11
   SDL2_SRC_SHA1: f3cdd91df44653518d4f3db5fdc775170016aa85
   BASEROM_US_SHA1: abe01e4aeb033b6c0836819f549c791b26cfde83
-  # the repository whose runs must have the cart image; forks only warn
+  # the repository whose main, coop/story and v* runs must have the cart
+  # image; its other branches and forks only warn
   CANONICAL_REPO: reaffirmed/goldeneye-coop
 
 concurrency:
@@ -67,8 +71,10 @@ jobs:
           fi
           echo "have=0" >> "$GITHUB_OUTPUT"
           msg="Co-op mission runs did NOT run: $GITHUB_REPOSITORY is missing $missing (setup steps at the top of .github/workflows/coop-missions.yml). This is a CI setup gap, not a failure in the code under test."
-          { echo '### Co-op mission runs: not run'; echo; echo "$msg"; } >> "$GITHUB_STEP_SUMMARY"
-          if [ "$GITHUB_REPOSITORY" = "$CANONICAL_REPO" ]; then
+          { echo '### Co-op mission runs: NOT RUN'; echo; echo "$msg"; } >> "$GITHUB_STEP_SUMMARY"
+          gate=0
+          case "$GITHUB_REF" in refs/heads/main|refs/heads/coop/story|refs/tags/v*) gate=1 ;; esac
+          if [ "$GITHUB_REPOSITORY" = "$CANONICAL_REPO" ] && [ $gate = 1 ]; then
             echo "::error title=Co-op mission runs not run::$msg"
             exit 1
           fi
