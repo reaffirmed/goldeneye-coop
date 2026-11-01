@@ -3545,3 +3545,13 @@ them. On the replay of the same mission both worked.
   punching) all landed punches and hits. The Dam GE_COOP_TESTHIT check still
   drops the hit from guard 43 through the rock. Mission runs bunker2, dam,
   frigate pass.
+
+## Versus: no hit marker, no arrow toward who hit us
+
+Both are taken out of the versus HUD, as asked (they came in with Item 8,
+feedback, above). coop_hud.c no longer draws the X at the crosshair or the
+red arc on the ring round the middle of the view, and coop_versus.c no
+longer keeps their timers (sVsHitMark, sVsHitKill, sVsHurtTicks,
+sVsHurtFrom) or the two getters. The kill feed stays, and so do the hit and
+kill events themselves: only what was drawn from them is gone. Story co-op
+never had either. Rare's own red flash on taking damage is untouched.
