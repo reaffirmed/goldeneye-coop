@@ -30,6 +30,7 @@
 #include <ultra64.h>
 
 #include <SDL.h>
+#include <bondconstants.h>  /* CAMERAMODE - the real enum, not a copy */
 #include "port_console.h" /* the tilde console: fixed keys feed it below */
 static const char *inputDevRecPath(const char *id);   /* per-device records, below */
 
@@ -7861,10 +7862,11 @@ void portInputPadMerge(s32 idx, OSContPad *pad)
              * swirl camera runs: it never reaches gameplay (weapon cycling)
              * or the menus, where a tap on the co-op lobby pressed Leave
              * Lobby or opened character select (GE_COOP_LOBBY runs) */
-            extern s32 g_CameraMode;
+            extern enum CAMERAMODE g_CameraMode;
             static u32 sitick;
             u32 t = sitick++;
-            if ((g_CameraMode == 1 || g_CameraMode == 2 || g_CameraMode == 3) /* INTRO, FADESWIRL, SWIRL */
+            if ((g_CameraMode == CAMERAMODE_INTRO || g_CameraMode == CAMERAMODE_FADESWIRL
+                || g_CameraMode == CAMERAMODE_SWIRL)
                 && t > 60u && (t % 40u) < 2u)
             {
                 pad->button |= CONT_A;
