@@ -11814,7 +11814,9 @@ void coopReplTeamPick(ObjectRecord *obj)
 }
 
 /* ---- harness: a hostile joiner ------------------------------------------------
- * GE_COOP_TESTHOSTILE=<s>[:<mask>] on a joiner: <s> seconds into the mission it
+ * GE_COOP_TESTHOSTILE=<s>[:<mask>] on a joiner: <s> * 60 mission ticks in (a
+ * second at full speed; three software-GL copies on one machine run about a
+ * quarter of that, so keep <s> small on the rig) it
  * sends what only a broken or hostile game would, once, to check that the host
  * and the other joiners refuse it (coop/ci/net_scenarios.sh, scenario
  * "hostile"). Mask bits (default 0x1F, the ones an unfixed build survives):

@@ -3604,3 +3604,92 @@ longer keeps their timers (sVsHitMark, sVsHitKill, sVsHurtTicks,
 sVsHurtFrom) or the two getters. The kill feed stays, and so do the hit and
 kill events themselves: only what was drawn from them is gone. Story co-op
 never had either. Rare's own red flash on taking damage is untouched.
+
+## Network audit: what a joiner may send, stale sessions, bounds (2026-11-01, COOP_VERSION stays 16)
+
+From a read of the co-op network code for the 1.0 audit (BASE-10, BASE-11),
+then checked on the rig with a hostile joiner and 11 simulated lines. No
+packet layout changed.
+
+- **Host-only events from a joiner.** The host relayed any event kind a
+  joiner sent, and the joiners took it as the host's: one joiner could end
+  the mission for everyone (ENDALL), mark another player gone (PLAYERNOTE),
+  hurt the host as a guard (a non-friendly HIT) or run script commands
+  (AICMD). coopEventHostOnly lists the kinds only the host sends (HIT that
+  isn't friendly, AICMD, PLAYERNOTE, ENDALL, OBJDONE, TEAMTIME, CAMPAIGN,
+  BARK, CINEMA, and DROP outside versus); the host refuses them from a
+  joiner ("refused event kind %d from player %d"), and a joiner drops them
+  when they don't come from the host ("dropped event kind %d said to be
+  from player %d"). SHOTCHR, LIVES, SEEN, ENDING and VOTE only ever go to
+  the host, so a joiner's are sent there whatever their `to` says.
+- **Lengths and numbers in events.** AICMD took its length from the packet
+  (up to 255) for a 25-byte field and copied it into a 32-byte buffer; it is
+  now refused when longer than the field. HIT damage must be 0..100 (NaN
+  and negative refused). Names in HELLO and PLAYERNOTE are NUL-terminated
+  before use.
+- **Setup offsets.** Offsets into the setup records from the network were
+  checked for range only, and the tank packet's not at all. coopSetupRecOk
+  (coopExtSetupRecOk outside coop.c) also needs the offset to start a
+  record: a bitmap of record starts is built whenever the setup changes.
+  Doors, OBJDMG, knocks, presses, team picks, pickups, endings, the tank,
+  stuck items and versus objects all go through it.
+- **STATE indexes.** A STATE with body or head out of 0..79, a position not
+  finite or past 1e7, or a yaw past 100 is dropped before the host relays
+  it ("dropped a STATE from channel"). A shot's impact type past the table
+  (explosionImpactTypeCount) is cleared, and a room past getMaxNumRooms()
+  too.
+- **ENDING offsets.** coopEndingApply only takes an offset that starts a
+  command in that AI list (coopAiOffsetOk walks it).
+- **Late packets from a player's earlier session.** A channel restarted on
+  every session change, so a packet from the previous life arriving after
+  the new one restarted it again, and a late BYE from the old session
+  dropped the new one. Each channel keeps its last two sessions
+  (oldSession); their packets are dropped ("earlier session came late") and
+  their goodbyes ignored. A game that comes back with a retired session
+  after the slot was cleared is still taken.
+- **Join snapshot on every REPLREQ.** A joiner's block re-ask made the host
+  resend the whole join snapshot each time; it now goes at most once every
+  20 host ticks per joiner.
+- **Password guesses.** The host stops answering a sender for 30 s after 5
+  wrong lobby passwords (coop_steam.c, sPwFails).
+- Left as they are (design, or protocol for 0.7): a long cut can split a
+  game in two (both copies host; the new host ignores the old one as "not
+  in our lobby"); SHOTCHR isn't checked against the held weapon, range or
+  sight, and versus trusts each shooter; UDP mode gives a slot to the first
+  address that writes (LAN and tests only); a full event ring (256) stops
+  queueing without a signal; objectives are claimed through WORLD bits.
+- Harness: GE_COOP_TESTHOSTILE=<s>[:<mask>] on a joiner sends, once, what
+  only a broken or hostile game would (bits in coopHostileTick).
+  coop/ci/net_scenarios.sh runs 2..4 copies through the lobby into Dam over
+  the mock Steam, each behind its own GE_COOP_NETSIM line, with an optional
+  cut, kill and rejoin, and fails on a crash, an unresolved desync, dropped
+  events or a joiner with no join snapshot. It leaves out GE_SKIPINTRO: its
+  A taps land on the lobby screen and press Leave Lobby.
+- **Mock Steam: the old lobby owner stayed in the lobby.** SetLobbyOwner in
+  coop/mock/steam_mock.c took the old owner off the member list (the list
+  is the owner plus <lobby>.members, and the creator was never in the
+  file), so after a migration the new host turned the old one away as "not
+  in our lobby". On Steam the old owner is still a member. The old owner now
+  goes on the file and the new one comes off it. With that, a long cut no
+  longer leaves two games that ignore each other: both copies host and each
+  takes the other as its joiner ("mock101 joined" on the new host, "mock202
+  is back" on the old one), each with its own guards. That is the case the
+  0.7 hello host flag is for.
+- Rig (Dam, mock Steam, every copy behind 40 ms + 10 ms jitter + 1% loss
+  unless said; one run each; simulated, not internet):
+  - Hostile joiner (3 players, player 2 with GE_COOP_TESTHOSTILE=15). On
+    main with mask 0x1F: the host took a 0.5 guard hit from player 2 and
+    showed "xxxxxxxxxxxxxxxxxxxxxxxx... disconnected" (the unterminated
+    name); player 3 got "THE HOST ENDED THE MISSION", the same garbage
+    name, a NaN friendly hit, then its log stopped and the host lost it.
+    Mask 0xFF: the host crashed (signal 11). On this branch, both masks:
+    "refused event kind 13 from player 2", "dropped a STATE from channel 0
+    (body 5000 head 5000)", "player 2's ending (list 040d at 2147418112) is
+    not in that list"; no hit, no note, no ending, no crash, player 3 plays
+    on to the end.
+  - 11 lines, main and this branch (coop/ci/net_scenarios.sh): 25/10/0,
+    55/20/1, 140/20/2, 50/150/1 jitter, 40/10/10 loss, 3 players at
+    120/30/2, 4 players, host killed (3 players), joiner killed at 45 s and
+    back at 90 s, host cut 8 s, joiner cut 10 s. All pass on both, no
+    events dropped, no unresolved desync; host upload 12.7 to 18.8 KB/s
+    and round trips within 25 ms of main except around the host kill.
