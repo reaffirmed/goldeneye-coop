@@ -1228,7 +1228,7 @@ on the paper) and scroll as before.
   shows as skipped and the summary says NOT RUN; on main, coop/story and v*
   tags of reaffirmed/goldeneye-coop the "cart image" job also fails, so the
   run is red. The repo is public, so a ci-rom release would be public too:
-  how CI gets the cart image is still open (task board BASE-02).
+  how CI gets the cart image is still open (task board BUILD-2).
   Until 2026-11-01 a missing secret left a notice and a green job, and all
   225 runs to then were that 4-11 s skip: neither CI_ROM_KEY nor the ci-rom
   release had been set up, so these runs had never run in CI. A stage with
