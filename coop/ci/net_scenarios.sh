@@ -22,6 +22,19 @@
 #   REJOIN    <s>: start the killed copy again (it joins from the friend list)
 #   RUNSECS   how long each copy runs (default 150)
 #   HOSTENV, P<i>ENV, ALLENV  more env for the host / copy i / every copy
+#             (CUT with ids, <copy>:<at>:<len>:<id>,..., cuts only those peers
+#             in the game's net layer; GE_MOCK_CUT=<at>:<len>:<id>,... in a
+#             copy's env cuts them in the mock Steam itself, session requests
+#             included: coop/mock/steam_mock.c)
+#   Examples (FAILON_SPLIT=1 with each):
+#     2+2 split, p2 takes over with p3 as its joiner, p1 keeps p4:
+#       N=4 HOSTENV=GE_MOCK_CUT=90:8:76561190000000202,76561190000000303
+#     the same with the STEPDOWN goodbye lost on the way to p3:
+#       ... P3ENV=GE_MOCK_CUT=96:10:76561190000000202
+#     2+2 split where the far side's first pick (p2) is still on p1:
+#       N=4 CUT=1:50:30:76561190000000303,76561190000000404 RUNSECS=220
+#     the same with no STEPDOWN goodbye at all (each joiner finds the winner):
+#       ... P3ENV=GE_COOP_TESTNOSTEPBYE=1 P4ENV=GE_COOP_TESTNOSTEPBYE=1
 #   BUILD     build_pc folder (default /home/dev/project/build_pc), OUT (/out)
 # Exit 1 when a check fails (a crash, an unresolved desync, a joiner that
 # never got the join snapshot, events dropped from a full queue, or, with

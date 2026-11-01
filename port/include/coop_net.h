@@ -33,6 +33,9 @@ void coopNetShutdown(void);
  * ids[0] is the new host. The socket or the Steam lobby stays open. */
 void coopNetMigrate(int ashost, const unsigned long long *ids, int n);
 int  coopNetHostLeft(void);             /* joiner: the transport saw the host leave (Steam: it left the lobby) */
+void coopNetKnock(unsigned long long id, const void *buf, int len); /* Steam: one packet to a lobby member with no slot here */
+unsigned long long coopNetLobbyOwner(void);     /* Steam: the lobby's owner (one at a time, set by Steam); 0 on UDP */
+int  coopNetIsLobbyMember(unsigned long long id); /* Steam: id is in our lobby; 1 on UDP */
 
 /* Steam backend (coop_steam.c), used by coop_net.c when GE_COOP starts with "steam" */
 int  coopSteamInit(const char *spec);
@@ -47,6 +50,9 @@ int  coopSteamRecvFrom(void *buf, int cap, int *peer);
 void coopSteamShutdown(void);
 void coopSteamMigrate(int ashost, const unsigned long long *ids, int n);
 int  coopSteamHostLeft(void);
+unsigned long long coopSteamLobbyOwner(void);
+void coopSteamKnock(unsigned long long id, const void *buf, int len);
+int  coopSteamIsLobbyMember(unsigned long long id);
 
 /* the lobby screen (front.c through src/game/coop.c) */
 int  coopSteamLobbyState(void);         /* 0 none, 1 creating or looking, 2 in a lobby */
