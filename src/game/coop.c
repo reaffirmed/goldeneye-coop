@@ -3311,8 +3311,8 @@ static void coopHarnessTick(void)
     if (coopNetIsHost() && coopInMission())
     {   /* GE_COOP_TESTFLOOD=<s>: <s> seconds into the mission, fill every joiner's event
          * queue past full with events that do nothing (kind 15, unused), then 22 player
-         * notes that do nothing but log on arrival ("testflood: note %d arrived"): the
-         * notes must all arrive, in order, and the overflow must bring a snapshot again
+         * notes that do nothing but log on arrival ("testflood: note %d arrived"), then
+         * 20 more, one every 8 ticks: the 42 notes must all arrive, in order, and the overflow must bring a snapshot again
          * (coopChanQueue, coopFlushEvents; harness only) */
         static s32 testflood = -2;
         if (testflood == -2)
@@ -3337,6 +3337,19 @@ static void coopHarnessTick(void)
                 memset(&ev, 0, sizeof(ev));
                 ev.kind = COOPEV_PLAYERNOTE;
                 ev.u.note.what = (u8) (200 + k);
+                coopQueueEventTo(&ev, COOP_ALL);
+            }
+        }
+        {   /* then one more note every 8 ticks, 20 of them, while acks free room and
+             * the stash drains: none may overtake the ones still waiting */
+            static s32 later;
+            if (testflood > 0 && (s32) sMissionTicks > testflood && later < 20 && (sTick % 8) == 0)
+            {
+                CoopEvent ev;
+
+                memset(&ev, 0, sizeof(ev));
+                ev.kind = COOPEV_PLAYERNOTE;
+                ev.u.note.what = (u8) (200 + 22 + later++);
                 coopQueueEventTo(&ev, COOP_ALL);
             }
         }
@@ -6125,6 +6138,12 @@ static s32 coopEventMustArrive(s32 kind)
         || kind == COOPEV_AICMD || kind == COOPEV_PLAYERNOTE || kind == COOPEV_ENDING;
 }
 
+static void coopChanPut(CoopChan *ch, const CoopEvent *ev)
+{
+    ch->out[ch->outNext % COOP_EVENT_RING] = *ev;
+    ch->outNext++;
+}
+
 static void coopChanQueue(s32 c, CoopEvent *ev)
 {
     CoopChan *ch = &sChan[c];
@@ -6132,6 +6151,19 @@ static void coopChanQueue(s32 c, CoopEvent *ev)
 
     if (!coopNetPeerConnected(c))
     {
+        return;
+    }
+    if (coopEventMustArrive(ev->kind) && ch->nstash > 0)
+    {   /* others of these wait already: behind them, or a mission end could
+         * overtake an objective queued before it */
+        if (ch->nstash < (u8) (sizeof(ch->stash) / sizeof(ch->stash[0])))
+        {
+            ch->stash[ch->nstash++] = *ev;
+            portConLogf("ge: coop: event queue to player %d full, kind %d kept to send later\n", coopPlayerOfChan(c) + 1, ev->kind);
+            return;
+        }
+        ch->overflowed = 1;
+        portConLogf("ge: coop: event queue to player %d full, dropping kind %d\n", coopPlayerOfChan(c) + 1, ev->kind);
         return;
     }
     if (coopEventMustArrive(ev->kind) ? unacked > COOP_EVENT_RING : unacked > COOP_EVENT_RING - COOP_EVENT_RESERVE)
@@ -6146,8 +6178,7 @@ static void coopChanQueue(s32 c, CoopEvent *ev)
         portConLogf("ge: coop: event queue to player %d full, dropping kind %d\n", coopPlayerOfChan(c) + 1, ev->kind);
         return;
     }
-    ch->out[ch->outNext % COOP_EVENT_RING] = *ev;
-    ch->outNext++;
+    coopChanPut(ch, ev);
 }
 
 /* To player `to`, or COOP_ALL. A joiner sends everything to the host, which
@@ -6269,7 +6300,7 @@ static void coopFlushEvents(void)
                 sChan[c].stash[k - 1] = sChan[c].stash[k];
             }
             sChan[c].nstash--;
-            coopChanQueue(c, &ev);
+            coopChanPut(&sChan[c], &ev);    /* the room is there (the loop's test) */
         }
         if (sChan[c].overflowed && sChan[c].nstash == 0 && sChan[c].outNext - 1 == sChan[c].outAcked && coopNetIsHost()
             && coopPlayerOfChan(c) >= 1)

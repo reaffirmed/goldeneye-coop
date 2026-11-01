@@ -3774,7 +3774,9 @@ each took the other as its joiner, each with its own guards, for good.
   snapshot can't bring back (mission end, end-all, objective done,
   cinema, AI command, player note, ending), and when even those are taken
   they wait in a per-channel stash of 8 and go out in order as room comes
-  ("event queue to player %d full, kind %d kept to send later"). Anything
+  ("event queue to player %d full, kind %d kept to send later"). While the
+  stash holds any, a new one goes behind them even if the queue has room
+  again, so a mission end can't overtake an objective queued before it. Anything
   else dropped is mended by sending that joiner the join snapshot again
   once the queue and the stash have drained ("... snapshot again (%d so
   far)"), only for a channel that still has a player. No packet change; a
@@ -3792,9 +3794,9 @@ each took the other as its joiner, each with its own guards, for good.
   examples for each.
 - GE_COOP_TESTFLOOD=<s> (host, harness only): <s> s into the mission, every
   joiner's queue gets 296 events that do nothing and then 22 player notes
-  that only log on arrival. Rig, N=3: 56 dropped per joiner, all 22 notes
-  arrive in order, and each joiner gets the snapshot again once the queue
-  drains. Before this, the drain check compared outNext with outAcked
+  that only log on arrival, then 20 more notes, one every 8 ticks. Rig, N=3:
+  all 42 notes arrive in order on both joiners (7 waited in the stash), and
+  each joiner gets the snapshot again once the queue drains. Before this, the drain check compared outNext with outAcked
   (an empty queue is outNext - 1 == outAcked), so the snapshot-again never
   fired.
 - net_scenarios.sh: a "two hosts" line, and FAILON_SPLIT=1 fails a run in

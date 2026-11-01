@@ -293,12 +293,25 @@ static int coopNetCut(void)
         t0 = portProfNow();
         if (e != NULL && sscanf(e, "%d:%d", &at, &len) == 2)
         {
-            ids = strchr(e, ':');
-            ids = (ids != NULL) ? strchr(ids + 1, ':') : NULL;
-            while (ids != NULL && sCutNIds < 4)
+            int colons = 0;
+
+            /* the ids, if any, follow the second ':' (no strchr: this codebase's
+             * string.h takes unsigned char) */
+            for (ids = e; *ids != '\0' && colons < 2; ids++)
             {
-                sCutIds[sCutNIds++] = strtoull(ids + 1, NULL, 10);
-                ids = strchr(ids + 1, ',');
+                colons += (*ids == ':');
+            }
+            while (colons == 2 && *ids != '\0' && sCutNIds < 4)
+            {
+                sCutIds[sCutNIds++] = strtoull(ids, NULL, 10);
+                while (*ids != '\0' && *ids != ',')
+                {
+                    ids++;
+                }
+                if (*ids == ',')
+                {
+                    ids++;
+                }
             }
             portConLogf("ge: coop: netcut: the line goes quiet %d s in, for %d s%s\n", at, len,
                         sCutNIds > 0 ? " (to some peers only)" : "");
