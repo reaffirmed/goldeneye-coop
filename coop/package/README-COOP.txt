@@ -300,7 +300,9 @@ and replaces its own files (ProjectMidas.exe, the DLLs, the .bat files and
 these notes). Then pick "Restart Now" (from the Files screen's prompt it
 restarts by itself). Your cart image, saves, profiles,
 reports and midas.ini are never touched, and the download is thrown away if
-it doesn't match. If a file can't be replaced, everything is put back.
+it doesn't match. If a file can't be replaced, everything is put back. If
+the game is closed, crashes or loses power half way through replacing them,
+the next start finishes the job and offers "Restart Now".
 - A host turned you away with "Update needed to join": the game looks for
   the update at once and offers it, so you can install it and join again.
   If the host is the one on the old version, it says so.
