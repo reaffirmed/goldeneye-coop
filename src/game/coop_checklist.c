@@ -15,6 +15,9 @@
  *       v<tag>   stand 1.5 m from that object, facing it
  *       x<tag>   use the gadget in hand on that object (what gunfire.c does when it is aimed at)
  *       l<deg>   look <deg> degrees down (negative up)
+ *       j<chr>:<list>  host: that chr runs ai list <list> (hex) from its start, e.g.
+ *                Bunker 2's Natalya following Bond (j<her chr>:40d); a chr
+ *                number of 1024 and up (decimal) is the chr running that list now
  *   GE_COOP_WATCH=<chr>[,<chr>...]  every second, log those chrs when they
  *                          appear, vanish, die or move more than 7 m in a
  *                          second (and whether their room is on our screen)
@@ -56,6 +59,7 @@ typedef struct
 {
     char kind;
     s32  arg;
+    s32  arg2;  /* j: the ai list */
     s32  at;    /* mission ticks */
 } ClStep;
 
@@ -93,6 +97,7 @@ static void clInit(void)
         }
         s->kind = e[0];
         s->arg = atoi(e + 1);
+        s->arg2 = (strchr(e, ':') != NULL && strchr(e, ':') < at) ? (s32) strtol(strchr(e, ':') + 1, NULL, 16) : 0;
         s->at = atoi(at + 1) * 60;
         sNumSteps++;
         e = strchr(at, ',');
@@ -370,6 +375,29 @@ static void clStep(ClStep *s)
         case 'l':
             g_CurrentPlayer->vv_verta = (f32) -s->arg;
             break;
+        case 'j':
+        {
+            s32 i;
+
+            c = (s->arg < 0x400) ? chrFindByLiteralId(s->arg) : NULL;
+            for (i = 0; s->arg >= 0x400 && c == NULL && i < g_NumChrSlots; i++)
+            {
+                if (g_ChrSlots[i].model != NULL && g_ChrSlots[i].prop != NULL && g_ChrSlots[i].ailist == ailistFindById(s->arg))
+                {
+                    c = &g_ChrSlots[i];
+                }
+            }
+            if (!coopExtIsHost() || c == NULL || ailistFindById(s->arg2) == NULL)
+            {
+                portConLogf("ge: coop: step j%d: %s\n", s->arg, !coopExtIsHost() ? "host only" : (c == NULL) ? "no chr" : "no such list");
+                return;
+            }
+            c->ailist = ailistFindById(s->arg2);
+            c->aioffset = 0;
+            c->sleep = 0;
+            portConLogf("ge: coop: step j: chr %d runs list %x\n", c->chrnum, s->arg2);
+            break;
+        }
     }
     portConLogf("ge: coop: step %c%d at %u s done\n", s->kind, s->arg, coopExtMissionTicks() / 60);
 }

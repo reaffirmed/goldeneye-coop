@@ -3545,3 +3545,52 @@ them. On the replay of the same mission both worked.
   punching) all landed punches and hits. The Dam GE_COOP_TESTHIT check still
   drops the hit from guard 43 through the rock. Mission runs bunker2, dam,
   frigate pass.
+
+## Escorts follow one player; big fights don't freeze them (2026-11-01, COOP_VERSION stays 16)
+
+Owner's question: can the AI follow people better? Read for Natalya
+(Bunker 2, Control, Train, Jungle) and the Control technician, whose follow
+scripts are "run / walk to Bond", "Bond within 2.5 / 10 m", "Bond further
+than 4 m" (Bunker 2 ai_12).
+
+- **She switched between players.** coopChrTarget hands a chr in a passive
+  action (standing) the next player every 12 ticks. An escort stands between
+  runs, so when nobody was within 10 m each run went to whoever the turn had
+  reached. A chr that ran or walked to Bond (chrGoToBond, coopChrFollowed)
+  now keeps that player for the rest of the mission. It moves on when that
+  player dies or leaves (dropped at once, as before), when its script's own
+  checks hand it to another player (AltKeep), or when another player has
+  been under half as far and 10 m nearer for 3 s while it stood (its leader
+  out of reach: no route, nothing to run to). Guards that ran at a player
+  keep them too; sight, hearing and distance checks still ask every player.
+- **Nearest first.** coopChrAltBegin tried the other players in player
+  order, so a "Bond within 10 m" that two players passed went to the lower
+  number. It now tries them nearest first (only matters with 3 or 4).
+- **The 10 guard limit.** Retail stops every moving chr (chrGoToBond,
+  chrGoToPad, chrGoToChr, chrlvTickGoPos) once 10 guards have seen their
+  target in the last 2 s (g_SeenBondRecentlyGuardCount). Guards fighting
+  each partner count too, so co-op reached it far sooner. coopSeenBondCap
+  gives each player in the mission the solo 10 (host only; solo and versus
+  keep 10), and logs "N guards saw a player just now" when 10 is passed.
+- Harness: checklist step `j<chr>:<list>` (hex list; a chr of 1024 and up is
+  the chr running that list) makes the host run a chr from a list's start.
+  Bunker 2's Natalya is chr 0 (list 409, follow list 40d); with
+  GE_COOP_TESTDOOR=1 and `o3@8` the host opens her cell (tag 3) at 15 s and
+  her own script starts the follow.
+- Rig, Bunker 2, before (main) and after, a temporary log of each run she
+  starts and each turn of the scan:
+  - Two players taking turns between two spots each (host c13/c12, joiner
+    c33/c16, every 5 s from 24 s): before, 498 scan turns over the mission
+    and once her runs went to player 2, then player 1; after, no scan turns
+    once she follows and every run is to player 1.
+  - Three players (P1 c13/c12, P2 n0/c33/c16, P3 c0/c29/c11): before, her
+    runs between 77 and 102 s went to players 3, 3, 1, 1, 3, 3, 1, 2, 3, 2,
+    2, 2, 2, 2; after, two runs in the whole mission (player 2, then player
+    3 when her "within 10 m" check found them).
+  - The guards' count reached 10 and 11 in each two-player run (before and
+    after), the point where the old build stopped every moving chr.
+  - Checklist BU1 and BU5 (host far off on c27, the joiner opens her cell
+    with GE_COOP_TESTDOOR=1): she goes to player 2 and follows them to rooms
+    26 and 27; when the joiner goes down she goes to player 1 (the guards
+    there then killed her).
+  - Mission runs (bunker2 control train jungle dam statue) 6/6.
