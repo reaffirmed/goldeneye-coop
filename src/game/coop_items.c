@@ -49,6 +49,7 @@
 #include "bondinv.h"
 #include "chr.h"
 #include "propobj.h"
+#include "model.h"
 #include "quaternion.h"
 #include "math_atan2f.h"
 #include "lv.h"

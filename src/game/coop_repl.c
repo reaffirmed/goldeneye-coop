@@ -68,6 +68,7 @@
 #include "bondview.h"
 #include "chr.h"
 #include "propobj.h"
+#include "model.h"
 #include "coop.h"
 #include "coop_net.h"
 
