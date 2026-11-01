@@ -30,6 +30,7 @@
 #include <ultra64.h>
 
 #include <SDL.h>
+#include <bondconstants.h>  /* CAMERAMODE - the real enum, not a copy */
 #include "port_console.h" /* the tilde console: fixed keys feed it below */
 static const char *inputDevRecPath(const char *id);   /* per-device records, below */
 
@@ -7857,11 +7858,16 @@ void portInputPadMerge(s32 idx, OSContPad *pad)
         }
         if (s_SkipIntro && idx == 0)
         {   /* GE_SKIPINTRO=1: tap A through the mission intro cameras
-             * (2-tick presses, one per ~2/3s, first 15s only - stops
-             * before it could cycle weapons in gameplay) */
+             * (2-tick presses, one per ~2/3s). Only while the intro or
+             * swirl camera runs: it never reaches gameplay (weapon cycling)
+             * or the menus, where a tap on the co-op lobby pressed Leave
+             * Lobby or opened character select (GE_COOP_LOBBY runs) */
+            extern enum CAMERAMODE g_CameraMode;
             static u32 sitick;
             u32 t = sitick++;
-            if (t > 60u && t < 900u && (t % 40u) < 2u)
+            if ((g_CameraMode == CAMERAMODE_INTRO || g_CameraMode == CAMERAMODE_FADESWIRL
+                || g_CameraMode == CAMERAMODE_SWIRL)
+                && t > 60u && (t % 40u) < 2u)
             {
                 pad->button |= CONT_A;
             }

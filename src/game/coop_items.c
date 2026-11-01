@@ -49,6 +49,7 @@
 #include "bondinv.h"
 #include "chr.h"
 #include "propobj.h"
+#include "model.h"
 #include "quaternion.h"
 #include "math_atan2f.h"
 #include "lv.h"
@@ -1580,6 +1581,10 @@ static void coopItemsApplyStuck(const CoopStuckMsg *m, s32 from)
         memcpy(r.rot, m->rot, sizeof(r.rot));
         memcpy(r.pos, m->pos, sizeof(r.pos));
         coopItemsApplyRest(&r);     /* lies where theirs does */
+        return;
+    }
+    if (!coopExtSetupRecOk(m->objofs))
+    {
         return;
     }
     host = (ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + m->objofs);

@@ -29,6 +29,8 @@
 #endif
 #include "game/frametiming.h"   /* portTickSetHz: [display] tickhz */
 #include "romdata.h"            /* romdataIsIniKey: [data] keys are not "unknown controls" */
+#include "port_save.h"          /* portFileWriteBegin: midas.ini and kbm binds replaced whole */
+extern const char *portRootPath(const char *name);
 
 /* port_console.c: same output as the fprintf(stderr, ...) this replaced,
  * plus a silent copy in the tilde console ring (spec section 7). */
@@ -2324,8 +2326,7 @@ static void iniParseKeys(int bind, char *value)
 
 static void videoWriteDefaultIni(void)
 {
-    extern FILE *portRootFopen(const char *name, const char *mode);
-    FILE *f = portRootFopen("midas.ini", "w");
+    FILE *f = portFileWriteBegin(portRootPath("midas.ini"), "w");
 
     if (f == NULL)
     {
@@ -2493,8 +2494,10 @@ static void videoWriteDefaultIni(void)
     fprintf(f, "mp_friendly_fire=%d\n", s_CfgMpFriendlyFire);
     fprintf(f, "head_roll=%d\n", s_CfgNoHeadRoll == 0);
     fprintf(f, "p1_ends_match=%d\n", s_CfgMpP1EndsMatch);
-    fclose(f);
-    printf("ge: wrote default midas.ini\n");
+    if (portFileWriteEnd(f))
+    {
+        printf("ge: wrote default midas.ini\n");
+    }
 }
 
 /** A modal error box for failures before there is a game to show them (today
@@ -2920,7 +2923,7 @@ static int videoIniWriteKeys(const char *section, const char *const *keys, const
         }
         if (hadsection)
         {
-            f = portRootFopen("midas.ini", "w");
+            f = portFileWriteBegin(portRootPath("midas.ini"), "w");
             if (f != NULL)
             {
                 int ok = 1;
@@ -2932,20 +2935,21 @@ static int videoIniWriteKeys(const char *section, const char *const *keys, const
                         ok = 0;
                     }
                 }
-                if (ferror(f))
+                /* a failed write (full disk) is not "saved", and the old
+                 * midas.ini stays as it was */
+                if (!ok)
                 {
-                    ok = 0;
+                    portFileWriteAbort(f);
                 }
-                if (fclose(f) != 0)
+                else
                 {
-                    ok = 0;
+                    ok = portFileWriteEnd(f);
                 }
-                /* a failed write (full disk) is not "saved" */
                 written = ok;
                 s_IniSeen = 1;
                 if (!ok)
                 {
-                    portConLogf("ge: midas.ini: WRITE FAILED - the file may be incomplete\n");
+                    portConLogf("ge: midas.ini: write failed - the old file is kept\n");
                 }
             }
         }
@@ -3066,7 +3070,7 @@ static int videoKbmBindsSave(void)
         }
         fclose(f);
     }
-    f = fopen(path, "w");
+    f = portFileWriteBegin(path, "w");
     if (f == NULL)
     {
         portConLogf("ge: devices: cannot write %s\n", path);
@@ -3083,7 +3087,7 @@ static int videoKbmBindsSave(void)
         SDL_free(lines[i]);
     }
     portVideoKbmBindsAppend(f);
-    if (ferror(f) | fclose(f))
+    if (!portFileWriteEnd(f))
     {
         portConLogf("ge: devices: writing %s failed\n", path);
         return 0;
@@ -3276,14 +3280,14 @@ static void videoIniDropSection(const char *section)
         SDL_free(lines[0]);
         SDL_memmove(lines, lines + 1, (size_t) --nlines * sizeof(char *));
     }
-    f = portRootFopen("midas.ini", "w");
+    f = portFileWriteBegin(portRootPath("midas.ini"), "w");
     if (f != NULL)
     {
         for (i = 0; i < nlines; i++)
         {
             fputs(lines[i], f);
         }
-        fclose(f);
+        portFileWriteEnd(f);
     }
     for (i = 0; i < nlines; i++) SDL_free(lines[i]);
     SDL_free(lines);
@@ -4922,11 +4926,12 @@ static void videoIniWritableCheck(void)
         fclose(f);
         return;
     }
-    portConLogf("ge: midas.ini: the game folder is not writable, settings will not be saved\n");
-    portShowErrorBox("Project Midas: settings will not be saved",
-                     "Project Midas cannot write midas.ini in its own folder, so any settings you change "
-                     "will be lost when you quit.\n\n"
-                     "Move the game folder somewhere you can write to, such as C:\\Games\\ProjectMidas. "
+    portConLogf("ge: midas.ini: the game folder is not writable, settings and saves will not be kept\n");
+    portShowErrorBox("GoldenEye Coop: nothing will be saved",
+                     "The game can't write to its own folder, so your settings, mission progress, "
+                     "co-op campaign and profiles will be lost when you quit, and the updater can't "
+                     "install updates.\n\n"
+                     "Move the game folder somewhere you can write to, such as C:\\Games\\GoldenEye-Coop. "
                      "Avoid Program Files. If the folder is under Documents or Desktop, Windows "
                      "Controlled Folder Access may be blocking it.");
 }

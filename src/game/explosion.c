@@ -216,6 +216,14 @@ s_impacttype g_ImpactTypes[] = {
     {12.0f, 12.0f, 1, 2, 1},
 };
 
+#ifndef TARGET_N64
+/* co-op: how many impact types there are (a partner's shot names one by number) */
+s32 explosionImpactTypeCount(void)
+{
+    return (s32) (sizeof(g_ImpactTypes) / sizeof(g_ImpactTypes[0]));
+}
+#endif
+
 // unused / unreferenced (padding)
 u32 D_800408FC = 0;
 

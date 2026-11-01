@@ -474,6 +474,81 @@ static void applyLobbyOptions(void)
     pSetLobbyData(sMM, sLobby, LOBBY_KEY_PASSWORD, sPassword[0] != '\0' ? "1" : "0");
 }
 
+/* Wrong passwords, per sender. The answer to each guess was immediate and
+ * unlimited, so anyone in a public lobby could try the 32-bit hash space (or a
+ * word list) as fast as Steam carries messages. After PW_TRIES wrong guesses a
+ * sender is not answered for PW_HOLD_MS; a real player who mistyped waits out
+ * a few seconds at most. */
+#define PW_SLOTS 8
+#define PW_TRIES 5
+#define PW_HOLD_MS 30000u
+static struct
+{
+    u64s who;
+    unsigned int fails;
+    unsigned long long lastMs;
+} sPwFails[PW_SLOTS];
+
+extern unsigned long long portProfNow(void);
+
+static unsigned long long pwNowMs(void)
+{
+    return portProfNow() / 1000ull;
+}
+
+static int pwSlot(u64s who, int make)
+{
+    int i, oldest = 0;
+
+    for (i = 0; i < PW_SLOTS; i++)
+    {
+        if (sPwFails[i].who == who)
+        {
+            return i;
+        }
+        if (sPwFails[i].lastMs < sPwFails[oldest].lastMs)
+        {
+            oldest = i;
+        }
+    }
+    if (!make)
+    {
+        return -1;
+    }
+    sPwFails[oldest].who = who;
+    sPwFails[oldest].fails = 0;
+    return oldest;
+}
+
+static int pwThrottled(u64s who)
+{
+    int i = pwSlot(who, 0);
+
+    if (i < 0 || sPwFails[i].fails < PW_TRIES)
+    {
+        return 0;
+    }
+    if (pwNowMs() - sPwFails[i].lastMs >= PW_HOLD_MS)
+    {
+        sPwFails[i].fails = 0;  /* served its wait: a fresh set of tries */
+        return 0;
+    }
+    return 1;
+}
+
+static void pwFailed(u64s who)
+{
+    int i = pwSlot(who, 1);
+
+    sPwFails[i].fails++;
+    sPwFails[i].lastMs = pwNowMs();
+    if (sPwFails[i].fails == PW_TRIES)
+    {
+        portConLogf("ge: steam: %llu got the password wrong %d times: not answering it for %u s\n", who, PW_TRIES,
+                    PW_HOLD_MS / 1000u);
+    }
+}
+
 /* host: a control message from someone in the lobby (1 when it was one) */
 static int hostControl(u64s from, const unsigned char *data, int size)
 {
@@ -492,6 +567,10 @@ static int hostControl(u64s from, const unsigned char *data, int size)
     {
         sendControl(from, PW_OK, 0);    /* in already; our answer was lost */
     }
+    else if (pwThrottled(from))
+    {
+        return 1;   /* too many wrong guesses lately: no answer at all, right or wrong */
+    }
     else if (isLobbyMember(from) && (sPassword[0] == '\0' || isFriend(from) || m[1] == pwHash(sPassword, sLobby)))
     {
         if (setPeer(-1, from) >= 0)
@@ -503,6 +582,7 @@ static int hostControl(u64s from, const unsigned char *data, int size)
     else
     {
         sendControl(from, PW_NO, 0);
+        pwFailed(from);
         portConLogf("ge: steam: turned %llu away: wrong password\n", from);
     }
     return 1;
@@ -918,6 +998,18 @@ static void pump(void)
     sPolls++;
 }
 
+static int sOffWhy;     /* COOPSTEAM_OFF_*: why steamOpen last failed */
+
+int coopSteamOffReason(void)
+{
+    return sReady ? COOPSTEAM_OFF_NONE : sOffWhy;
+}
+
+const char *coopSteamLibName(void)
+{
+    return STEAM_LIB;
+}
+
 static int steamOpen(void)
 {
     char err[1024];
@@ -927,20 +1019,26 @@ static int steamOpen(void)
     {
         return 1;
     }
-    sLib = LIB_OPEN(STEAM_LIB);
+    if (sLib == NULL)
+    {
+        sLib = LIB_OPEN(STEAM_LIB);
+    }
     if (sLib == NULL)
     {
         portConLogf("ge: steam: %s not found next to the game; co-op is off\n", STEAM_LIB);
+        sOffWhy = COOPSTEAM_OFF_NOLIB;
         return 0;
     }
     if (!loadAll())
     {
+        sOffWhy = COOPSTEAM_OFF_BADLIB;
         return 0;
     }
     writeAppId();
     if (!pIsSteamRunning())
     {
         portConLogf("ge: steam: Steam is not running; start it and log in, then launch again\n");
+        sOffWhy = COOPSTEAM_OFF_NOTRUNNING;
         return 0;
     }
     memset(err, 0, sizeof(err));
@@ -948,6 +1046,7 @@ static int steamOpen(void)
     if (r != 0)
     {
         portConLogf("ge: steam: init failed (%d): %s\n", r, err);
+        sOffWhy = COOPSTEAM_OFF_INITFAILED;
         return 0;
     }
     pMDInit();

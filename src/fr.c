@@ -718,6 +718,7 @@ Gfx *viSetupCurrentPlayerView(Gfx *gdl)
     { /* GE_GLFARX=n (diag): scale ONLY the projection far plane - zrange (portal/room
        * culls, fog params) stays vanilla - to isolate GL far-plane clipping */
         extern char *getenv(const char *);
+        extern double atof(const char *);
         static f32 glfarx = -1.0f;
         if (glfarx < 0.0f) { const char *e = getenv("GE_GLFARX"); glfarx = (e != NULL) ? (f32) atof(e) : 1.0f; if (glfarx < 1.0f) glfarx = 1.0f; }
         guPerspectiveF(g_viProjectionMatrixF, &g_viPerspNorm, g_ViBackData->fovy, g_ViBackData->aspect, g_ViBackData->znear, g_ViBackData->zfar * glfarx, 1.0f);

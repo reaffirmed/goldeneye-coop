@@ -81,5 +81,11 @@ while [ $# -gt 0 ]; do
     done
     wait
 done
+# Every stage asked for needs its own result line: one whose run died without
+# reporting is a failure, and so is a run of no stages at all, never a pass.
+[ -n "$(echo $STAGES)" ] || echo "(none) FAIL: no stages to run 0s" >> "$OUT/summary.txt"
+for want in $STAGES; do
+    grep -q "^$want \(PASS\|FAIL\)" "$OUT/summary.txt" || echo "$want FAIL: no result (its run died without reporting) 0s" >> "$OUT/summary.txt"
+done
 cat "$OUT/summary.txt"
 ! grep -q " FAIL" "$OUT/summary.txt"

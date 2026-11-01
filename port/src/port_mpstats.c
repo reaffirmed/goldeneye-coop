@@ -32,6 +32,7 @@
 
 extern const char *portRootPath(const char *name);   /* main.c */
 extern void portConLogf(const char *fmt, ...);         /* port_console.c */
+#include "port_save.h"   /* portFileWriteBegin: replaced whole, never half-written */
 extern const char *portProfileActive(s32 player);      /* port_profiles.c */
 extern s32 get_is_ramrom_flag(void);                   /* ramromreplay.c */
 extern s32 get_recording_ramrom_flag(void);
@@ -129,7 +130,7 @@ void portMpStatsLoad(const char *name, s32 out[PORT_MPSTAT_COUNT])
 
 static void statsWrite(const char *name, const s32 v[PORT_MPSTAT_COUNT])
 {
-    FILE *f = fopen(statsPath(name), "w");
+    FILE *f = portFileWriteBegin(statsPath(name), "w");
     s32 k;
 
     if (f == NULL)
@@ -143,7 +144,7 @@ static void statsWrite(const char *name, const s32 v[PORT_MPSTAT_COUNT])
     {
         fprintf(f, "%s=%d\n", sKey[k], (int) v[k]);
     }
-    fclose(f);
+    portFileWriteEnd(f);
 }
 
 void portMpStatsRecord(const struct PortMpMatchLine *lines, s32 count, s32 seconds)

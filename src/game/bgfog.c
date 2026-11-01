@@ -464,6 +464,7 @@ void fogLoadCurrentEnvironment(EnvironmentRecord *arg0)
        * move. Used to check whether missing distant geometry is caused by the
        * zrange cull. */
         extern char *getenv(const char *);
+        extern double atof(const char *);
         static f32 farx = -1.0f;
         if (farx < 0.0f)
         {

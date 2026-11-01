@@ -9745,10 +9745,33 @@ static void coopLobbyBuildRows(void)
     coop_lobby_build_tab = CLTAB_MAIN;
     if (state == COOPLOBBY_OFF)
     {
+        char libline[48];
+
         coopLobbyAddUpdate();
-        coopLobbyAdd(CLROW_TEXT, 0, "Steam is not running.\n", "");
-        coopLobbyAdd(CLROW_TEXT, 0, "Start Steam and log in,\n", "");
-        coopLobbyAdd(CLROW_TEXT, 0, "then open CO-OP again.\n", "");
+        switch (coopSteamOffReason())
+        {   /* say what is actually wrong: a missing file needs a re-unzip, not Steam */
+            case COOPSTEAM_OFF_NOLIB:
+            case COOPSTEAM_OFF_BADLIB:
+                snprintf(libline, sizeof(libline), "%s\n", coopSteamLibName());
+                coopLobbyAdd(CLROW_TEXT, 0, "The game's Steam file,\n", "");
+                coopLobbyAdd(CLROW_TEXT, 0, libline, "");
+                coopLobbyAdd(CLROW_TEXT, 0, coopSteamOffReason() == COOPSTEAM_OFF_NOLIB ? "is missing.\n" : "is damaged.\n", "");
+                coopLobbyAdd(CLROW_TEXT, 0, "Unzip the game again.\n", "");
+                coopLobbyAdd(CLROW_TEXT, 0, "Some virus scanners\n", "");
+                coopLobbyAdd(CLROW_TEXT, 0, "remove it.\n", "");
+                break;
+            case COOPSTEAM_OFF_INITFAILED:
+                coopLobbyAdd(CLROW_TEXT, 0, "Steam turned the game away.\n", "");
+                coopLobbyAdd(CLROW_TEXT, 0, "Check you are logged in\n", "");
+                coopLobbyAdd(CLROW_TEXT, 0, "and online in Steam,\n", "");
+                coopLobbyAdd(CLROW_TEXT, 0, "then open CO-OP again.\n", "");
+                break;
+            default:
+                coopLobbyAdd(CLROW_TEXT, 0, "Steam is not running.\n", "");
+                coopLobbyAdd(CLROW_TEXT, 0, "Start Steam and log in,\n", "");
+                coopLobbyAdd(CLROW_TEXT, 0, "then open CO-OP again.\n", "");
+                break;
+        }
         return;
     }
     if (state == COOPLOBBY_IDLE)
@@ -12754,7 +12777,7 @@ Gfx *constructor_menu1D_cooplobby(Gfx *DL)
     }
     DL = coopMwHints(DL);
     DL = coopScreenErrorRender(DL);     /* why we are back here, or a join that failed (coop_screens.c) */
-    if (coop_lobby_hot >= 0 && !g_portMenuMouseOwns && !coop_charsel_open)
+    if (coop_lobby_hot >= 0 && frontCursorSnapAllowed() && !coop_charsel_open)
     {   /* a pad or the keys picked the row: its bar shows it, as MW2's do */
         return DL;
     }
