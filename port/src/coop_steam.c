@@ -474,6 +474,81 @@ static void applyLobbyOptions(void)
     pSetLobbyData(sMM, sLobby, LOBBY_KEY_PASSWORD, sPassword[0] != '\0' ? "1" : "0");
 }
 
+/* Wrong passwords, per sender. The answer to each guess was immediate and
+ * unlimited, so anyone in a public lobby could try the 32-bit hash space (or a
+ * word list) as fast as Steam carries messages. After PW_TRIES wrong guesses a
+ * sender is not answered for PW_HOLD_MS; a real player who mistyped waits out
+ * a few seconds at most. */
+#define PW_SLOTS 8
+#define PW_TRIES 5
+#define PW_HOLD_MS 30000u
+static struct
+{
+    u64s who;
+    unsigned int fails;
+    unsigned long long lastMs;
+} sPwFails[PW_SLOTS];
+
+extern unsigned long long portProfNow(void);
+
+static unsigned long long pwNowMs(void)
+{
+    return portProfNow() / 1000ull;
+}
+
+static int pwSlot(u64s who, int make)
+{
+    int i, oldest = 0;
+
+    for (i = 0; i < PW_SLOTS; i++)
+    {
+        if (sPwFails[i].who == who)
+        {
+            return i;
+        }
+        if (sPwFails[i].lastMs < sPwFails[oldest].lastMs)
+        {
+            oldest = i;
+        }
+    }
+    if (!make)
+    {
+        return -1;
+    }
+    sPwFails[oldest].who = who;
+    sPwFails[oldest].fails = 0;
+    return oldest;
+}
+
+static int pwThrottled(u64s who)
+{
+    int i = pwSlot(who, 0);
+
+    if (i < 0 || sPwFails[i].fails < PW_TRIES)
+    {
+        return 0;
+    }
+    if (pwNowMs() - sPwFails[i].lastMs >= PW_HOLD_MS)
+    {
+        sPwFails[i].fails = 0;  /* served its wait: a fresh set of tries */
+        return 0;
+    }
+    return 1;
+}
+
+static void pwFailed(u64s who)
+{
+    int i = pwSlot(who, 1);
+
+    sPwFails[i].fails++;
+    sPwFails[i].lastMs = pwNowMs();
+    if (sPwFails[i].fails == PW_TRIES)
+    {
+        portConLogf("ge: steam: %llu got the password wrong %d times: not answering it for %u s\n", who, PW_TRIES,
+                    PW_HOLD_MS / 1000u);
+    }
+}
+
 /* host: a control message from someone in the lobby (1 when it was one) */
 static int hostControl(u64s from, const unsigned char *data, int size)
 {
@@ -492,6 +567,10 @@ static int hostControl(u64s from, const unsigned char *data, int size)
     {
         sendControl(from, PW_OK, 0);    /* in already; our answer was lost */
     }
+    else if (pwThrottled(from))
+    {
+        return 1;   /* too many wrong guesses lately: no answer at all, right or wrong */
+    }
     else if (isLobbyMember(from) && (sPassword[0] == '\0' || isFriend(from) || m[1] == pwHash(sPassword, sLobby)))
     {
         if (setPeer(-1, from) >= 0)
@@ -503,6 +582,7 @@ static int hostControl(u64s from, const unsigned char *data, int size)
     else
     {
         sendControl(from, PW_NO, 0);
+        pwFailed(from);
         portConLogf("ge: steam: turned %llu away: wrong password\n", from);
     }
     return 1;

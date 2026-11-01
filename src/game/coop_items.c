@@ -1583,6 +1583,10 @@ static void coopItemsApplyStuck(const CoopStuckMsg *m, s32 from)
         coopItemsApplyRest(&r);     /* lies where theirs does */
         return;
     }
+    if (!coopExtSetupRecOk(m->objofs))
+    {
+        return;
+    }
     host = (ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + m->objofs);
     if (g_CurrentSetup.propDefs == NULL || coopExtSetupOfs(host) != m->objofs || host->prop == NULL || host->model == NULL)
     {

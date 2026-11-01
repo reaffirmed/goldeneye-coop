@@ -576,7 +576,41 @@ API u64 SteamAPI_ISteamMatchmaking_GetLobbyByIndex(void *self, int i)
 
 API sbool SteamAPI_ISteamMatchmaking_SetLobbyOwner(void *self, u64 l, u64 owner)
 {
+    char p[320], tmp[330];
+    FILE *f, *o;
+    u64 v, old = ownerOf(l);
+    int listed = 0;
+
     (void) self;
+    /* The member list is the owner plus <lobby>.members, so a new owner
+     * comes off the file and the old one goes on it: it is still a member,
+     * as on Steam. (Before, the old owner dropped out of the lobby here, and
+     * a migrated host turned it away as "not in our lobby".) */
+    path(p, sizeof(p), l, "members");
+    snprintf(tmp, sizeof(tmp), "%s.%llu", p, sSelf);
+    f = fopen(p, "r");
+    o = fopen(tmp, "w");
+    while (f != NULL && o != NULL && fscanf(f, "%llu", &v) == 1)
+    {
+        listed |= (v == old);
+        if (v != owner)
+        {
+            fprintf(o, "%llu\n", v);
+        }
+    }
+    if (o != NULL && old != 0 && old != owner && !listed)
+    {
+        fprintf(o, "%llu\n", old);
+    }
+    if (f != NULL)
+    {
+        fclose(f);
+    }
+    if (o != NULL)
+    {
+        fclose(o);
+        rename(tmp, p);
+    }
     writeId(l, "owner", owner);
     log_("lobby owner set");
     return 1;
