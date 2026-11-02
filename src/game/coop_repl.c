@@ -401,7 +401,7 @@ static u32 coopReplChrHash(void)
 
         if (chr->model == NULL || chr->prop == NULL
             || (chr->chrnum >= COOP_PUPPET_CHRNUM && chr->chrnum <= COOP_PUPPET_CHRNUM + COOP_MAX_PLAYERS)   /* and our own body while down */
-            || chr->actiontype == ACT_DIE || chr->actiontype == ACT_DEAD)
+            || chr->actiontype == ACT_DIE || chr->actiontype == ACT_DEAD || !coopExtChrSent(chr))
         {
             continue;
         }
