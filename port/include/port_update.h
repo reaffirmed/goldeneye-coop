@@ -29,7 +29,8 @@ enum {
 };
 
 void portUpdateBoot(int argc, char **argv); /* main.c: wait out the old copy, tidy up after the last update */
-void portUpdateTick(void);            /* boss.c, once a frame: the startup check */
+void portUpdateLaunchCheck(void);     /* port_update_launch.c: start the startup check before the window opens */
+void portUpdateTick(void);            /* boss.c, once a frame: the startup check, if the launch didn't start it */
 void portUpdateCheck(int force);      /* ask GitHub now (force: even with auto_update off, or checked lately) */
 int  portUpdateState(void);
 int  portUpdateProgress(void);        /* 0..100 while downloading */
@@ -38,12 +39,14 @@ const char *portUpdateLatest(void);   /* the newest release's tag once checked, 
 const char *portUpdateError(void);    /* why the last check or install failed */
 int  portUpdateNewer(const char *tag);/* 1: tag is a newer release than ours (or ours is unknown) */
 int  portUpdateHasDownload(void);     /* the newest release has a zip for this system */
+long portUpdateDownloadBytes(void);   /* that zip's size, 0 when unknown */
 void portUpdateInstall(void);         /* download and install portUpdateLatest() */
 void portUpdateRestart(void);         /* start the new build and quit this one */
 const char *portUpdateJustUpdated(void); /* the release an update's restart brought us to, else "" */
 int  portUpdateEnabled(void);         /* [display] auto_update */
 
-/* the launch prompt (front.c, on the Files screen): asked once a run, never for a skipped release */
+/* the launch prompt (port_update_launch.c, before the game window opens):
+ * asked once a run, never for a skipped release */
 enum {
     PORTUPD_ANSWER_UPDATE = 0,  /* Update Now: download and install, then restart */
     PORTUPD_ANSWER_LATER,       /* Not Now: ask again next launch */
@@ -78,6 +81,10 @@ int portUpdCompareVersions(const char *a, const char *b);
 int portUpdPathAllowed(const char *rel);
 
 void portUpdSha256(const void *data, size_t len, char hex[65]);
+
+/* ---- the launch prompt (port_update_launch.c, GE_VIDEO builds) ---------- */
+
+void portUpdateLaunch(void);          /* video.c videoInit: ask before the game window opens */
 unsigned long portUpdCrc32(const void *data, size_t len);
 /* raw deflate; returns the bytes written, or -1 on a bad stream or a full out */
 long portUpdInflate(const unsigned char *in, size_t inlen, unsigned char *out, size_t outcap);
