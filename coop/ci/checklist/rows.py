@@ -184,17 +184,19 @@ ROWS = {
     'SR3': ('streets', 0, f'{INV} GE_COOP_WATCH=39,40', f'{INV} GE_COOP_WATCH=39,40 GE_COOP_STEPS=l0@5 GE_COOP_STEPSLINGER=60', 80, 2,
             ['spanh:39:4', 'spanh:40:4', 'spanj:39:4', 'spanj:40:4']),
     # SU2: once the alarm is on, the script (list 0x1003) spawns guards at pad 214 in the places of
-    # chrs 15-17 every 20 s, and they come and go within 1-2 s on the host (alone too: SU2-solo);
-    # list 0x1004 spawns a new chr 9 once 9 is gone. The host raises the alarm (testworld), the
-    # joiner kills chr 9: the host's spawns reach the joiner under the host's numbers, and the chr
-    # sets must stay in step (no unresolved desync; QA-9: they don't on e1e93f5)
-    'SU2': ('surface2', 0, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_TESTWORLD=1 GE_COOP_WATCH=9,15,16,17',
+    # chrs 15-17, and list 0x1004 spawns a new chr 9 once 9 is gone. The guards run ai_34, which
+    # removes a guard on its first tick while nobody is near pad 214 (alone too: SU2-solo), so a
+    # player must stand there for one to stay. The host raises the alarm (testworld) and goes to
+    # pad 214, the joiner kills chr 9: the host's guard reaches the joiner under the host's number,
+    # and the chr sets must stay in step (no unresolved desync; QA-9: they didn't on e1e93f5)
+    'SU2': ('surface2', 0, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_TESTWORLD=1 GE_COOP_WATCH=9,15,16,17 GE_COOP_STEPS=p214@18 GE_COOP_STEPSLINGER=70',
             f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_WATCH=9,15,16,17 GE_COOP_STEPS=k9@20 GE_COOP_STEPSLINGER=70', 100, 2,
-            ['b:watch: alarm on', 'j:mirrored host chr 1[567] ']),
-    # SU2 split in two: the alarm alone, and chr 9 shot with no alarm
+            ['b:watch: alarm on', 'h:step p214 at \\d+ s done', 'j:mirrored host chr 1[567] ']),
+    # SU2 split in two: the alarm alone with nobody near pad 214 (each guard removes itself at
+    # once, and since #129 the host never sends it), and chr 9 shot with no alarm
     'SU2-alarm': ('surface2', 0, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_TESTWORLD=1 GE_COOP_WATCH=9,15,16,17',
                   f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_WATCH=9,15,16,17 GE_COOP_STEPS=l0@20 GE_COOP_STEPSLINGER=70', 100, 2,
-                  ['b:watch: alarm on', 'j:mirrored host chr 1[567] ']),
+                  ['b:watch: alarm on', 'j:step l0 at \\d+ s done']),
     'SU2-kill9': ('surface2', 0, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_WATCH=9,15,16,17',
                   f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_WATCH=9,15,16,17 GE_COOP_STEPS=k9@20 GE_COOP_STEPSLINGER=70', 100, 2,
                   ['j:step k9 at \\d+ s done']),
