@@ -3809,3 +3809,47 @@ each took the other as its joiner, each with its own guards, for good.
   fired.
 - net_scenarios.sh: a "two hosts" line, and FAILON_SPLIT=1 fails a run in
   which a joiner took over but nobody stepped down and got its snapshot.
+
+## Streets: the joiner's own civilian casualty count (QA-10, 2026-11-02, COOP_VERSION stays 17)
+
+QA-10 (checklist row SR1): in some Streets runs the joiner alone showed "Warning: Civilian
+casualties high", then "critical", then the caption "Mission Failure: Too many civilian
+casualties". The mission went on, since the failure caption is all the script does. The
+joiner's stage flags fought the host's until "repl: unresolved desync: stage flags". The
+host showed none of it.
+
+The count is list 0x100a (ai_27 in UsetuppeteZ). It starts at 15 in its chr's alertness
+byte:
+- Each time one of its three civilian spawners (lists 0x1003 and 0x1005 among them) makes
+  a civilian, it sets bit 0x02 on a chr (chr_bitfield_set_on). The count takes one off
+  for each.
+- A civilian that goes out of sight removes itself (list 0x0410: stage flag 0x00200000,
+  then chr_remove_instant). The count adds one back and clears the flag the next tick.
+- So the count is 15 minus the civilians that died. Below 8, 4 and 1 it shows the three
+  captions and sets stage flags 0x00040000, 0x00080000 and 0x00100000.
+
+On a joiner, the spawns are left to the host (coopScriptSpawnsLeftToHost), but they still
+take the success branch, so the joiner's spawners set the bit. The removals run only on the
+host, and the host's 0x00200000 lasts one or two ticks, so WORLD hardly ever carries it.
+The joiner's count only went down. Logged on the rig (two at once, SR1):
+- host: 23 off, 22 back;
+- joiner: 16 off, 0 back.
+
+Fix: chr_bitfield_set_on and _off are now in coopHostOwnsCmd, so a joiner's copy of the
+level scripts steps over them, as it already does for the countdown.
+- A chr with a body already gets the host's bits in the AI sync.
+- The scripts' bodiless chrs never got them from anyone, so a joiner's copy counted only
+  what its own copy did.
+- Only Streets reads these bits. Archives sets some (chrs 0x33-0x37 and 0x43) and never
+  reads them.
+- The host's captions (relayed TextPrintTop) and stage flags (WORLD) reach the joiner as
+  before.
+- After a takeover, the new host's count starts from its own 15 rather than the old host's.
+
+Rig: Linux i686, two copies on one machine over the mock Steam. This is a simulated
+network, not internet play.
+- SR1, three at once, before: the joiner showed casualty captions in 3 of 3 runs, and 1
+  ended with an unresolved desync.
+- After: 0 of 4 had captions or an unresolved desync. The joiner's count never moved.
+- One of those 4 failed SR1's "host chr 2 fades away" check, which fails under load on
+  main too.
