@@ -421,6 +421,7 @@ void coopReplSendSnapshot(s32 player)
     sOut[player].snapAt = 0;
     sOut[player].snapid = ++sSnapSerial;
     portConLogf("ge: coop: repl: full snapshot to player %d (%d objects)\n", player + 1, sNum);
+    coopClSnapDoors(1, sOut[player].snapid);   /* harness: GE_COOP_WATCHDOORS only */
     coopItemsSendAllTo(player);     /* and what has been thrown and dropped (coop_items.c) */
 }
 
@@ -734,6 +735,7 @@ static void coopReplRecvRecords(const CoopReplPkt *p, s32 len)
             if (--sSnapLeft == 0)
             {
                 portConLogf("ge: coop: repl: join snapshot applied, %d objects, %d corrected\n", sNum, sFixes);
+                coopClSnapDoors(0, sSnapId);   /* harness: GE_COOP_WATCHDOORS only */
             }
         }
     }

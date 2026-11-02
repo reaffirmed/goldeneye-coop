@@ -2921,14 +2921,17 @@ static void coopHarnessTick(void)
         }
     }
     {   /* GE_COOP_TESTOPEN=<s>: host opens the door nearest Bond <s> seconds into the
-         * mission, partner or not (harness only: a door already open when someone drops in) */
+         * mission, partner or not; =join: when a partner first connects, which is before the
+         * join snapshot a joiner still in its intro applies (harness only: a door already
+         * open when someone drops in) */
         static s32 testopen = -2;
         if (testopen == -2)
         {
             const char *e = getenv("GE_COOP_TESTOPEN");
-            testopen = (e != NULL) ? atoi(e) : -1;
+            testopen = (e == NULL) ? -1 : (strcmp(e, "join") == 0) ? -3 : atoi(e);
         }
-        if (testopen >= 0 && coopNetIsHost() && coopInMission() && sMissionTicks >= (u32) testopen * 60)
+        if (coopNetIsHost() && coopInMission()
+            && ((testopen >= 0 && sMissionTicks >= (u32) testopen * 60) || (testopen == -3 && coopNetHasPeer())))
         {
             PropRecord *bond = getCurrentPlayerProp();
             PropRecord *it, *best = NULL;

@@ -142,9 +142,13 @@ ROWS = {
             ['b:objective 0 \\(A\\) is now complete']),
     'AZ4': ('aztec', 0, f'{INV} GE_COOP_WATCHWORLD=1',
             f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h50@8,v19@10,x19@12,o11@14,u11@16,h73@20,v15@22,x15@24,p1@75', 100, 2,
-            ['b:objective 0 \\(A\\) is now complete', 'hflag:100', 'h:watch: countdown running', 'b:objective 1 \\(B\\) is now complete']),
+            ['b:objective 0 \\(A\\) is now complete', 'hflag:100',
+             # the countdown shows on the joiner, and "Final checks cleared" (under 10 s) and the
+             # ending (under 3 s, as solo) come only once each side's countdown has run that far
+             'seqj:countdown running and shown=>Final checks cleared',
+             'cdb:10:Final checks cleared', 'cdb:3:objective 1 \\(B\\) is now complete']),
     'AZ4-solo': ('aztec', 0, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h50@8,v19@10,x19@12,o11@14,u11@16,h73@20,v15@22,x15@24,p1@75', '', 100, 2,
-                 ['h:watch: countdown running', 'h:objective 1 \\(B\\) is now complete'], 1),
+                 ['cdh:10:Final checks cleared', 'cdh:3:objective 1 \\(B\\) is now complete'], 1),
     # ---- Depot: the joiner takes the safe key, opens the safe door and takes the blueprints (Secret Agent)
     'DE3': ('depot', 1, f'{INV} GE_COOP_WATCHDOORS=1', f'{INV} GE_COOP_WATCHDOORS=1 GE_COOP_STEPS=g0@10,p50@14,e0@16,g5@22', 50, 2,
             ['b:objective 2 \\(\\w\\) is now complete', 'j:step e: door \\d+ at \\d+, closed before', 'h:watch: door \\d+ open',
@@ -157,7 +161,7 @@ ROWS = {
            ['j:step p69 at \\d+ s done', 'h:watch: door \\d+ closed', 'h:watch: door \\d+ open']),
     'X2': ('aztec', 0, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=o11@14,u11@16', f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=o11@14,u11@16', 50, 2,
            ['h:step u11 at 16 s done', 'j:step u11 at 16 s done', 'hflag:100', '!hflag:800', '!jflag:800']),
-    'X3b': ('dam', 0, f'{INV} GE_COOP_TESTOPEN=5 GE_COOP_WATCHDOORS=1', f'{INV} GE_COOP_WATCHDOORS=1 GE_COOP_STEPS=p1@50', 75, 40,
+    'X3b': ('dam', 0, f'{INV} GE_COOP_TESTOPEN=join GE_COOP_WATCHDOORS=1', f'{INV} GE_COOP_WATCHDOORS=1 GE_COOP_STEPS=p1@50', 75, 40,
             ['h:testopen: door', 'doorsame']),
     'X4b': ('dam', 0, f'{INV} GE_COOP_TESTOPEN=8 GE_COOP_TESTFLAG=1000:10 GE_COOP_WATCHDOORS=1 GE_COOP_TESTABORT=18:handover',
             f'{INV} GE_COOP_WATCHDOORS=1 GE_COOP_STEPS=p1@60', 90, 2,
@@ -202,15 +206,36 @@ def special(c, L):
     h, j = L.get('h') or '', L.get('j') or ''
     op = re.search(r'testopen: door (\d+) -> open', h)
     if c == 'doorsame':
-        # the door the host opened before the drop-in, and every open door, as the host's
+        # the host's doors when it started the join snapshot the joiner applied, against the
+        # joiner's once that snapshot is in and no door of its moves (GE_COOP_WATCHDOORS).
+        # Only doors standing still count: a door moving on the host at the snapshot, or one
+        # the host's watch saw change between the snapshot and the joiner's list, is left out
         if op is None:
             return ['the host opened no door (testopen)']
-        hs, js = doorsopen(h), doorsopen(j)
+        d = op.group(1)
+        ap = re.search(r'watch: snapshot (\d+) applied', j)
+        if ap is None:
+            return ['the joiner logged no applied snapshot']
+        sid = ap.group(1)
+        hs = re.search(rf'watch: snapshot {sid} sent: open (\S+), moving (\S+), clock ([\d.]+)', h)
+        js = re.search(rf'watch: snapshot {sid} (settled|never settled): open (\S+), moving (\S+), clock ([\d.]+)', j)
+        if hs is None:
+            return [f'the host logged no snapshot {sid}']
+        if js is None:
+            return [f'the joiner logged no door list after snapshot {sid}']
+        ids = lambda v: set() if v == 'none' else set(v.split(','))
+        hopen, hmov, jopen = ids(hs.group(1)), ids(hs.group(2)), ids(js.group(2))
+        t0, t1 = float(hs.group(3)), float(js.group(4))
+        changed = {x for x, w in re.findall(r'watch: door (\d+) (?:open|closed), clock ([\d.]+)', h) if t0 - 1.5 <= float(w) <= t1 + 1.5}
+        skip = hmov | changed
         why = []
-        if op.group(1) not in hs:
-            why.append(f'door {op.group(1)} had closed again on the host before the join (no test)')
-        if hs != js:
-            why.append(f'open doors at the join: host {sorted(hs)}, joiner {sorted(js)}')
+        if js.group(1) != 'settled':
+            why.append(f'doors still moving on the joiner 15 s after snapshot {sid}: {js.group(3)}')
+        if d not in hopen or d in skip:
+            why.append(f'door {d} was not standing open on the host from snapshot {sid} to the joiner\'s list (no test)')
+        if (hopen ^ jopen) - skip:
+            why.append(f'snapshot {sid}: host open {sorted(hopen)}, joiner open {sorted(jopen)}'
+                       f' (left out: {sorted(skip) or "none"})')
         return why
     if c == 'doorkept':
         # the door the old host opened stays open on the new host after the hand-over
@@ -244,6 +269,46 @@ def special(c, L):
             return ['no joiner countdown sample between two host samples']
         off = [(t, jvv, round(hvv, 1)) for t, jvv, hvv in pairs if abs(jvv - hvv) > 0.5]
         return [f'countdown apart (s after the host started, joiner, host): {off[:3]}'] if off else []
+    m = re.match(r'seq([hjb]):(.+?)=>(.+)$', c)
+    if m:
+        # seqj:<A>=><B>: on that side a line matching <A> comes before the first line matching <B>
+        why = []
+        for w in (('h', 'j') if m.group(1) == 'b' else (m.group(1),)):
+            t = L.get(w) or ''
+            b = re.search(m.group(3), t)
+            if b is None:
+                why.append(f'{w} log lacks "{m.group(3)}"')
+            elif re.search(m.group(2), t[:b.start()]) is None:
+                why.append(f'{w}: no "{m.group(2)}" before "{m.group(3)}"')
+        return why
+    m = re.match(r'cd([hjb]):([\d.]+):(.+)$', c)
+    if m:
+        # cdb:<N>:<regex>: on that side the first line matching <regex> comes while a countdown
+        # runs and once it is under N s: a running countdown is logged before the line, and
+        # the first one logged after it reads under N (the countdown only goes down, so the
+        # line came at a value between the two). A script that checks "countdown under N s"
+        # before its countdown has run that far fails it, even if a countdown runs later
+        # (AZ4: the launch caption and the ending came first). With no countdown logged after
+        # the line (the mission ended), the last one before it must be under N + 3
+        why = []
+        rx = r'watch: countdown running ([\d.]+) s'
+        lim = float(m.group(2))
+        for w in (('h', 'j') if m.group(1) == 'b' else (m.group(1),)):
+            t = L.get(w) or ''
+            at = re.search(m.group(3), t)
+            if at is None:
+                why.append(f'{w} log lacks "{m.group(3)}"')
+                continue
+            before = [float(v) for v in re.findall(rx, t[:at.start()])]
+            after = re.search(rx, t[at.end():])
+            if not before:
+                why.append(f'{w}: "{m.group(3)}" with no countdown running before it')
+            elif after is not None and float(after.group(1)) >= lim:
+                why.append(f'{w}: "{m.group(3)}" before the countdown was under {m.group(2)} s'
+                           f' (between {before[-1]} and {after.group(1)} s)')
+            elif after is None and before[-1] >= lim + 3:
+                why.append(f'{w}: "{m.group(3)}" before the countdown was under {m.group(2)} s (last {before[-1]} s)')
+        return why
     m = re.match(r'(!?)([hj])flag:([0-9a-f]+)$', c)
     if m:
         # hflag:<hex>: some stage-flags line (GE_COOP_WATCHWORLD) on the host has those bits; !hflag: none has.
@@ -303,7 +368,7 @@ def judge(name, d, checks, players, je=''):
             if want - done:
                 why.append(f"joiner's steps not all done (missing {','.join(sorted(want - done))})")
             continue
-        if c in ('doorsame', 'doorkept', 'clocksame') or re.match(r'!?[hj]flag:', c):
+        if c in ('doorsame', 'doorkept', 'clocksame') or re.match(r'!?[hj]flag:|cd[hjb]:|seq[hjb]:', c):
             why += special(c, L)
             continue
         neg = c.startswith('!')
