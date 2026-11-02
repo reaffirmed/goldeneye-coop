@@ -3836,12 +3836,17 @@ Fix (host only; packets unchanged):
   never reaches them.
 - The chr checksum (coopReplChrHash) skips chrs not sent yet (coopExtChrSent), so it names
   what joiners have.
+- Limit: a slot counts as "the same chr" by its chrnum alone. If a guard removed itself
+  and a new one took the same slot with the same chrnum before the next snapshot, two
+  snapshots in a row would see one chr, and it would be sent. Surface 2's spawner doesn't
+  do this: the after runs show 0 of 178 checksums differ. A level that does would bring
+  back the old symptom, one stray guard on joiners for up to 1 s.
 
 Rig: Linux i686, two copies on one machine over the mock Steam. This is a simulated
 network, not internet play.
-- QA's SU2-alarm and SU2 rows: before, "unresolved desync" in every run, with 113 of 182
-  chr checksums differing. After, none unresolved, and 0 (SU2-alarm) or 2 (SU2) of about
-  180 checksums differ.
+- QA's SU2-alarm and SU2 rows: before, "unresolved desync" in every run, with 169 of 193
+  chr checksums differing on SU2-alarm. After, none unresolved, and 0 (SU2-alarm) or 2
+  (SU2) of about 180 checksums differ.
 - With the host standing on pad 214 after the alarm, the reinforcement stays, and the
   joiner mirrors it the same second the host's watch sees it.
 - Both rows still fail QA's check that "mirrored host chr 1[567]" appears in the joiner's
