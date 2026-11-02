@@ -3840,8 +3840,10 @@ level scripts steps over them, as it already does for the countdown.
 - A chr with a body already gets the host's bits in the AI sync.
 - The scripts' bodiless chrs never got them from anyone, so a joiner's copy counted only
   what its own copy did.
-- Only Streets reads these bits. Archives sets some (chrs 0x33-0x37 and 0x43) and never
-  reads them.
+- Only Streets and Archives use these commands. Archives sets bits on guards with bodies
+  (0x33-0x37 from list 0x1000, 0x43 from a guard's list), and those guards' own lists read
+  them. On a joiner those bits now come from the host in the AI sync, one sync later,
+  instead of being set locally.
 - The host's captions (relayed TextPrintTop) and stage flags (WORLD) reach the joiner as
   before.
 - After a takeover, the new host's count starts from its own 15 rather than the old host's.
