@@ -15,6 +15,7 @@
  *       v<tag>   stand 1.5 m from that object, facing it
  *       x<tag>   use the gadget in hand on that object (what gunfire.c does when it is aimed at)
  *       l<deg>   look <deg> degrees down (negative up)
+ *       e        press Use on the door nearest us (keys and locks apply as in play)
  *       j<chr>:<list>  host: that chr runs ai list <list> (hex) from its start, e.g.
  *                Bunker 2's Natalya following Bond (j<her chr>:40d); a chr
  *                number of 1024 and up (decimal) is the chr running that list now
@@ -22,6 +23,8 @@
  *                          appear, vanish, die or move more than 7 m in a
  *                          second (and whether their room is on our screen)
  *   GE_COOP_WATCHWORLD=1   log the alarm, the countdown and the stage flags when they change
+ *   GE_COOP_WATCHDOORS=1   log the open doors once, then each door that opens or closes
+ *                          (door number = its byte offset in the setup, as testdoor/testopen)
  *   GE_COOP_REVIVE=1       log any chr that leaves ACT_DIE/ACT_DEAD for another action
  *   GE_COOP_SOLO=1         run the steps with no partner (a host on its own)
  */
@@ -30,6 +33,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
+#ifdef _WIN32
+#include <SDL.h>
+#endif
 #include <bondaicommands.h>
 #include <bondgame.h>
 #include <bondconstants.h>
@@ -47,6 +54,10 @@
 #include "bg.h"
 #include "stan.h"
 #include "math_atan2f.h"
+#include "loadobjectmodel.h"
+
+bool doorIsClosed(DoorRecord *door);
+TICKOP propdoorInteract(PropRecord *doorprop);
 
 extern void portConLogf(const char *fmt, ...);
 void bondviewCallRecordDamageKills(f32 damage, f32 arg1, s32 arg2, s32 arg3);
@@ -73,6 +84,10 @@ static s32    sWatch[CL_MAXWATCH], sNumWatch;
 static s32    sWatchSeen[CL_MAXWATCH];
 static coord3d sWatchPos[CL_MAXWATCH];
 static s32    sWatchWorld;
+static s32    sWatchDoors;
+#define CL_MAXDOORS 512
+static u8     sDoorOpen[CL_MAXDOORS];
+static s32    sDoorsSeen;
 static s32    sLastAlarm = -1, sLastClockRun = -1;
 static s32    sLastFlags;
 static u32    sLastTicks, sLastSec, sDoneAt;
@@ -113,6 +128,7 @@ static void clInit(void)
         e = (e != NULL) ? e + 1 : NULL;
     }
     sWatchWorld = getenv("GE_COOP_WATCHWORLD") != NULL;
+    sWatchDoors = getenv("GE_COOP_WATCHDOORS") != NULL;
     e = getenv("GE_COOP_STEPSLINGER");
     sLinger = (e != NULL) ? atoi(e) : 20;
 }
@@ -299,6 +315,37 @@ static void clStep(ClStep *s)
         case 'k':
             clShoot(c, 10);
             break;
+        case 'e':
+        {
+            PropRecord *me = getCurrentPlayerProp();
+            PropRecord *it, *best = NULL;
+            f32 bestd = 1.0e30f;
+
+            for (it = g_ActivePropsHead; me != NULL && it != NULL; it = it->next)
+            {
+                if (it->type == PROP_TYPE_DOOR && it->door != NULL)
+                {
+                    f32 dx = it->pos.f[0] - me->pos.f[0];
+                    f32 dz = it->pos.f[2] - me->pos.f[2];
+
+                    if (dx * dx + dz * dz < bestd)
+                    {
+                        bestd = dx * dx + dz * dz;
+                        best = it;
+                    }
+                }
+            }
+            if (best == NULL)
+            {
+                portConLogf("ge: coop: step e: no door\n");
+                break;
+            }
+            portConLogf("ge: coop: step e: door %d at %.0f, %s before\n",
+                        (s32) ((u8 *) best->door - (u8 *) g_CurrentSetup.propDefs), sqrtf(bestd),
+                        doorIsClosed(best->door) ? "closed" : "open");
+            propExecuteTickOperation(best, propdoorInteract(best));
+            break;
+        }
         case 'h':
             bondinvAddInvItem(s->arg);
             gunRequestHandWeaponChange(GUNRIGHT, s->arg, 0);
@@ -402,6 +449,62 @@ static void clStep(ClStep *s)
     portConLogf("ge: coop: step %c%d at %u s done\n", s->kind, s->arg, coopExtMissionTicks() / 60);
 }
 
+static double clWallClock(void)
+{   /* seconds on the machine's monotonic clock: copies on one machine share it, so
+     * two logs' countdowns can be compared at the same moment (not mission time,
+     * which each copy starts when it loads the mission) */
+#ifdef _WIN32
+    return SDL_GetPerformanceCounter() / (double) SDL_GetPerformanceFrequency();
+#else
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec / 1e9;
+#endif
+}
+
+static void clWatchDoors(void)
+{   /* GE_COOP_WATCHDOORS: first pass lists the open doors, later passes log changes */
+    PropDefHeaderRecord *it = (PropDefHeaderRecord *) g_CurrentSetup.propDefs;
+    char list[512];
+    s32 n = 0, len = 0, k = 0;
+
+    if (it == NULL || (!coopExtIsHost() && !coopReplSnapshotDone()))
+    {   /* a joiner's doors are the host's only once the join snapshot is in */
+        return;
+    }
+    list[0] = '\0';
+    for (; it->type != PROPDEF_END && k < CL_MAXDOORS; it = (PropDefHeaderRecord *) ((u32 *) it + sizepropdef(it)))
+    {
+        s32 id, open;
+
+        if (it->type != PROPDEF_DOOR || ((DoorRecord *) it)->prop == NULL)
+        {
+            continue;
+        }
+        id = (s32) ((u8 *) it - (u8 *) g_CurrentSetup.propDefs);
+        open = !doorIsClosed((DoorRecord *) it);
+        if (!sDoorsSeen)
+        {
+            if (open && len < (s32) sizeof(list) - 12)
+            {
+                len += sprintf(list + len, "%s%d", n ? "," : "", id);
+            }
+        }
+        else if (open != sDoorOpen[k])
+        {
+            portConLogf("ge: coop: watch: door %d %s\n", id, open ? "open" : "closed");
+        }
+        n += open;
+        sDoorOpen[k++] = (u8) open;
+    }
+    if (!sDoorsSeen)
+    {
+        portConLogf("ge: coop: watch: %d doors, open: %s\n", k, n ? list : "none");
+        sDoorsSeen = 1;
+    }
+}
+
 static void clWatchTick(void)
 {
     s32 i;
@@ -452,7 +555,8 @@ static void clWatchTick(void)
         }
         if (run != sLastClockRun || (run && (coopExtMissionTicks() / 60) % 5 == 0))
         {
-            portConLogf("ge: coop: watch: countdown %s %.1f s\n", run ? "running" : "stopped", countdownTimerGetValue() / 60.0f);
+            portConLogf("ge: coop: watch: countdown %s %.1f s at mission %u s, clock %.2f\n", run ? "running" : "stopped",
+                        countdownTimerGetValue() / 60.0f, coopExtMissionTicks() / 60, clWallClock());
             sLastClockRun = run;
         }
     }
@@ -506,6 +610,7 @@ void coopChecklistTick(void)
         memset(sLastAct, 0, sizeof(sLastAct));
         sLastAlarm = sLastClockRun = -1;
         sLastFlags = 0;
+        sDoorsSeen = 0;
     }
     sLastTicks = t;
     if ((!sSolo && !coopLobbyHasPartner()) || t < 2)
@@ -538,5 +643,9 @@ void coopChecklistTick(void)
     {
         sLastSec = t / 60;
         clWatchTick();
+        if (sWatchDoors)
+        {
+            clWatchDoors();
+        }
     }
 }

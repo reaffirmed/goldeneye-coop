@@ -48,6 +48,12 @@ ROWS = {
     # the backup needs the modem in (stage flag 0x10000, set by the host here)
     'D4': ('dam', 2, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_TESTFLAG=10000:5', f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=o6@8,u6@9,o7@11,u7@12', 70, 2,
            ['b:objective 2 \\(C\\) is now complete', '!b:objective 2 \\(C\\) is now failed']),
+    # D3 does not stage: the thrown modem lands but never attaches to the link (B fails),
+    # the host alone the same (D3-solo), so the row stays NOT RUN until a line attaches it
+    'D3': ('dam', 2, f'{INV} GE_COOP_WATCHWORLD=1', f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h47@8,v5@10,f1@12', 50, 2,
+           ['b:objective 1 \\(B\\) is now complete', '!b:objective 1 \\(B\\) is now failed']),
+    'D3-solo': ('dam', 2, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h47@8,v5@10,f1@12', '', 50, 2,
+                ['h:objective 1 \\(B\\) is now complete'], 1),
     'D4-solo': ('dam', 2, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_TESTFLAG=10000:5 GE_COOP_STEPS=o6@8,u6@9,o7@11,u7@12', '', 70, 2,
                 ['h:objective 2 \\(C\\) is now complete'], 1),
     'D5': ('dam', 0, f'{INV} GE_COOP_TESTWORLD=1 GE_COOP_WATCHWORLD=1', f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=p1@50', 75, 18,
@@ -119,9 +125,42 @@ ROWS = {
                ['=h:mission end', '=j:mission end']),
     'X4': ('dam', 0, f'{INV} GE_COOP_TESTWORLD=1 GE_COOP_TESTABORT=18:handover', f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=p1@60', 90, 2,
            ['h:testabort \\(hand over\\)', 'j:host migration: player 2 hosts', 'j:watch: alarm on']),
+    # ---- Silo: the joiner plants all four charges (00 Agent); the countdown starts once one settles.
+    # On 9883333 three of the four reach the host; the charge thrown at pad 88 never counts
+    # for its room (from pad 89, or looking down, neither), so SI1 is a lead, not a verdict
+    'SI1': ('silo', 2, f'{INV} GE_COOP_WATCHWORLD=1', f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h34@8,p4@10,f1@12,p12@16,f1@18,p88@22,f1@24,p95@28,f1@30', 70, 2,
+            ['h:peer planted objective item 0 ', 'h:peer planted objective item 1 ', 'h:peer planted objective item 2 ',
+             'h:peer planted objective item 3 ', 'b:objective 0 \\(A\\) is now complete']),
+    'SI4': ('silo', 2, f'{INV} GE_COOP_WATCHWORLD=1', f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h34@8,p4@10,f1@12,p1@40', 60, 2,
+            ['b:watch: countdown running', 'clocksame']),
+    # ---- Frigate: the joiner throws the tracker bug onto the helicopter (tag 0); D on both
+    'FR4': ('frigate', 0, f'{INV} GE_COOP_WATCHWORLD=1', f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h47@8,v0@10,f1@12', 50, 2,
+            ['b:objective 3 \\(\\w\\) is now complete']),
+    # ---- Aztec: guidance data on the computer (A), then the launch: console 11 swaps the doors,
+    # the joiner's gadget on 15 starts the 30 s countdown, and the shuttle goes (B)
+    'AZ2': ('aztec', 0, f'{INV} GE_COOP_WATCHWORLD=1', f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h50@8,v19@10,x19@12', 45, 2,
+            ['b:objective 0 \\(A\\) is now complete']),
+    'AZ4': ('aztec', 0, f'{INV} GE_COOP_WATCHWORLD=1',
+            f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h50@8,v19@10,x19@12,o11@14,u11@16,h73@20,v15@22,x15@24,p1@75', 100, 2,
+            ['b:objective 0 \\(A\\) is now complete', 'hflag:100', 'h:watch: countdown running', 'b:objective 1 \\(B\\) is now complete']),
+    # ---- Depot: the joiner takes the safe key, opens the safe door and takes the blueprints (Secret Agent)
+    'DE3': ('depot', 1, f'{INV} GE_COOP_WATCHDOORS=1', f'{INV} GE_COOP_WATCHDOORS=1 GE_COOP_STEPS=g0@10,p50@14,e0@16,g5@22', 50, 2,
+            ['b:objective 2 \\(\\w\\) is now complete', 'j:step e: door \\d+ at \\d+, closed before', 'h:watch: door \\d+ open',
+             'b:objective 3 \\(\\w\\) is now complete']),
     # ---- Across every mission
     'X3': ('dam', 0, f'{INV} GE_COOP_TESTWORLD=1 GE_COOP_WATCHWORLD=1', f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=p1@50', 75, 18,
            ['j:watch: alarm on', 'j:watch: stage flags 4']),
+    # ---- Egypt: the joiner walks into the trap room (pad 151): doors 1 and 2 shut and 0 opens; the room of pad 69 resets them
+    'E3': ('egypt', 0, f'{INV} GE_COOP_WATCHDOORS=1', f'{INV} GE_COOP_WATCHDOORS=1 GE_COOP_STEPS=p151@10,p69@20', 45, 2,
+           ['j:step p69 at \\d+ s done', 'h:watch: door \\d+ closed', 'h:watch: door \\d+ open']),
+    'X2': ('aztec', 0, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=o11@14,u11@16', f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=o11@14,u11@16', 50, 2,
+           ['h:step u11 at 16 s done', 'j:step u11 at 16 s done', 'hflag:100', '!hflag:800', '!jflag:800']),
+    'X3b': ('dam', 0, f'{INV} GE_COOP_TESTOPEN=5 GE_COOP_WATCHDOORS=1', f'{INV} GE_COOP_WATCHDOORS=1 GE_COOP_STEPS=p1@50', 75, 40,
+            ['h:testopen: door', 'doorsame']),
+    'X4b': ('dam', 0, f'{INV} GE_COOP_TESTOPEN=8 GE_COOP_TESTFLAG=1000:10 GE_COOP_WATCHDOORS=1 GE_COOP_TESTABORT=18:handover',
+            f'{INV} GE_COOP_WATCHDOORS=1 GE_COOP_STEPS=p1@60', 90, 2,
+            ['h:testabort \\(hand over\\)', 'j:host migration: player 2 hosts', 'j:objective 3 \\(\\w\\) is now complete',
+             '!j:objective 3 \\(\\w\\) is now incomplete', 'doorkept']),
     'X5': ('dam', 0, f'{INV} GE_COOP_TESTPAD=330:10 GE_COOP_TESTWIN=1', INV, 90, 24,
            ['=j:mission end', '=h:mission end']),
     'X8-doak3': ('facility', 1, INV, INV, 90, 2,
@@ -149,6 +188,72 @@ def objstates(text):
         final[m.group(2)] = m.group(3)
         seq.append((m.group(2), m.group(3)))
     return final, seq
+
+
+def doorsopen(text):
+    """The open doors the first watch line lists (GE_COOP_WATCHDOORS)."""
+    m = re.search(r'watch: \d+ doors, open: (\S+)', text or '')
+    return set() if m is None or m.group(1) == 'none' else set(m.group(1).split(','))
+
+
+def special(c, L):
+    h, j = L.get('h') or '', L.get('j') or ''
+    op = re.search(r'testopen: door (\d+) -> open', h)
+    if c == 'doorsame':
+        # the door the host opened before the drop-in, and every open door, as the host's
+        if op is None:
+            return ['the host opened no door (testopen)']
+        hs, js = doorsopen(h), doorsopen(j)
+        why = []
+        if op.group(1) not in hs:
+            why.append(f'door {op.group(1)} had closed again on the host before the join (no test)')
+        if hs != js:
+            why.append(f'open doors at the join: host {sorted(hs)}, joiner {sorted(js)}')
+        return why
+    if c == 'doorkept':
+        # the door the old host opened stays open on the new host after the hand-over
+        if op is None:
+            return ['the host opened no door (testopen)']
+        d = op.group(1)
+        mig = j.find('host migration: player 2 hosts')
+        if mig < 0:
+            return ['no migration on the joiner']
+        before, after = j[:mig], j[mig:]
+        seen = re.findall(rf'watch: door {d} (open|closed)', before)
+        if (seen[-1:] or [None])[0] != 'open' and d not in doorsopen(before):
+            return [f'door {d} was not open on the joiner before the hand-over']
+        if re.search(rf'watch: door {d} closed', after):
+            return [f'door {d} closed on the new host after the hand-over']
+        return []
+    if c == 'clocksame':
+        # the joiner's countdown at a moment against the host's at that moment (linear between
+        # the host's samples): within 0.5 s. GE_COOP_WATCHWORLD stamps each line with the
+        # machine's monotonic clock, shared by copies on one machine
+        rx = r'watch: countdown running ([\d.]+) s at mission \d+ s, clock ([\d.]+)'
+        hv = sorted((float(w), float(v)) for v, w in re.findall(rx, h))
+        jv = [(float(w), float(v)) for v, w in re.findall(rx, j)]
+        pairs = []
+        for w, v in jv:
+            for (w0, v0), (w1, v1) in zip(hv, hv[1:]):
+                if w0 <= w <= w1 and w1 - w0 < 15:
+                    pairs.append((round(w - hv[0][0], 1), v, v0 + (v1 - v0) * (w - w0) / (w1 - w0)))
+                    break
+        if not pairs:
+            return ['no joiner countdown sample between two host samples']
+        off = [(t, jvv, round(hvv, 1)) for t, jvv, hvv in pairs if abs(jvv - hvv) > 0.5]
+        return [f'countdown apart (s after the host started, joiner, host): {off[:3]}'] if off else []
+    m = re.match(r'(!?)([hj])flag:([0-9a-f]+)$', c)
+    if m:
+        # hflag:<hex>: some stage-flags line (GE_COOP_WATCHWORLD) on the host has those bits; !hflag: none has.
+        # The line shows the objective flags, the AI script's bits >> 8 (its 0x10000 is 100 here)
+        bits = int(m.group(3), 16)
+        seen = any(int(x, 16) & bits == bits for x in re.findall(r'watch: stage flags ([0-9a-f]+)', L.get(m.group(2)) or ''))
+        if m.group(1) and seen:
+            return [f'{m.group(2)} stage flags had {m.group(3)}']
+        if not m.group(1) and not seen:
+            return [f'{m.group(2)} stage flags never had {m.group(3)}']
+        return []
+    return [f'unknown check {c}']
 
 
 def logs_of(d, players):
@@ -195,6 +300,9 @@ def judge(name, d, checks, players, je=''):
             done = set(re.findall(r'step (\w+) at \d+ s done', L['j']))
             if want - done:
                 why.append(f"joiner's steps not all done (missing {','.join(sorted(want - done))})")
+            continue
+        if c in ('doorsame', 'doorkept', 'clocksame') or re.match(r'!?[hj]flag:', c):
+            why += special(c, L)
             continue
         neg = c.startswith('!')
         exact = c.startswith('=')
