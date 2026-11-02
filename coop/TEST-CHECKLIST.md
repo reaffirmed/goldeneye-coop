@@ -71,8 +71,9 @@ the objective sweep 17/17, and the X9 split runs 2/2. CA3 and the hostage spot f
 failed because the host's window could not open its GL context (a rig fault, no game
 log at all); both passed when re-run.
 
-Tally on e1e93f5, 101 rows: 82 PASS, 1 FAIL (SU2, the joiner's chrs fall out of step
-with the alarm on, QA-9), 2 BLOCKED (A2, T2), 16 NOT RUN. "Earlier" with no build is the
+Tally on e1e93f5, 101 rows: 81 PASS, 2 FAIL (SU2, the joiner's chrs fall out of step
+with the alarm on, QA-9; SR1, a joiner-only civilian-casualty failure in 1 run of 6,
+QA-10), 2 BLOCKED (A2, T2), 16 NOT RUN. "Earlier" with no build is the
 bug-fix branch on 2026-10-29 and 2026-10-30 (heads 620f526 to 93ea314).
 
 **Fixed: intermittent desync.** In joiner-heavy runs where a blast kills guards
@@ -202,7 +203,7 @@ ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
-| SR1 | ONEPLAYER | Drives the tank (vehicles run on both sides) | "Bond in tank" checks work for the joiner's tank | `SR1` | **PASS** (rig, e1e93f5 with this PR's harness additions (log lines only), `rows.py SR1`, 2 of 2 runs): the joiner drives the tank ("we are driving tank" on the joiner, "player 2 is driving tank" on the host), and the host's chr 2, stood in front of it, is run over ("player 2's tank runs over chr 2") and fades on both. No mission script uses `if_bond_in_tank`, so the "in tank" checks are the engine's (running over, the tank's hits). |
+| SR1 | ONEPLAYER | Drives the tank (vehicles run on both sides) | "Bond in tank" checks work for the joiner's tank | `SR1` | **FAIL** (rig, e1e93f5, `rows.py SR1`, task QA-10): in 1 of 6 runs (`sr1-repeats.tgz r1`) the joiner's own copy of Streets' civilian-casualty script counts down to "Mission Failure: Too many civilian casualties" and sets stage flags the host keeps clearing, until "unresolved desync: stage flags"; the host shows nothing and plays on. The tank part held in all 6: the joiner drives ("we are driving tank"), and the host's chr 2, stood in front of it, is run over and fades on both. No mission script uses `if_bond_in_tank`, so the "in tank" checks are the engine's. The other 5 runs pass (2 with the #128 harness, 3 on plain e1e93f5). Earlier, e1e93f5: recorded as pass on the first 2 runs. |
 | SR2 | ACTION | Meets Valentin / reaches the exit | Ends for both | `SR2` | **PASS** (rig, e1e93f5, `rows.py SR2`). Earlier, 9883333: pass (rig, 9883333, `rows.py SR2`). Earlier, 0d88b92: pass (rig, 0d88b92, `rows.py SR2`): the joiner on pad 248; one mission end on each. Jungle (`J-exit`, pad 468) and Control (`C-exit`, pad 168) the same. Earlier: pass for the exit (rig, 2026-10-30): the joiner on pad 248; one mission end on each. Jungle (468) and Control (168) exits the same. |
 | SR3 | FX | Civilians appear and disappear (Streets reaper fix) | No flicker on the joiner | `SR3` | **PASS** (rig, e1e93f5 with this PR's harness additions (log lines only), `rows.py SR3`, 2 of 2 runs): Streets' script shows civilians 39 and 40 for about half a second every few seconds. On the joiner each showing is the host's, mirrored and removed again about 1 s later (the reaper), not held for the 5 s from before the fix. In the once-a-second watch the longest showing on the joiner was 2 s in the first run and 4 s in the second, where two showings 2 s apart read as one; that failed the first version of the check (2 s), which now allows 4 s, still under the old 5 s hold. The joiner catches about twice as many showings as the host's watch, since each stays about 1 s there against half a second on the host. |
 
