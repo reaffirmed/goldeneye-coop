@@ -1162,6 +1162,16 @@ void coopSteamMigrate(int ashost, const unsigned long long *ids, int n)
     }
 }
 
+unsigned long long coopSteamLobbyOwner(void)
+{
+    return (sReady && sLobby != 0) ? (unsigned long long) pGetLobbyOwner(sMM, sLobby) : 0;
+}
+
+int coopSteamIsLobbyMember(unsigned long long id)
+{
+    return sReady && isLobbyMember((u64s) id);
+}
+
 int coopSteamHostLeft(void)
 {
     return sReady && !sIsHost && sHostLeft;
@@ -1192,6 +1202,33 @@ void coopSteamSendTo(int peer, const void *buf, int len)
         return;
     }
     pSendMessageToUser(sNM, sPeerIdent[peer], buf, (unsigned int) len, SEND_UNRELIABLE_NONAGLE, 0);
+}
+
+/* one message to a lobby member that has no slot here (coopNetKnock): Steam
+ * asks them to take the session, as it did for us */
+void coopSteamKnock(unsigned long long id, const void *buf, int len)
+{
+    unsigned char ident[IDENTITY_SIZE];
+    int slot;
+
+    if (!sReady || id == 0 || (u64s) id == sSelf)
+    {
+        return;
+    }
+    slot = peerSlot((u64s) id);
+    if (slot < 0 && sIsHost && isLobbyMember((u64s) id))
+    {   /* a slot for it, so its answer is not dropped as a stranger's; the game
+         * frees the slot again if it stays silent (coop.c coopSessionTick) */
+        slot = setPeer(-1, (u64s) id);
+    }
+    if (slot >= 0)
+    {
+        coopSteamSendTo(slot, buf, len);
+        return;
+    }
+    memset(ident, 0, sizeof(ident));
+    pIdentSetSteamID64(ident, (u64s) id);
+    pSendMessageToUser(sNM, ident, buf, (unsigned int) len, SEND_UNRELIABLE_NONAGLE, 0);
 }
 
 void coopSteamSend(const void *buf, int len)

@@ -17,9 +17,11 @@
  * arrives is held <ms> plus up to <jitter> more before the game sees it, so
  * they also come out of order, and <loss> percent are dropped. Both
  * directions when every copy sets it, as the scripts do.
- * GE_COOP_NETCUT=<s>:<len s> (tests): <s> seconds after the network opens,
- * nothing goes out or comes in for <len> seconds (a dropped Wi-Fi, a line
- * gone quiet).
+ * GE_COOP_NETCUT=<s>:<len s>[:<id>,...] (tests): <s> seconds after the
+ * network opens, nothing goes out or comes in for <len> seconds (a dropped
+ * Wi-Fi, a line gone quiet); with ids (coopNetPeerId values), only the
+ * packets to and from those peers (a host that loses some joiners and keeps
+ * the others).
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -273,7 +275,10 @@ unsigned int coopNetSentTake(int peer, unsigned int *bytesbytype, unsigned int *
 
 extern unsigned long long portProfNow(void);
 
-/* GE_COOP_NETCUT: 1 while the line is cut */
+/* GE_COOP_NETCUT: 1 while the line (or a listed peer's part of it) is cut */
+static unsigned long long sCutIds[4];
+static int sCutNIds;
+
 static int coopNetCut(void)
 {
     static int at = -2, len;
@@ -282,12 +287,34 @@ static int coopNetCut(void)
     if (at == -2)
     {
         const char *e = getenv("GE_COOP_NETCUT");
+        const char *ids;
 
         at = -1;
         t0 = portProfNow();
         if (e != NULL && sscanf(e, "%d:%d", &at, &len) == 2)
         {
-            portConLogf("ge: coop: netcut: the line goes quiet %d s in, for %d s\n", at, len);
+            int colons = 0;
+
+            /* the ids, if any, follow the second ':' (no strchr: this codebase's
+             * string.h takes unsigned char) */
+            for (ids = e; *ids != '\0' && colons < 2; ids++)
+            {
+                colons += (*ids == ':');
+            }
+            while (colons == 2 && *ids != '\0' && sCutNIds < 4)
+            {
+                sCutIds[sCutNIds++] = strtoull(ids, NULL, 10);
+                while (*ids != '\0' && *ids != ',')
+                {
+                    ids++;
+                }
+                if (*ids == ',')
+                {
+                    ids++;
+                }
+            }
+            portConLogf("ge: coop: netcut: the line goes quiet %d s in, for %d s%s\n", at, len,
+                        sCutNIds > 0 ? " (to some peers only)" : "");
         }
         else
         {
@@ -320,9 +347,34 @@ static int coopNetCut(void)
     return 0;
 }
 
+/* this peer's part of the line is cut (all of it without a GE_COOP_NETCUT id list) */
+static int coopNetCutPeer(int peer)
+{
+    unsigned long long id;
+    int i;
+
+    if (!coopNetCut())
+    {
+        return 0;
+    }
+    if (sCutNIds == 0)
+    {
+        return 1;
+    }
+    id = (peer >= 0) ? coopNetPeerId(peer) : 0;
+    for (i = 0; i < sCutNIds; i++)
+    {
+        if (id != 0 && sCutIds[i] == id)
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void coopNetSendTo(int peer, const void *buf, int len)
 {
-    if (coopNetCut())
+    if (coopNetCutPeer(peer))
     {
         return;
     }
@@ -430,6 +482,26 @@ static unsigned int netsimRand(void)
     return (sSimRand >> 8) & 0xFFFFFF;
 }
 
+/* coopNetRecvRaw less what a cut peer sent */
+static int coopNetRecvCut(void *buf, int cap, int *peer)
+{
+    int n, from;
+
+    for (;;)
+    {
+        from = -1;
+        n = coopNetRecvRaw(buf, cap, &from);
+        if (n <= 0 || !coopNetCutPeer(from))
+        {
+            if (peer != NULL)
+            {
+                *peer = from;
+            }
+            return n;
+        }
+    }
+}
+
 int coopNetRecvFrom(void *buf, int cap, int *peer)
 {
     unsigned char tmp[1500];
@@ -449,7 +521,7 @@ int coopNetRecvFrom(void *buf, int cap, int *peer)
             portConLogf("ge: coop: netsim: %d ms + up to %d ms jitter, %d%% loss\n", sSimLat, sSimJit, sSimLoss);
         }
     }
-    if (coopNetCut())
+    if (coopNetCut() && sCutNIds == 0)
     {
         while (coopNetRecvRaw(tmp, sizeof(tmp), &from) > 0)
         {   /* lost on the way */
@@ -458,10 +530,10 @@ int coopNetRecvFrom(void *buf, int cap, int *peer)
     }
     if (!sSimOn)
     {
-        return coopNetRecvRaw(buf, cap, peer);
+        return coopNetRecvCut(buf, cap, peer);
     }
     now = portProfNow();
-    while ((n = coopNetRecvRaw(tmp, sizeof(tmp), &from)) > 0)
+    while ((n = coopNetRecvCut(tmp, sizeof(tmp), &from)) > 0)
     {   /* hold everything that came */
         if (n > (int) sizeof(sSim[0].data) || (int) (netsimRand() % 100) < sSimLoss)
         {
@@ -544,6 +616,37 @@ void coopNetMigrate(int ashost, const unsigned long long *ids, int n)
         portConLogf("ge: coop: %s %s:%d (slot %d)\n", ashost ? "keeping a slot for" : "new host at",
                     inet_ntoa(sPeer[i].sin_addr), ntohs(sPeer[i].sin_port), i);
     }
+}
+
+void coopNetKnock(unsigned long long id, const void *buf, int len)
+{
+    int i;
+
+    if (!sSteam)
+    {
+        return;
+    }
+    if (coopNetCut())
+    {
+        for (i = 0; i < sCutNIds && sCutIds[i] != id; i++)
+        {
+        }
+        if (sCutNIds == 0 || i < sCutNIds)
+        {
+            return;     /* the line, or that peer's part of it, is cut */
+        }
+    }
+    coopSteamKnock(id, buf, len);
+}
+
+unsigned long long coopNetLobbyOwner(void)
+{
+    return sSteam ? coopSteamLobbyOwner() : 0;
+}
+
+int coopNetIsLobbyMember(unsigned long long id)
+{
+    return sSteam ? coopSteamIsLobbyMember(id) : 1;
 }
 
 int coopNetHostLeft(void)

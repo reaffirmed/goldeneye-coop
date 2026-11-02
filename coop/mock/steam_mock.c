@@ -15,8 +15,10 @@
  * among them), so a public lobby can be listed (RequestLobbyList) by a copy
  * that is not the owner's friend. A member's <id>.lobby file names the lobby
  * it is in, so friends see it there (as Steam's GetFriendGamePlayed does);
- * <lobby>.owner holds SetLobbyOwner's value (any member may set it here, and
- * any member may set lobby data; real Steam lets only the owner).
+ * <lobby>.owner holds SetLobbyOwner's value. As on Steam only the owner may
+ * pass it on, and an owner whose process is gone (<id>.pid) is replaced by
+ * the first member still running, as Steam does when the owner drops out.
+ * Any member may set lobby data here; real Steam lets only the owner.
  *
  * Voice: no microphone by default (GetAvailableVoice says no data, as Steam
  * does for a silent or missing mic). GE_MOCK_VOICE=<hz> makes a "voice"
@@ -38,6 +40,8 @@
 #include <arpa/inet.h>
 #include <math.h>
 #include <time.h>
+#include <signal.h>
+#include <errno.h>
 
 typedef unsigned long long u64;
 typedef unsigned char sbool;
@@ -107,6 +111,7 @@ static void path(char *out, size_t n, u64 id, const char *ext)
 {
     snprintf(out, n, "%s/%llu.%s", sDir, id, ext);
 }
+static void writeId(u64 id, const char *ext, u64 v);
 
 /* a lobby's key, "" when it has none */
 static const char *dataGet(u64 lobby, const char *key, char *out, int cap)
@@ -200,6 +205,76 @@ static unsigned short portOf(u64 id)
     return (unsigned short) (30000 + id % 10000);
 }
 
+/* GE_MOCK_CUT=<at s>:<len s>:<id>[,<id>...] (tests): <at> seconds after the
+ * first poll, for <len> seconds, nothing goes to or comes from those ids;
+ * every other line stays up (a split of 3 or 4 copies into two groups) */
+static int mockCut(u64 who)
+{
+    static int at = -2, len, n;
+    static u64 ids[8];
+    static struct timespec t0;
+    static int said;
+    struct timespec now;
+    double s;
+    int i;
+
+    if (at == -2)
+    {
+        const char *e = getenv("GE_MOCK_CUT");
+        int off = 0;
+
+        at = -1;
+        clock_gettime(CLOCK_MONOTONIC, &t0);
+        if (e != NULL && sscanf(e, "%d:%d:%n", &at, &len, &off) == 2 && off > 0)
+        {
+            e += off;
+            while (n < 8 && *e != '\0')
+            {
+                ids[n++] = strtoull(e, NULL, 10);
+                e = strchr(e, ',');
+                if (e == NULL)
+                {
+                    break;
+                }
+                e++;
+            }
+            fprintf(stderr, "steam-mock[%llu]: cut %d ids at %d s for %d s\n", (unsigned long long) sSelf, n, at, len);
+        }
+        else
+        {
+            at = -1;
+        }
+    }
+    if (at < 0)
+    {
+        return 0;
+    }
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    s = (double) (now.tv_sec - t0.tv_sec) + (double) (now.tv_nsec - t0.tv_nsec) / 1e9;
+    if (s < at || s >= at + len)
+    {
+        if (said == 1 && s >= at + len)
+        {
+            said = 2;
+            fprintf(stderr, "steam-mock[%llu]: cut over\n", (unsigned long long) sSelf);
+        }
+        return 0;
+    }
+    if (!said)
+    {
+        said = 1;
+        fprintf(stderr, "steam-mock[%llu]: cut on\n", (unsigned long long) sSelf);
+    }
+    for (i = 0; i < n; i++)
+    {
+        if (ids[i] == who)
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void poll_(void)
 {
     unsigned char buf[1600];
@@ -229,6 +304,10 @@ static void poll_(void)
         u64 from;
 
         memcpy(&from, buf, 8);
+        if (mockCut(from))
+        {
+            continue;   /* lost on the cut line */
+        }
         if (!accepted(from))
         {
             /* SteamNetworkingMessagesSessionRequest_t: the identity */
@@ -275,6 +354,7 @@ API int SteamAPI_InitFlat(char *err)
     e = getenv("GE_MOCK_DIR");
     snprintf(sDir, sizeof(sDir), "%s", e ? e : "/tmp/gecoop-mock");
     mkdir(sDir, 0777);
+    writeId(sSelf, "pid", (u64) getpid());   /* ownerOf: is the owner still running */
 
     sSock = socket(AF_INET, SOCK_DGRAM, 0);
     memset(&a, 0, sizeof(a));
@@ -582,6 +662,11 @@ API sbool SteamAPI_ISteamMatchmaking_SetLobbyOwner(void *self, u64 l, u64 owner)
     int listed = 0;
 
     (void) self;
+    if (old != sSelf)
+    {   /* Steam: only the owner can hand the lobby on */
+        log_("lobby owner refused (not the owner)");
+        return 0;
+    }
     /* The member list is the owner plus <lobby>.members, so a new owner
      * comes off the file and the old one goes on it: it is still a member,
      * as on Steam. (Before, the old owner dropped out of the lobby here, and
@@ -616,7 +701,69 @@ API sbool SteamAPI_ISteamMatchmaking_SetLobbyOwner(void *self, u64 l, u64 owner)
     return 1;
 }
 
+/* 1 while that copy's process runs (or we can't tell) */
+static int running(u64 id)
+{
+    u64 pid = readId(id, "pid");
+
+    return pid == 0 || kill((pid_t) pid, 0) == 0 || errno == EPERM;
+}
+
+static u64 ownerOfRaw(u64 lobby);
+
 static u64 ownerOf(u64 lobby)
+{
+    char p[320], tmp[330];
+    FILE *f, *o;
+    u64 owner = ownerOfRaw(lobby), v, next = 0;
+
+    if (running(owner))
+    {
+        return owner;
+    }
+    /* the owner is gone: Steam gives the lobby to a member still there */
+    path(p, sizeof(p), lobby, "members");
+    f = fopen(p, "r");
+    while (f != NULL && next == 0 && fscanf(f, "%llu", &v) == 1)
+    {
+        if (v != owner && running(v))
+        {
+            next = v;
+        }
+    }
+    if (f != NULL)
+    {
+        fclose(f);
+    }
+    if (next == 0)
+    {
+        return owner;
+    }
+    snprintf(tmp, sizeof(tmp), "%s.%llu", p, sSelf);
+    f = fopen(p, "r");
+    o = fopen(tmp, "w");
+    while (f != NULL && o != NULL && fscanf(f, "%llu", &v) == 1)
+    {
+        if (v != next && v != owner)
+        {
+            fprintf(o, "%llu\n", v);
+        }
+    }
+    if (f != NULL)
+    {
+        fclose(f);
+    }
+    if (o != NULL)
+    {
+        fclose(o);
+        rename(tmp, p);
+    }
+    writeId(lobby, "owner", next);
+    log_("lobby owner gone: passed on");
+    return next;
+}
+
+static u64 ownerOfRaw(u64 lobby)
 {
     /* mock ids keep the owner's low 48 bits; the high bits are the usual 7656119... */
     int i;
@@ -786,6 +933,10 @@ API int SteamAPI_ISteamNetworkingMessages_SendMessageToUser(void *self, const un
     if (len > 1500 || to == 0)
     {
         return 2;
+    }
+    if (mockCut(to))
+    {
+        return 1;   /* sent into the cut line */
     }
     memcpy(buf, &sSelf, 8);
     memcpy(buf + 8, data, len);

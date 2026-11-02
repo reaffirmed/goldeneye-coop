@@ -22,10 +22,26 @@
 #   REJOIN    <s>: start the killed copy again (it joins from the friend list)
 #   RUNSECS   how long each copy runs (default 150)
 #   HOSTENV, P<i>ENV, ALLENV  more env for the host / copy i / every copy
+#             (CUT with ids, <copy>:<at>:<len>:<id>,..., cuts only those peers
+#             in the game's net layer; GE_MOCK_CUT=<at>:<len>:<id>,... in a
+#             copy's env cuts them in the mock Steam itself, session requests
+#             included: coop/mock/steam_mock.c)
+#   Examples (FAILON_SPLIT=1 with each):
+#     2+2 split, p2 takes over with p3 as its joiner, p1 keeps p4:
+#       N=4 HOSTENV=GE_MOCK_CUT=90:8:76561190000000202,76561190000000303
+#     the same with the STEPDOWN goodbye lost on the way to p3:
+#       ... P3ENV=GE_MOCK_CUT=96:10:76561190000000202
+#     2+2 split where the far side's first pick (p2) is still on p1:
+#       N=4 CUT=1:50:30:76561190000000303,76561190000000404 RUNSECS=220
+#     the same with no STEPDOWN goodbye at all (each joiner finds the winner):
+#       ... P3ENV=GE_COOP_TESTNOSTEPBYE=1 P4ENV=GE_COOP_TESTNOSTEPBYE=1
 #   BUILD     build_pc folder (default /home/dev/project/build_pc), OUT (/out)
 # Exit 1 when a check fails (a crash, an unresolved desync, a joiner that
 # never got the join snapshot, events dropped from a full queue, or, with
-# FAILON_MIGRATE=1, no migration after a host kill).
+# FAILON_MIGRATE=1, no migration after a host kill, or, with FAILON_SPLIT=1,
+# a cut that made a joiner take over and left two hosts: no copy stepped
+# down to the other and got its join snapshot again; a cut the joiner rode
+# out without taking over passes).
 BUILD=${BUILD:-/home/dev/project/build_pc}
 OUT=${OUT:-/out}
 N=${N:-2}
@@ -103,6 +119,7 @@ avg() { awk '{ s += $1; n++ } END { if (n) printf "%.1f", s / n; else printf "-"
     echo "desyncs fixed:    $(cnt 'repl: desync')   unresolved: $(cnt 'unresolved desync')"
     echo "stale guard ents: $(grep -h 'guard snapshot entries came after' "$OUT"/p*.log | awk '{s+=$4} END {print s+0}')"
     echo "slow-line toasts: $(cnt 'slow connection')"
+    echo "two hosts:        $(cnt 'two hosts:') seen, $(cnt 'joining its game') stepped down, $(cnt 'following it there') joiners followed"
 } > "$OUT/summary.txt"
 grep -qi "segmentation\|signal 11\|assert" "$OUT"/p*.log && fail="$fail crash"
 [ "$(cnt 'unresolved desync')" -gt 0 ] && fail="$fail unresolved-desync"
@@ -110,6 +127,8 @@ grep -qi "segmentation\|signal 11\|assert" "$OUT"/p*.log && fail="$fail crash"
 for i in $(seq 2 $N); do
     [ -f "$OUT/p$i.log" ] && ! grep -q "repl: join snapshot applied" "$OUT/p$i.log" && fail="$fail p$i-never-joined"
 done
+if [ "$FAILON_SPLIT" = 1 ] && [ "$(cnt 'took over [0-9]* chrs')" -gt 0 ] && { [ "$(cnt 'joining its game')" -eq 0 ] \
+        || [ "$(cnt 'repl: join snapshot applied')" -lt "$N" ]; }; then fail="$fail split"; fi
 if [ "$FAILON_MIGRATE" = 1 ] && [ "$(cnt 'took over [0-9]* chrs')" -eq 0 ]; then fail="$fail no-migration"; fi
 echo "result: ${fail:-PASS}" >> "$OUT/summary.txt"
 cat "$OUT/summary.txt"

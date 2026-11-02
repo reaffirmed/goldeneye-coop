@@ -3735,3 +3735,77 @@ the index to 0.
   living guard becomes such a chr (index -1, no AI sync). Before the fix,
   the rig (joiner cut 20 s, N=2) crashed with the same frames as valpb1's
   crash report. After the fix it plays on.
+
+## Two hosts settle on one (COOP_VERSION 17)
+
+The first change of the 0.7 bump (NET-3, approved by the coordinator). A
+line that goes quiet for longer than the joiner's wait (2 s, then 3.5 s in
+a mission) makes the joiner take over although the host is still there: on
+the rig a 6 s joiner-side cut did it, and so did 7 of 9 Valentin runs with a
+6 s cut (campaign evidence). When the line came back both copies hosted and
+each took the other as its joiner, each with its own guards, for good.
+
+- Every host's hello sets hold bit 2 (COOP_HOLD_HOSTING) and carries
+  hostgen, the host changes its game has been through (0 for the game that
+  opened the lobby; a migration takes the old host's + 1). It sits in the
+  old pad, so the hello keeps its size.
+- A host that hears another host's hello (coopTwoHosts) settles it by,
+  in order: the Steam lobby's owner keeps the game (Steam keeps exactly
+  one, nobody can forge it, and after a P2P-only cut it is still the old
+  host); then the game with more players; then the one with fewer host
+  changes (the game that was there first); then the lower SteamID.
+  Players are counted from the two hellos only, ours as we last sent it
+  (sSentHello) and theirs: its host, and each roster id that is a member
+  of our lobby, is not the other host and is not listed by both. The other
+  host is Steam's id for the channel, and a hello whose roster[0] is not
+  that id is ignored, so a lobby member can't claim to host with made-up
+  players. A host steps down only after two hellos in a row from the same
+  host say so. "two hosts: player on channel %d hosts too (%d players to
+  our %d, %d host changes to our %d, by %s): we keep ours | theirs is the
+  game", then "two hosts: joining its game".
+- Knocking: a host whose joiner went quiet and was dropped, and a joiner
+  whose host went quiet (once it, or whoever it follows, hosts), send their
+  hello to that player every 2 s for a minute (coopNetKnock: a
+  SendMessageToUser, with a slot for it so its answer is not dropped as a
+  stranger's; the slot is freed again if it stays silent). Without it the
+  two halves of a cut never spoke again when the old host had dropped the
+  joiner before the line came back (the 6 s Valentin cut, 4 of 4 runs).
+- The one that loses sends its other joiners BYE STEPDOWN with the
+  winner's id (new reason, new tohost field: the BYE grows to 24 bytes),
+  then coopJoinOtherHost: the network takes the winner as host, the
+  session starts over (a new session id, so the winner restarts our channel
+  and drops our old session's late packets), and the mission ends back to
+  the lobby, where we follow the host in as any late joiner and get the
+  join snapshot. A joiner that gets STEPDOWN from its host does the same.
+- No ids on the UDP transport (tests): no settling there.
+- A full event queue: the last 16 places are kept for the kinds a
+  snapshot can't bring back (mission end, end-all, objective done,
+  cinema, AI command, player note, ending), and when even those are taken
+  they wait in a per-channel stash of 8 and go out in order as room comes
+  ("event queue to player %d full, kind %d kept to send later"). While the
+  stash holds any, a new one goes behind them even if the queue has room
+  again, so a mission end can't overtake an objective queued before it. Anything
+  else dropped is mended by sending that joiner the join snapshot again
+  once the queue and the stash have drained ("... snapshot again (%d so
+  far)"), only for a channel that still has a player. No packet change; a
+  joiner's own dropped events are mended by the checksums.
+- CoopByePkt is checked at build time: 24 bytes, tohost at 16, so Linux
+  (long long aligned to 4) and MinGW (to 8) keep agreeing.
+- The mock Steam (coop/mock) refuses SetLobbyOwner from a non-owner, as
+  Steam does, and passes ownership to the first live member when the
+  owner's process is gone ("lobby owner gone: passed on").
+- GE_COOP_NETCUT=<s>:<len>[:<id>,...] cuts only the listed peers' part of
+  the line (a 2+2 split); GE_COOP_TESTNOSTEPBYE=1 makes a losing host skip
+  BYE STEPDOWN, so its joiners must find the winner on their own.
+  GE_MOCK_CUT=<s>:<len>:<id>,... (QA's, in the mock Steam) cuts those ids
+  below the game, session requests included. net_scenarios.sh lists
+  examples for each.
+- GE_COOP_TESTFLOOD=<s> (host, harness only): <s> s into the mission, every
+  joiner's queue gets 296 events that do nothing and then 22 player notes
+  that only log on arrival, then 20 more notes, one every 8 ticks. Rig, N=3:
+  all 42 notes arrive in order on both joiners (7 waited in the stash), and
+  each joiner gets the snapshot again once the queue drains. Before this, the drain check compared outNext with outAcked
+  (an empty queue is outNext - 1 == outAcked), so the snapshot-again never
+  fired.
+- net_scenarios.sh: a "two hosts" line, and FAILON_SPLIT=1 fails a run in
+  which a joiner took over but nobody stepped down and got its snapshot.

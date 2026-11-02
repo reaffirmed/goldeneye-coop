@@ -91,7 +91,7 @@ u32 randomGetNext(void);
 extern void portConLogf(const char *fmt, ...);
 
 #define COOP_MAGIC   0x50434547u /* "GECP" */
-#define COOP_VERSION 16 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
+#define COOP_VERSION 17 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
                           6: host migration (AI sync, bye, addresses in the roster);
                           7: pings, chat, objective credit, team times, cross-save (COOPEV 16, 20..31, COOPPKT 10);
                           8: versus (COOPEV 32..36, COOPPKT 16);
@@ -107,7 +107,9 @@ extern void portConLogf(const char *fmt, ...);
                               the arena's pickups (COOPEV 37), thrown items, dropped guns, object damage and knocks;
                           15: where a guard's animation loops (GUARDS endframe);
                           16: versus: the host's rules (COOPSET 13) instead of each PC's Multiplayer Options, a
-                              player who quits leaves alone (COOPEV_VSLEFT) */
+                              player who quits leaves alone (COOPEV_VSLEFT);
+                          17: two hosts that meet settle on one (HELLO hold bit 2 and hostgen, BYE STEPDOWN and
+                              tohost, coopTwoHosts) */
 
 enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7, COOPPKT_AISYNC = 8, COOPPKT_BYE = 9 };
 /* 10 and 11 (COOPPKT_EXT_FIRST..LAST in coop.h) are coop_ext.c's features' own packets;
@@ -170,8 +172,10 @@ typedef struct
     u8 settings[COOPSET_MAX];   /* host: the lobby's other settings (coopSetting) */
     u32 missionticks;   /* how long the sender has been in this mission */
     u8 youare;          /* host: the player number of the game it is sent to */
-    u8 hold;            /* host: bit 0, the mission card holds everyone still; bits 4-7, who has loaded in (coop_screens.c) */
-    u8 pad2[2];
+    u8 hold;            /* host: bit 0, the mission card holds everyone still; bit 1 COOP_HOLD_ENDING; bit 2
+                         * COOP_HOLD_HOSTING; bit 3 free; bits 4-7, who has loaded in (coop_screens.c) */
+    u8 hostgen;         /* host: how many host changes its game has been through (coopTwoHosts) */
+    u8 pad2;
     CoopRosterEnt roster[COOP_MAX_PLAYERS];     /* host: every player, by number */
     /* host: each player's line to it (coopNetLink), for every lobby's party
      * panel. Added after v0.2.0 without a version change: a shorter hello
@@ -334,7 +338,7 @@ typedef struct
 
 /* "I am leaving": sent a few times, unreliable, by a game that leaves the
  * session on purpose (the menus, the watch, closing the game) */
-enum { COOPBYE_LEAVE = 1, COOPBYE_HANDOFF = 2 };
+enum { COOPBYE_LEAVE = 1, COOPBYE_HANDOFF = 2, COOPBYE_STEPDOWN = 3 };
 typedef struct
 {
     u32 magic;
@@ -345,7 +349,11 @@ typedef struct
     u8 player;      /* the sender's player number */
     u8 newhost;     /* HANDOFF: the player that takes over */
     u8 pad;
+    unsigned long long tohost;  /* STEPDOWN: the host we and our joiners go to (coopTwoHosts) */
 } CoopByePkt;
+/* the same layout on i386 Linux (long long aligned to 4) and MinGW (to 8): only while tohost sits at 16 */
+typedef char coopByeSizeCheck[(sizeof(CoopByePkt) == 24) ? 1 : -1];
+typedef char coopByeTohostCheck[(__builtin_offsetof(CoopByePkt, tohost) == 16) ? 1 : -1];
 
 /* COOPEV_PLAYERNOTE: what happened to a joiner, from the host to everyone */
 enum { COOPNOTE_LOST = 1, COOPNOTE_BACK, COOPNOTE_GONE, COOPNOTE_LEFT, COOPNOTE_LEFTMISSION };
@@ -373,6 +381,8 @@ static u32 sMissionSerial;      /* host: missions started */
 static u32 sFollowedMission;    /* joiner: last host mission we launched into */
 static u32 sEndingSkipped;      /* joiner: a host mission we didn't drop into because its ending had begun */
 #define COOP_HOLD_ENDING 2      /* HELLO hold bit 1: the host's ending has begun */
+#define COOP_HOLD_HOSTING 4     /* HELLO hold bit 2: the sender hosts (every host's hello; coopTwoHosts) */
+static u8 sHostGen;             /* host: host changes our game has been through (0 for the game that opened the lobby) */
 static s32 sLobbyReady;         /* our Ready on the lobby screen */
 static s32 sDownRule = COOPDOWN_BOTH; /* the host's down rule (lobby): COOPDOWN_BOTH, _TIMER or _REVIVE */
 static u8 sSettings[COOPSET_MAX];     /* the host's other lobby settings; the joiner copies them from HELLO */
@@ -465,6 +475,9 @@ typedef struct
     s32 ackDirty;
     u32 session;        /* the peer's session, 0 until heard */
     u32 oldSession[2];  /* its last two before that: a late packet from one is dropped (coopChanSession) */
+    u8 overflowed;      /* host: events to it were dropped from a full queue; snapshot again once it drains */
+    u8 nstash;          /* must-arrive events that found the queue full, sent as soon as there is room */
+    CoopEvent stash[8];
     CoopHelloPkt hello; /* its last hello */
     u32 helloTick;
     s32 helloSeen;
@@ -594,6 +607,10 @@ static u8 sHoldArrived;     /* who has loaded in, the host's bit included */
 static void coopPendingEndTick(void);
 static void coopRemoteWatch(s32 p);
 static void coopMigrateReset(void);
+static void coopTwoHosts(s32 c);
+static void coopJoinOtherHost(unsigned long long id);
+static void coopKnockAdd(unsigned long long id);
+static CoopHelloPkt sSentHello;     /* host: our last hello (coopTwoHosts compares it with theirs) */
 static s32 sHostWaiting;    /* joiner: the host went quiet or left; see coopSessionTick */
 static s32 sMigrated;        /* this session has been through a migration: stay in the lobby after */
 static s32 sPendingEnd;      /* end our mission at the next tick: 1 back to the lobby */
@@ -858,6 +875,8 @@ static void coopChanReset(CoopChan *ch)
     ch->inDone = 0;
     ch->ackDirty = 0;
     ch->evLastSend = 0;
+    ch->overflowed = 0;
+    ch->nstash = 0;
     memset(ch->inSeq, 0, sizeof(ch->inSeq));
 }
 
@@ -1668,6 +1687,10 @@ static void coopPollNet(void)
             {
                 ch->helloSeen = 1;
                 portConLogf("ge: coop: connected to player %d\n", coopPlayerOfChan(c) + 1);
+            }
+            if (coopNetIsHost() && (ch->hello.hold & COOP_HOLD_HOSTING))
+            {
+                coopTwoHosts(c);
             }
             continue;
         }
@@ -3319,6 +3342,52 @@ static void coopHarnessTick(void)
         {
             portConLogf("ge: coop: testping: pressing ping\n");
             coopPingPress();
+        }
+    }
+    if (coopNetIsHost() && coopInMission())
+    {   /* GE_COOP_TESTFLOOD=<s>: <s> seconds into the mission, fill every joiner's event
+         * queue past full with events that do nothing (kind 15, unused), then 22 player
+         * notes that do nothing but log on arrival ("testflood: note %d arrived"), then
+         * 20 more, one every 8 ticks: the 42 notes must all arrive, in order, and the overflow must bring a snapshot again
+         * (coopChanQueue, coopFlushEvents; harness only) */
+        static s32 testflood = -2;
+        if (testflood == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTFLOOD");
+            testflood = (e != NULL) ? atoi(e) * 60 : -1;
+        }
+        if (testflood > 0 && (s32) sMissionTicks == testflood)
+        {
+            CoopEvent ev;
+            s32 k;
+
+            portConLogf("ge: coop: testflood: filling the event queues\n");
+            for (k = 0; k < COOP_EVENT_RING + 40; k++)
+            {
+                memset(&ev, 0, sizeof(ev));
+                ev.kind = 15;
+                coopQueueEventTo(&ev, COOP_ALL);
+            }
+            for (k = 0; k < 22; k++)
+            {
+                memset(&ev, 0, sizeof(ev));
+                ev.kind = COOPEV_PLAYERNOTE;
+                ev.u.note.what = (u8) (200 + k);
+                coopQueueEventTo(&ev, COOP_ALL);
+            }
+        }
+        {   /* then one more note every 8 ticks, 20 of them, while acks free room and
+             * the stash drains: none may overtake the ones still waiting */
+            static s32 later;
+            if (testflood > 0 && (s32) sMissionTicks > testflood && later < 20 && (sTick % 8) == 0)
+            {
+                CoopEvent ev;
+
+                memset(&ev, 0, sizeof(ev));
+                ev.kind = COOPEV_PLAYERNOTE;
+                ev.u.note.what = (u8) (200 + 22 + later++);
+                coopQueueEventTo(&ev, COOP_ALL);
+            }
         }
     }
     if (coopPartnerHere() && coopInMission())
@@ -6095,21 +6164,57 @@ static void coopHostApplyShot(CoopEvent *ev)
 
 /* ---- reliable events -------------------------------------------------- */
 
+/* kinds a snapshot can't bring back: the last COOP_EVENT_RESERVE places of the
+ * queue are kept for them, and when even those are taken they wait in the
+ * channel's stash (coopFlushEvents) */
+#define COOP_EVENT_RESERVE 16
+static s32 coopEventMustArrive(s32 kind)
+{
+    return kind == COOPEV_MISSIONEND || kind == COOPEV_ENDALL || kind == COOPEV_OBJDONE || kind == COOPEV_CINEMA
+        || kind == COOPEV_AICMD || kind == COOPEV_PLAYERNOTE || kind == COOPEV_ENDING;
+}
+
+static void coopChanPut(CoopChan *ch, const CoopEvent *ev)
+{
+    ch->out[ch->outNext % COOP_EVENT_RING] = *ev;
+    ch->outNext++;
+}
+
 static void coopChanQueue(s32 c, CoopEvent *ev)
 {
     CoopChan *ch = &sChan[c];
+    u32 unacked = ch->outNext - ch->outAcked;
 
     if (!coopNetPeerConnected(c))
     {
         return;
     }
-    if (ch->outNext - ch->outAcked > COOP_EVENT_RING)
-    {
+    if (coopEventMustArrive(ev->kind) && ch->nstash > 0)
+    {   /* others of these wait already: behind them, or a mission end could
+         * overtake an objective queued before it */
+        if (ch->nstash < (u8) (sizeof(ch->stash) / sizeof(ch->stash[0])))
+        {
+            ch->stash[ch->nstash++] = *ev;
+            portConLogf("ge: coop: event queue to player %d full, kind %d kept to send later\n", coopPlayerOfChan(c) + 1, ev->kind);
+            return;
+        }
+        ch->overflowed = 1;
         portConLogf("ge: coop: event queue to player %d full, dropping kind %d\n", coopPlayerOfChan(c) + 1, ev->kind);
         return;
     }
-    ch->out[ch->outNext % COOP_EVENT_RING] = *ev;
-    ch->outNext++;
+    if (coopEventMustArrive(ev->kind) ? unacked > COOP_EVENT_RING : unacked > COOP_EVENT_RING - COOP_EVENT_RESERVE)
+    {
+        ch->overflowed = 1;
+        if (coopEventMustArrive(ev->kind) && ch->nstash < (u8) (sizeof(ch->stash) / sizeof(ch->stash[0])))
+        {
+            ch->stash[ch->nstash++] = *ev;
+            portConLogf("ge: coop: event queue to player %d full, kind %d kept to send later\n", coopPlayerOfChan(c) + 1, ev->kind);
+            return;
+        }
+        portConLogf("ge: coop: event queue to player %d full, dropping kind %d\n", coopPlayerOfChan(c) + 1, ev->kind);
+        return;
+    }
+    coopChanPut(ch, ev);
 }
 
 /* To player `to`, or COOP_ALL. A joiner sends everything to the host, which
@@ -6221,6 +6326,33 @@ static void coopFlushEvents(void)
     for (c = 0; c < COOP_NET_MAX_PEERS; c++)
     {
         coopFlushChan(c);
+        while (sChan[c].nstash > 0 && sChan[c].outNext - sChan[c].outAcked <= COOP_EVENT_RING)
+        {   /* a mission end or an objective that found the queue full: in order, as room comes */
+            CoopEvent ev = sChan[c].stash[0];
+            s32 k;
+
+            for (k = 1; k < sChan[c].nstash; k++)
+            {
+                sChan[c].stash[k - 1] = sChan[c].stash[k];
+            }
+            sChan[c].nstash--;
+            coopChanPut(&sChan[c], &ev);    /* the room is there (the loop's test) */
+        }
+        if (sChan[c].overflowed && sChan[c].nstash == 0 && sChan[c].outNext - 1 == sChan[c].outAcked && coopNetIsHost()
+            && coopPlayerOfChan(c) >= 1)
+        {   /* what was dropped is lost; the objects' state, the items and the guards come
+             * whole with a snapshot (a joiner's own drops are mended by the checksums) */
+            static u16 snaps[COOP_MAX_PLAYERS];
+            s32 p = coopPlayerOfChan(c);
+
+            sChan[c].overflowed = 0;
+            snaps[p]++;
+            portConLogf("ge: coop: event queue to player %d drained after dropping events: snapshot again (%d so far)\n", p + 1, snaps[p]);
+            if (coopInMission())
+            {
+                coopReplSendSnapshot(p);
+            }
+        }
     }
 }
 
@@ -8624,8 +8756,8 @@ static void coopSendHello(void)
 
     s32 c, i;
 
-    if ((!sHelloNow && (sTick % (sOnLobbyScreen ? 15 : 60)) != 0) || !coopNetHasPeer())
-    {
+    if ((!sHelloNow && (sTick % (sOnLobbyScreen ? 15 : 60)) != 0) || (!coopNetHasPeer() && !coopNetIsHost()))
+    {   /* a host with nobody yet still makes its hello: coopKnockTick sends it */
         return;
     }
     memset(&p, 0, sizeof(p));
@@ -8658,6 +8790,8 @@ static void coopSendHello(void)
         coopNetSend(&p, sizeof(p));
         return;
     }
+    p.hold |= COOP_HOLD_HOSTING;
+    p.hostgen = sHostGen;
     for (i = 0; i < COOP_MAX_PLAYERS; i++)
     {   /* the roster: who is here, as the host sees it */
         CoopRosterEnt *e = &p.roster[i];
@@ -8682,6 +8816,7 @@ static void coopSendHello(void)
             p.linkjit[i] = (u8) (l.jitter > 255 ? 255 : l.jitter);
         }
     }
+    sSentHello = p;     /* coopTwoHosts */
     for (c = 0; c < COOP_NET_MAX_PEERS; c++)
     {
         p.youare = (u8) coopPlayerOfChan(c);
@@ -8817,6 +8952,7 @@ static void coopSessionReset(void)
     s32 i;
 
     sSelfSession = 0;   /* a new one on first use */
+    sHostGen = 0;
     memset(sChan, 0, sizeof(sChan));
     for (i = 0; i < COOP_NET_MAX_PEERS; i++)
     {
@@ -9307,7 +9443,14 @@ static void coopNote(s32 p, s32 what);
 
 /* ---- leaving on purpose ---- */
 
+static void coopSendByeTo(s32 reason, s32 newhost, unsigned long long tohost, s32 skipchan);
+
 static void coopSendBye(s32 reason, s32 newhost)
+{
+    coopSendByeTo(reason, newhost, 0, -1);
+}
+
+static void coopSendByeTo(s32 reason, s32 newhost, unsigned long long tohost, s32 skipchan)
 {
     CoopByePkt b;
     s32 i;
@@ -9324,11 +9467,27 @@ static void coopSendBye(s32 reason, s32 newhost)
     b.reason = (u8) reason;
     b.player = (u8) coopSelf();
     b.newhost = (u8) newhost;
+    b.tohost = tohost;
     for (i = 0; i < 3; i++)
     {   /* unreliable: a few copies, the lobby leave or the silence covers the rest */
-        coopNetSend(&b, sizeof(b));
+        if (skipchan < 0)
+        {
+            coopNetSend(&b, sizeof(b));
+        }
+        else
+        {
+            s32 c;
+
+            for (c = 0; c < COOP_NET_MAX_PEERS; c++)
+            {
+                if (c != skipchan && coopNetPeerConnected(c))
+                {
+                    coopNetSendTo(c, &b, sizeof(b));
+                }
+            }
+        }
     }
-    portConLogf("ge: coop: said goodbye (%s)\n", reason == COOPBYE_HANDOFF ? "handing over" : "leaving");
+    portConLogf("ge: coop: said goodbye (%s)\n", reason == COOPBYE_HANDOFF ? "handing over" : reason == COOPBYE_STEPDOWN ? "another host has the game" : "leaving");
 }
 
 /* the player a leaving host hands over to: the next one in the roster */
@@ -10029,6 +10188,7 @@ static void coopMigrate(void)
             ids[i - 1] = sMigRoster[list[i]].id;
         }
         sMissionSerial = sHostHello.mission;    /* the joiners have followed this one already */
+        sHostGen = (u8) (sHostHello.hostgen + 1 > 255 ? 255 : sHostHello.hostgen + 1);  /* coopTwoHosts: the older game wins a tie */
         coopNetMigrate(1, ids, n - 1);
         coopLinkStatsReset();
         coopRenumber(newof);
@@ -10099,6 +10259,11 @@ static void coopHostGone(s32 how)
     coopUpper(sGoneHostName);
     sHostLeftHow = how;
     portConLogf("ge: coop: the host %s\n", how == COOPBYE_HANDOFF ? "handed over" : how ? "left" : "went quiet");
+    if (how == 0)
+    {   /* it went quiet, it didn't leave: it may still be hosting behind a cut line,
+         * so whoever of us ends up hosting knocks on it (coopKnockTick) */
+        coopKnockAdd(sHostHello.roster[0].id);
+    }
     coopMigrateFromRoster();
 }
 
@@ -10125,9 +10290,141 @@ static void coopRecvBye(s32 c, CoopByePkt *b)
         coopNetDropPeer(c);
         return;
     }
+    if (c == 0 && b->reason == COOPBYE_STEPDOWN && b->tohost != 0)
+    {   /* our host met another host and gave the game to it: we go there too */
+        portConLogf("ge: coop: our host stepped down for %llu: following it there\n", b->tohost);
+        coopJoinOtherHost(b->tohost);
+        return;
+    }
     if (c == 0 && sHostWaiting != HOSTW_NEWHOST)
     {
         coopHostGone(b->reason == COOPBYE_HANDOFF ? COOPBYE_HANDOFF : COOPBYE_LEAVE);
+    }
+}
+
+/* ---- two hosts ----
+ * A line that goes quiet for longer than the joiner's wait (2 s, then 3.5 s
+ * in a mission) makes the joiner take over although the host is still there,
+ * and when the line comes back both host and each takes the other as a joiner
+ * (on Steam the lobby still has them both). Every host's hello says it hosts
+ * (COOP_HOLD_HOSTING), so the two hear it and keep one game:
+ *   1. the Steam lobby's owner's: Steam keeps one owner, nobody can claim it,
+ *      and after a cut the old host still has it;
+ *   2. else the game with more players, counted from the two hellos alike:
+ *      only lobby members, not the other host, not anyone both claim;
+ *   3. else the one with fewer host changes (the game that was there first);
+ *   4. else the lower SteamID.
+ * The other host's id is Steam's for the channel, never the hello's. A
+ * host steps down only after two hellos in a row say so: it tells its own
+ * joiners to come along (BYE STEPDOWN), leaves its mission and joins the
+ * winner as a late joiner, through the join snapshot. */
+static unsigned long long sTwoHostsThem[COOP_NET_MAX_PEERS];
+static u8 sTwoHostsVotes[COOP_NET_MAX_PEERS];   /* hellos in a row from that host that said we lose */
+
+/* the players hello h says its game has: its host, and each lobby member it
+ * lists that is not otherhost and not listed by hello other too */
+static s32 coopHelloPlayers(const CoopHelloPkt *h, const CoopHelloPkt *other, unsigned long long otherhost)
+{
+    s32 i, k, n = 1, both;
+    unsigned long long id;
+
+    for (i = 1; i < COOP_MAX_PLAYERS; i++)
+    {
+        id = h->roster[i].id;
+        if (!h->roster[i].present || id == 0 || id == otherhost || id == h->roster[0].id || !coopNetIsLobbyMember(id))
+        {
+            continue;
+        }
+        for (k = 0, both = 0; k < COOP_MAX_PLAYERS; k++)
+        {
+            both |= other->roster[k].present && other->roster[k].id == id;
+        }
+        for (k = 1; k < i; k++)
+        {
+            both |= h->roster[k].present && h->roster[k].id == id;   /* listed twice: once */
+        }
+        n += !both;
+    }
+    return n;
+}
+
+static void coopTwoHosts(s32 c)
+{
+    const CoopHelloPkt *h = &sChan[c].hello;
+    unsigned long long me = coopSteamSelfId(), them = coopNetPeerId(c), owner = coopNetLobbyOwner();
+    s32 ours, theirs, lose;
+    const char *why;
+
+    if (them == 0 || me == 0 || them == me || h->roster[0].id != them)
+    {   /* UDP tests: no ids to settle on; a hello that names another host than its sender: ignored */
+        sTwoHostsVotes[c] = 0;
+        return;
+    }
+    ours = coopHelloPlayers(&sSentHello, h, them);
+    theirs = coopHelloPlayers(h, &sSentHello, me);
+    if (owner == me || owner == them)
+    {
+        lose = (owner == them);
+        why = "lobby owner";
+    }
+    else if (theirs != ours)
+    {
+        lose = theirs > ours;
+        why = "players";
+    }
+    else if (h->hostgen != sHostGen)
+    {
+        lose = h->hostgen < sHostGen;
+        why = "host changes";
+    }
+    else
+    {
+        lose = them < me;
+        why = "SteamID";
+    }
+    if (sTwoHostsThem[c] != them)
+    {
+        sTwoHostsThem[c] = them;
+        sTwoHostsVotes[c] = 0;
+    }
+    sTwoHostsVotes[c] = lose ? (u8) (sTwoHostsVotes[c] < 255 ? sTwoHostsVotes[c] + 1 : 255) : 0;
+    if (sTwoHostsVotes[c] <= 1)
+    {
+        portConLogf("ge: coop: two hosts: player on channel %d hosts too (%d players to our %d, %d host changes to our %d, by %s): %s\n",
+                    c, theirs, ours, h->hostgen, sHostGen, why, lose ? "theirs is the game" : "we keep ours");
+    }
+    if (sTwoHostsVotes[c] < 2)
+    {
+        return;     /* once more from them first: a hello in flight can be out of date */
+    }
+    portConLogf("ge: coop: two hosts: joining its game\n");
+    memset(sTwoHostsVotes, 0, sizeof(sTwoHostsVotes));
+    memset(sTwoHostsThem, 0, sizeof(sTwoHostsThem));
+    if (getenv("GE_COOP_TESTNOSTEPBYE") == NULL)
+    {
+        coopSendByeTo(COOPBYE_STEPDOWN, 0, them, c);
+    }
+    else
+    {   /* harness: every goodbye lost; our joiners find out from the silence */
+        portConLogf("ge: coop: testnostepbye: not telling our joiners\n");
+    }
+    coopJoinOtherHost(them);
+}
+
+/* leave our game (host or joiner) for the one `id` hosts: a late joiner there */
+static void coopJoinOtherHost(unsigned long long id)
+{
+    unsigned long long ids[1];
+    s32 inmission = coopInMission();
+
+    ids[0] = id;
+    coopNetMigrate(0, ids, 1);
+    coopLinkStatsReset();
+    coopSessionReset();     /* a new session: the other host restarts our channel and treats us as new */
+    coopBanner("ANOTHER HOST HAS THE GAME", "JOINING IT");
+    if (inmission)
+    {
+        sPendingEnd = 1;    /* back to the lobby, then in with the host as any late joiner */
     }
 }
 
@@ -10183,6 +10480,10 @@ static void coopApplyNote(CoopEvent *ev)
             snprintf(msg, sizeof(msg), "%s left the mission.\n", name);
             break;
         default:
+            if (ev->u.note.what >= 200)
+            {
+                portConLogf("ge: coop: testflood: note %d arrived\n", ev->u.note.what - 200);   /* GE_COOP_TESTFLOOD */
+            }
             return;
     }
     portConLogf("ge: coop: %s", msg);
@@ -10250,7 +10551,76 @@ static void coopRemoteWatch(s32 p)
     {
         coopNote(p, COOPNOTE_GONE);
         sChan[c].helloSeen = 0;
+        coopKnockAdd(coopNetPeerId(c));     /* went quiet: it may have taken over behind a cut line */
         coopNetDropPeer(c);
+    }
+}
+
+/* Knocking: a player that went quiet (a joiner we dropped, or the host we
+ * took over from) may be hosting on its own once the line comes back, with
+ * nobody sending to it. For a minute our hello goes to it every 2 s
+ * (coopNetKnock); if it hosts, it takes us as a joiner, its hellos come back
+ * and the two hosts settle (coopTwoHosts). */
+#define COOP_KNOCK_MS 60000
+static struct { unsigned long long id; u32 untilMs, lastMs; } sKnock[COOP_MAX_PLAYERS];
+
+static void coopKnockAdd(unsigned long long id)
+{
+    s32 i, k = 0;
+
+    if (id == 0)
+    {
+        return;
+    }
+    for (i = 0; i < COOP_MAX_PLAYERS; i++)
+    {
+        if (sKnock[i].id == id || (sKnock[k].id != 0 && (sKnock[i].id == 0 || sKnock[i].untilMs < sKnock[k].untilMs)))
+        {   /* its own entry, else a free one, else the one closest to its end */
+            k = i;
+            if (sKnock[i].id == id)
+            {
+                break;
+            }
+        }
+    }
+    sKnock[k].id = id;
+    sKnock[k].untilMs = coopNowMs() + COOP_KNOCK_MS;
+    sKnock[k].lastMs = 0;
+    portConLogf("ge: coop: knocking on %llu for %d s (it went quiet; it may be hosting)\n", id, COOP_KNOCK_MS / 1000);
+}
+
+static void coopKnockTick(void)
+{
+    u32 now = coopNowMs();
+    s32 i, c;
+
+    for (i = 0; i < COOP_MAX_PLAYERS; i++)
+    {
+        if (sKnock[i].id == 0)
+        {
+            continue;
+        }
+        if ((s32) (now - sKnock[i].untilMs) > 0)
+        {
+            sKnock[i].id = 0;
+            continue;
+        }
+        if (!coopNetIsHost())
+        {
+            continue;   /* a joiner of whoever hosts now: that host knocks too */
+        }
+        for (c = 0; c < COOP_NET_MAX_PEERS && !(coopNetPeerConnected(c) && coopNetPeerId(c) == sKnock[i].id && sChan[c].helloSeen); c++)
+        {
+        }
+        if (c < COOP_NET_MAX_PEERS)
+        {
+            continue;   /* it talks to us again: nothing to knock for */
+        }
+        if (now - sKnock[i].lastMs >= 2000 && sSentHello.magic == COOP_MAGIC)
+        {
+            sKnock[i].lastMs = now;
+            coopNetKnock(sKnock[i].id, &sSentHello, sizeof(sSentHello));
+        }
     }
 }
 
@@ -10270,6 +10640,10 @@ static void coopSessionTick(void)
     if (sEnabled <= 0 || !coopNetIsOpen())
     {
         return;
+    }
+    if (coopNetIsHost())
+    {
+        coopKnockTick();
     }
     if (coopNetIsHost())
     {   /* a slot nobody has spoken from for a long time (the lobby, or a
