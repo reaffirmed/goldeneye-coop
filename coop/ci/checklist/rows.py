@@ -143,6 +143,8 @@ ROWS = {
     'AZ4': ('aztec', 0, f'{INV} GE_COOP_WATCHWORLD=1',
             f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h50@8,v19@10,x19@12,o11@14,u11@16,h73@20,v15@22,x15@24,p1@75', 100, 2,
             ['b:objective 0 \\(A\\) is now complete', 'hflag:100', 'h:watch: countdown running', 'b:objective 1 \\(B\\) is now complete']),
+    'AZ4-solo': ('aztec', 0, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h50@8,v19@10,x19@12,o11@14,u11@16,h73@20,v15@22,x15@24,p1@75', '', 100, 2,
+                 ['h:watch: countdown running', 'h:objective 1 \\(B\\) is now complete'], 1),
     # ---- Depot: the joiner takes the safe key, opens the safe door and takes the blueprints (Secret Agent)
     'DE3': ('depot', 1, f'{INV} GE_COOP_WATCHDOORS=1', f'{INV} GE_COOP_WATCHDOORS=1 GE_COOP_STEPS=g0@10,p50@14,e0@16,g5@22', 50, 2,
             ['b:objective 2 \\(\\w\\) is now complete', 'j:step e: door \\d+ at \\d+, closed before', 'h:watch: door \\d+ open',
