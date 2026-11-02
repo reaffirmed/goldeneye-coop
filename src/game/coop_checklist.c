@@ -33,10 +33,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <time.h>
-#ifdef _WIN32
-#include <SDL.h>
-#endif
 #include <bondaicommands.h>
 #include <bondgame.h>
 #include <bondconstants.h>
@@ -449,18 +445,13 @@ static void clStep(ClStep *s)
     portConLogf("ge: coop: step %c%d at %u s done\n", s->kind, s->arg, coopExtMissionTicks() / 60);
 }
 
+extern unsigned long long portProfNow(void);   /* pcsched.c: monotonic microseconds */
+
 static double clWallClock(void)
 {   /* seconds on the machine's monotonic clock: copies on one machine share it, so
      * two logs' countdowns can be compared at the same moment (not mission time,
      * which each copy starts when it loads the mission) */
-#ifdef _WIN32
-    return SDL_GetPerformanceCounter() / (double) SDL_GetPerformanceFrequency();
-#else
-    struct timespec ts;
-
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec + ts.tv_nsec / 1e9;
-#endif
+    return portProfNow() / 1e6;
 }
 
 static void clWatchDoors(void)
