@@ -11622,7 +11622,18 @@ static s32 coopIsSoundCmd(u8 cmd)
 static s32 sApplyingRemoteAi;
 
 /* a joiner's own copy of the level scripts leaves these to the host: the
- * countdown (WORLD's clock) and the blast when it runs out (relayed) */
+ * countdown (WORLD's clock), the blast when it runs out (relayed), and the
+ * bits one list sets on another chr for a third to read (chr_bitfield_set_on
+ * and _off). A chr with a body gets the host's bits in the AI sync. The
+ * scripts' own bodiless chrs get them from no one, so a joiner's copy only
+ * counted what its own copy did. Streets' spawners set one for each
+ * civilian they make, and its casualty list counts them against the ones
+ * removed out of sight. A joiner's spawns are left to the host
+ * (coopScriptSpawnsLeftToHost) and still set the bit, but the removals run
+ * on the host only, so the joiner's count only went down: "Civilian
+ * casualties high", then "Mission Failure", and stage flags fighting the
+ * host's (QA-10). The host's captions and stage flags reach the joiner as
+ * before. */
 static s32 coopHostOwnsCmd(u8 cmd)
 {
     switch (cmd)
@@ -11633,6 +11644,8 @@ static s32 coopHostOwnsCmd(u8 cmd)
         case AI_HudCountdownStop:
         case AI_HudCountdownStart:
         case AI_TriggerExplosionsAroundBond:
+        case AI_SetChrBitfield:
+        case AI_UnsetChrBitfield:
             return sEnabled > 0 && !coopVersus() && coopInMission();
         default:
             return 0;
