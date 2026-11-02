@@ -21,8 +21,11 @@
  *                number of 1024 and up (decimal) is the chr running that list now
  *   GE_COOP_WATCH=<chr>[,<chr>...]  every second, log those chrs when they
  *                          appear, vanish, die or move more than 7 m in a
- *                          second (and whether their room is on our screen)
+ *                          second (and whether their room is on our screen, or for
+ *                          one that vanished, was: "gone (was on our screen)")
  *   GE_COOP_WATCHWORLD=1   log the alarm, the countdown and the stage flags when they change
+ *   GE_COOP_WATCHOBJS=1    every second, log each tagged object whose destroyed level goes up
+ *                          ("watch: tag N destroyed L, at S s"; the first pass only notes them)
  *   GE_COOP_WATCHDOORS=1   log the open doors once, then each door that opens or closes
  *                          (door number = its byte offset in the setup, as testdoor/testopen)
  *   GE_COOP_REVIVE=1       log any chr that leaves ACT_DIE/ACT_DEAD for another action
@@ -79,8 +82,11 @@ static s32    sNumSteps, sNextStep;
 static s32    sWatch[CL_MAXWATCH], sNumWatch;
 static s32    sWatchSeen[CL_MAXWATCH];
 static coord3d sWatchPos[CL_MAXWATCH];
+static s32    sWatchRoom[CL_MAXWATCH];   /* the room it was last in, for a "gone" line */
 static s32    sWatchWorld;
 static s32    sWatchDoors;
+static s32    sWatchObjs, sObjsSeen;
+static u8     sObjLevel[256];
 #define CL_MAXDOORS 512
 static u8     sDoorOpen[CL_MAXDOORS];
 static s32    sDoorsSeen;
@@ -127,6 +133,7 @@ static void clInit(void)
     }
     sWatchWorld = getenv("GE_COOP_WATCHWORLD") != NULL;
     sWatchDoors = getenv("GE_COOP_WATCHDOORS") != NULL;
+    sWatchObjs = getenv("GE_COOP_WATCHOBJS") != NULL;
     e = getenv("GE_COOP_STEPSLINGER");
     sLinger = (e != NULL) ? atoi(e) : 20;
 }
@@ -593,8 +600,10 @@ static void clWatchTick(void)
 
         if (here != sWatchSeen[i])
         {
-            portConLogf("ge: coop: watch: chr %d %s%s\n", sWatch[i], here ? "appears" : "gone",
-                        here ? (getROOMID_isRendered(clRoom(c->prop)) ? " (on our screen)" : "") : "");
+            portConLogf("ge: coop: watch: chr %d %s%s, at %u s\n", sWatch[i], here ? "appears" : "gone",
+                        here ? (getROOMID_isRendered(clRoom(c->prop)) ? " (on our screen)" : "")
+                             : (sWatchSeen[i] && getROOMID_isRendered(sWatchRoom[i])) ? " (was on our screen)" : "",
+                        coopExtMissionTicks() / 60);
         }
         if (here)
         {
@@ -612,6 +621,7 @@ static void clWatchTick(void)
                             c->prop->pos.f[1], c->prop->pos.f[2], clRoom(c->prop), c->maxdamage - c->damage);
             }
             sWatchPos[i] = c->prop->pos;
+            sWatchRoom[i] = clRoom(c->prop);
         }
         sWatchSeen[i] = here;
     }
@@ -637,6 +647,27 @@ static void clWatchTick(void)
             sLastClockRun = run;
         }
     }
+}
+
+static void clWatchObjs(void)
+{   /* GE_COOP_WATCHOBJS: a tagged object blown up or broken further (T4's train) */
+    s32 i;
+
+    for (i = 0; i < 256; i++)
+    {
+        ObjectRecord *o = objFindByTagId(i);
+        s32 lv = (o != NULL && o->prop != NULL) ? objGetDestroyedLevel(o) : 0;
+
+        if (sObjsSeen && lv > sObjLevel[i])
+        {
+            portConLogf("ge: coop: watch: tag %d destroyed %d, at %u s\n", i, lv, coopExtMissionTicks() / 60);
+        }
+        if (o != NULL && o->prop != NULL)
+        {
+            sObjLevel[i] = (u8) lv;
+        }
+    }
+    sObjsSeen = 1;
 }
 
 static void clReviveTick(void)
@@ -689,6 +720,8 @@ void coopChecklistTick(void)
         sLastFlags = 0;
         sDoorsSeen = 0;
         sSnapSettleLeft = 0;
+        sObjsSeen = 0;
+        memset(sObjLevel, 0, sizeof(sObjLevel));
     }
     sLastTicks = t;
     if ((!sSolo && !coopLobbyHasPartner()) || t < 2)
@@ -721,6 +754,10 @@ void coopChecklistTick(void)
     {
         sLastSec = t / 60;
         clWatchTick();
+        if (sWatchObjs)
+        {
+            clWatchObjs();
+        }
         if (sWatchDoors)
         {
             clWatchDoors();

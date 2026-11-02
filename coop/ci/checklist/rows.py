@@ -167,6 +167,60 @@ ROWS = {
             f'{INV} GE_COOP_WATCHDOORS=1 GE_COOP_STEPS=p1@60', 90, 2,
             ['h:testabort \\(hand over\\)', 'j:host migration: player 2 hosts', 'j:objective 3 \\(\\w\\) is now complete',
              '!j:objective 3 \\(\\w\\) is now incomplete', 'doorkept']),
+    # ---- Open rows, first rig lines (e1e93f5)
+    # F7: Facility's only "on screen" script check (list 0x40d, chrs 51-55 per a solo run with the
+    # check logged) holds a guard until he is on screen; none removes one. The joiner stands
+    # 3-10 m from each in turn, facing him, with the host at the start: none may vanish in view
+    'F7': ('facility', 0, f'{INV} GE_COOP_WATCH=51,52,53,54,55',
+           f'{INV} GE_COOP_WATCH=51,52,53,54,55 GE_COOP_STEPS=n51@10,n52@25,n53@40,n54@55,n55@70', 90, 2,
+           ['!j:watch: chr 5[1-5] gone \\(was on our screen\\)', 'h:chr 5[1-5] seen by player 2', 'j:step n55 at \\d+ s done']),
+    # SR1: the joiner gets in the tank, the host stands chr 2 in front of it; no stage script
+    # uses if_bond_in_tank, so "in tank" is the engine's (running over, the tank's hits)
+    'SR1': ('streets', 0, f'{INV} GE_COOP_TESTTANKCHR=2', f'{INV} GE_COOP_TESTTANK=10', 50, 2,
+            ['h:player 2 is driving tank', 'j:we are driving tank', 'h:player 2.s tank runs over chr 2', 'j:host chr 2 fades away']),
+    # SR3: Streets' script shows civilians 39 and 40 for about half a second every few seconds;
+    # before the reaper fix the joiner kept each for 5 s, so its showings ran together. Each showing
+    # lasts at most 4 s in the once-a-second watch (two showings 2 s apart can read as one)
+    'SR3': ('streets', 0, f'{INV} GE_COOP_WATCH=39,40', f'{INV} GE_COOP_WATCH=39,40 GE_COOP_STEPS=l0@5 GE_COOP_STEPSLINGER=60', 80, 2,
+            ['spanh:39:4', 'spanh:40:4', 'spanj:39:4', 'spanj:40:4']),
+    # SU2: once the alarm is on, the script (list 0x1003) spawns guards at pad 214 in the places of
+    # chrs 15-17 every 20 s, and they come and go within 1-2 s on the host (alone too: SU2-solo);
+    # list 0x1004 spawns a new chr 9 once 9 is gone. The host raises the alarm (testworld), the
+    # joiner kills chr 9: the host's spawns reach the joiner under the host's numbers, and the chr
+    # sets must stay in step (no unresolved desync; QA-9: they don't on e1e93f5)
+    'SU2': ('surface2', 0, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_TESTWORLD=1 GE_COOP_WATCH=9,15,16,17',
+            f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_WATCH=9,15,16,17 GE_COOP_STEPS=k9@20 GE_COOP_STEPSLINGER=70', 100, 2,
+            ['b:watch: alarm on', 'j:mirrored host chr 1[567] ']),
+    # SU2 split in two: the alarm alone, and chr 9 shot with no alarm
+    'SU2-alarm': ('surface2', 0, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_TESTWORLD=1 GE_COOP_WATCH=9,15,16,17',
+                  f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_WATCH=9,15,16,17 GE_COOP_STEPS=l0@20 GE_COOP_STEPSLINGER=70', 100, 2,
+                  ['b:watch: alarm on', 'j:mirrored host chr 1[567] ']),
+    'SU2-kill9': ('surface2', 0, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_WATCH=9,15,16,17',
+                  f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_WATCH=9,15,16,17 GE_COOP_STEPS=k9@20 GE_COOP_STEPSLINGER=70', 100, 2,
+                  ['j:step k9 at \\d+ s done']),
+    # SU2-solo: the host alone, alarm at 15 s and chr 9 shot at 20 s: how the spawned chrs come and go without a partner
+    'SU2-solo': ('surface2', 0, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_TESTWORLD=1 GE_COOP_WATCH=9,15,16,17 GE_COOP_STEPS=k9@20 GE_COOP_STEPSLINGER=70', '', 100, 2,
+                 ['h:watch: alarm on', 'h:watch: chr 1[567] appears'], 1),
+    # SI6: Agent, the joiner plants the charge: the 360 s countdown runs out and the host's blast
+    # (AI_TriggerExplosionsAroundBond, 246) reaches the joiner, whose own copy then sets off more
+    # than six explosions at once around its player (the Unlimited Explosions line). Both are
+    # invulnerable, so the hurt itself is not measured; B fails on both
+    'SI6': ('silo', 0, f'{INV} GE_COOP_WATCHWORLD=1',
+            f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h34@8,p4@10,f1@12 GE_COOP_STEPSLINGER=400', 420, 2,
+            ['b:watch: countdown running', 'clocksame', 'j:host script command 246',
+             'seqj:host script command 246=>more than the N64.s 6 at once', 'b:objective 4 \\(B\\) is now failed']),
+    # T3: the joiner shoots Ourumov (chr 71, list 0x414) in the last car: stage flag 800, and 20 s
+    # later the host's 60 s countdown, the same on both
+    'T3': ('train', 0, f'{INV} GE_COOP_WATCHWORLD=1',
+           f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=c71@10,s71@12 GE_COOP_STEPSLINGER=40', 60, 2,
+           ['hflag:800', 'b:watch: countdown running', 'clocksame']),
+    # T4: the same run to the end of the countdown: the end flag (setup 0x00000800, 80000 in the
+    # stage-flags line), the host's blasts reach the joiner, and the car parts they break (tags 41
+    # and 42 on the host's object watch) are broken on both at 80 s
+    'T4': ('train', 0, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_WATCHOBJS=1 GE_COOP_TESTDUMP=80',
+           f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_WATCHOBJS=1 GE_COOP_TESTDUMP=80 GE_COOP_STEPS=c71@10,s71@12 GE_COOP_STEPSLINGER=100', 120, 2,
+           ['hflag:80000', 'jflag:80000', 'j:host explosion \\(type 13\\)',
+            'b:dump: tag 41 .* destroyed [1-9]', 'b:dump: tag 42 .* destroyed [1-9]']),
     'X5': ('dam', 0, f'{INV} GE_COOP_TESTPAD=330:10 GE_COOP_TESTWIN=1', INV, 90, 24,
            ['=j:mission end', '=h:mission end']),
     'X8-doak3': ('facility', 1, INV, INV, 90, 2,
@@ -309,10 +363,28 @@ def special(c, L):
             elif after is None and before[-1] >= lim + 3:
                 why.append(f'{w}: "{m.group(3)}" before the countdown was under {m.group(2)} s (last {before[-1]} s)')
         return why
+    m = re.match(r'span([hj]):(\d+):([\d.]+)$', c)
+    if m:
+        # spanj:<chr>:<s>: that chr shows at least once on that side (GE_COOP_WATCH), and each
+        # showing, appears to gone, lasts at most <s> s (sampled once a second)
+        t = L.get(m.group(1)) or ''
+        ev = re.findall(rf'watch: chr {m.group(2)} (appears|gone)[^\n]*, at (\d+) s', t)
+        spans, start = [], None
+        for what, at in ev:
+            if what == 'appears':
+                start = int(at)
+            elif start is not None:
+                spans.append(int(at) - start)
+                start = None
+        if not spans:
+            return [f'{m.group(1)}: chr {m.group(2)} never showed and went']
+        long_ = [x for x in spans if x > float(m.group(3))]
+        return [f'{m.group(1)}: chr {m.group(2)} showings of {long_} s (of {len(spans)})'] if long_ else []
     m = re.match(r'(!?)([hj])flag:([0-9a-f]+)$', c)
     if m:
         # hflag:<hex>: some stage-flags line (GE_COOP_WATCHWORLD) on the host has those bits; !hflag: none has.
-        # The line shows the objective flags, the AI script's bits >> 8 (its 0x10000 is 100 here)
+        # The line shows the objective flags: a setup file's argument with its four bytes reversed
+        # (its 0x00010000 is 100 here, 0x00080000 is 800, 0x00000800 is 80000)
         bits = int(m.group(3), 16)
         seen = any(int(x, 16) & bits == bits for x in re.findall(r'watch: stage flags ([0-9a-f]+)', L.get(m.group(2)) or ''))
         if m.group(1) and seen:
@@ -368,7 +440,7 @@ def judge(name, d, checks, players, je=''):
             if want - done:
                 why.append(f"joiner's steps not all done (missing {','.join(sorted(want - done))})")
             continue
-        if c in ('doorsame', 'doorkept', 'clocksame') or re.match(r'!?[hj]flag:|cd[hjb]:|seq[hjb]:', c):
+        if c in ('doorsame', 'doorkept', 'clocksame') or re.match(r'!?[hj]flag:|cd[hjb]:|seq[hjb]:|span[hj]:', c):
             why += special(c, L)
             continue
         neg = c.startswith('!')

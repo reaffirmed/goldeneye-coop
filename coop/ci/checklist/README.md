@@ -53,9 +53,9 @@ src/game/coop_checklist.c; env only, nothing changes without them):
 machine's monotonic clock, which copies on one machine share. Mission seconds
 start when each copy loads the mission, so a joiner that came in later is
 seconds behind: compare countdowns by the clock (the `clocksame` check), not by
-mission second. The stage-flags line shows the objective flags, the AI script's
-bits shifted right by 8 (the script's 0x10000 is 100 there), which is what the
-`hflag:`/`jflag:` checks read.
+mission second. The stage-flags line shows the objective flags, a setup file's
+argument with its four bytes reversed (0x00010000 there is 100 here, 0x00000800 is
+80000), which is what the `hflag:`/`jflag:` checks read.
 
 The watch logs a running countdown once a mission second. `cdb:<N>:<regex>` (or
 `cdh:`, `cdj:`) needs the first line matching `<regex>` to come while a countdown
@@ -75,3 +75,12 @@ the host's watch saw change in between; if the test door itself moved, the run i
 no test and has to be run again. The clock stamps that window compares come from each
 copy's own monotonic clock, so `doorsame` and `clocksame` hold only when host and
 joiner run on one machine, as on the rig, not across two PCs.
+
+`GE_COOP_WATCH` stamps each "appears" and "gone" line with the mission second, and a
+chr that vanishes while its room was on our screen reads "gone (was on our screen)"
+(F7: no `!j:` hit for that). `span<h|j>:<chr>:<s>` needs that chr to show at least
+once on that side and each showing, appears to gone, to last at most `<s>` s; the
+watch samples once a second (SR3: Streets' civilians 39 and 40, which the script
+shows for about half a second at a time). `GE_COOP_WATCHOBJS=1` logs each tagged
+object whose destroyed level goes up, once a second ("watch: tag 41 destroyed 1, at
+55 s"; T4's train car).
