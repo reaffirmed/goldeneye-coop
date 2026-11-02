@@ -20,8 +20,9 @@
  *
  * Nothing is asked with [display] auto_update=0, when the check doesn't answer
  * in time (offline), or in automated runs (GE_FRAMES, GE_NOMSGBOX), where a box
- * would hang the harness. GE_UPDATE_AUTO=install answers Update Now without a
- * box, for tests; GE_UPDATE_AUTO=restart also takes Restart Now.
+ * would hang the harness; those runs don't wait for the check either.
+ * GE_UPDATE_AUTO=install answers Update Now without a box, for tests;
+ * GE_UPDATE_AUTO=restart also takes Restart Now.
  * GE_UPDATE_LAUNCHWAIT=<ms> changes how long the check is waited for.
  */
 #include <SDL.h>    /* first: the game's own include/string.h clashes with mingw's intrin.h after it */
@@ -234,6 +235,10 @@ void portUpdateLaunch(void)
     int answer;
 
     portUpdateLaunchCheck();
+    if (autoans == NULL && launchQuiet())
+    {   /* nothing can be asked: don't hold the start for GitHub */
+        return;
+    }
     if (portUpdateState() == PORTUPD_READY)
     {   /* the last install was cut off and has just been finished: the new
          * build is in the folder, this is the old one */
@@ -264,10 +269,6 @@ void portUpdateLaunch(void)
     if (autoans != NULL)
     {
         answer = PORTUPD_ANSWER_UPDATE;
-    }
-    else if (launchQuiet())
-    {
-        return;   /* not answered: the next launch asks */
     }
     else
     {

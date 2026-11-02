@@ -1190,21 +1190,7 @@ void portUpdateTick(void)
     const char *autoinstall = getenv("GE_UPDATE_AUTO");
 
     sTicks++;
-    if (!sStarted)
-    {
-        sStarted = 1;
-        if (sState == PORTUPD_READY)
-        {   /* a cut-off install was finished at boot: Restart is the offer */
-        }
-        else if (portUpdateEnabled())
-        {
-            startJob(JOB_CHECK_QUIET);
-        }
-        else
-        {
-            sState = PORTUPD_OFF;
-        }
-    }
+    portUpdateLaunchCheck();   /* headless builds have no launch prompt: the check starts here */
     if (autoinstall != NULL && !sBusy && !sRestarted)
     {   /* harness: take what a check found (not again after its restart) */
         if (sState == PORTUPD_AVAILABLE)
