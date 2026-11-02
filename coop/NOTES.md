@@ -3809,3 +3809,41 @@ each took the other as its joiner, each with its own guards, for good.
   fired.
 - net_scenarios.sh: a "two hosts" line, and FAILON_SPLIT=1 fails a run in
   which a joiner took over but nobody stepped down and got its snapshot.
+
+## Surface 2's alarm guards: sent from their second snapshot (2026-11-02, COOP_VERSION stays 17)
+
+QA-9 (checklist row SU2): on Surface 2 with the alarm on, every rig run had a joiner log
+"unresolved desync: the chrs here are not the host's", and the joiner showed alarm guards
+standing at the spawn pad that the host didn't have.
+
+The cause is the level's own script. ai_34, the list the alarm's reinforcements run,
+starts with `if_guard_distance_to_bond_greater_than(0xdc05, 0x3f)`. Label 3f logs
+"too far - deleted!" and runs `chr_remove_instant`. So while nobody is near pad 214, the
+spawner makes a guard, the guard removes itself on its first tick, and the spawner makes
+another. On the host, chrs 15, 16 and 17 turned over about four times a second, solo too.
+Each one existed for one guard snapshot only: of 841 spawns logged, 840 were gone by the
+next snapshot.
+
+A joiner mirrored every guard a snapshot carried, and the reaper kept a guard until 1 s had
+passed with no snapshot entry (COOP_GUARD_GONE_LIVE). So the joiner always had one to
+three guards standing at the pad that the host never showed. The chr checksum hardly ever
+agreed, and the joiner reported it as unresolved.
+
+Fix (host only; packets unchanged):
+- coopSendGuards sends a chr only from the second snapshot in a row it is in. Each slot
+  keeps the chrnum it had and the run of snapshots it has been there for. A new guard
+  reaches joiners one snapshot later, 50 ms. A guard that removes itself straight away
+  never reaches them.
+- The chr checksum (coopReplChrHash) skips chrs not sent yet (coopExtChrSent), so it names
+  what joiners have.
+
+Rig: Linux i686, two copies on one machine over the mock Steam. This is a simulated
+network, not internet play.
+- QA's SU2-alarm and SU2 rows: before, "unresolved desync" in every run, with 113 of 182
+  chr checksums differing. After, none unresolved, and 0 (SU2-alarm) or 2 (SU2) of about
+  180 checksums differ.
+- With the host standing on pad 214 after the alarm, the reinforcement stays, and the
+  joiner mirrors it the same second the host's watch sees it.
+- Both rows still fail QA's check that "mirrored host chr 1[567]" appears in the joiner's
+  log. In those rows no player is near the pad, so the host never keeps an alarm guard,
+  and the joiner rightly mirrors none.
