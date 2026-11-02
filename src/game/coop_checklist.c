@@ -84,6 +84,8 @@ static s32    sWatchDoors;
 #define CL_MAXDOORS 512
 static u8     sDoorOpen[CL_MAXDOORS];
 static s32    sDoorsSeen;
+static u32    sSnapSettle;    /* joiner: the applied snapshot whose doors are not logged settled yet */
+static s32    sSnapSettleLeft;
 static s32    sLastAlarm = -1, sLastClockRun = -1;
 static s32    sLastFlags;
 static u32    sLastTicks, sLastSec, sDoneAt;
@@ -454,6 +456,90 @@ static double clWallClock(void)
     return portProfNow() / 1e6;
 }
 
+/* the open and the moving doors, as "a,b" or "none"; returns the number moving */
+static s32 clDoorLists(char *open, char *moving, s32 size)
+{
+    PropDefHeaderRecord *it = (PropDefHeaderRecord *) g_CurrentSetup.propDefs;
+    s32 no = 0, nm = 0, lo = 0, lm = 0, k = 0;
+
+    open[0] = moving[0] = '\0';
+    for (; it != NULL && it->type != PROPDEF_END && k < CL_MAXDOORS; it = (PropDefHeaderRecord *) ((u32 *) it + sizepropdef(it)))
+    {
+        DoorRecord *d = (DoorRecord *) it;
+        s32 id;
+
+        if (it->type != PROPDEF_DOOR || d->prop == NULL)
+        {
+            continue;
+        }
+        k++;
+        id = (s32) ((u8 *) it - (u8 *) g_CurrentSetup.propDefs);
+        if (d->openstate != DOORSTATE_STATIONARY)
+        {
+            if (lm < size - 12)
+            {
+                lm += sprintf(moving + lm, "%s%d", nm ? "," : "", id);
+            }
+            nm++;
+        }
+        else if (!doorIsClosed(d) && lo < size - 12)
+        {
+            lo += sprintf(open + lo, "%s%d", no ? "," : "", id);
+            no++;
+        }
+    }
+    if (!no)
+    {
+        sprintf(open, "none");
+    }
+    if (!nm)
+    {
+        sprintf(moving, "none");
+    }
+    return nm;
+}
+
+/* coop_repl.c, GE_COOP_WATCHDOORS: the host starts a join snapshot (sent = 1), or a
+ * joiner has applied one. Logs the doors standing open and the doors moving at that
+ * moment, tagged with the snapshot, so a check compares the host's doors with the
+ * joiner's for the same snapshot; the joiner logs them again once no door moves */
+void coopClSnapDoors(s32 sent, u32 snapid)
+{
+    char open[512], moving[512];
+
+    if (!sWatchDoors || g_CurrentSetup.propDefs == NULL)
+    {
+        return;
+    }
+    clDoorLists(open, moving, sizeof(open));
+    portConLogf("ge: coop: watch: snapshot %u %s: open %s, moving %s, clock %.2f\n", snapid, sent ? "sent" : "applied",
+                open, moving, clWallClock());
+    if (!sent)
+    {
+        sSnapSettle = snapid;
+        sSnapSettleLeft = 15;
+    }
+}
+
+static void clSnapSettle(void)
+{   /* once a second after a joiner applied a snapshot: its doors once none moves */
+    char open[512], moving[512];
+    s32 nm;
+
+    if (sSnapSettleLeft <= 0)
+    {
+        return;
+    }
+    nm = clDoorLists(open, moving, sizeof(open));
+
+    if (nm == 0 || --sSnapSettleLeft == 0)
+    {
+        portConLogf("ge: coop: watch: snapshot %u %s: open %s, moving %s, clock %.2f\n", sSnapSettle,
+                    nm == 0 ? "settled" : "never settled", open, moving, clWallClock());
+        sSnapSettleLeft = 0;
+    }
+}
+
 static void clWatchDoors(void)
 {   /* GE_COOP_WATCHDOORS: first pass lists the open doors, later passes log changes */
     PropDefHeaderRecord *it = (PropDefHeaderRecord *) g_CurrentSetup.propDefs;
@@ -484,7 +570,7 @@ static void clWatchDoors(void)
         }
         else if (open != sDoorOpen[k])
         {
-            portConLogf("ge: coop: watch: door %d %s\n", id, open ? "open" : "closed");
+            portConLogf("ge: coop: watch: door %d %s, clock %.2f\n", id, open ? "open" : "closed", clWallClock());
         }
         n += open;
         sDoorOpen[k++] = (u8) open;
@@ -544,7 +630,7 @@ static void clWatchTick(void)
             portConLogf("ge: coop: watch: alarm %s\n", alarm ? "on" : "off");
             sLastAlarm = alarm;
         }
-        if (run != sLastClockRun || (run && (coopExtMissionTicks() / 60) % 5 == 0))
+        if (run != sLastClockRun || run)   /* every second while it runs: a check can place a line against it */
         {
             portConLogf("ge: coop: watch: countdown %s %.1f s at mission %u s, clock %.2f\n", run ? "running" : "stopped",
                         countdownTimerGetValue() / 60.0f, coopExtMissionTicks() / 60, clWallClock());
@@ -602,6 +688,7 @@ void coopChecklistTick(void)
         sLastAlarm = sLastClockRun = -1;
         sLastFlags = 0;
         sDoorsSeen = 0;
+        sSnapSettleLeft = 0;
     }
     sLastTicks = t;
     if ((!sSolo && !coopLobbyHasPartner()) || t < 2)
@@ -637,6 +724,7 @@ void coopChecklistTick(void)
         if (sWatchDoors)
         {
             clWatchDoors();
+            clSnapSettle();
         }
     }
 }

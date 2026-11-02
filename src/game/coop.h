@@ -855,6 +855,7 @@ void coopReplTick(u32 missionticks);
 void coopReplPacket(const void *buf, s32 len, s32 from);
 void coopReplSendSnapshot(s32 player);  /* host: every setup object's state to that player, over the next ticks */
 s32  coopReplSnapshotDone(void);        /* joiner: this mission's join snapshot is in and applied */
+void coopClSnapDoors(s32 sent, u32 snapid);  /* coop_checklist.c: the doors at a join snapshot (GE_COOP_WATCHDOORS) */
 void coopReplMigrated(void);            /* we became the host or follow a new one: snapshot to everyone again */
 s32  coopReplDesyncs(void);             /* joiner: blocks found different and corrected this mission */
 s32  coopReplUnresolved(void);          /* joiner: differences that outlasted 10 s of corrections */

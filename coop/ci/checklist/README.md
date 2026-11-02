@@ -56,3 +56,22 @@ seconds behind: compare countdowns by the clock (the `clocksame` check), not by
 mission second. The stage-flags line shows the objective flags, the AI script's
 bits shifted right by 8 (the script's 0x10000 is 100 there), which is what the
 `hflag:`/`jflag:` checks read.
+
+The watch logs a running countdown once a mission second. `cdb:<N>:<regex>` (or
+`cdh:`, `cdj:`) needs the first line matching `<regex>` to come while a countdown
+runs and once it is under N s: a running countdown before the line, and the first
+one after it under N (AZ4: "Final checks cleared" is `cdb:10:`). It fails a script
+that reaches the line before its countdown has run that far, even if a countdown
+runs afterwards. `seqj:<A>=><B>` needs a line matching `<A>` before the first `<B>`
+(AZ4: the countdown shows on the joiner before the launch caption).
+
+`GE_COOP_TESTOPEN=join` opens the door when a partner first connects, so it is open
+and still at the join snapshot a joiner applies once its intro is over (X3b).
+`GE_COOP_WATCHDOORS` also logs the open and the moving doors when the host starts a
+join snapshot and when the joiner has applied it, tagged with the snapshot, and the
+joiner's doors again once none moves. `doorsame` compares the host's still doors at
+the snapshot the joiner applied with the joiner's settled ones, leaving out doors
+the host's watch saw change in between; if the test door itself moved, the run is
+no test and has to be run again. The clock stamps that window compares come from each
+copy's own monotonic clock, so `doorsame` and `clocksame` hold only when host and
+joiner run on one machine, as on the rig, not across two PCs.
