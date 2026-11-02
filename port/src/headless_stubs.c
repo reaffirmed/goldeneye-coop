@@ -5,13 +5,70 @@
  * null renderer; these satisfy the symbols their callers reference.
  */
 #include <ultra64.h>
+#include <PR/libaudio.h>
+
+/* No sound out, but the synthesizer still runs: the sound player and the
+ * sequencers only take their events and advance inside alAudioFrame, as
+ * audio_pc.c's pump says for a missing device. Without it every event
+ * posted stayed queued until the queue filled ("snd: event queue FULL"),
+ * sounds never ended and music.c's wait for a stopped sequence spun out
+ * its 512 tries. One frame per game field, as audio_pc.c with a device;
+ * the command list is built and dropped, since nothing would hear it. */
+static void headlessAudioFrame(void)
+{
+    extern u32 g_FrameSize;
+    static Acmd cmdList[3072 * 4]; /* audio_pc.c's budget */
+    static s16 frameBuf[1024 * 2];
+    s32 cmdLen = 0;
+    s32 samples = g_FrameSize != 0 ? (s32) g_FrameSize : 368;
+
+    if (samples > 1024)
+    {
+        samples = 1024;
+    }
+    alAudioFrame(cmdList, &cmdLen, frameBuf, samples);
+}
+
+static s32 sInPump; /* as audio_pc.c: client handlers can re-enter the pump */
 
 void portAudioPump(void)
 {
+    extern s32 currentFrameCounter;
+    static s32 lastField, primed;
+    s32 fields;
+
+    if (sInPump || alGlobals == NULL || alGlobals->drvr.head == NULL)
+    {
+        return;
+    }
+    if (!primed)
+    {
+        primed = 1;
+        lastField = currentFrameCounter;
+    }
+    fields = currentFrameCounter - lastField;
+    lastField = currentFrameCounter;
+    if (fields < 0 || fields > 16)
+    {
+        fields = 1;
+    }
+    sInPump = 1;
+    while (fields-- > 0)
+    {
+        headlessAudioFrame();
+    }
+    sInPump = 0;
 }
 
 void portAudioPumpForce(void)
 {
+    if (sInPump || alGlobals == NULL || alGlobals->drvr.head == NULL)
+    {
+        return;
+    }
+    sInPump = 1;
+    headlessAudioFrame();
+    sInPump = 0;
 }
 
 /* blood_animation.c evicts CPU-animated textures from the fast3d cache;
