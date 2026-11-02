@@ -549,6 +549,14 @@ static void coopTrackCombat(void);
 static void coopApplyWorld(CoopWorldPkt *p);
 static void coopCradleFallTick(void);
 static s32 sClockSet;
+/* joiner: our script stepped over a countdown Set/Start/Stop (the host's to
+ * run) and the host's clock has not shown it yet: our checks of the clock
+ * wait (coopClockPending) */
+#define COOP_CLOCK_WAIT_MS 5000   /* coopClockPending: then ours goes on */
+static s32 sClockPending;
+static u32 sClockPendingMs;
+static s32 sClockWantRunning = -1;
+static f32 sClockWantValue = -1.0f;
 static s32 coopSetupOfs(void *rec);
 static s32 coopSetupRecOk(s32 ofs);
 static StandTile *coopFindStan(coord3d *pos, StandTile *from, coord3d *frompos);
@@ -2268,6 +2276,9 @@ void coopStageStart(void)
     memset(sFlagBy, -1, sizeof(sFlagBy));
     sNumTeamPicks = 0;
     sClockSet = 0;
+    sClockPending = 0;
+    sClockWantRunning = -1;
+    sClockWantValue = -1.0f;
     sLastHurtTick = sLastFightTick = sDeadSince = 0;
     sBledOut = 0;
     sLivesLeft = coopLivesStart();
@@ -7037,6 +7048,14 @@ static void coopApplyClock(CoopWorldPkt *p)
         return;
     }
     sClockSet = 1;  /* the team has a countdown: if we take over as host, ours goes on in WORLD */
+    if (sClockPending && (sClockWantRunning < 0 || running == sClockWantRunning)
+        && (sClockWantValue < 0.0f || sClockWantRunning == 1
+            || (p->clock - sClockWantValue <= 60.0f && sClockWantValue - p->clock <= 60.0f)))
+    {   /* the host's script has got there too: its clock is the one ours asked for */
+        sClockPending = 0;
+        sClockWantRunning = -1;
+        sClockWantValue = -1.0f;
+    }
     if (running != (countdownTimerIsRunning() != 0) || shown != !(clock_drawn_flag & 1))
     {
         portConLogf("ge: coop: countdown %s and %s, %.1f s left (host)\n", running ? "running" : "stopped",
@@ -11460,11 +11479,63 @@ static void coopEndingApply(const u8 *raw, s32 from)
  * list runs its own; our copy of the level script gets to the same ending a
  * few seconds late, and its copies of them would black out the jump (chrai.c
  * steps over them) */
+/* joiner: a countdown command our script stepped over; until the host's
+ * clock shows it, our copy's clock is still the old one. Aztec's launch: the
+ * joiner's copy set 30 s and started it (both stepped over), then asked "under
+ * 10 s?" of a clock still at 0, cleared the final checks at once and asked the
+ * host to start the ending: the shuttle went with no countdown on either screen */
+static void coopClockNoteSkipped(const u8 *list, s32 offset)
+{
+    switch (list[offset])
+    {
+        case AI_HudCountdownSet:
+            sClockWantValue = (f32) (s16) ((list[offset + 1] << 8) | list[offset + 2]) * CHRAI_TICKRATE_F;
+            break;
+        case AI_HudCountdownStart:
+            sClockWantRunning = 1;
+            break;
+        case AI_HudCountdownStop:
+            sClockWantRunning = 0;
+            break;
+        default:
+            return;
+    }
+    if (!sClockPending)
+    {
+        portConLogf("ge: coop: our script set the countdown: its checks wait for the host's clock\n");
+    }
+    sClockPending = 1;
+    sClockPendingMs = coopNowMs();
+}
+
+/* joiner: hold a countdown check while the host's clock is behind our script
+ * (COOP_CLOCK_WAIT_MS at most: a host whose script never gets there leaves
+ * ours to go on with what it has) */
+static s32 coopClockPending(void)
+{
+    if (sClockPending && coopNowMs() - sClockPendingMs > COOP_CLOCK_WAIT_MS)
+    {
+        portConLogf("ge: coop: the host's countdown did not come: our script goes on\n");
+        sClockPending = 0;
+        sClockWantRunning = -1;
+        sClockWantValue = -1.0f;
+    }
+    return sClockPending;
+}
+
 s32 coopAiSkip(u8 *list, s32 offset, ChrRecord *self)
 {
     if (sEnabled > 0 && !coopNetIsHost() && !sApplyingRemoteAi && coopHostOwnsCmd(list[offset]))
     {
+        coopClockNoteSkipped(list, offset);
         return 1;   /* the host's countdown and blast (coopApplyClock, coopApplyAiCommand) */
+    }
+    if (sEnabled > 0 && !coopNetIsHost() && !sApplyingRemoteAi
+        && (list[offset] == AI_IFHudCountdownLessThan || list[offset] == AI_IFHudCountdownGreaterThan
+            || list[offset] == AI_IFHudCountdownIsNotRunning)
+        && coopClockPending())
+    {
+        return 2;   /* ask again once the host's clock has caught up with ours */
     }
     if (sEnabled > 0 && !coopNetIsHost() && !sApplyingRemoteAi && list[offset] == AI_BondDisableDamageAndPickups
         && !sHostEndingBegun && !coopVersus() && coopInMission() && coopRemoteHere(0) && coopEndingHold(list, offset, self))
