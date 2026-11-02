@@ -64,16 +64,17 @@ its game code too.
 Seven rows have new rig lines (F7, SR1, SR3, SU2, SI6, T3, T4). They ran on e1e93f5 with
 this PR's harness additions, which only add log lines: the mission second on the
 `GE_COOP_WATCH` appear and gone lines, "gone (was on our screen)", and `GE_COOP_WATCHOBJS`.
-SU2's failure also shows on plain e1e93f5.
+SU2's failure also showed on plain e1e93f5. NET's fix (#129, QA-9) is on main dd5e114, and SU2
+was re-run there with its check reworked (the host now stands on pad 214, so the alarm's guard
+stays): it passes. Every other row's current result is still from e1e93f5.
 Also on e1e93f5: CI `mission_runs.sh` 20/20 (lossy link), its three late joins 3/3,
 `joiner_spots.sh` 4/4, every `rows.py` line (D3 and D4 fail as the host alone does),
 the objective sweep 17/17, and the X9 split runs 2/2. CA3 and the hostage spot first
 failed because the host's window could not open its GL context (a rig fault, no game
 log at all); both passed when re-run.
 
-Tally on e1e93f5, 101 rows: 81 PASS, 2 FAIL (SU2, the joiner's chrs fall out of step
-with the alarm on, QA-9; SR1, a joiner-only civilian-casualty failure in 1 run of 6,
-QA-10), 2 BLOCKED (A2, T2), 16 NOT RUN. "Earlier" with no build is the
+Tally, 101 rows (SU2 on dd5e114, the rest on e1e93f5): 82 PASS, 1 FAIL (SR1, a
+joiner-only civilian-casualty failure in 1 run of 6, QA-10), 2 BLOCKED (A2, T2), 16 NOT RUN. "Earlier" with no build is the
 bug-fix branch on 2026-10-29 and 2026-10-30 (heads 620f526 to 93ea314).
 
 **Fixed: intermittent desync.** In joiner-heavy runs where a blast kills guards
@@ -167,7 +168,7 @@ ACT_DIE (`solo.sh`, `GE_COOP_REVIVE=1`).
 | # | Family | Joiner does | Both screens should show | Rig check | Result |
 | --- | --- | --- | --- | --- | --- |
 | SU1 | ACTION | Destroys the communications dish / power | Objective on both | | **PASS** (rig, e1e93f5, objective sweep `rows.py SW-surface2`: every joiner step ran, the same objective states on both, no unresolved desync). Earlier, 9883333: pass (rig, 9883333, objective sweep `rows.py SW-surface2`: every joiner step ran, the same objective states on both, no unresolved desync). Earlier, 0d88b92: pass (rig, 0d88b92, objective sweep `rows.py SW-surface2`: A and B complete on both, credit player 2). Earlier: pass (rig: A and B destroy objectives). |
-| SU2 | SPAWN | Watches the reinforcement spawn points | Reinforcements arrive the same on both (Surface 2 spawn fix, #63) | `SU2` | **FAIL** (rig, e1e93f5 with this PR's harness additions (log lines only), `rows.py SU2`, task QA-9): with the alarm on, the joiner logs "repl: unresolved desync: the chrs here are not the host's" (3 of 3 SU2 runs; `SU2-alarm`, the alarm alone, 1 of 1 on this harness and 1 of 1 on plain e1e93f5; `SU2-kill9`, chr 9 killed with no alarm, passes). The reinforcements do reach the joiner under the host's numbers ("mirrored host chr 15"), and its own script spawns none. But the alarm script spawns guards at pad 214 in the places of chrs 15 to 17 that come and go every 1 to 2 s on the host, as on a host alone (`SU2-solo`), and the joiner's chr set falls behind for more than the 10 s the checksum allows. |
+| SU2 | SPAWN | Watches the reinforcement spawn points | Reinforcements arrive the same on both (Surface 2 spawn fix, #63) | `SU2` | **PASS** (rig, main dd5e114 with #129, `rows.py SU2`, task QA-9 fixed): 2 of 2. The host raises the alarm and stands on pad 214, so the alarm script's guard stays; the joiner mirrors it under the host's number ("mirrored host chr 15", "chr 17") and logs no unresolved desync, only 1 or 2 corrected object desyncs. `SU2-alarm` (nobody near pad 214: each guard removes itself on its first tick, and since #129 the host never sends one) and `SU2-kill9` pass 2 of 2, with no mirrored guard and no desync at all; `SU2-solo` passes. Earlier, e1e93f5: FAIL (rig, e1e93f5 with #128's harness additions (log lines only), `rows.py SU2` before it put the host on pad 214, task QA-9): with the alarm on, the joiner logs "repl: unresolved desync: the chrs here are not the host's" (3 of 3 SU2 runs; `SU2-alarm`, the alarm alone, 1 of 1 on this harness and 1 of 1 on plain e1e93f5; `SU2-kill9`, chr 9 killed with no alarm, passes). The reinforcements do reach the joiner under the host's numbers ("mirrored host chr 15"), and its own script spawns none. But the alarm script spawns guards at pad 214 in the places of chrs 15 to 17 that come and go every 1 to 2 s on the host, as on a host alone (`SU2-solo`), and the joiner's chr set falls behind for more than the 10 s the checksum allows. |
 | SU3 | ONEPLAYER | Enters the bunker first | Ends for both | `SU3` | **PASS** (rig, e1e93f5, `rows.py SU3`). Earlier, 9883333: pass (rig, 9883333, `rows.py SU3`). Earlier, 0d88b92: pass (rig, 0d88b92, `rows.py SU3`): the joiner on pad 3; the room objective completes on both and one mission end on each. Earlier: pass (rig: joiner enters the objective room, C/D on both). |
 
 ## 9. Bunker 2
