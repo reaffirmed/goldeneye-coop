@@ -72,4 +72,6 @@ join snapshot and when the joiner has applied it, tagged with the snapshot, and 
 joiner's doors again once none moves. `doorsame` compares the host's still doors at
 the snapshot the joiner applied with the joiner's settled ones, leaving out doors
 the host's watch saw change in between; if the test door itself moved, the run is
-no test and has to be run again.
+no test and has to be run again. The clock stamps that window compares come from each
+copy's own monotonic clock, so `doorsame` and `clocksame` hold only when host and
+joiner run on one machine, as on the rig, not across two PCs.
