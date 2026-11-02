@@ -2920,6 +2920,42 @@ static void coopHarnessTick(void)
             portConLogf("ge: coop: testworld: alarm + flag 0x40000000\n");
         }
     }
+    {   /* GE_COOP_TESTOPEN=<s>: host opens the door nearest Bond <s> seconds into the
+         * mission, partner or not (harness only: a door already open when someone drops in) */
+        static s32 testopen = -2;
+        if (testopen == -2)
+        {
+            const char *e = getenv("GE_COOP_TESTOPEN");
+            testopen = (e != NULL) ? atoi(e) : -1;
+        }
+        if (testopen >= 0 && coopNetIsHost() && coopInMission() && sMissionTicks >= (u32) testopen * 60)
+        {
+            PropRecord *bond = getCurrentPlayerProp();
+            PropRecord *it, *best = NULL;
+            f32 bestd = 1e30f;
+
+            testopen = -1;
+            for (it = g_ActivePropsHead; bond != NULL && it != NULL; it = it->next)
+            {
+                if (it->type == PROP_TYPE_DOOR && it->door != NULL && doorIsClosed(it->door))
+                {
+                    f32 dx = it->pos.f[0] - bond->pos.f[0];
+                    f32 dz = it->pos.f[2] - bond->pos.f[2];
+                    if (dx * dx + dz * dz < bestd)
+                    {
+                        bestd = dx * dx + dz * dz;
+                        best = it;
+                    }
+                }
+            }
+            if (best != NULL)
+            {
+                portConLogf("ge: coop: testopen: door %d -> open (dist %.0f)\n",
+                    (s32) ((u8 *) best->door - (u8 *) g_CurrentSetup.propDefs), sqrtf(bestd));
+                doorActivate(best->door, DOORSTATE_OPENING);
+            }
+        }
+    }
     {   /* GE_COOP_TESTFLAG=<hex>:<s>: host sets those stage flags <s> seconds into the mission
          * (harness only: an objective's earlier steps, e.g. Dam's modem 100) */
         static s32 testflag = -2;

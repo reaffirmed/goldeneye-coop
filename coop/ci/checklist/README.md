@@ -37,3 +37,22 @@ speed: with 3 pairs on 4 cores the sweep's steps never got to run before the
 pair was killed. SECSX (default 2.5) is how much wall time a pair gets per
 mission second. A FAIL is a lead, not a verdict: read the logs first, since a
 step that missed its target also fails a check.
+
+Door and countdown rows use three more harness switches (src/game/coop.c,
+src/game/coop_checklist.c; env only, nothing changes without them):
+
+- `GE_COOP_WATCHDOORS=1` logs the open doors once (a joiner waits for its join
+  snapshot), then each door that opens or closes. A door's number is its byte
+  offset in the setup, the same number `testdoor` and `testopen` print.
+- `GE_COOP_TESTOPEN=<s>`: the host opens the closed door nearest it `<s>` mission
+  seconds in, partner or not, so a drop-in finds a door already open (X3b, X4b).
+- Step `e` presses Use on the door nearest the player, keys and locks as in play
+  (DE3's safe door).
+
+`GE_COOP_WATCHWORLD` stamps each countdown line with the mission second and the
+machine's monotonic clock, which copies on one machine share. Mission seconds
+start when each copy loads the mission, so a joiner that came in later is
+seconds behind: compare countdowns by the clock (the `clocksame` check), not by
+mission second. The stage-flags line shows the objective flags, the AI script's
+bits shifted right by 8 (the script's 0x10000 is 100 there), which is what the
+`hflag:`/`jflag:` checks read.
