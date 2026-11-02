@@ -94,6 +94,18 @@ ROWS = {
     # pair.sh stops both once either side's steps are done: the host's last step waits for the joiner's death
     'BU5': ('bunker2', 1, f'{INV} GE_COOP_TESTDOOR=1 GE_COOP_STEPS=c27@8,c27@60', 'GE_COOP_TESTDOOR=1 GE_COOP_STEPS=o3@8,c13@18,c12@30,d@40', 80, 2,
             ['h:chr 0 goes to player 2', 'h:chr 0 goes to player 1']),
+    # the ending (Natalya and Bond run out to the helipad); GE_COOP_TESTALLOBJ=1 counts every objective
+    # complete, pad 51 is in the exit room. BU6: the host gets there, the joiner is still at the start: the
+    # joiner's own Bond is stood on the ending's pad, not left running where it stood (off the shot)
+    'BU6': ('bunker2', 0, f'{INV} GE_COOP_TESTALLOBJ=1 GE_COOP_STEPS=p51@12', INV, 70, 2,
+            ["j:our Bond goes to the ending's pad 119", "j:our Bond runs the ending's list 0417",
+             '!j:mission complete, telling the peer', '=h:mission end', '=j:mission end']),
+    # BU7: the joiner gets there and its own objectives read incomplete (the switch is on the host only):
+    # its copy of the exit script waits at the host's ending instead of taking the failure branch, which
+    # ended the joiner's mission a second into the host's cutscene
+    'BU7': ('bunker2', 0, f'{INV} GE_COOP_TESTALLOBJ=1', f'{INV} GE_COOP_STEPS=p51@12', 70, 2,
+            ["j:our copy of that script waits", "j:our Bond runs the ending's list 0417",
+             '!j:mission complete, telling the peer', '=h:mission end', '=j:mission end']),
     # ---- Statue
     'ST5': ('statue', 0, INV, f'{INV} GE_COOP_STEPS=g1@12', 60, 2,
             ['b:objective 4 \\(E\\) is now complete']),

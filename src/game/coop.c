@@ -556,6 +556,7 @@ static void coopApplyAiCommand(CoopEvent *ev);
 static s32 sPendingCinemaList = -1;
 static s32 sHostEndingHere;    /* joiner: we play the host's ending; its exit is the host's to send */
 static s32 sHostEndingBegun;   /* joiner: the host's script has started an ending (damage and pickups off) */
+static s32 sEndingParked;      /* joiner: our copy of the level script waits at the host's ending (logged once) */
 static void coopPendingCinemaTick(void);
 static s32 coopLocalCalm(void);
 static void coopTrackCombat(void);
@@ -2257,6 +2258,7 @@ void coopStageStart(void)
     sPendingCinemaList = -1;
     sHostEndingHere = 0;
     sHostEndingBegun = 0;
+    sEndingParked = 0;
     coopSeenReset();
     sWorldHostFlags = sWorldOwnFlags = 0;
 
@@ -11681,6 +11683,79 @@ void coopAiCommand(u8 *list, s32 offset, ChrRecord *self)
  * camera switch to make that body (it can lag the command by a few ticks) */
 static s32 sPendingCinemaWait;
 
+/* The level script that gives Bond's ending body list `id` (SetChrAiList to
+ * CHR_BOND_CINEMA) may stand that body on a pad just before it (Bunker 1 and
+ * 2, Surface 2, Egyptian: chr_try_teleporting_to_pad(CHR_BOND_CINEMA, ...)).
+ * The host relays only the SetChrAiList, so a joiner whose own copy never got
+ * to the exit (the host reached it) ran the list wherever it stood, out of
+ * the ending's shot. Found in our own copy of the setup, so nothing new is
+ * sent: the teleport command's bytes in `out`, 1 if there is one. */
+static s32 coopEndingBodyPad(s32 id, u8 *out)
+{
+    s32 i;
+
+    if (g_CurrentSetup.ailists == NULL)
+    {
+        return 0;
+    }
+    for (i = 0; g_CurrentSetup.ailists[i].ailist != NULL && i < 0x400; i++)
+    {
+        u8 *list = (u8 *) g_CurrentSetup.ailists[i].ailist;
+        s32 at = 0, tp = -1, steps;
+
+        for (steps = 0; list[at] != AI_EndList && steps < 0x4000; steps++)
+        {
+            s32 len = chraiitemsize(list, at);
+
+            if (len <= 0)
+            {
+                break;
+            }
+            if (list[at] == AI_TRYTeleportingChrToPad && list[at + 1] == (u8) CHR_BOND_CINEMA)
+            {
+                tp = at;
+            }
+            else if (list[at] == AI_SetChrAiList && list[at + 1] == (u8) CHR_BOND_CINEMA)
+            {
+                if (tp >= 0 && ((list[at + 2] << 8) | list[at + 3]) == id)
+                {
+                    memcpy(out, list + tp, sizeof(AiTRYTeleportingChrToPadRecord));
+                    return 1;
+                }
+                tp = -1;    /* a teleport goes with the next body list only */
+            }
+            at += len;
+        }
+    }
+    return 0;
+}
+
+/* our body onto the ending's pad: the setup's command, run on our body with
+ * its label after it (a label it can't find would send the interpreter back
+ * to the command, for ever) */
+static void coopCinemaTeleport(ChrRecord *bc, const u8 *cmd)
+{
+    static u8 list[16];
+    AIRecord *savedlist = bc->ailist;
+    s32 savedofs = bc->aioffset;
+    s32 n = sizeof(AiTRYTeleportingChrToPadRecord);
+
+    memcpy(list, cmd, n);
+    list[n++] = AI_Label;
+    list[n++] = cmd[4];   /* AiTRYTeleportingChrToPadRecord.GOTOLABEL */
+    list[n] = AI_EndList;
+    bc->ailist = (AIRecord *) list;
+    bc->aioffset = 0;
+    sApplyingRemoteAi = 1;
+    ai((PropDefHeaderRecord *) bc, PROP_TYPE_CHR);
+    sApplyingRemoteAi = 0;
+    bc->ailist = savedlist;
+    bc->aioffset = savedofs;
+    portConLogf("ge: coop: our Bond goes to the ending's pad %d, now at %.0f %.0f %.0f room %d\n", (cmd[2] << 8) | cmd[3],
+                bc->prop->pos.f[0], bc->prop->pos.f[1], bc->prop->pos.f[2],
+                bc->prop->stan != NULL ? (s32) bc->prop->stan->room : -1);
+}
+
 static void coopPendingCinemaTick(void)
 {
     ChrRecord *bc;
@@ -11696,6 +11771,12 @@ static void coopPendingCinemaTick(void)
     bc = (g_CurrentPlayer->prop != NULL) ? g_CurrentPlayer->prop->chr : NULL;
     if (bc != NULL)
     {
+        u8 tp[8];
+
+        if (coopEndingBodyPad(sPendingCinemaList, tp))
+        {
+            coopCinemaTeleport(bc, tp);
+        }
         bc->ailist = ailistFindById(sPendingCinemaList);
         bc->aioffset = 0;
         bc->sleep = 0;
@@ -11949,6 +12030,22 @@ s32 coopAiSkip(u8 *list, s32 offset, ChrRecord *self)
         && coopClockPending())
     {
         return 2;   /* ask again once the host's clock has caught up with ours */
+    }
+    if (sEnabled > 0 && !coopNetIsHost() && !sApplyingRemoteAi && list[offset] == AI_BondDisableDamageAndPickups
+        && sHostEndingBegun && !coopVersus() && coopRemoteHere(0)
+        && (self == NULL || g_CurrentPlayer->prop == NULL || self != g_CurrentPlayer->prop->chr))
+    {   /* the host's ending already plays here: our copy of the level script
+         * stays at its first command rather than play it a second time. Run
+         * on, it asks its own questions again and can answer them otherwise:
+         * Bunker 2's exit asks "all objectives complete?", and an answer of
+         * no here took the failure branch, which ended our mission a second
+         * into the host's ending (no Natalya, no run out to the helipad) */
+        if (!sEndingParked)
+        {
+            sEndingParked = 1;
+            portConLogf("ge: coop: the host's ending plays here: our copy of that script waits\n");
+        }
+        return 2;
     }
     if (sEnabled > 0 && !coopNetIsHost() && !sApplyingRemoteAi && list[offset] == AI_BondDisableDamageAndPickups
         && !sHostEndingBegun && !coopVersus() && coopInMission() && coopRemoteHere(0) && coopEndingHold(list, offset, self))

@@ -30,6 +30,8 @@
  *                          (door number = its byte offset in the setup, as testdoor/testopen)
  *   GE_COOP_REVIVE=1       log any chr that leaves ACT_DIE/ACT_DEAD for another action
  *   GE_COOP_SOLO=1         run the steps with no partner (a host on its own)
+ *   GE_COOP_TESTALLOBJ=1   every objective counts as complete (the debug menu's switch),
+ *                          so an exit plays the mission's success ending
  */
 #include <ultra64.h>
 #include <math.h>
@@ -124,6 +126,12 @@ static void clInit(void)
     }
     sRevive = getenv("GE_COOP_REVIVE") != NULL;
     sSolo = getenv("GE_COOP_SOLO") != NULL;
+    if (getenv("GE_COOP_TESTALLOBJ") != NULL)
+    {
+        extern s32 debug_all_obj_complete_flag;
+
+        debug_all_obj_complete_flag = 1;
+    }
     e = getenv("GE_COOP_WATCH");
     while (e != NULL && *e != '\0' && sNumWatch < CL_MAXWATCH)
     {
