@@ -407,11 +407,12 @@ if(GE_VIDEO)
     add_compile_definitions(GE_VIDEO=1)
 else()
     set(FAST3D_SRC)
-    # video.c/input_pc.c/raphnet.c are GE_VIDEO-only; exclude them from the port glob.
+    # video.c/input_pc.c/raphnet.c/port_update_launch.c are GE_VIDEO-only; exclude them from the port glob.
     list(REMOVE_ITEM PORT_SRC
         ${CMAKE_SOURCE_DIR}/port/src/video.c
         ${CMAKE_SOURCE_DIR}/port/src/input_pc.c
-        ${CMAKE_SOURCE_DIR}/port/src/raphnet.c)
+        ${CMAKE_SOURCE_DIR}/port/src/raphnet.c
+        ${CMAKE_SOURCE_DIR}/port/src/port_update_launch.c)
 endif()
 
 add_executable(ge ${GAME_SRC} ${ENGINE_SRC} ${GU_SRC} ${PORT_SRC}

@@ -515,9 +515,6 @@ static void portDlgClose(void);
 static s32 portDlgTick(void);
 static s32 portDlgSaidYes(void);
 static Gfx *portDlgDraw(Gfx *DL);
-/* the update prompt on the Files screen (with the box, further down) */
-static s32 portUpdPromptTick(void);
-static Gfx *portUpdPromptDraw(Gfx *DL);
 static s32 port_filesel_options_selected = FALSE; /* OPTIONS clicked: menu change at the end of the tick */
 #endif
 
@@ -2768,10 +2765,6 @@ s32 interface_menu05_fileselect(void)
         }
     }
 #ifndef TARGET_N64
-    else if (portUpdPromptTick())
-    {   /* a newer release: Update Now / Not Now / Skip This Version, or its download */
-        g_MenuTimer = 0;
-    }
     else if (portDlgIsOpen())
     {   /* EXIT GAME "Are you sure?" - Yes / No. The cursor stays live (mouse
          * users click a button), and the box itself owns all of that now. */
@@ -3302,143 +3295,9 @@ static Gfx *portDlgDraw(Gfx *DL)
     return DL;
 }
 
-/* ---- THE UPDATE PROMPT -----------------------------------------------------
- *
- * When the startup check (port/src/port_update.c) finds a newer release, the
- * Files screen asks once, in the box above: Update Now, Not Now, or Skip This
- * Version (B is Not Now). Nothing is downloaded unless they pick Update Now;
- * then a note shows the download, and the game restarts into the new build
- * once it is in. B on the note lets the download finish in the background
- * (the CO-OP screen has its progress and Restart Now). Not Now asks again
- * next launch; Skip stays quiet until a release newer than that one. The
- * CO-OP screen still offers the update whatever they picked.
- */
-enum {
-    PORT_UPDP_NONE,
-    PORT_UPDP_ASK,      /* the box is up */
-    PORT_UPDP_WAIT,     /* they said yes: downloading and installing */
-    PORT_UPDP_FAILED    /* the box again: why, Try Again or OK */
-};
-static s32 port_updp;
-
-static void portUpdPromptFailed(void)
-{
-    static const char *const answers[2] = { "Try Again\n", "OK\n" };
-    char note[64];
-
-    snprintf(note, sizeof(note), "%.60s\n", portUpdateError());
-    portDlgOpenN("Update failed\n", answers, 2, 1);
-    portDlgSetNote(note);
-    port_updp = PORT_UPDP_FAILED;
-}
-
-/** The Files screen's tick runs this first: 1 = the prompt owns this frame's input. */
-static s32 portUpdPromptTick(void)
-{
-    switch (port_updp)
-    {
-        case PORT_UPDP_NONE:
-        {
-            static const char *const answers[3] = { "Update Now\n", "Not Now\n", "Skip This Version\n" };
-            const char *own = portUpdateOwn();
-            char title[48], note[64];
-
-            /* not over another box, nor on the frame a press lands (it would answer at once) */
-            if (portDlgIsOpen() || folder_selected_for_deletion >= 0 || !portUpdatePromptWanted()
-                || joyGetButtonsPressedThisFrame(PLAYER_1, ANY_BUTTON) != 0)
-            {
-                return 0;
-            }
-            snprintf(title, sizeof(title), "%.20s is out. Update now?\n", portUpdateLatest());
-            snprintf(note, sizeof(note), "You have %.20s. Co-op needs the same version.\n",
-                     own[0] != '\0' ? own : "a build from source");
-            portDlgOpenN(title, answers, 3, PORTUPD_ANSWER_UPDATE);
-            portDlgSetNote(note);
-            port_updp = PORT_UPDP_ASK;
-            sndPlaySfx((struct ALBankAlt_s *) g_musicSfxBufferPtr, OPTION_CLICK2_SFX, NULL);
-            return 1;
-        }
-        case PORT_UPDP_ASK:
-            if (!portDlgIsOpen())
-            {   /* closed under us (the idle timeout): ask again when they are back */
-                port_updp = PORT_UPDP_NONE;
-                return 0;
-            }
-            if (portDlgTick())
-            {
-                const s32 pick = portDlgPick();   /* -1: B, the same as Not Now */
-
-                portUpdatePromptAnswer(pick < 0 ? PORTUPD_ANSWER_LATER : pick);
-                port_updp = (pick == PORTUPD_ANSWER_UPDATE) ? PORT_UPDP_WAIT : PORT_UPDP_NONE;
-            }
-            return 1;
-        case PORT_UPDP_WAIT:
-            switch (portUpdateState())
-            {
-                case PORTUPD_DOWNLOADING:
-                case PORTUPD_INSTALLING:
-                    if (joyGetButtonsPressedThisFrame(PLAYER_1, B_BUTTON) != 0)
-                    {   /* keep playing; it finishes in the background */
-                        port_updp = PORT_UPDP_NONE;
-                        sndPlaySfx((struct ALBankAlt_s *) g_musicSfxBufferPtr, GUN_M60AMMGUN_3_SFX, NULL);
-                    }
-                    return 1;
-                case PORTUPD_READY:
-                    portUpdateRestart();   /* quits this copy; on failure the state says why */
-                    if (portUpdateState() == PORTUPD_FAILED)
-                    {
-                        portUpdPromptFailed();
-                    }
-                    return 1;
-                case PORTUPD_FAILED:
-                    portUpdPromptFailed();
-                    return 1;
-                default:
-                    port_updp = PORT_UPDP_NONE;
-                    return 0;
-            }
-        case PORT_UPDP_FAILED:
-            if (!portDlgIsOpen())
-            {
-                port_updp = PORT_UPDP_NONE;
-                return 0;
-            }
-            if (portDlgTick())
-            {
-                if (portDlgPick() == 0)
-                {
-                    portUpdateInstall();
-                    port_updp = PORT_UPDP_WAIT;
-                }
-                else
-                {
-                    port_updp = PORT_UPDP_NONE;
-                }
-            }
-            return 1;
-    }
-    return 0;
-}
-
-/** The download's note while they wait (the question itself is the box's own draw). */
-static Gfx *portUpdPromptDraw(Gfx *DL)
-{
-    char title[48];
-
-    if (port_updp != PORT_UPDP_WAIT)
-    {
-        return DL;
-    }
-    if (portUpdateState() == PORTUPD_DOWNLOADING)
-    {
-        snprintf(title, sizeof(title), "Downloading %.20s  %d%%\n", portUpdateLatest(), (int) portUpdateProgress());
-    }
-    else
-    {
-        snprintf(title, sizeof(title), "Installing %.20s...\n", portUpdateLatest());
-    }
-    return portDlgDrawNote(DL, title, "The game restarts when it is done. B: carry on\n");
-}
+/* The update offer is asked when the game is opened, before this screen
+ * (port/src/port_update_launch.c). The CO-OP screen still shows a newer
+ * release, its download and Restart Now. */
 
 #endif /* !TARGET_N64 */
 
@@ -3788,7 +3647,6 @@ Gfx *constructor_menu05_fileselect(Gfx *DL)
     {
         DL = portDlgDraw(DL);
     }
-    DL = portUpdPromptDraw(DL);
 #endif
 
     if (folder_selected_for_deletion < 0)

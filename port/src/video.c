@@ -4947,6 +4947,12 @@ s32 videoInit(void)
     }
     videoLoadConfig(); /* midas.ini (needs no SDL init - scancode names are static) */
     videoIniWritableCheck();
+    {   /* a newer release: ask before the game window opens (port_update_launch.c).
+         * After the ini, which can turn the check off. */
+        extern void portUpdateLaunch(void);
+
+        portUpdateLaunch();
+    }
 
     { /* GE_WINDOW=WxH: override midas.ini window size (automated capture runs
        * verify widescreen without editing the user's config) */

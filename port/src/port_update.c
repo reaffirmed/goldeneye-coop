@@ -5,8 +5,8 @@
  * which skips the rolling coop-latest prerelease), once at startup unless
  * [display] auto_update=0, again when a host turns us away for another co-op
  * version, and when the player picks Check Now. A newer release the startup
- * check finds is put to the player once on the Files screen (front.c
- * portUpdPromptTick): Update Now, Not Now, or Skip This Version, which keeps
+ * check finds is put to the player once when the game is opened, before its
+ * window (port_update_launch.c): Update Now, Not Now, or Skip This Version, which keeps
  * the prompt quiet until a newer one than that comes out. Nothing downloads
  * unless they say so. It also shows on the CO-OP screen (front.c
  * coopLobbyAddUpdate) whatever they answered; picking it there or Update Now:
@@ -1161,6 +1161,29 @@ void portUpdateBoot(int argc, char **argv)
                 sSkipped[0] != '\0' ? ", skipping " : "", sSkipped);
 }
 
+/* port_update_launch.c, before the game window opens (the ini is read by
+ * now): start the check the launch prompt waits on. portUpdateTick won't
+ * start a second one. */
+void portUpdateLaunchCheck(void)
+{
+    if (sStarted)
+    {
+        return;
+    }
+    sStarted = 1;
+    if (sState == PORTUPD_READY)
+    {   /* a cut-off install was finished at boot: Restart is the offer */
+    }
+    else if (portUpdateEnabled())
+    {
+        startJob(JOB_CHECK_QUIET);
+    }
+    else
+    {
+        sState = PORTUPD_OFF;
+    }
+}
+
 /* boss.c, once a frame (the ini is read by now) */
 void portUpdateTick(void)
 {
@@ -1272,6 +1295,16 @@ int portUpdateNewer(const char *tag)
         return portUpdCompareVersions(tag, "v0.0.0") > 0;
     }
     return portUpdCompareVersions(tag, sOwn) == 1;
+}
+
+long portUpdateDownloadBytes(void)
+{
+    long n;
+
+    lock();
+    n = (sAsset >= 0) ? sRelease.assets[sAsset].size : 0;
+    unlock();
+    return n;
 }
 
 int portUpdateHasDownload(void)

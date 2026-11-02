@@ -286,19 +286,21 @@ Options > Gameplay > Accessibility:
 
 Updates
 -------
-When the game starts it asks GitHub whether a newer release is out (one
-small request; nothing downloads by itself). If there is one, the Files
-screen asks "v... is out. Update now?" with three answers:
-- Update Now: downloads it and restarts the game into it (B while it
-  downloads lets you carry on; it finishes in the background).
-- Not Now: nothing changes; it asks again next time you start the game.
-- Skip This Version: it won't ask about that release again, only about a
-  newer one.
+When you open the game it asks GitHub whether a newer release is out (one
+small request, waited for a few seconds at most; nothing downloads by
+itself). If there is one, a window asks "v... is out" before the game
+starts, with three answers:
+- Update Now: downloads it, with a small window showing how far it is, and
+  starts the new version. Close that window to play now; the download
+  finishes in the background.
+- Not Now: the game starts; it asks again next time you open it.
+- Skip This Version: the game starts; it won't ask about that release
+  again, only about a newer one.
 Whatever you pick, the PLAY tab of the CO-OP screen also shows "Update to
 v..." at the top. Pick it and the game downloads the new zip, checks it against the checksum GitHub lists for it,
 and replaces its own files (ProjectMidas.exe, the DLLs, the .bat files,
-these notes and the license files). Then pick "Restart Now" (from the Files screen's prompt it
-restarts by itself). Your cart image, saves, profiles,
+these notes and the license files). Then pick "Restart Now" (after Update
+Now in the opening window it restarts by itself). Your cart image, saves, profiles,
 reports and midas.ini are never touched, and the download is thrown away if
 it doesn't match. If a file can't be replaced, everything is put back. If
 the game is closed, crashes or loses power half way through replacing them,
