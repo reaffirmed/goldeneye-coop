@@ -63,6 +63,8 @@ run_stage() {
     grep -q "peer completed the mission\|mission complete, telling the peer" "$jl" || why="${why:+$why; }joiner did not complete the mission"
     if grep -q "unresolved desync" "$hl" "$jl"; then why="${why:+$why; }unresolved desync"; fi
     if grep -qi "segmentation\|signal 11\|assert\|crash" "$hl" "$jl"; then why="${why:+$why; }crash in log"; fi
+    # a GE_SANITIZE build: ASan and UBSan stop the game and print one of these
+    if grep -q "runtime error: \|ERROR: AddressSanitizer" "$hl" "$jl"; then why="${why:+$why; }sanitizer report (see the log)"; fi
     local fixes=$(grep -h "repl: desync" "$hl" "$jl" | wc -l)
     if [ -z "$why" ]; then
         echo "$st PASS ($fixes corrected desyncs) $((SECONDS - t0))s"

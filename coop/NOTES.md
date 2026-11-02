@@ -1235,6 +1235,14 @@ on the paper) and scroll as before.
   225 runs to then were that 4-11 s skip: neither CI_ROM_KEY nor the ci-rom
   release had been set up, so these runs had never run in CI. A stage with
   no result line, or a run with no stages, now fails instead of passing.
+- The same job then repeats every stage and the joiner spot checks on a
+  GE_SANITIZE build (headless, ASan + UBSan, -fno-sanitize-recover=all), and
+  both scripts fail a stage whose log has "runtime error: " or "ERROR:
+  AddressSanitizer". main.yml's sanitize-linux job builds that config and
+  runs the cart-free tests under the same sanitizers on every push. On
+  2026-11-01 (local, US cart) all 20 stages and the 4 spot checks ran clean
+  under it, so no decomp UB exemptions were needed; a planted out-of-bounds
+  write in coopTick failed Dam with the UBSan report. Task board BUILD-4.
 - First run caught a bug: with 2% loss a lost join snapshot datagram left the
   joiner waiting for it for good, and the checksum (which waits for the
   snapshot) never ran. Now the first checksum a second after the last
