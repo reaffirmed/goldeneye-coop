@@ -530,6 +530,8 @@ static u8 sChrFireSeen[COOP_MAX_CHRS][2]; /* host: firecount at the last snapsho
 static s16 sChrSnapNum[COOP_MAX_CHRS];    /* host: the chrnum in this slot at the last guard snapshot, -1 none */
 static u32 sChrSnapSeen[COOP_MAX_CHRS];   /* host: the last guard snapshot that chr was there for */
 static u32 sChrSnapSince[COOP_MAX_CHRS];  /* host: the first one in the run of snapshots it has been there for */
+static s16 sChrDeadNum[COOP_MAX_CHRS];    /* host: the chrnum in this slot that is fading (ACT_DEAD), -1 none */
+static u8  sChrDeadSends[COOP_MAX_CHRS];  /* host: the snapshots it has gone out in as fading */
 static u8 sChrFiring[COOP_MAX_CHRS];      /* client: GSF_FIRE_* from the last snapshot */
 static f32 sChrHurtSeen[COOP_MAX_CHRS];   /* host: damage as of the last snapshot sent */
 static s16 sChrHurtNum[COOP_MAX_CHRS];    /* host: 1 + the chrnum that was for */
@@ -2284,6 +2286,7 @@ void coopStageStart(void)
         sGuardTrackNum[i] = -1;
         sChrLastSync[i] = 0;
         sChrSnapNum[i] = -1;
+        sChrDeadNum[i] = -1;
         sChrFireSeen[i][0] = sChrFireSeen[i][1] = 0;
         sChrFiring[i] = 0;
         sChrHurtNum[i] = 0;
@@ -4760,6 +4763,13 @@ s32 coopTargetRecordDamage(f32 damage, f32 angle)
 #define COOP_GUARD_FAR   6000.0f
 #define COOP_GUARD_GONE  300
 #define COOP_GUARD_GONE_LIVE 60
+/* a body fades for 1.5 s of game time (chrlvTickDead, CHRLV_TICK_DEAD_CHECK) and is then
+ * freed. Once a second is 20 snapshots, which is more than that when the host runs slowly
+ * (3 ticks a snapshot at 33 ticks a second: 1.8 s), so a fade could start and end between
+ * two of them. The joiner never saw it fading and its body stood until the reaper took it
+ * (QA-11, Streets' run-over chr 2). A body goes out in the first few snapshots of its fade,
+ * a lost packet or two included, then once a second as before */
+#define COOP_DEAD_FIRST_SENDS 3
 
 static s32 coopGuardDue(ChrRecord *chr, s32 i, s32 firing)
 {
@@ -4859,9 +4869,19 @@ static void coopSendGuards(void)
                 continue;
             }
         }
-        if (!coopGuardDue(chr, i, hurt || fire != 0 || (i < COOP_MAX_CHRS && sChrFiring[i] != 0)))
+        if (i < COOP_MAX_CHRS && (chr->actiontype != ACT_DEAD || sChrDeadNum[i] != chr->chrnum))
+        {
+            sChrDeadNum[i] = (chr->actiontype == ACT_DEAD) ? (s16) chr->chrnum : -1;
+            sChrDeadSends[i] = 0;
+        }
+        if (!coopGuardDue(chr, i, hurt || fire != 0 || (i < COOP_MAX_CHRS && sChrFiring[i] != 0)
+                          || (i < COOP_MAX_CHRS && sChrDeadNum[i] >= 0 && sChrDeadSends[i] < COOP_DEAD_FIRST_SENDS)))
         {
             continue;
+        }
+        if (i < COOP_MAX_CHRS && sChrDeadNum[i] >= 0 && sChrDeadSends[i] < 255)
+        {
+            sChrDeadSends[i]++;
         }
         if (i < COOP_MAX_CHRS)
         {
