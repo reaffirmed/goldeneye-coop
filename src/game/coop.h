@@ -643,6 +643,7 @@ s32  coopExtSetupRecOk(s32 ofs);         /* 1: a byte offset from the network is
 s32  coopExtSelf(void);
 s32  coopExtIsHost(void);
 u32  coopExtMissionTicks(void);
+s32  coopExtChrSent(const ChrRecord *chr);
 u32  coopExtHostMissionTicks(void);
 s32  coopExtRemoteView(s32 p, CoopExtView *out);
 void coopExtTick(s32 inmission);

@@ -527,6 +527,9 @@ static u8 sChrHostDying[COOP_MAX_CHRS];         /* the host's says this chr is d
 static u16 sChrFade[COOP_MAX_CHRS];             /* joiner: 1 + ticks since the host's chr began to fade, 0 not fading */
 static s16 sChrFadeNum[COOP_MAX_CHRS];          /* ... the chrnum that was */
 static u8 sChrFireSeen[COOP_MAX_CHRS][2]; /* host: firecount at the last snapshot */
+static s16 sChrSnapNum[COOP_MAX_CHRS];    /* host: the chrnum in this slot at the last guard snapshot, -1 none */
+static u32 sChrSnapSeen[COOP_MAX_CHRS];   /* host: the last guard snapshot that chr was there for */
+static u32 sChrSnapSince[COOP_MAX_CHRS];  /* host: the first one in the run of snapshots it has been there for */
 static u8 sChrFiring[COOP_MAX_CHRS];      /* client: GSF_FIRE_* from the last snapshot */
 static f32 sChrHurtSeen[COOP_MAX_CHRS];   /* host: damage as of the last snapshot sent */
 static s16 sChrHurtNum[COOP_MAX_CHRS];    /* host: 1 + the chrnum that was for */
@@ -2280,6 +2283,7 @@ void coopStageStart(void)
         coopTrackReset(&sGuardTrack[i]);
         sGuardTrackNum[i] = -1;
         sChrLastSync[i] = 0;
+        sChrSnapNum[i] = -1;
         sChrFireSeen[i][0] = sChrFireSeen[i][1] = 0;
         sChrFiring[i] = 0;
         sChrHurtNum[i] = 0;
@@ -4838,6 +4842,23 @@ static void coopSendGuards(void)
             sChrHurtSeen[i] = chr->damage;
         }
         hurt = i < COOP_MAX_CHRS && chr->damage > sChrHurtSeen[i] && chr->actiontype != ACT_DEAD;
+        if (i < COOP_MAX_CHRS)
+        {   /* a chr goes out from the second snapshot it is in. Surface 2's alarm script
+             * spawns a guard whose own list removes it again at once (ai_chr_remove_instant),
+             * solo too, so a new one stood at the pad for one snapshot in two. A joiner
+             * mirrored each and kept it a second after it had gone: guards standing
+             * there that the host never showed, and a chr checksum that never agreed */
+            if (sChrSnapNum[i] != chr->chrnum || sChrSnapSeen[i] != sGuardSnap - 1)
+            {
+                sChrSnapNum[i] = (s16) chr->chrnum;
+                sChrSnapSince[i] = sGuardSnap;
+            }
+            sChrSnapSeen[i] = sGuardSnap;
+            if (sChrSnapSince[i] == sGuardSnap)
+            {
+                continue;
+            }
+        }
         if (!coopGuardDue(chr, i, hurt || fire != 0 || (i < COOP_MAX_CHRS && sChrFiring[i] != 0)))
         {
             continue;
@@ -12095,6 +12116,19 @@ s32 coopExtIsHost(void)
 u32 coopExtMissionTicks(void)
 {
     return sMissionTicks;
+}
+
+/* host: 0 for a chr the guard snapshots have not sent yet (new since the last one,
+ * coopSendGuards), so the chr checksum (coop_repl.c) names what joiners have. 1 on a joiner */
+s32 coopExtChrSent(const ChrRecord *chr)
+{
+    s32 i = (s32) (chr - g_ChrSlots);
+
+    if (!coopNetIsHost() || i < 0 || i >= COOP_MAX_CHRS)
+    {
+        return 1;
+    }
+    return sChrSnapNum[i] == chr->chrnum && sChrSnapSeen[i] == sGuardSnap && sChrSnapSince[i] != sGuardSnap;
 }
 
 /* another player in this mission with us: where they are and look */
