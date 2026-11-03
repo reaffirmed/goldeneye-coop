@@ -12694,24 +12694,56 @@ KeyRecord *weaponFindThrown(s32 KeyID) //MATCH
 {
     KeyRecord  *obj;
     PropRecord *prop;
+#ifndef TARGET_N64
+    KeyRecord  *loose  = NULL;
+    s32         flying = 0;     /* one still on its way: it may yet land where it should */
+#endif
 
     for (prop = chrpropGetActiveTail(); prop; prop = prop->prev)
     {
 #ifndef TARGET_N64
-        if (coopPropIsPartner(prop) || coopItemsUnsettled(prop))
-        {   /* co-op: a partner drawing the Surface 2 mine, or throwing it, is not the mine left lying in the level */
+        if (coopPropIsPartner(prop))
+        {   /* co-op: a partner drawing the Surface 2 mine is not the mine left lying in the level */
             continue;
         }
-#endif
+        if (coopItemsUnsettled(prop))
+        {   /* nor is a partner's throw their game hasn't settled yet */
+            flying |= check_if_entry_is_collectable(KeyID, prop) != NULL;
+            continue;
+        }
+        obj = check_if_entry_is_collectable(KeyID, prop);
+        if (obj && (obj->runtime_bitflags & RUNTIMEBITFLAG_HASPROJECTILE))
+        {
+            flying = 1;
+        }
+        else if (obj && loose == NULL)
+        {
+            loose = obj;
+        }
+#else
         obj = check_if_entry_is_collectable(KeyID, prop);
         if (obj && (!(obj->runtime_bitflags & RUNTIMEBITFLAG_HASPROJECTILE)))
         {
             return obj;
         }
+#endif
     }
 
+#ifndef TARGET_N64
+    /* co-op: one lying loose fails Dam's modem (Frigate's bug, Surface 2's
+     * mine) only once no player has one left to place (coop.c) */
+    if (loose != NULL && coopItemChanceLeft(KeyID, flying))
+    {
+        return NULL;
+    }
+    return loose;
+#else
     return NULL;
+#endif
 }
+
+
+
 
 void add_obj_to_temp_proxmine_table(WeaponObjRecord* proxy)
 {
