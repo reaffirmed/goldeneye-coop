@@ -3927,3 +3927,46 @@ simulated network, not internet play.
   sends and receipts logged, 1 missed. There the host sent the fading body three times,
   and none of them arrived while the joiner was frozen for 4.5 s and off the line. That
   is the rig being overloaded, which no snapshot timing can cover.
+
+## A partner's silenced shot counted more than once (2026-11-03, COOP_VERSION stays 17)
+
+Tester report: suppressed guns don't seem to work for other players, and guards
+seem to know at once where everyone is. The owner's rule for the fix: each
+player should hear and be heard exactly as in the vanilla game.
+
+The host hears a partner's gun with the same sum as gunTickNoise: the gun's
+NoiseIncreasePerShot for each shot, decaying the same way, and the guards'
+hearing range is that loudness times 100 (chrCheckGuardsHeardSound). It counts
+a shot from the muzzle flash bit in their newest STATE (coopPuppetNoise). A
+STATE carries a shot's flash for one of their ticks, but the host ran the sum
+every one of its own ticks with whatever STATE it had. When no new STATE came
+in a tick (a late packet, jitter, or a partner's game running fewer ticks a
+second than the host's), the same flash was counted again, and so was the
+call that alerts the guards. A silenced PP7 shot adds 1.0 (an unsilenced PP7
+adds 2.0); counted four times, one shot is heard four times as far.
+
+Fix (host only; packets unchanged): each STATE's shots count once
+(CoopRemote.noiseTick). With the newest STATE already counted, the noise only
+decays, as it does on the shooter's own game.
+
+Guards' awareness otherwise matches vanilla's: a heard shot sets the shooter as
+the guard's Bond and where they stood (chrlvAlertGuardToPlayerPosition), sight
+checks ask every player, and near misses use chrTestHit's bounds. Smarter
+guards (the host's Guard AI option, Classic by default) still call for help,
+flank and cut off by design; this fix does not change them.
+
+Rig: Linux i686 (headless build), two copies on one machine over the mock
+Steam. This is a simulated network, not internet play. Dam, the joiner fires
+the silenced PP7 for 4 s (GE_COOP_TESTAIMCHR=6:20:4 GE_COOP_TESTFIRE=5:22:4),
+12 shots; a temporary log printed the joiner's own loudness per shot and the
+host's for that player.
+- No added lag: before and after both counted 12 shots, the same loudness as
+  the joiner's own game (1.00, 1.86, 2.72, 3.55 ...).
+- GE_COOP_NETSIM=60:40:2 and 120:100:5: before, 16 counts for 12 shots in
+  each (one STATE counted 3 times took the host to 4.72 where the joiner's own
+  game was at 3.54; another was counted 4 times); after, 12 counts, each within
+  0.02 of the joiner's own.
+- No added lag, the joiner at 30 ticks a second (GE_TICKHZ=30, a slower PC):
+  before, every shot was counted twice (1.00, 1.99, 2.73, 3.72 ...), so the
+  silenced PP7 was as loud on the host as an unsilenced one; after, once each
+  (1.00, 1.73, 2.47, 3.16 against the joiner's own 0.98, 1.72, 2.45, 3.13).

@@ -442,6 +442,7 @@ typedef struct
     f32 noise[2];       /* host: how loud each of their guns is now (gunTickNoise), for the guards' hearing */
     u8 noiseSeq;        /* the shotseq coopPuppetNoise last saw */
     u8 noiseSeqValid;
+    u32 noiseTick;      /* the STATE (its tick) whose shots were last counted */
 } CoopRemote;
 /* each level script's last "either player" check passer (coopAltBondCredit) */
 #define COOP_SCRIPTPASS 32
@@ -1906,13 +1907,14 @@ static void coopPuppetUpdateGhost(CoopRemote *r)
 
 /* host: a partner's gunfire is heard by the guards as our own is
  * (bondview2.c, chrCheckGuardsHeardSound with gunTickNoise's loudness),
- * with them as Bond, so the guards that hear it come after them. Only
- * their shots used to wake a guard, and only the ones that hit it. */
+ * with them as Bond, so the guards that hear it come after them. Each STATE
+ * counts once: a late packet left one shot's flash in place for several
+ * ticks, and each tick added the gun's noise again. */
 static void coopPuppetNoise(CoopRemote *r, s32 p)
 {
     f32 loudest = 0.0f;
     s32 fired = 0;
-    s32 newshot;
+    s32 newshot, fresh;
     s32 h;
 
     if (!coopNetIsHost() || coopVersus() || !coopRemoteAliveHere(p))
@@ -1921,8 +1923,10 @@ static void coopPuppetNoise(CoopRemote *r, s32 p)
         r->noiseSeqValid = 0;
         return;
     }
+    fresh = !r->noiseSeqValid || r->st.tick != r->noiseTick;
     newshot = r->noiseSeqValid && r->st.look.shotseq != r->noiseSeq;
     r->noiseSeq = r->st.look.shotseq;
+    r->noiseTick = r->st.tick;
     r->noiseSeqValid = 1;
     for (h = GUNRIGHT; h <= GUNLEFT; h++)
     {
@@ -1939,7 +1943,7 @@ static void coopPuppetNoise(CoopRemote *r, s32 p)
         {
             continue;
         }
-        if (item != ITEM_UNARMED && ((r->st.look.flash & (1 << h)) || (newshot && h == GUNRIGHT)))
+        if (item != ITEM_UNARMED && fresh && ((r->st.look.flash & (1 << h)) || (newshot && h == GUNRIGHT)))
         {
             r->noise[h] += ws->NoiseIncreasePerShot;
             if (r->noise[h] > ws->LoudnessMax)
