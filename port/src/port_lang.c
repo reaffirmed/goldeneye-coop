@@ -31,7 +31,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 #include <dirent.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -78,6 +77,13 @@ static struct {
     char text[48];
 } sBankPatches[LANG_BANKPATCH_MAX];
 static int sBankPatchCount;
+
+/* ASCII only, and our own: <ctype.h>'s would pull mingw's msvcrt isalpha
+ * into the link, which clashes with the game's (src/str.c) */
+static int langLower(int c)
+{
+    return (c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c;
+}
 
 static char *langTrim(char *s)
 {
@@ -669,7 +675,7 @@ static const struct trentry *langLookup(const char *s, size_t n, int fold)
             if (fold) {
                 size_t k;
                 for (k = 0; k < n; k++) {
-                    if (tolower((unsigned char) e->key[k]) != tolower((unsigned char) s[k])) {
+                    if (langLower((unsigned char) e->key[k]) != langLower((unsigned char) s[k])) {
                         break;
                     }
                 }
@@ -738,7 +744,7 @@ static void langNoteMissing(const char *s, size_t n)
         if ((unsigned char) s[k] >= 0x80) {
             return;   /* already in the language (the patch's text, a translation being wrapped) */
         }
-        if (isalpha((unsigned char) s[k])) {
+        if (langLower((unsigned char) s[k]) >= 'a' && langLower((unsigned char) s[k]) <= 'z') {
             letters++;
         }
     }
@@ -909,7 +915,7 @@ void portLangInit(int argc, char **argv)
         why = "GE_LANG";
     }
     for (i = 0; code[i] != '\0'; i++) {
-        code[i] = (char) tolower((unsigned char) code[i]);
+        code[i] = (char) langLower((unsigned char) code[i]);
     }
     idx = code[0] != '\0' ? langFind(code) : 0;
     if (idx == -2) {
