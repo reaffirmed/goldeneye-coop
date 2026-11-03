@@ -208,7 +208,10 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; (cutsce
 - HUD: per-player colour (yellow, cyan, pink, green) on name tags, radar
   dots and stacked partner status blocks. A player can pick their own
   (lobby row CLROW_COLOUR, [display] coop_color): Dear ImGui's ColorPicker4
-  over the lobby (port/src/port_imgui.cpp, port/imgui). It rides in HELLO
+  over the lobby (port/src/port_imgui.cpp, port/imgui), drawn in the
+  lobby's look: Zurich Bold and Bank Gothic from the game
+  (portFontGlyphExport, textrelated.c) in ImGui's atlas, the Modern or
+  Classic layout's colours, the red crosshair for the pointer. It rides in HELLO
   after linkjit (owncolour, and the host's colour[] for everyone), added
   without a protocol bump: an older build sends none and reads none.
   coopPlayerColour and the lobby's coopLobbyChatColour use it unless the

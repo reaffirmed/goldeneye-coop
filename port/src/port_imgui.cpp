@@ -3,6 +3,9 @@
  * colour picker: ImGui's own ColorPicker4, drawn and driven as ImGui draws
  * and drives it (the saturation/value square, the hue bar, the RGB, HSV and
  * hex inputs, the Current and Original swatches, the right-click options).
+ * It wears the lobby's look: the game's own fonts (textrelated.c's glyphs in
+ * ImGui's atlas), the Modern or Classic layout's colours, and the game's red
+ * crosshair for the pointer.
  *
  * Threads: the frame is built on the sim thread (portImguiFrame, called where
  * a game frame is handed to the renderer, video.c), which also owns the
@@ -35,6 +38,10 @@ int32_t portConIsOpen(void);
 int32_t portTextInputActive(void);
 int32_t portAccessColorblind(void);
 void portInputMouseWindowPos(int32_t *x, int32_t *y, int32_t *moved);
+int32_t portCoopMenuClassic(void);
+int32_t portFontGlyphExport(int32_t which, uint8_t c, int32_t *w, int32_t *h, int32_t *stride, int32_t *top,
+                            int32_t *gap, const uint8_t **pixels);
+int32_t portFontLineHeight(int32_t which);
 
 int32_t portColourPickerOpen(int32_t rgb, int32_t defrgb, const char *name);
 int32_t portColourPickerPoll(int32_t *rgb);
@@ -45,7 +52,8 @@ void portImguiRender(void);
 
 enum { PICK_NONE = 0, PICK_OK = 1, PICK_CANCEL = 2 };
 
-#define PICK_FONTS      4       /* ProggyClean at 13, 26, 39 and 52 px: whole multiples stay sharp */
+#define PICK_LINES      36      /* the text's line: a 36th of the window's height, as the lobby's help text */
+#define PICK_SPACE      5       /* textRender's space (SPACE_WIDTH) */
 #define PICK_POLL_MS    500     /* the lobby stopped asking (a mission started): close */
 #define PICK_EVENTS     256
 
@@ -63,9 +71,14 @@ static int s_PopupOpened;       /* OpenPopup done for this opening */
 static bool s_Busy;             /* last frame: something in the picker was being edited */
 static int s_MouseHeld;         /* the click that opened it is still down: not ImGui's */
 static int s_StartedText;       /* we started SDL text input */
-static ImFont *s_Fonts[PICK_FONTS];
-static int s_Scale;             /* the style's scale (1..PICK_FONTS) */
+static ImFont *s_Body;          /* the game's Zurich Bold (ProggyClean if it was not loaded) */
+static ImFont *s_Head;          /* the game's Bank Gothic: the Modern lobby's small capitals */
+static float s_BodyLine = 13.0f;   /* their line heights, in the game's pixels */
+static int s_Classic;           /* drawn as the folder (the lobby's Classic layout) */
+static float s_Scale;           /* window pixels per font pixel (the style was scaled by it) */
+static int s_ThemeClassic = -1; /* the theme the style holds */
 static ImGuiStyle s_BaseStyle;
+static int s_DrawPointer;       /* the OS arrow is hidden: we draw the game's crosshair */
 static Uint64 s_LastCounter;
 
 /* ---- between threads ---- */
@@ -87,7 +100,7 @@ static ImguiSnap *s_SnapShown;    /* GL thread: what it draws each frame */
  * another thread than the frame's) */
 struct ImguiEvent
 {
-    int kind;       /* 0 key, 1 text, 2 wheel, 3 pad button, 4 pad axis */
+    int kind;       /* 0 key, 1 text, 2 wheel, 3 pad button, 4 pad axis, 5 mouse button */
     int key;        /* ImGuiKey */
     int down;
     float value;
@@ -208,6 +221,18 @@ static int SDLCALL eventWatch(void *userdata, SDL_Event *ev)
             SDL_strlcpy(e.text, ev->text.text, sizeof(e.text));
             evPush(e);
             break;
+        case SDL_MOUSEBUTTONDOWN:
+        case SDL_MOUSEBUTTONUP:
+            /* as events, so a click quicker than a frame still lands */
+            e.kind = 5;
+            e.key = (ev->button.button == SDL_BUTTON_LEFT) ? 0 : (ev->button.button == SDL_BUTTON_RIGHT) ? 1
+                  : (ev->button.button == SDL_BUTTON_MIDDLE) ? 2 : -1;
+            e.down = (ev->type == SDL_MOUSEBUTTONDOWN);
+            if (e.key >= 0)
+            {
+                evPush(e);
+            }
+            break;
         case SDL_MOUSEWHEEL:
             e.kind = 2;
             e.value = (float) ev->wheel.y;
@@ -258,6 +283,107 @@ static int SDLCALL eventWatch(void *userdata, SDL_Event *ev)
     return 0;
 }
 
+/* The game's own fonts, glyph for glyph as textRender draws them: each byte
+ * it has a glyph for (ASCII, and the language's accented letters) replaces
+ * ProggyClean's, which only holds the font together. */
+struct GameGlyph
+{
+    int rect;
+    int w, h, stride;
+    const uint8_t *px;
+};
+
+static ImFont *fontGame(ImGuiIO &io, int which, std::vector<GameGlyph> &glyphs)
+{
+    const int line = portFontLineHeight(which);
+    ImFontConfig cfg;
+    ImFont *f;
+    int n = 0;
+
+    if (line <= 0)
+    {
+        return NULL;
+    }
+    cfg.SizePixels = (float) line;
+    f = io.Fonts->AddFontDefault(&cfg);
+    for (int c = 0x20; c <= 0xFF; c++)
+    {
+        GameGlyph g;
+        int32_t w, h, stride, top, gap;
+        const uint8_t *px = NULL;
+
+        if (c > 0x7E && c < 0xA0)
+        {
+            continue;
+        }
+        memset(&g, 0, sizeof(g));
+        if (c == 0x20 || c == 0xA0)
+        {   /* blank, the game's space wide */
+            g.rect = io.Fonts->AddCustomRectFontGlyph(f, (ImWchar) c, 1, 1, (float) PICK_SPACE, ImVec2(0.0f, 0.0f));
+        }
+        else if (portFontGlyphExport(which, (uint8_t) c, &w, &h, &stride, &top, &gap, &px))
+        {
+            g.rect = io.Fonts->AddCustomRectFontGlyph(f, (ImWchar) c, w, h, (float) (gap + w),
+                                                      ImVec2((float) gap, (float) top));
+            g.w = w;
+            g.h = h;
+            g.stride = stride;
+            g.px = px;
+            n++;
+        }
+        else
+        {
+            continue;
+        }
+        glyphs.push_back(g);
+    }
+    if (n == 0)
+    {
+        return NULL;
+    }
+    return f;
+}
+
+static void fontsBuild(ImGuiIO &io)
+{
+    std::vector<GameGlyph> glyphs;
+    unsigned char *px;
+    int tw, th;
+    ImFontConfig cfg;
+
+    s_Body = fontGame(io, 1, glyphs);
+    s_Head = fontGame(io, 0, glyphs);
+    if (s_Body == NULL)
+    {   /* the fonts are not loaded (never so in a lobby): ImGui's own */
+        cfg.SizePixels = 13.0f;
+        s_Body = io.Fonts->AddFontDefault(&cfg);
+        s_Head = s_Body;
+        portConLogf("ge: imgui: the game's fonts are not loaded; ImGui's own font\n");
+    }
+    else
+    {
+        s_BodyLine = (float) portFontLineHeight(1);
+        s_Head = (s_Head != NULL) ? s_Head : s_Body;
+    }
+    io.FontDefault = s_Body;
+    io.Fonts->GetTexDataAsRGBA32(&px, &tw, &th);
+    for (const GameGlyph &g : glyphs)
+    {   /* the I8 glyph is the ink's coverage: white, that much alpha (the
+         * game's combiner: the colour, TEXEL0 times its alpha) */
+        const ImFontAtlasCustomRect *r = io.Fonts->GetCustomRectByIndex(g.rect);
+
+        for (int y = 0; g.px != NULL && y < g.h; y++)
+        {
+            ImU32 *row = (ImU32 *) px + (size_t) (r->Y + y) * (size_t) tw + r->X;
+
+            for (int x = 0; x < g.w; x++)
+            {
+                row[x] = IM_COL32(255, 255, 255, g.px[y * g.stride + x]);
+            }
+        }
+    }
+}
+
 /* sim thread, once: the context, the fonts, the event watch */
 static int imguiInit(void)
 {
@@ -282,19 +408,7 @@ static int imguiInit(void)
     io.BackendPlatformName = "ge_port";
     ImGui::StyleColorsDark();
     s_BaseStyle = ImGui::GetStyle();
-    for (int i = 0; i < PICK_FONTS; i++)
-    {
-        ImFontConfig cfg;
-
-        cfg.SizePixels = 13.0f * (float) (i + 1);
-        s_Fonts[i] = io.Fonts->AddFontDefault(&cfg);
-    }
-    {   /* built here, on this thread; the GL thread only uploads it */
-        unsigned char *px;
-        int w, h;
-
-        io.Fonts->GetTexDataAsRGBA32(&px, &w, &h);
-    }
+    fontsBuild(io);     /* here, on this thread; the GL thread only uploads it */
     s_EvMtx = SDL_CreateMutex();
     SDL_AddEventWatch(eventWatch, NULL);
     SDL_AtomicSet(&s_GlWanted, 1);
@@ -353,6 +467,7 @@ int32_t portColourPickerOpen(int32_t rgb, int32_t defrgb, const char *name)
     s_PopupOpened = 0;
     s_Busy = false;
     s_MouseHeld = 1;
+    s_Classic = portCoopMenuClassic() != 0;
     s_Open = 1;
     SDL_AtomicSet(&s_Active, 1);
     if (!SDL_IsTextInputActive())
@@ -422,20 +537,14 @@ static void imguiInput(ImGuiIO &io)
     {
         mb = SDL_GetMouseState(&mx, &my);
     }
-    if (s_MouseHeld)
-    {   /* the lobby's click on the Colour row must not land in the picker */
-        s_MouseHeld = (mb & (SDL_BUTTON_LMASK | SDL_BUTTON_RMASK | SDL_BUTTON_MMASK)) != 0;
-        mb = 0;
-    }
+    mb &= SDL_BUTTON_LMASK | SDL_BUTTON_RMASK | SDL_BUTTON_MMASK;
     if (SDL_GetWindowFlags(w) & SDL_WINDOW_INPUT_FOCUS)
     {
         io.AddMousePosEvent(mx * (float) dw / (float) ww, my * (float) dh / (float) wh);
     }
-    io.AddMouseButtonEvent(0, (mb & SDL_BUTTON_LMASK) != 0);
-    io.AddMouseButtonEvent(1, (mb & SDL_BUTTON_RMASK) != 0);
-    io.AddMouseButtonEvent(2, (mb & SDL_BUTTON_MMASK) != 0);
-    /* the game hides the OS arrow while its mouse option is on: draw ImGui's */
-    io.MouseDrawCursor = (SDL_ShowCursor(SDL_QUERY) == SDL_DISABLE);
+    /* the game hides the OS arrow while its mouse option is on: draw its own (crosshair) */
+    s_DrawPointer = (SDL_ShowCursor(SDL_QUERY) == SDL_DISABLE);
+    io.MouseDrawCursor = false;
 
     {
         const SDL_Keymod mod = SDL_GetModState();
@@ -465,17 +574,209 @@ static void imguiInput(ImGuiIO &io)
             case 4:
                 io.AddKeyAnalogEvent((ImGuiKey) e.key, e.value > 0.1f, e.value);
                 break;
+            case 5:
+                if (!s_MouseHeld)
+                {
+                    io.AddMouseButtonEvent(e.key, e.down != 0);
+                }
+                break;
         }
     }
     s_EvCount = 0;
     SDL_UnlockMutex(s_EvMtx);
+    if (s_MouseHeld)
+    {   /* the lobby's click on the Colour row must not land in the picker */
+        s_MouseHeld = (mb != 0);
+    }
+    else
+    {   /* a release the watch never saw (focus went away): let go */
+        static const Uint32 masks[3] = { SDL_BUTTON_LMASK, SDL_BUTTON_RMASK, SDL_BUTTON_MMASK };
+
+        for (int b = 0; b < 3; b++)
+        {
+            if (io.MouseDown[b] && !(mb & masks[b]))
+            {
+                io.AddMouseButtonEvent(b, false);
+            }
+        }
+    }
+}
+
+static ImVec4 rgba(unsigned rgb, float a)
+{
+    return ImVec4(((rgb >> 16) & 0xFF) / 255.0f, ((rgb >> 8) & 0xFF) / 255.0f, (rgb & 0xFF) / 255.0f, a);
+}
+
+/* the lobby's look on ImGui's widgets: Modern's dark panel, light text and
+ * lime (front.c MW_*), or Classic's folder: the paper, its ink and the grey
+ * bar under the row the pointer is on. Square corners, as the game has. */
+static void themeApply(void)
+{
+    ImGuiStyle &st = ImGui::GetStyle();
+    ImVec4 *c;
+
+    st = s_BaseStyle;
+    c = st.Colors;
+    st.WindowRounding = st.ChildRounding = st.FrameRounding = st.PopupRounding = 0.0f;
+    st.GrabRounding = st.ScrollbarRounding = st.TabRounding = 0.0f;
+    st.WindowBorderSize = st.PopupBorderSize = 1.0f;
+    st.FrameBorderSize = 0.0f;
+    st.WindowPadding = ImVec2(12.0f, 10.0f);
+    st.FramePadding = ImVec2(5.0f, 3.0f);
+    st.ItemSpacing = ImVec2(6.0f, 5.0f);
+    if (s_Classic)
+    {
+        const ImVec4 ink = rgba(0x28261E, 1.0f);
+
+        c[ImGuiCol_Text] = ink;
+        c[ImGuiCol_TextDisabled] = rgba(0x7A745C, 1.0f);
+        c[ImGuiCol_WindowBg] = rgba(0xCCC49E, 1.0f);
+        c[ImGuiCol_PopupBg] = rgba(0xD5CDA5, 1.0f);
+        c[ImGuiCol_Border] = rgba(0x706B56, 1.0f);
+        c[ImGuiCol_BorderShadow] = ImVec4(0, 0, 0, 0);
+        c[ImGuiCol_FrameBg] = ImVec4(0, 0, 0, 0.08f);
+        c[ImGuiCol_FrameBgHovered] = ImVec4(0, 0, 0, 0.19f);
+        c[ImGuiCol_FrameBgActive] = ImVec4(0, 0, 0, 0.28f);
+        c[ImGuiCol_Button] = ImVec4(0, 0, 0, 0.10f);
+        c[ImGuiCol_ButtonHovered] = ImVec4(0, 0, 0, 0.19f);
+        c[ImGuiCol_ButtonActive] = ImVec4(0, 0, 0, 0.30f);
+        c[ImGuiCol_Header] = ImVec4(0, 0, 0, 0.10f);
+        c[ImGuiCol_HeaderHovered] = ImVec4(0, 0, 0, 0.19f);
+        c[ImGuiCol_HeaderActive] = ImVec4(0, 0, 0, 0.30f);
+        c[ImGuiCol_Separator] = c[ImGuiCol_SeparatorHovered] = c[ImGuiCol_SeparatorActive] = rgba(0x706B56, 1.0f);
+        c[ImGuiCol_CheckMark] = c[ImGuiCol_SliderGrab] = c[ImGuiCol_SliderGrabActive] = ink;
+        c[ImGuiCol_TextSelectedBg] = ImVec4(0, 0, 0, 0.25f);
+        c[ImGuiCol_NavCursor] = rgba(0xC81010, 1.0f);   /* the crosshair's red */
+        c[ImGuiCol_ModalWindowDimBg] = ImVec4(0, 0, 0, 0.35f);
+    }
+    else
+    {
+        const ImVec4 lime = rgba(0xB6D83C, 1.0f), dark = rgba(0x5E7A1C, 1.0f), edge = rgba(0x484E42, 1.0f);
+
+        c[ImGuiCol_Text] = rgba(0xE6E8E0, 1.0f);
+        c[ImGuiCol_TextDisabled] = rgba(0x8A8E84, 1.0f);
+        c[ImGuiCol_WindowBg] = rgba(0x15170F, 0.96f);
+        c[ImGuiCol_PopupBg] = rgba(0x1E2119, 0.98f);
+        c[ImGuiCol_Border] = edge;
+        c[ImGuiCol_BorderShadow] = ImVec4(0, 0, 0, 0);
+        c[ImGuiCol_FrameBg] = ImVec4(1, 1, 1, 0.07f);
+        c[ImGuiCol_FrameBgHovered] = rgba(0x5E7A1C, 0.55f);
+        c[ImGuiCol_FrameBgActive] = rgba(0x5E7A1C, 0.85f);
+        c[ImGuiCol_Button] = ImVec4(1, 1, 1, 0.08f);
+        c[ImGuiCol_ButtonHovered] = dark;
+        c[ImGuiCol_ButtonActive] = rgba(0x7E9E2C, 1.0f);
+        c[ImGuiCol_Header] = ImVec4(1, 1, 1, 0.08f);
+        c[ImGuiCol_HeaderHovered] = dark;
+        c[ImGuiCol_HeaderActive] = rgba(0x7E9E2C, 1.0f);
+        c[ImGuiCol_Separator] = c[ImGuiCol_SeparatorHovered] = c[ImGuiCol_SeparatorActive] = edge;
+        c[ImGuiCol_CheckMark] = c[ImGuiCol_SliderGrab] = c[ImGuiCol_SliderGrabActive] = lime;
+        c[ImGuiCol_TextSelectedBg] = rgba(0x5E7A1C, 0.8f);
+        c[ImGuiCol_NavCursor] = lime;
+        c[ImGuiCol_ModalWindowDimBg] = ImVec4(0, 0, 0, 0.55f);
+    }
+    st.ScaleAllSizes(s_Scale * s_BodyLine / 13.0f);   /* ImGui's sizes are for its 13 px font */
+    s_ThemeClassic = s_Classic;
+}
+
+/* Latin-1 capitals in UTF-8, as the Modern lobby writes its labels (coopMwUpper) */
+static const char *upperUtf8(const char *in, char *out, size_t n)
+{
+    size_t i = 0;
+
+    for (; *in != '\0' && i + 1 < n; in++, i++)
+    {
+        unsigned char ch = (unsigned char) *in;
+
+        if (ch >= 'a' && ch <= 'z')
+        {
+            ch = (unsigned char) (ch - 0x20);
+        }
+        else if (ch >= 0xA0 && ch <= 0xBE && ch != 0xB7 && i > 0 && (unsigned char) out[i - 1] == 0xC3)
+        {   /* U+00E0..U+00FE but the division sign: its capital is 0x20 down */
+            ch = (unsigned char) (ch - 0x20);
+        }
+        out[i] = (char) ch;
+    }
+    out[i] = '\0';
+    return out;
+}
+
+/* a button as the lobby's rows: Modern marks the one under the pointer (or
+ * the pad's) with the lime block at its left, as its highlighted row */
+static bool gameButton(const char *label, const ImVec2 &size)
+{
+    char up[96];
+    const bool hit = ImGui::Button(s_Classic ? label : upperUtf8(label, up, sizeof(up)), size);
+
+    if (!s_Classic && (ImGui::IsItemHovered() || ImGui::IsItemFocused()))
+    {
+        const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+
+        ImGui::GetWindowDrawList()->AddRectFilled(a, ImVec2(a.x + fmaxf(2.0f, 3.0f * s_Scale), b.y),
+                                                  ImGui::GetColorU32(ImGuiCol_CheckMark));
+    }
+    return hit;
+}
+
+/* the window's heading: Modern's section head (small capitals in lime, a rule
+ * running on from them), or the folder's (its ink, a rule under it) */
+static void heading(const char *title)
+{
+    char up[96];
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    const float right = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+    const float rule = fmaxf(1.0f, floorf(s_Scale * 0.75f));
+
+    upperUtf8(title, up, sizeof(up));
+    if (s_Classic)
+    {
+        ImGui::SetWindowFontScale(1.4f);   /* toward the folder's CO-OP LOBBY */
+        ImGui::TextUnformatted(up);
+        ImGui::SetWindowFontScale(1.0f);
+        const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+
+        dl->AddRectFilled(ImVec2(a.x, b.y + rule), ImVec2(right, b.y + 2.0f * rule), ImGui::GetColorU32(ImGuiCol_Separator));
+        ImGui::Dummy(ImVec2(0.0f, 2.0f * rule));
+    }
+    else
+    {
+        ImGui::PushFont(s_Head);
+        ImGui::SetWindowFontScale(1.5f);   /* the size of the lobby's PARTY */
+        ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_CheckMark), "%s", up);
+        ImGui::SetWindowFontScale(1.0f);
+        ImGui::PopFont();
+        const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+        const float y = floorf((a.y + b.y) * 0.5f);
+
+        dl->AddRectFilled(ImVec2(b.x + 6.0f * s_Scale, y), ImVec2(right, y + rule), ImGui::GetColorU32(ImGuiCol_Separator));
+    }
+    ImGui::Spacing();
+}
+
+/* the game's pointer, its red crosshair (frontDrawCursor's), drawn over the
+ * picker where ImGui would draw its arrow */
+static void crosshair(const ImGuiIO &io)
+{
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    const ImVec2 p = io.MousePos;
+    const float u = io.DisplaySize.y / 240.0f;     /* a pixel of the 240-line menus */
+    const float r = 5.0f * u, arm = 7.5f * u, t = fmaxf(1.5f, 0.8f * u);
+    const ImU32 red = IM_COL32(0xE0, 0x10, 0x10, 0xE6);
+
+    if (!ImGui::IsMousePosValid(&p))
+    {
+        return;
+    }
+    dl->AddCircle(p, r, red, 0, t);
+    dl->AddLine(ImVec2(p.x - arm, p.y), ImVec2(p.x + arm, p.y), red, t);
+    dl->AddLine(ImVec2(p.x, p.y - arm), ImVec2(p.x, p.y + arm), red, t);
 }
 
 /* the picker's window: ImGui's ColorPicker4 as it comes, with OK, Cancel and
- * Default Colour under it */
+ * Default Colour under it, in the lobby's look */
 static void pickerUi(void)
 {
-    const float k = (float) s_Scale;
+    const float k = 6.0f * ImGui::GetFontSize();     /* OK and Cancel's width */
     const char *title = portTrUtf8("Player Colour");
     char id[96];
     bool open = true;
@@ -488,7 +789,7 @@ static void pickerUi(void)
         s_PopupOpened = 1;
     }
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (!ImGui::BeginPopupModal(id, &open, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
+    if (!ImGui::BeginPopupModal(id, &open, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoTitleBar))
     {
         pickClose(PICK_CANCEL);
         return;
@@ -500,6 +801,7 @@ static void pickerUi(void)
         float before[3];
 
         memcpy(before, s_Col, sizeof(before));
+        heading(title);
         ImGui::ColorPicker4("##picker", s_Col, ImGuiColorEditFlags_NoAlpha, s_Ref);
         if (memcmp(before, s_Col, sizeof(before)) != 0)
         {
@@ -517,17 +819,17 @@ static void pickerUi(void)
             ImGui::PopTextWrapPos();
         }
         ImGui::Separator();
-        if (ImGui::Button(portTrUtf8("OK"), ImVec2(80.0f * k, 0.0f)))
+        if (gameButton(portTrUtf8("OK"), ImVec2(k, 0.0f)))
         {
             done = PICK_OK;
         }
         ImGui::SameLine();
-        if (ImGui::Button(portTrUtf8("Cancel"), ImVec2(80.0f * k, 0.0f)))
+        if (gameButton(portTrUtf8("Cancel"), ImVec2(k, 0.0f)))
         {
             done = PICK_CANCEL;
         }
         ImGui::SameLine();
-        if (ImGui::Button(portTrUtf8("Default Colour")))
+        if (gameButton(portTrUtf8("Default Colour"), ImVec2(0.0f, 0.0f)))
         {
             memcpy(s_Col, s_Def, sizeof(s_Col));
             s_UseDefault = 1;
@@ -608,20 +910,24 @@ void portImguiFrame(void)
     ImGuiIO &io = ImGui::GetIO();
 
     imguiInput(io);
-    {   /* ImGui's look at a whole multiple of its 13 px font, about 720 lines a step */
-        int scale = (int) floorf(io.DisplaySize.y / 720.0f + 0.5f);
+    {   /* the game's font, its line a PICK_LINES-th of the window (in quarter
+         * steps, so a resize does not restyle every frame) */
+        float scale = floorf(io.DisplaySize.y / PICK_LINES / s_BodyLine * 4.0f + 0.5f) / 4.0f;
 
-        scale = (scale < 1) ? 1 : (scale > PICK_FONTS) ? PICK_FONTS : scale;
-        if (scale != s_Scale)
+        scale = (scale < 0.75f) ? 0.75f : scale;
+        if (scale != s_Scale || s_Classic != s_ThemeClassic)
         {
-            ImGui::GetStyle() = s_BaseStyle;
-            ImGui::GetStyle().ScaleAllSizes((float) scale);
             s_Scale = scale;
+            themeApply();
         }
-        io.FontDefault = s_Fonts[scale - 1];
+        io.FontGlobalScale = s_Scale;
     }
     ImGui::NewFrame();
     pickerUi();
+    if (s_DrawPointer && s_Open)
+    {
+        crosshair(io);
+    }
     ImGui::Render();
 
     ImDrawData *dd = ImGui::GetDrawData();
