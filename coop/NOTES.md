@@ -3810,6 +3810,124 @@ each took the other as its joiner, each with its own guards, for good.
 - net_scenarios.sh: a "two hosts" line, and FAILON_SPLIT=1 fails a run in
   which a joiner took over but nobody stepped down and got its snapshot.
 
+## Surface 2's alarm guards: sent from their second snapshot (2026-11-02, COOP_VERSION stays 17)
+
+QA-9 (checklist row SU2): on Surface 2 with the alarm on, every rig run had a joiner log
+"unresolved desync: the chrs here are not the host's", and the joiner showed alarm guards
+standing at the spawn pad that the host didn't have.
+
+The cause is the level's own script. ai_34, the list the alarm's reinforcements run,
+starts with `if_guard_distance_to_bond_greater_than(0xdc05, 0x3f)`. Label 3f logs
+"too far - deleted!" and runs `chr_remove_instant`. So while nobody is near pad 214, the
+spawner makes a guard, the guard removes itself on its first tick, and the spawner makes
+another. On the host, chrs 15, 16 and 17 turned over about four times a second, solo too.
+Each one existed for one guard snapshot only: of 841 spawns logged, 840 were gone by the
+next snapshot.
+
+A joiner mirrored every guard a snapshot carried, and the reaper kept a guard until 1 s had
+passed with no snapshot entry (COOP_GUARD_GONE_LIVE). So the joiner always had one to
+three guards standing at the pad that the host never showed. The chr checksum hardly ever
+agreed, and the joiner reported it as unresolved.
+
+Fix (host only; packets unchanged):
+- coopSendGuards sends a chr only from the second snapshot in a row it is in. Each slot
+  keeps the chrnum it had and the run of snapshots it has been there for. A new guard
+  reaches joiners one snapshot later, 50 ms. A guard that removes itself straight away
+  never reaches them.
+- The chr checksum (coopReplChrHash) skips chrs not sent yet (coopExtChrSent), so it names
+  what joiners have.
+- Limit: a slot counts as "the same chr" by its chrnum alone. If a guard removed itself
+  and a new one took the same slot with the same chrnum before the next snapshot, two
+  snapshots in a row would see one chr, and it would be sent. Surface 2's spawner doesn't
+  do this: the after runs show 0 of 178 checksums differ. A level that does would bring
+  back the old symptom, one stray guard on joiners for up to 1 s.
+
+Rig: Linux i686, two copies on one machine over the mock Steam. This is a simulated
+network, not internet play.
+- QA's SU2-alarm and SU2 rows: before, "unresolved desync" in every run, with 169 of 193
+  chr checksums differing on SU2-alarm. After, none unresolved, and 0 (SU2-alarm) or 2
+  (SU2) of about 180 checksums differ.
+- With the host standing on pad 214 after the alarm, the reinforcement stays, and the
+  joiner mirrors it the same second the host's watch sees it.
+- Both rows still fail QA's check that "mirrored host chr 1[567]" appears in the joiner's
+  log. In those rows no player is near the pad, so the host never keeps an alarm guard,
+  and the joiner rightly mirrors none.
+
+## Streets: the joiner's own civilian casualty count (QA-10, 2026-11-02, COOP_VERSION stays 17)
+
+QA-10 (checklist row SR1): in some Streets runs the joiner alone showed "Warning: Civilian
+casualties high", then "critical", then the caption "Mission Failure: Too many civilian
+casualties". The mission went on, since the failure caption is all the script does. The
+joiner's stage flags fought the host's until "repl: unresolved desync: stage flags". The
+host showed none of it.
+
+The count is list 0x100a (ai_27 in UsetuppeteZ). It starts at 15 in its chr's alertness
+byte:
+- Each time one of its three civilian spawners (lists 0x1003 and 0x1005 among them) makes
+  a civilian, it sets bit 0x02 on a chr (chr_bitfield_set_on). The count takes one off
+  for each.
+- A civilian that goes out of sight removes itself (list 0x0410: stage flag 0x00200000,
+  then chr_remove_instant). The count adds one back and clears the flag the next tick.
+- So the count is 15 minus the civilians that died. Below 8, 4 and 1 it shows the three
+  captions and sets stage flags 0x00040000, 0x00080000 and 0x00100000.
+
+On a joiner, the spawns are left to the host (coopScriptSpawnsLeftToHost), but they still
+take the success branch, so the joiner's spawners set the bit. The removals run only on the
+host, and the host's 0x00200000 lasts one or two ticks, so WORLD hardly ever carries it.
+The joiner's count only went down. Logged on the rig (two at once, SR1):
+- host: 23 off, 22 back;
+- joiner: 16 off, 0 back.
+
+Fix: chr_bitfield_set_on and _off are now in coopHostOwnsCmd, so a joiner's copy of the
+level scripts steps over them, as it already does for the countdown.
+- A chr with a body already gets the host's bits in the AI sync.
+- The scripts' bodiless chrs never got them from anyone, so a joiner's copy counted only
+  what its own copy did.
+- Only Streets and Archives use these commands. Archives sets bits on guards with bodies
+  (0x33-0x37 from list 0x1000, 0x43 from a guard's list), and those guards' own lists read
+  them. On a joiner those bits now come from the host in the AI sync, one sync later,
+  instead of being set locally.
+- The host's captions (relayed TextPrintTop) and stage flags (WORLD) reach the joiner as
+  before.
+- After a takeover, the new host's count starts from its own 15 rather than the old host's.
+
+Rig: Linux i686, two copies on one machine over the mock Steam. This is a simulated
+network, not internet play.
+- SR1, three at once, before: the joiner showed casualty captions in 3 of 3 runs, and 1
+  ended with an unresolved desync.
+- After: 0 of 4 had captions or an unresolved desync. The joiner's count never moved.
+- One of those 4 failed SR1's "host chr 2 fades away" check, which fails under load on
+  main too.
+
+## A body that fades between two of its snapshots (QA-11, 2026-11-02, COOP_VERSION stays 17)
+
+QA-11 (checklist row SR1): in some runs the joiner never logged "host chr 2 fades away"
+for the chr its tank had run over. Its copy of the body stood until the reaper's "chr 2
+gone on the host, removing", then vanished instead of fading.
+
+A body fades for 1.5 s of game time on the host (chrlvTickDead, CHRLV_TICK_DEAD_CHECK 90)
+and is then freed. coopGuardDue sends a fading body (ACT_DEAD) in one snapshot of 20.
+Snapshots go every 3 host ticks, so 20 of them take 1 s at 60 ticks a second but 1.8 s at
+33. Below about 40 ticks a second, a fade could start and end between two of the body's
+sends, and the joiner never saw it fading. In QA's ten runs on 04b7090, the two runs at
+about 33 ticks a second were the ones with two pairs on the machine, and one of them
+missed the fade. The other eight ran at 45 to 55 and all faded.
+
+Fix (host only; packets unchanged): a body goes out in the first 3 snapshots of its fade
+(COOP_DEAD_FIRST_SENDS), so a lost packet or two doesn't matter, then once in 20 as
+before. A fade lasts only 1.5 s, so this adds at most 3 entries per body.
+
+Rig: Linux i686, copies of the game on one machine over the mock Steam. This is a
+simulated network, not internet play.
+- SR1 with two pairs at once, as in QA's failing run (the host at 25 to 38 ticks a
+  second): main missed the fade in 3 of 16 runs, the fix in 0 of 16.
+- With four pairs at once (as low as 1 to 30 ticks a second, with 4 to 12 s frame
+  freezes): main missed it in 7 of 12, the fix in 2 of 12. In both of those 2, the
+  joiner froze for 4 to 6 s and dropped off the line. In 24 more such runs with the
+  sends and receipts logged, 1 missed. There the host sent the fading body three times,
+  and none of them arrived while the joiner was frozen for 4.5 s and off the line. That
+  is the rig being overloaded, which no snapshot timing can cover.
+
 ## Bunker 2: the joiner's ending without Natalya (COOP_VERSION stays 17)
 
 Report (owner, joiner): Natalya was not in the cutscene at the end of the

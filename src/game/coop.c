@@ -527,6 +527,11 @@ static u8 sChrHostDying[COOP_MAX_CHRS];         /* the host's says this chr is d
 static u16 sChrFade[COOP_MAX_CHRS];             /* joiner: 1 + ticks since the host's chr began to fade, 0 not fading */
 static s16 sChrFadeNum[COOP_MAX_CHRS];          /* ... the chrnum that was */
 static u8 sChrFireSeen[COOP_MAX_CHRS][2]; /* host: firecount at the last snapshot */
+static s16 sChrSnapNum[COOP_MAX_CHRS];    /* host: the chrnum in this slot at the last guard snapshot, -1 none */
+static u32 sChrSnapSeen[COOP_MAX_CHRS];   /* host: the last guard snapshot that chr was there for */
+static u32 sChrSnapSince[COOP_MAX_CHRS];  /* host: the first one in the run of snapshots it has been there for */
+static s16 sChrDeadNum[COOP_MAX_CHRS];    /* host: the chrnum in this slot that is fading (ACT_DEAD), -1 none */
+static u8  sChrDeadSends[COOP_MAX_CHRS];  /* host: the snapshots it has gone out in as fading */
 static u8 sChrFiring[COOP_MAX_CHRS];      /* client: GSF_FIRE_* from the last snapshot */
 static f32 sChrHurtSeen[COOP_MAX_CHRS];   /* host: damage as of the last snapshot sent */
 static s16 sChrHurtNum[COOP_MAX_CHRS];    /* host: 1 + the chrnum that was for */
@@ -2282,6 +2287,8 @@ void coopStageStart(void)
         coopTrackReset(&sGuardTrack[i]);
         sGuardTrackNum[i] = -1;
         sChrLastSync[i] = 0;
+        sChrSnapNum[i] = -1;
+        sChrDeadNum[i] = -1;
         sChrFireSeen[i][0] = sChrFireSeen[i][1] = 0;
         sChrFiring[i] = 0;
         sChrHurtNum[i] = 0;
@@ -4758,6 +4765,13 @@ s32 coopTargetRecordDamage(f32 damage, f32 angle)
 #define COOP_GUARD_FAR   6000.0f
 #define COOP_GUARD_GONE  300
 #define COOP_GUARD_GONE_LIVE 60
+/* a body fades for 1.5 s of game time (chrlvTickDead, CHRLV_TICK_DEAD_CHECK) and is then
+ * freed. Once a second is 20 snapshots, which is more than that when the host runs slowly
+ * (3 ticks a snapshot at 33 ticks a second: 1.8 s), so a fade could start and end between
+ * two of them. The joiner never saw it fading and its body stood until the reaper took it
+ * (QA-11, Streets' run-over chr 2). A body goes out in the first few snapshots of its fade,
+ * a lost packet or two included, then once a second as before */
+#define COOP_DEAD_FIRST_SENDS 3
 
 static s32 coopGuardDue(ChrRecord *chr, s32 i, s32 firing)
 {
@@ -4840,9 +4854,36 @@ static void coopSendGuards(void)
             sChrHurtSeen[i] = chr->damage;
         }
         hurt = i < COOP_MAX_CHRS && chr->damage > sChrHurtSeen[i] && chr->actiontype != ACT_DEAD;
-        if (!coopGuardDue(chr, i, hurt || fire != 0 || (i < COOP_MAX_CHRS && sChrFiring[i] != 0)))
+        if (i < COOP_MAX_CHRS)
+        {   /* a chr goes out from the second snapshot it is in. Surface 2's alarm script
+             * spawns a guard whose own list removes it again at once (ai_chr_remove_instant),
+             * solo too, so a new one stood at the pad for one snapshot in two. A joiner
+             * mirrored each and kept it a second after it had gone: guards standing
+             * there that the host never showed, and a chr checksum that never agreed */
+            if (sChrSnapNum[i] != chr->chrnum || sChrSnapSeen[i] != sGuardSnap - 1)
+            {
+                sChrSnapNum[i] = (s16) chr->chrnum;
+                sChrSnapSince[i] = sGuardSnap;
+            }
+            sChrSnapSeen[i] = sGuardSnap;
+            if (sChrSnapSince[i] == sGuardSnap)
+            {
+                continue;
+            }
+        }
+        if (i < COOP_MAX_CHRS && (chr->actiontype != ACT_DEAD || sChrDeadNum[i] != chr->chrnum))
+        {
+            sChrDeadNum[i] = (chr->actiontype == ACT_DEAD) ? (s16) chr->chrnum : -1;
+            sChrDeadSends[i] = 0;
+        }
+        if (!coopGuardDue(chr, i, hurt || fire != 0 || (i < COOP_MAX_CHRS && sChrFiring[i] != 0)
+                          || (i < COOP_MAX_CHRS && sChrDeadNum[i] >= 0 && sChrDeadSends[i] < COOP_DEAD_FIRST_SENDS)))
         {
             continue;
+        }
+        if (i < COOP_MAX_CHRS && sChrDeadNum[i] >= 0 && sChrDeadSends[i] < 255)
+        {
+            sChrDeadSends[i]++;
         }
         if (i < COOP_MAX_CHRS)
         {
@@ -11603,7 +11644,18 @@ static s32 coopIsSoundCmd(u8 cmd)
 static s32 sApplyingRemoteAi;
 
 /* a joiner's own copy of the level scripts leaves these to the host: the
- * countdown (WORLD's clock) and the blast when it runs out (relayed) */
+ * countdown (WORLD's clock), the blast when it runs out (relayed), and the
+ * bits one list sets on another chr for a third to read (chr_bitfield_set_on
+ * and _off). A chr with a body gets the host's bits in the AI sync. The
+ * scripts' own bodiless chrs get them from no one, so a joiner's copy only
+ * counted what its own copy did. Streets' spawners set one for each
+ * civilian they make, and its casualty list counts them against the ones
+ * removed out of sight. A joiner's spawns are left to the host
+ * (coopScriptSpawnsLeftToHost) and still set the bit, but the removals run
+ * on the host only, so the joiner's count only went down: "Civilian
+ * casualties high", then "Mission Failure", and stage flags fighting the
+ * host's (QA-10). The host's captions and stage flags reach the joiner as
+ * before. */
 static s32 coopHostOwnsCmd(u8 cmd)
 {
     switch (cmd)
@@ -11614,6 +11666,8 @@ static s32 coopHostOwnsCmd(u8 cmd)
         case AI_HudCountdownStop:
         case AI_HudCountdownStart:
         case AI_TriggerExplosionsAroundBond:
+        case AI_SetChrBitfield:
+        case AI_UnsetChrBitfield:
             return sEnabled > 0 && !coopVersus() && coopInMission();
         default:
             return 0;
@@ -11698,7 +11752,7 @@ static s32 coopEndingBodyPad(s32 id, u8 *out)
     {
         return 0;
     }
-    for (i = 0; g_CurrentSetup.ailists[i].ailist != NULL && i < 0x400; i++)
+    for (i = 0; i < 0x400 && g_CurrentSetup.ailists[i].ailist != NULL; i++)
     {
         u8 *list = (u8 *) g_CurrentSetup.ailists[i].ailist;
         s32 at = 0, tp = -1, steps;
@@ -12179,6 +12233,19 @@ s32 coopExtIsHost(void)
 u32 coopExtMissionTicks(void)
 {
     return sMissionTicks;
+}
+
+/* host: 0 for a chr the guard snapshots have not sent yet (new since the last one,
+ * coopSendGuards), so the chr checksum (coop_repl.c) names what joiners have. 1 on a joiner */
+s32 coopExtChrSent(const ChrRecord *chr)
+{
+    s32 i = (s32) (chr - g_ChrSlots);
+
+    if (!coopNetIsHost() || i < 0 || i >= COOP_MAX_CHRS)
+    {
+        return 1;
+    }
+    return sChrSnapNum[i] == chr->chrnum && sChrSnapSeen[i] == sGuardSnap && sChrSnapSince[i] != sGuardSnap;
 }
 
 /* another player in this mission with us: where they are and look */
