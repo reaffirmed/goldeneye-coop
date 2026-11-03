@@ -3927,3 +3927,22 @@ simulated network, not internet play.
   sends and receipts logged, 1 missed. There the host sent the fading body three times,
   and none of them arrived while the joiner was frozen for 4.5 s and off the line. That
   is the rig being overloaded, which no snapshot timing can cover.
+
+## Partner Fade strength (2026-11-03, COOP_VERSION stays 17)
+
+- The owner's ask: a scale for the partner fade, so each player sets how much
+  they like it. `partner_fade` is now a percent, not a toggle: Port Options
+  lists Off, 25 % to 200 % in quarters, 100 % (the fade as shipped in v0.6.13)
+  the default. Each player's own ([display], nothing sent).
+- coop_fade.c coopFadeTarget: below 100 the depth scales (the partner fades
+  only part way, 50 % = half see-through at their closest; same 1 m / 2.6 m
+  distances); above 100 they go all the way and both distances grow with it
+  (200 % = gone at 2 m, whole from 5.2 m). 100 % is the old curve exactly.
+  The 2.2 m other-floor rule is unchanged.
+- An older midas.ini's `partner_fade=1` (the toggle's on) reads as 100 %;
+  `partner_fade=0` stays off.
+- Harness: GE_COOP_TESTWALK's "done" line now logs the strength and how much
+  of the partner is drawn (a `fwd:0` step reads it after the easing settles).
+- Rig (Dam, two copies over the mock Steam, joiner walks back from the host
+  then into them): at 1.1 m, Off drawn 100 %, 50 % drawn 50 %, 100 % drawn 1 %,
+  200 % drawn 0 %; at 2 m, 100 % drawn 70 %, 200 % drawn 0 %. Matches the curve.

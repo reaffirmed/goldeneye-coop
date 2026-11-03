@@ -238,9 +238,15 @@ padN_stickmode.
   coop_menu           | 0          | 1 draws the CO-OP screen on the
                       |            | original folder (Classic); 0 the
                       |            | Modern tabbed screen. Same options
-  partner_fade        | 1          | Story co-op: a partner closer than
-                      |            | 2.6 m fades out, gone at 1 m, and
-                      |            | back as you part. 0 = always drawn
+  partner_fade        | 100        | Story co-op: how strongly a partner
+                      |            | up close fades out, percent. 100: a
+                      |            | partner closer than 2.6 m fades, gone
+                      |            | at 1 m, back as you part. Below 100
+                      |            | they fade only part way (50 = half
+                      |            | see-through at most); above, the
+                      |            | distances grow with it (200 = gone
+                      |            | at 2 m, whole from 5.2 m). 0 = always
+                      |            | drawn. 1 (older ini) reads as 100
   caption_style       | 0          | 0 Modern: speech and mission messages
                       |            | as caption lines, bottom centre, the
                       |            | speaker's name in colour. 1 Classic:

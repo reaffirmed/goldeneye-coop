@@ -173,6 +173,13 @@ static const char *const sPctText[] = {
     "10%\n", "15%\n", "20%\n", "25%\n", "30%\n", "35%\n", "40%\n", "45%\n", "50%\n"
 };
 
+/* Partner Fade (coop_fade.c): its strength, Off, then a quarter at a time to
+ * double; 100% is the fade as it first shipped. The ini keeps the percent. */
+static const s32 sPartnerFadeVals[] = { 0, 25, 50, 75, 100, 125, 150, 175, 200 };
+static const char *const sPartnerFadeText[] = {
+    "Off\n", "25%\n", "50%\n", "75%\n", "100%\n", "125%\n", "150%\n", "175%\n", "200%\n"
+};
+
 /* Stick Sensitivity: the stick_scale multiplier, 0.5 to 3.0 in tenths */
 static const s32 sStickSensVals[] = {
     5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
@@ -383,8 +390,8 @@ static const struct PortOpt sOpts[] = {
     ENUMR ("text_size",         "[display]", "Text Size\n",     PORTOPT_CAT_GAMEPLAY, sTextSizeVals, sTextSizeText, NULL),
     /* mission messages and speech: Modern caption lines (coop_captions.c) or Rare's */
     TOGGLET("caption_style",    "[display]", "Caption Style\n", PORTOPT_CAT_GAMEPLAY, sCoopMenuText),
-    /* story co-op: a partner right in front of you fades out (coop_fade.c) */
-    TOGGLE("partner_fade",      "[display]", "Partner Fade\n",  PORTOPT_CAT_GAMEPLAY),
+    /* story co-op: a partner right in front of you fades out (coop_fade.c), how strongly is each player's own */
+    ENUMR ("partner_fade",      "[display]", "Partner Fade\n",  PORTOPT_CAT_GAMEPLAY, sPartnerFadeVals, sPartnerFadeText, NULL),
     /* the in-game updater (port_update.c): ask GitHub for a newer release at startup */
     TOGGLE("auto_update",       "[display]", "Check for Updates\n", PORTOPT_CAT_GAMEPLAY),
     TOGGLET("crouch_key",       "[input]",   "Crouch Key\n",    PORTOPT_CAT_CONTROLLER, sHoldToggleText),
