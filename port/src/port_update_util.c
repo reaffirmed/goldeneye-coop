@@ -422,7 +422,8 @@ static int endsWithNoCase(const char *s, const char *tail)
  * cart image extension, wherever it is), settings (*.ini), saves and the old
  * co-op files beside the exe, and everything under Data/ except the plain text
  * files that sit directly in it (README.txt, shaders_base.txt). Saves,
- * profiles, logs, crash and bug reports all live in folders under Data/. */
+ * profiles, logs, crash and bug reports all live in folders under Data/.
+ * The languages under lang/ are the game's own files and are replaced. */
 int portUpdPathAllowed(const char *rel)
 {
     static const char *const kept[] = { ".z64", ".n64", ".v64", ".rom", ".bin", ".ini", ".sav", ".eep" };
@@ -446,6 +447,27 @@ int portUpdPathAllowed(const char *rel)
     }
     if (rel[strlen(rel) - 1] == '/')
     {
+        return 0;
+    }
+    if (strncmp(rel, "lang/", 5) == 0)
+    {   /* the languages (lang/README.md): lang/<code>/<file>, one level,
+         * only the kinds of file a language has (its language.ini is ours, not a
+         * player's setting) */
+        static const char *const langfiles[] = { ".ini", ".po", ".xdelta", ".txt" };
+        const char *code = rel + 5;
+        const char *leaf = strchr(code, '/');
+
+        if (leaf == NULL || leaf == code || strchr(leaf + 1, '/') != NULL || leaf[1] == '.')
+        {
+            return 0;
+        }
+        for (i = 0; i < sizeof(langfiles) / sizeof(langfiles[0]); i++)
+        {
+            if (endsWithNoCase(leaf, langfiles[i]))
+            {
+                return 1;
+            }
+        }
         return 0;
     }
     for (i = 0; i < sizeof(kept) / sizeof(kept[0]); i++)

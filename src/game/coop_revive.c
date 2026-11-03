@@ -23,6 +23,7 @@
 #include "player.h"
 #include "stan.h"
 #include "coop.h"
+#include "port_lang.h"   /* portTr: the port's own text in the player's language */
 
 extern void portConLogf(const char *fmt, ...);
 extern s32 portJoyPortUseHeldInPlay(void);
@@ -125,7 +126,7 @@ void coopReviveTick(s32 missionticks)
             char name[40], msg[64];
 
             coopAsciiName(name, sizeof(name), p.name, 0);
-            snprintf(msg, sizeof(msg), "You revived %s.\n", name);
+            snprintf(msg, sizeof(msg), portTr("You revived %s.\n"), name);
             hudmsgBottomShow(msg);
             coopStatsNote(COOPSTAT_REVIVES);
             portConLogf("ge: coop: revived player %d\n", p.player + 1);

@@ -46,6 +46,7 @@
 #include "language.h"
 #include "chr.h"
 #include "coop.h"
+#include "port_lang.h"   /* portTr: the port's own text in the player's language */
 
 extern Gfx *portHudScaleBegin(Gfx *gdl, f32 x, f32 y);
 extern Gfx *portHudScaleEnd(Gfx *gdl);
@@ -319,11 +320,11 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
     name[strlen(name) - 1] = '\0';
     if (coopHudPlayerLost(p->player))
     {
-        snprintf(text, sizeof(text), "%s - LOST\n", name);
+        snprintf(text, sizeof(text), portTr("%s - LOST\n"), name);
     }
     else if (p->dead)
     {
-        snprintf(text, sizeof(text), "REVIVE %s %dM\n", name, (int) (dist / 100.0f + 0.5f));
+        snprintf(text, sizeof(text), portTr("REVIVE %s %dM\n"), name, (int) (dist / 100.0f + 0.5f));
     }
     else
     {
@@ -472,7 +473,7 @@ static Gfx *coopHudPing(Gfx *gdl, CoopPingMark *m)
     name[strlen(name) - 1] = '\0';
     if (m->kind == COOPPING_ENEMY)
     {
-        snprintf(text, sizeof(text), "ENEMY %dM\n", (int) (dist / 100.0f + 0.5f));
+        snprintf(text, sizeof(text), portTr("ENEMY %dM\n"), (int) (dist / 100.0f + 0.5f));
     }
     else
     {
@@ -667,11 +668,11 @@ static Gfx *coopHudPartnerStatus(Gfx *gdl, CoopHudPartner *p, s32 row)
         }
         else if (p->revivable && coopHudDownRule() == COOPDOWN_REVIVE)
         {
-            snprintf(text, sizeof(text), "DOWN - REVIVE THEM %d\n", (int) secs);   /* before they bleed out */
+            snprintf(text, sizeof(text), portTr("DOWN - REVIVE THEM %d\n"), (int) secs);   /* before they bleed out */
         }
         else if (p->revivable && p->respawn >= 0)
         {
-            snprintf(text, sizeof(text), "DOWN - REVIVE OR %d\n", (int) secs);
+            snprintf(text, sizeof(text), portTr("DOWN - REVIVE OR %d\n"), (int) secs);
         }
         else if (p->revivable)
         {
@@ -679,7 +680,7 @@ static Gfx *coopHudPartnerStatus(Gfx *gdl, CoopHudPartner *p, s32 row)
         }
         else if (p->respawn >= 0)
         {
-            snprintf(text, sizeof(text), "DOWN - BACK IN %d\n", (int) secs);
+            snprintf(text, sizeof(text), portTr("DOWN - BACK IN %d\n"), (int) secs);
         }
         else if (coopHudDownRule() == COOPDOWN_REVIVE)
         {
@@ -754,15 +755,15 @@ static Gfx *coopHudRespawn(Gfx *gdl, s32 eta)
     }
     else if (coopHudDownRule() == COOPDOWN_REVIVE)
     {
-        snprintf(text, sizeof(text), "WAIT FOR A REVIVE - BLEEDING OUT IN %d\n", (int) secs);
+        snprintf(text, sizeof(text), portTr("WAIT FOR A REVIVE - BLEEDING OUT IN %d\n"), (int) secs);
     }
     else if (coopHudDownRule() == COOPDOWN_BOTH)
     {
-        snprintf(text, sizeof(text), "WAIT FOR A REVIVE OR BACK IN %d\n", (int) secs);
+        snprintf(text, sizeof(text), portTr("WAIT FOR A REVIVE OR BACK IN %d\n"), (int) secs);
     }
     else
     {
-        snprintf(text, sizeof(text), "BACK BESIDE YOUR PARTNER IN %d\n", (int) secs);
+        snprintf(text, sizeof(text), portTr("BACK BESIDE YOUR PARTNER IN %d\n"), (int) secs);
     }
     textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
     x = viGetViewLeft() + (viGetViewWidth() - tw) / 2;
@@ -787,7 +788,7 @@ static Gfx *coopHudRespawn(Gfx *gdl, s32 eta)
         }
         else
         {
-            snprintf(text, sizeof(text), "%d LIVES LEFT\n", (int) coopHudLives());
+            snprintf(text, sizeof(text), portTr("%d LIVES LEFT\n"), (int) coopHudLives());
         }
         textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
         gdl = coopHudPrint(gdl, viGetViewLeft() + (viGetViewWidth() - tw) / 2, y + th + 12, text, COOP_HUD_COL_DIM);
@@ -812,7 +813,7 @@ static Gfx *coopHudReviving(Gfx *gdl)
     coopHudText(name, sizeof(name), p.name);
     coopHudFit(name, viGetViewWidth() / 2);
     name[strlen(name) - 1] = '\0';
-    snprintf(text, sizeof(text), (hold >= 0) ? "REVIVING %s\n" : "HOLD USE TO REVIVE %s\n", name);
+    snprintf(text, sizeof(text), (hold >= 0) ? portTr("REVIVING %s\n") : portTr("HOLD USE TO REVIVE %s\n"), name);
     textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
     x = viGetViewLeft() + (viGetViewWidth() - tw) / 2;
     y = viGetViewTop() + viGetViewHeight() * 2 / 3;
@@ -847,12 +848,12 @@ static Gfx *coopHudSpectating(Gfx *gdl, s32 mode, s32 who)
     if (mode == 2)
     {
         snprintf(text, sizeof(text), "FREE CAMERA\n");
-        snprintf(keys, sizeof(keys), "FIRE: WATCH %s   USE: BACK\n", name);
+        snprintf(keys, sizeof(keys), portTr("FIRE: WATCH %s   USE: BACK\n"), name);
     }
     else
     {
-        snprintf(text, sizeof(text), "WATCHING %s\n", name);
-        snprintf(keys, sizeof(keys), others ? "FIRE / AIM: NEXT / BACK   USE: FREE CAMERA%s\n" : "USE: FREE CAMERA%s\n",
+        snprintf(text, sizeof(text), portTr("WATCHING %s\n"), name);
+        snprintf(keys, sizeof(keys), others ? portTr("FIRE / AIM: NEXT / BACK   USE: FREE CAMERA%s\n") : portTr("USE: FREE CAMERA%s\n"),
                  coopSpectateEndAsked() ? "   START: END" : "");
     }
     if (coopSpectateEndAsked() == 2)
@@ -993,10 +994,10 @@ Gfx *coopHudSkipVote(Gfx *gdl)
     {
         return gdl;
     }
-    len = snprintf(text, sizeof(text), "SKIP %d/%d", (int) n, (int) need);
+    len = snprintf(text, sizeof(text), portTr("SKIP %d/%d"), (int) n, (int) need);
     if (!mine)
     {
-        len += snprintf(text + len, sizeof(text) - len, " - PRESS TO VOTE");
+        len += snprintf(text + len, sizeof(text) - len, "%s", portTr(" - PRESS TO VOTE"));
     }
     else
     {
@@ -1005,7 +1006,7 @@ Gfx *coopHudSkipVote(Gfx *gdl)
             coopHudText(name, sizeof(name), coopPlayerName(who));
             coopHudFit(name, viGetViewWidth() / 4);
             name[strlen(name) - 1] = '\0';
-            len += snprintf(text + len, sizeof(text) - len, (i == 0) ? " - WAITING FOR %s" : ", %s", name);
+            len += snprintf(text + len, sizeof(text) - len, (i == 0) ? portTr(" - WAITING FOR %s") : ", %s", name);
         }
     }
     snprintf(text + len, sizeof(text) - len, "\n");

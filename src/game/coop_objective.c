@@ -35,6 +35,7 @@
 #include "player.h"
 #include <bondgame.h>
 #include "coop.h"
+#include "port_lang.h"   /* portTr: the port's own text in the player's language */
 
 extern void portConLogf(const char *fmt, ...);
 extern u8 *get_text_for_objective(int objectiveIndex);
@@ -160,7 +161,7 @@ static void coopObjToast(s32 index, s32 letter, s32 player)
             break;
         }
     }
-    snprintf(text, sizeof(text), "%s COMPLETED %c|%s", (name != NULL && name[0] != '\0') ? name : "PARTNER",
+    snprintf(text, sizeof(text), portTr("%s COMPLETED %c|%s"), (name != NULL && name[0] != '\0') ? name : portTr("PARTNER"),
              'A' + letter, body);
     coopFeedToast(text, player);
 }

@@ -2588,9 +2588,24 @@ void texLoad(s32 *updateword, struct texpool *pool)
         if (TRUE)
         {
             // Copy the compressed texture to RAM
+#ifndef TARGET_N64
+            { /* a language patch's own version of this image (port_lang.c) */
+                extern const unsigned char *portLangTexture(unsigned int num, unsigned int *size);
+                unsigned int langsize = 0;
+                const unsigned char *lang = portLangTexture((unsigned int) g_TexNumToLoad, &langsize);
+                if (lang != NULL)
+                {
+                    memset(alignedcompbuffer, 0, (thisoffset & 7) + langsize + 0x20);
+                    memcpy(alignedcompbuffer + (thisoffset & 7), lang, langsize);
+                }
+                else
+#endif
             romCopy(alignedcompbuffer,
                     (u32) &_imagesSegmentRomStart + (thisoffset & 0xfffffff8),
                     ((u32) (nextoffset - thisoffset) + 0x1f) >> 4 << 4);
+#ifndef TARGET_N64
+            }
+#endif
 #ifndef TARGET_N64
             { /* tickhz=hw load hitch: the texture's cart read; its decode is priced
                * after the decoder runs (portHwTexDecoded, frametiming.c) */

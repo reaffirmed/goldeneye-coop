@@ -22,6 +22,9 @@ require.
                                                  Perfect Dark netplay fork)
   GoldenEye 007 Plus (guard          credit,     every build
     targeting in src/game/chr.c)     see below
+  Spanish translation of GoldenEye   free, with  every release
+    007 v2.0, by Sogun and IlDucci   its readme  (lang/es)
+    (lang/es/GE-ESP-NTSC.xdelta)     see below
   gzip 1.2.4 (tools/gzipsrc)         GPL-2.0+    build tools only, not shipped
   puff (tools/extractor)             zlib        build tools only, not shipped
   armips (tools/armips.cpp)          MIT         build tools only, not shipped
@@ -219,6 +222,17 @@ Plus. The ported pieces are listed in coop/NOTES.md, "Provenance: GoldenEye
 
 Thanks to Joshua for GoldenEye 007 Plus, whose split-screen campaign co-op
 showed how guards can choose between several Bonds.
+
+
+Spanish translation of GoldenEye 007, v2.0
+------------------------------------------
+By Sogun, with IlDucci (version 2.0). lang/es/GE-ESP-NTSC.xdelta is their
+patch for the GoldenEye 007 (USA) cart, shipped as it came in their archive.
+The game applies it in memory to the player's own cart for the Spanish
+language. Their readme, lang/es/leeme.txt, is shipped beside it unchanged:
+its section 4 lets the patch be shared and modified freely, on condition
+that the readme goes with it. The translation is unofficial and is not
+endorsed by Nintendo or Rare.
 
 
 gzip 1.2.4

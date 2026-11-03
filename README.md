@@ -43,6 +43,7 @@ This is an unofficial fan project. It contains no game assets: every player need
 - **In-game updater.** The game checks GitHub for a new release and installs it from the CO-OP screen, checksum verified. Saves and settings are never touched.
 - **Accessibility.** Sound captions with direction, colour-blind player colours, text size up to 200%, screen shake off, and toggle crouch and walk.
 - **Bug reports in one key.** F8 saves a zip with the log, co-op state, settings and a screenshot, ready to paste into Discord. Crashes save a report too.
+- **Spanish.** Port Options > Language switches the whole game, the co-op and versus screens and every setting to Spanish, using Sogun and IlDucci's fan translation of the game's text. Players in a lobby can each use their own language. More languages can be added: see [`lang/README.md`](lang/README.md).
 - **Keyboard and mouse, or any pad,** with Xbox, PlayStation, N64 or keyboard button prompts.
 - Everything from Project Midas: widescreen, high frame rates, FOV, HUD and control options, and Project64 saves.
 
@@ -174,6 +175,7 @@ sudo apt install libsdl2-2.0-0:i386 libgl1:i386
 | `Data/Logs/ge_direct.log` | The run log on Windows. |
 | `Data/Crashes/`, `Data/Reports/` | Crash reports and F8 bug reports, newest ten kept. |
 | `Photos/` | Pictures from photo mode. |
+| `lang/` | Languages: each folder has its text and, for Spanish, the translators' patch and readme. |
 
 ## Known issues
 
@@ -201,6 +203,7 @@ GoldenEye Coop would not exist without the people below. Thank you.
 - **[Perfect Dark decompilation](https://github.com/n64decomp/perfect_dark)** by Ryan Dwyer and contributors, the **[Perfect Dark PC port](https://github.com/fgsfdsfgs/perfect_dark)** by fgsfds and contributors, and **[Perfect Dark netplay](https://github.com/murkantor/perfect_dark_netplay)** by murkantor.
 - **[The DOOM III Network Architecture](https://mrelusive.com/publications/papers/The-DOOM-III-Network-Architecture.pdf)** by J.M.P. van Waveren (id Software, 2006).
 - **Steamworks** by Valve, used through the Spacewar test app, and **[Steamworks.NET](https://github.com/rlabrecque/Steamworks.NET)** by Riley Labrecque for the packaged `steam_api.dll`. **Discord** Rich Presence.
+- **Sogun and IlDucci** for their Spanish translation of GoldenEye 007 (v2.0), shipped in `lang/es/` with their readme, as its terms ask.
 - Everyone who play-tested the co-op builds and sent F8 reports.
 
 Project Midas also credits [ENet](https://github.com/lsalzman/enet), [xdelta3](https://github.com/jmacd/xdelta), [qemu-irix](https://github.com/n64decomp/qemu-irix), [pj64raphnetraw](https://github.com/raphnet/pj64raphnetraw), the 1964 emulator and its mouse injector; see [its README](https://github.com/murkantor/Project-Midas#acknowledgements).

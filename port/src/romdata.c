@@ -64,6 +64,7 @@
 #include "image.h"      /* g_Textures / PORT_TEXTURES_MAX: the texture directory */
 #include "assets/obseg/file_resource_id_enums.h" /* OBJ_INDEX_MAX */
 #include "romdata.h"
+#include "port_lang.h"   /* a language's text banks (portLangBank) */
 #include "../generated/romseg_list.h"
 
 /* port_console.c: same output as the fprintf(stderr, ...) this replaced,
@@ -576,6 +577,133 @@ bad:
     return 0;
 }
 
+/* Another cart image's directory (a language patch applied to this cart,
+ * port_lang.c): inflate its data segment and call cb for every file with its
+ * ROM offset and size. 1 = walked. The image must keep the stock layout
+ * (cdata at the same ROM offset, the table at the same cdata offset), as a
+ * text-only patch does; entries may be fewer or reordered. */
+int romdataImageFiles(const u8 *img, u32 size, void (*cb)(const char *name, u32 ofs, u32 size, void *ctx), void *ctx)
+{
+    const u8 *src = img + ROMDATA_CDATA_ROMOFS;
+    u8 *cd;
+    u32 n;
+    u32 ofs[ROMDATA_MAX_FILES];
+    const char *names[ROMDATA_MAX_FILES];
+    s32 i, count = 0;
+
+    if (size < ROMDATA_CDATA_ROMOFS + 2 || src[0] != 0x11 || src[1] != 0x72) {
+        return 0;
+    }
+    cd = (u8 *) malloc(ROMDATA_CDATA_ALLOC);
+    if (cd == NULL) {
+        return 0;
+    }
+    n = decompressdata((u8 *) src, cd, NULL);
+    for (i = 0; i < ROMDATA_MAX_FILES; i++) {
+        const u8 *e = cd + ROMDATA_FILETABLE_OFS + (u32) i * ROMDATA_FILEENTRY_SIZE;
+        u32 nameptr;
+        if (ROMDATA_FILETABLE_OFS + (u32) (i + 1) * ROMDATA_FILEENTRY_SIZE > n || be32(e) != (u32) i) {
+            break;
+        }
+        nameptr = be32(e + 4);
+        ofs[i] = be32(e + 8);
+        if (nameptr >= ROMDATA_CDATA_VADDR && nameptr < ROMDATA_CDATA_VADDR + n &&
+            memchr(cd + (nameptr - ROMDATA_CDATA_VADDR), '\0', n - (nameptr - ROMDATA_CDATA_VADDR)) != NULL) {
+            names[i] = (const char *) cd + (nameptr - ROMDATA_CDATA_VADDR);
+        } else if (i == 0) {
+            names[i] = "";
+        } else {
+            break;
+        }
+        count = i + 1;
+    }
+    if (count < 3) {
+        free(cd);
+        return 0;
+    }
+    for (i = 1; i + 1 < count; i++) {
+        if (ofs[i + 1] >= ofs[i] && ofs[i + 1] <= size) {
+            cb(names[i], ofs[i], ofs[i + 1] - ofs[i], ctx);
+        }
+    }
+    free(cd);
+    return 1;
+}
+
+/* Another cart image's textures (port_lang.c): call cb with each texture's
+ * number, ROM offset and size. The image bank starts after the last file (the
+ * 16-byte ob_end), and the texture table in cdata lists each texture's size.
+ * The stock table has 8-byte entries; a patch built with another tool may
+ * pack it into 4-byte ones (the size in the low 23 bits), so the entry size
+ * is the one that gives `expect` textures (0 = the stock 8). 1 = walked. */
+#define ROMDATA_TEXTABLE_OFS 0x28570u   /* g_Textures in cdata */
+int romdataImageTextures(const u8 *img, u32 size, u32 expect,
+                         void (*cb)(u32 num, u32 ofs, u32 size, void *ctx), void *ctx)
+{
+    const u8 *src = img + ROMDATA_CDATA_ROMOFS;
+    u8 *cd;
+    u32 n, base = 0, i, stride, ok = 0;
+
+    if (size < ROMDATA_CDATA_ROMOFS + 2 || src[0] != 0x11 || src[1] != 0x72) {
+        return 0;
+    }
+    cd = (u8 *) malloc(ROMDATA_CDATA_ALLOC);
+    if (cd == NULL) {
+        return 0;
+    }
+    n = decompressdata((u8 *) src, cd, NULL);
+    for (i = 0; i < ROMDATA_MAX_FILES; i++) {
+        const u8 *e = cd + ROMDATA_FILETABLE_OFS + i * ROMDATA_FILEENTRY_SIZE;
+        if (ROMDATA_FILETABLE_OFS + (i + 1) * ROMDATA_FILEENTRY_SIZE > n || be32(e) != i) {
+            break;
+        }
+        base = be32(e + 8) + 16;
+    }
+    for (stride = 8; stride >= 4 && !ok; stride -= 4) {
+        u32 o, count = 0, total = 0, end = 0;
+        if (expect == 0 && stride != 8) {
+            break;
+        }
+        for (o = ROMDATA_TEXTABLE_OFS; o + stride <= n && count < PORT_TEXTURES_MAX; o += stride, count++) {
+            u32 sz = be32(cd + o) & 0x7FFFFFu;
+            if (sz == 0xFFFFu) {
+                end = 1;
+                break;
+            }
+            if (sz > size || total > size - sz) {
+                count = 0;
+                break;
+            }
+            total += sz;
+        }
+        if (!end || count < 100 || (expect != 0 && count != expect) || base > size || total > size - base) {
+            continue;
+        }
+        ok = 1;
+        for (i = 0, o = ROMDATA_TEXTABLE_OFS; i < count; i++, o += stride) {
+            u32 sz = be32(cd + o) & 0x7FFFFFu;
+            cb(i, base, sz, ctx);
+            base += sz;
+        }
+    }
+    free(cd);
+    return (int) ok;
+}
+
+/* a ROM segment's offset and size (romseg_list.h) by name; 0 = no such */
+int romdataSegRange(const char *name, u32 *ofs, u32 *size)
+{
+    size_t i;
+    for (i = 0; i < sizeof(sSegs) / sizeof(sSegs[0]); i++) {
+        if (strcmp(sSegs[i].name, name) == 0) {
+            *ofs = sSegs[i].romofs;
+            *size = sSegs[i].size;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* every ROMSEG must lie inside the image; a mod that shrank the cart
  * below a region would otherwise read past the buffer later */
 static int romdataCheckSegs(u32 romsize)
@@ -738,6 +866,7 @@ static int romdataClassEnabled(enum romfileclass cls)
 }
 
 static u8 sServed[OBJ_INDEX_MAX];          /* 1 = this compiled index now points at the ROM */
+static u8 sLangServed[OBJ_INDEX_MAX];      /* 1 = ... at a language's patched copy (port_lang.c) */
 static u8 *sCompiledData[OBJ_INDEX_MAX];   /* the linked data it replaced (probe), or NULL */
 
 /* the class of a file from its ROM name (the prefix grammar in
@@ -798,6 +927,20 @@ void romdataFilesApply(void)
         enum romfileclass cls = romdataClassOf(name);
         if (cls == CLASS_NONE || !romdataClassEnabled(cls)) {
             continue;
+        }
+        if (cls == CLASS_TEXT) {
+            /* the language in force has its own copy of this bank */
+            u32 lsize = 0;
+            const u8 *lbank = portLangBank(name, &lsize);
+            if (lbank != NULL) {
+                sCompiledData[i] = NULL; /* never "differs from the compiled bank": it is meant to */
+                file_resource_table[i].hw_address = (u8 *) lbank;
+                resource_lookup_data_array[i].rom_size = lsize;
+                sServed[i] = 1;
+                sLangServed[i] = 1;
+                served++;
+                continue;
+            }
         }
         r = romdataFileIndex(name);
         if (r < 0 || sFiles[r].size == 0) {
@@ -930,7 +1073,14 @@ static void romdataTextPreprocess(s32 index, u8 *data, u32 size)
                 v = (u32) (uintptr_t) (data + off);
             }
         }
-        {
+        if (sLangServed[index]) {
+            /* a translated bank: the language's own relabels (language.ini) */
+            const char *t = portLangBankPatch(bank, i);
+            if (t != NULL) {
+                v = (u32) (uintptr_t) t;
+                patched++;
+            }
+        } else {
             size_t p;
             for (p = 0; p < sizeof(sTextPatches) / sizeof(sTextPatches[0]); p++) {
                 if (sTextPatches[p].slot == i && strcmp(sTextPatches[p].bank, bank) == 0) {
@@ -952,6 +1102,14 @@ static void romdataTextPreprocess(s32 index, u8 *data, u32 size)
             }
         }
         memcpy(data + i * 4, &v, 4);
+    }
+    if (sLangServed[index]) {
+        /* the translators' accented letters sit on punctuation bytes in their
+         * fonts: into Latin-1, so the cart's own fonts keep their punctuation */
+        portLangBankRecode(data + first, size - first);
+        portConLogf("ge: romdata: text %-8s %3u slots from the %s translation%s\n", bank, n, portLangCode(),
+                patched ? " (its relabels applied)" : "");
+        return;
     }
     if (compiled != NULL) {
         if (differ == 0) {
@@ -1453,6 +1611,10 @@ s32 romdataInit(int argc, char **argv)
 done:
     romdataCheckSegs(sRomSize);
     sLoaded = 1;
+    /* a language with its own patch: applied to a copy of this cart, its
+     * text banks and fonts kept (port_lang.c); served below and by
+     * textrelated.c */
+    portLangRomLoaded(sRom, sRomSize);
     /* the texture directory + bank base from THIS cart, before the images
      * consumer is pointed at the bank */
     romdataImageTableApply();

@@ -36,6 +36,7 @@
 #include <joy.h>
 #include <snd.h>
 #include <music.h>
+#include "port_lang.h"   /* portTr: the port's own text in the player's language */
 
 extern void portConLogf(const char *fmt, ...);
 extern char *getenv(const char *);
@@ -210,7 +211,7 @@ static Gfx *scrMissionCard(Gfx *gdl, u8 arrived, s32 secs, s32 a)
         gdl = microcode_constructor_related_to_menus(gdl, cl, y + 2, cl + 5, y + 7, scrAlpha(coopHudColour(p), a));
         gdl = microcode_constructor(gdl);
         gdl = scrPrint(gdl, cl + 0x0A, y, name, scrAlpha(SCR_COL_TEXT, a));
-        snprintf(line, sizeof(line), isin ? "IN\n" : "LOADING%s\n", scrDots());
+        snprintf(line, sizeof(line), isin ? portTr("IN\n") : portTr("LOADING%s\n"), scrDots());
         gdl = scrPrint(gdl, isin ? cr - scrWidth(line) : cr - scrWidth("LOADING...\n"), y, line,
                        scrAlpha(isin ? SCR_COL_IN : SCR_COL_DIM, a));
         y += 0x0C;
@@ -227,7 +228,7 @@ static Gfx *scrMissionCard(Gfx *gdl, u8 arrived, s32 secs, s32 a)
     y += 8;
     if (in < total)
     {
-        snprintf(line, sizeof(line), "WAITING FOR EVERYONE TO LOAD IN - %d\n", (int) secs);
+        snprintf(line, sizeof(line), portTr("WAITING FOR EVERYONE TO LOAD IN - %d\n"), (int) secs);
     }
     else
     {
