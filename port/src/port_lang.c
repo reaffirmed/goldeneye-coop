@@ -968,7 +968,7 @@ static void langKeepBank(const char *name, uint32_t ofs, uint32_t size, void *vc
     if (name[0] != 'L' || l < 3 || l >= sizeof(sBanks[0].name) || name[l - 1] != 'E' || strchr(name, '/') != NULL) {
         return;
     }
-    if (size == 0 || ofs + size > ctx->size || sBankCount >= LANG_BANK_MAX) {
+    if (size == 0 || size > ctx->size || ofs > ctx->size - size || sBankCount >= LANG_BANK_MAX) {
         return;
     }
     sBanks[sBankCount].data = (uint8_t *) malloc(size);
@@ -1052,7 +1052,7 @@ void portLangRomLoaded(const uint8_t *rom, size_t size)
     }
     for (i = 0; i < 2; i++) {
         uint32_t ofs, sz;
-        if (romdataSegRange(segs[i], &ofs, &sz) && ofs + sz <= imgsize) {
+        if (romdataSegRange(segs[i], &ofs, &sz) && sz <= imgsize && ofs <= imgsize - sz) {
             sFontSeg[i] = langFontHost(img + ofs, sz);
             sFontSize[i] = sFontSeg[i] != NULL ? sz : 0;
         }

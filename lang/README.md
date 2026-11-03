@@ -119,6 +119,33 @@ The build copies `lang/` next to the game, and the release zip carries it.
 `lang/es/GE-ESP-NTSC.xdelta` is Sogun and IlDucci's Spanish translation, v2.0,
 for the USA cart. Its readme, `leeme.txt`, allows sharing it freely and
 changing it as long as the readme goes with it, so it is shipped beside the
-patch, unchanged. The port's Spanish (`port.po`) uses the patch's words for the
-game's terms: Presa, Agente secreto, Mirilla, Autoapuntado, Salud, Escenario,
-Nivel.
+patch, unchanged. It is credited in `tools/THIRD_PARTY_NOTICES.txt`, which
+the release zip carries. The port's Spanish (`port.po`) uses the patch's words
+for the game's terms: Presa, Agente secreto, Mirilla, Autoapuntado, Salud,
+Escenario, Nivel.
+
+Provenance:
+
+- The archive is `gespanishtranslationv20sogun-ilducci.zip` (sha256
+  `95ca5780e4fc019d6ed2070ea4999b3ce65e5c39ab704a6b14cb2f0877f5d834`), given to
+  the project by its owner. The patch's own pages are the translator's blog
+  post named in `leeme.txt` (sogunstudio.blogspot.com, August 2011) and the
+  ShootersForever thread.
+- The archive holds `GE-ESP-NTSC.xdelta` (USA), `GE-ESP-PAL.xdelta`, `léeme.txt`
+  and an old Wii folder. The two files shipped here are copied out of it
+  byte for byte: `GE-ESP-NTSC.xdelta` (sha256
+  `b3c9bc628200ae3c6e1056e1f7a5ed646b89fea056e6a47fab40010802c2207e`, dated
+  2014-12-29 in the archive) and `léeme.txt` as `leeme.txt` (sha256
+  `6188a150ed3ba7ea737e548575f0b595e3a90d76e2b57a3dc76438ee909d1d98`; only the
+  name lost its accent).
+- The readme lists the patch as `GE-SPA-NTSC.xdelta`, but the archive's file is
+  named `GE-ESP-NTSC.xdelta`. Nothing was renamed here: the translators' archive
+  ships it under that name, and it is the only USA patch in it.
+- The patch is VCDIFF, made against `GoldenEye 007 (U) [!].z64` (its xdelta
+  header names that file). It changes about 108 KB of the cart, and each window's
+  Adler-32 is checked when it is applied.
+
+A language patch feeds the game's own decompressor, like a cart image does:
+`port_vcdiff.c` refuses any patch whose offsets or lengths fall outside its
+buffers, but the text banks it produces are trusted as the cart's are. Only add
+patches from their translators.

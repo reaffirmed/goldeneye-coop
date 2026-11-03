@@ -13,8 +13,13 @@
  * Refused with a message: secondary compression (DJW/FGK/LZMA), a custom
  * code table, compressed sections.
  *
- * NO SDL, no game headers: builds anywhere, and scripts/port/test_vcdiff.c
- * runs it on the host.
+ * Every length and offset in the patch is checked without overflow on
+ * 32-bit size_t (the i686 builds): a damaged or hostile patch is refused, it
+ * never reads or writes outside its buffers. The output is capped at
+ * VC_MAX_OUTPUT.
+ *
+ * NO SDL, no game headers: builds anywhere, and coop/ci/vcdiff_test.c runs it
+ * on the host (CI, next to update_test).
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,6 +28,9 @@
 #include "port_vcdiff.h"
 
 enum { VC_NOOP = 0, VC_ADD = 1, VC_RUN = 2, VC_COPY = 3 };
+
+/* the largest patched file accepted: a cart is at most 64 MB */
+#define VC_MAX_OUTPUT (64u << 20)
 
 struct vcinst {
     uint8_t type1, size1, mode1;
@@ -166,9 +174,12 @@ static int vcGrow(uint8_t **out, size_t *cap, size_t need)
     if (need <= *cap) {
         return 1;
     }
+    if (need > VC_MAX_OUTPUT) {
+        return 0;
+    }
     nc = *cap ? *cap : (1u << 20);
     while (nc < need) {
-        nc *= 2;
+        nc *= 2;   /* need <= 64 MB: no wrap */
     }
     np = (uint8_t *) realloc(*out, nc);
     if (np == NULL) {
@@ -238,13 +249,13 @@ int portVcdiffApply(const uint8_t *src, size_t srclen, const uint8_t *patch, siz
         if (win & 0x03) {
             if (!vcVarint(&pb, &srcsz) || !vcVarint(&pb, &srcpos)) VCFAIL("window %d: truncated segment", nwin);
             if (win & 0x01) {
-                if ((size_t) srcpos + srcsz > srclen) {
+                if (srcsz > srclen || srcpos > srclen - srcsz) {
                     VCFAIL("window %d: reads the source at 0x%X+0x%X, past its %u bytes (wrong base file?)", nwin,
                            srcpos, srcsz, (unsigned) srclen);
                 }
                 seg = src + srcpos;
             } else {
-                if ((size_t) srcpos + srcsz > len) VCFAIL("window %d: target segment past the output", nwin);
+                if (srcsz > len || srcpos > len - srcsz) VCFAIL("window %d: target segment past the output", nwin);
                 seg = NULL; /* resolved against dst below: dst can move on realloc */
             }
         }
@@ -262,7 +273,7 @@ int portVcdiffApply(const uint8_t *src, size_t srclen, const uint8_t *patch, siz
                     ((uint32_t) pb.p[pb.at + 2] << 8) | pb.p[pb.at + 3];
             pb.at += 4;
         }
-        if ((size_t) datalen + instlen + addrlen != encend - pb.at) {
+        if (encend < pb.at || (uint64_t) datalen + instlen + addrlen != (uint64_t) (encend - pb.at)) {
             VCFAIL("window %d: section lengths do not add up", nwin);
         }
         db.p = pb.p + pb.at; db.n = datalen; db.at = 0;
@@ -270,6 +281,9 @@ int portVcdiffApply(const uint8_t *src, size_t srclen, const uint8_t *patch, siz
         ab.p = ib.p + instlen; ab.n = addrlen; ab.at = 0;
         pb.at = encend;
 
+        if (tgtlen > VC_MAX_OUTPUT || len > VC_MAX_OUTPUT - tgtlen) {
+            VCFAIL("window %d: the patched file would be over %u MB", nwin, (unsigned) (VC_MAX_OUTPUT >> 20));
+        }
         if (!vcGrow(&dst, &cap, len + tgtlen)) VCFAIL("out of memory");
         tbase = len;
         memset(cache.near_, 0, sizeof(cache.near_));
