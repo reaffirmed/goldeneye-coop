@@ -1517,6 +1517,92 @@ Gfx *frontDrawCursor(Gfx *DL)
 // TABS
 //********************************************************************************************************
 
+/* Port: cut a label (ending in '\n') until the gothic font measures it no
+ * longer than room, giving it a full stop, the way the Spanish patch fits its
+ * own ("SIGUIEN."). textMeasure's second result is the length along the text,
+ * sideways or not. English labels fit and are left alone. */
+static s32 frontFitDrop(u8 c)
+{
+    if (c >= 0xC0)
+    {
+        c = portLangAsciiFallback(c);   /* an accented vowel is a vowel */
+    }
+    switch (c)
+    {
+    case ' ': case '.': case '-':
+    case 'A': case 'E': case 'I': case 'O': case 'U':
+    case 'a': case 'e': case 'i': case 'o': case 'u':
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static void frontFitCut(char *buf, s32 room)
+{
+    s32 len = 0;
+    s32 textWidth;
+    s32 textHeight;
+
+    while (buf[len] != '\0' && buf[len] != '\n')
+    {
+        len++;
+    }
+    for (;;)
+    {
+        textWidth = 0;
+        textHeight = 0;
+        textMeasure(&textWidth, &textHeight, buf, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+        if (textHeight <= room || len <= 1)
+        {
+            return;
+        }
+        len--;
+        /* end on a consonant, as an abbreviation does ("SUPERFIC.", not "SUPERFICI.") */
+        while (len > 1 && frontFitDrop((u8) buf[len - 1]))
+        {
+            len--;
+        }
+        buf[len] = '.';
+        buf[len + 1] = '\n';
+        buf[len + 2] = '\0';
+    }
+}
+
+/* Port: a tab label in the player's language that fits its tab. The
+ * catalogue's short form for a tab (msgctxt "tab") comes first, then the
+ * label's usual translation, cut to the tab's text area (room, along the tab)
+ * if it is still too long. The result is in one of a few rotating buffers, so
+ * a caller may hold it for the frame it draws in. */
+static char *frontFitTabText(char *text, s32 room)
+{
+    static char bufs[4][40];
+    static s32 next;
+    const char *src = portTrCtx("tab", text);
+    char *buf = bufs[next];
+    s32 len = 0;
+
+    next = (next + 1) & 3;
+    if (src == NULL)
+    {
+        src = portLangDraw(text);
+    }
+    while (src[len] != '\0' && src[len] != '\n' && len < (s32) sizeof(bufs[0]) - 3)
+    {
+        buf[len] = src[len];
+        len++;
+    }
+    buf[len] = '\n';
+    buf[len + 1] = '\0';
+    setTextSpacingInverted(TRUE);
+    frontFitCut(buf, room);
+    setTextSpacingInverted(FALSE);
+    return buf;
+}
+
+/* the mission and arena grids: a name starts 0x1F left of its photo's centre
+ * and the photos are 70 apart, so a name stops a few pixels short of the next */
+#define PORT_GRID_LABEL_ROOM 66
+
 Gfx* frontAddStartTabText(Gfx* DL)
 {
     s32 v;
@@ -1526,6 +1612,7 @@ Gfx* frontAddStartTabText(Gfx* DL)
     s32 textHeight;
 
     g_textPtrTAB1 = langGet(getStringID(LTITLE, TITLE_STR_04_START));
+    g_textPtrTAB1 = frontFitTabText(g_textPtrTAB1, STARTTAB_TEXT_BOTTOM - STARTTAB_TEXT_TOP);
     setTextSpacingInverted(TRUE);
     textHeight = 0;
     textWidth = 0;
@@ -1569,6 +1656,7 @@ Gfx* frontAddPreviousTabText(Gfx* DL)
     s32 textHeight;
 
     g_textPtrTAB3 = langGet(getStringID(LTITLE, TITLE_STR_06_PREVIOUS));
+    g_textPtrTAB3 = frontFitTabText(g_textPtrTAB3, PREVTAB_TEXT_BOTTOM - PREVTAB_TEXT_TOP);
     setTextSpacingInverted(TRUE);
     textHeight = 0;
     textWidth = 0;
@@ -1650,6 +1738,7 @@ Gfx* frontAddNextTabText(Gfx* DL)
     s32 textHeight;
 
     g_textPtrTAB2 = langGet(getStringID(LTITLE, TITLE_STR_05_NEXT)); //"NEXT\n"
+    g_textPtrTAB2 = frontFitTabText(g_textPtrTAB2, NEXTTAB_TEXT_BOTTOM - NEXTTAB_TEXT_TOP);
     setTextSpacingInverted(TRUE);
     textHeight = 0;
     textWidth = 0;
@@ -4155,6 +4244,7 @@ static Gfx *portAddMiddleTabText(Gfx *DL, char *text)
     s32 textWidth;
     s32 textHeight;
 
+    text = frontFitTabText(text, NEXTTAB_TEXT_BOTTOM - NEXTTAB_TEXT_TOP);
     setTextSpacingInverted(TRUE);
     textHeight = 0;
     textWidth = 0;
@@ -4206,6 +4296,7 @@ static Gfx *portAddTopTabText(Gfx *DL, char *text)
     s32 textWidth;
     s32 textHeight;
 
+    text = frontFitTabText(text, STARTTAB_TEXT_BOTTOM - STARTTAB_TEXT_TOP);
     setTextSpacingInverted(TRUE);
     textHeight = 0;
     textWidth = 0;
@@ -13448,6 +13539,9 @@ Gfx *constructor_menu07_missionsel(Gfx *DL)
                 }
 
                 strcat(sp90, "\n");
+#ifndef TARGET_N64
+                frontFitCut((char *) sp90, PORT_GRID_LABEL_ROOM);   /* a translated name stays on its photo */
+#endif
 
                 spC4 = 0;
                 spC8 = 0;
@@ -18351,6 +18445,7 @@ static Gfx *portMpStageConstruct(Gfx *DL)
         }
         name[len] = '\n';
         name[len + 1] = '\0';
+        frontFitCut((char *) name, PORT_GRID_LABEL_ROOM);   /* a translated name stays on its photo */
         textMeasure(&h, &w, name, ptrFontBankGothicChars, ptrFontBankGothic, 0);
         x = cursor_xpos_table_mission_select[i % PORT_MPSTAGE_COLS] - 0x1F;
         y = (cursor_ypos_table_mission_select[i / PORT_MPSTAGE_COLS] - h) + 0x1D;

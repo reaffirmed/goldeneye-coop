@@ -40,7 +40,13 @@ keeps two things from the result:
 
 - the patched cart's text banks (`L*E`), served in place of the cart's own
   (`port/src/romdata.c`, `romdataFilesApply` and `romdataTextPreprocess`);
-- its two fonts, for the letters the patch adds.
+- its two fonts, for the letters the patch adds;
+- every image whose bytes the patch changed (the Spanish one redraws 15:
+  the "ELEGIR ARCHIVO" title, the CLASIFICADO and SÓLO PARA SUS OJOS stamps,
+  and a few more). `texLoad` (`image.c`) takes these from the patch
+  (`portLangTexture`) and every other image from the cart. The patch's
+  texture table may use 4-byte entries instead of the cart's 8-byte ones
+  (`romdataImageTextures` works out which).
 
 The copy is then freed. If the patch doesn't apply (another cart, a damaged
 file), the log says why and the game runs in English.
@@ -78,6 +84,11 @@ msgstr "%s dejó la misión."
 - A line that doesn't fit is the biggest risk: settings labels sit beside
   their value, so keep those short.
 - `#, fuzzy` entries are skipped.
+- A folder tab fits about eight capitals. A tab can have its own short label
+  with `msgctxt "tab"` (Spanish: RESET is REINICIO there, CREDITS is
+  AUTORES). A tab label, or a mission or arena name under its photo, that is
+  still too long is cut and given a full stop, ending on a consonant, the way
+  the patch fits its own ("SIGUIEN.", "SUPERFIC.").
 
 Most strings are matched when they are drawn (`textRender` and `textMeasure`
 look each one up), so a new string only needs an entry. Strings built with

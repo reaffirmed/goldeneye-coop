@@ -45,6 +45,9 @@ int portLangActive(void);
 const char *portTr(const char *en) PORT_LANG_FMTARG;
 /* the same, UTF-8, for OS dialog boxes */
 const char *portTrUtf8(const char *en) PORT_LANG_FMTARG;
+/* the translation of `en` in a context (a PO entry with msgctxt `ctx`), or
+ * NULL when the catalogue has none. "tab": a folder tab's short label. */
+const char *portTrCtx(const char *ctx, const char *en);
 /* textrelated.c: what a draw or a measure of `s` shows. Already-translated
  * text and game text pass through; an all-capitals string matches its
  * catalogue entry in any case and comes back in capitals. */
@@ -58,6 +61,9 @@ void portLangBankRecode(uint8_t *strings, uint32_t n);
 /* a port relabel for a translated bank's slot (language.ini bank.<name>.<slot>) */
 const char *portLangBankPatch(const char *bank, uint32_t slot);
 
+/* images: the patched cart's compressed bytes for texture `num` when the
+ * patch changed it (a title, a stamp), else NULL. image.c texLoad. */
+const uint8_t *portLangTexture(uint32_t num, uint32_t *size);
 /* fonts: the patched cart's font segment in the host layout the game reads
  * (0 = gothic, 1 = zurich bold), and which of its 0x21..0x7E glyphs a
  * Latin-1 byte borrows (0 = none) */

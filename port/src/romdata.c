@@ -630,6 +630,66 @@ int romdataImageFiles(const u8 *img, u32 size, void (*cb)(const char *name, u32 
     return 1;
 }
 
+/* Another cart image's textures (port_lang.c): call cb with each texture's
+ * number, ROM offset and size. The image bank starts after the last file (the
+ * 16-byte ob_end), and the texture table in cdata lists each texture's size.
+ * The stock table has 8-byte entries; a patch built with another tool may
+ * pack it into 4-byte ones (the size in the low 23 bits), so the entry size
+ * is the one that gives `expect` textures (0 = the stock 8). 1 = walked. */
+#define ROMDATA_TEXTABLE_OFS 0x28570u   /* g_Textures in cdata */
+int romdataImageTextures(const u8 *img, u32 size, u32 expect,
+                         void (*cb)(u32 num, u32 ofs, u32 size, void *ctx), void *ctx)
+{
+    const u8 *src = img + ROMDATA_CDATA_ROMOFS;
+    u8 *cd;
+    u32 n, base = 0, i, stride, ok = 0;
+
+    if (size < ROMDATA_CDATA_ROMOFS + 2 || src[0] != 0x11 || src[1] != 0x72) {
+        return 0;
+    }
+    cd = (u8 *) malloc(ROMDATA_CDATA_ALLOC);
+    if (cd == NULL) {
+        return 0;
+    }
+    n = decompressdata((u8 *) src, cd, NULL);
+    for (i = 0; i < ROMDATA_MAX_FILES; i++) {
+        const u8 *e = cd + ROMDATA_FILETABLE_OFS + i * ROMDATA_FILEENTRY_SIZE;
+        if (ROMDATA_FILETABLE_OFS + (i + 1) * ROMDATA_FILEENTRY_SIZE > n || be32(e) != i) {
+            break;
+        }
+        base = be32(e + 8) + 16;
+    }
+    for (stride = 8; stride >= 4 && !ok; stride -= 4) {
+        u32 o, count = 0, total = 0, end = 0;
+        if (expect == 0 && stride != 8) {
+            break;
+        }
+        for (o = ROMDATA_TEXTABLE_OFS; o + stride <= n && count < PORT_TEXTURES_MAX; o += stride, count++) {
+            u32 sz = be32(cd + o) & 0x7FFFFFu;
+            if (sz == 0xFFFFu) {
+                end = 1;
+                break;
+            }
+            if (sz > size || total > size - sz) {
+                count = 0;
+                break;
+            }
+            total += sz;
+        }
+        if (!end || count < 100 || (expect != 0 && count != expect) || base > size || total > size - base) {
+            continue;
+        }
+        ok = 1;
+        for (i = 0, o = ROMDATA_TEXTABLE_OFS; i < count; i++, o += stride) {
+            u32 sz = be32(cd + o) & 0x7FFFFFu;
+            cb(i, base, sz, ctx);
+            base += sz;
+        }
+    }
+    free(cd);
+    return (int) ok;
+}
+
 /* a ROM segment's offset and size (romseg_list.h) by name; 0 = no such */
 int romdataSegRange(const char *name, u32 *ofs, u32 *size)
 {

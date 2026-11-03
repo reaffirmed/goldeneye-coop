@@ -4002,3 +4002,11 @@ how to add one: [`lang/README.md`](../lang/README.md).
   without accents instead of losing characters.
 - `GE_LANG_MISSING=1` writes each English string drawn without a translation to
   `Data/Logs/lang-missing.txt`.
+- The patch also redraws 15 images (the file screen's title, the folder
+  stamps). `portLangTexture` keeps each image whose bytes differ from the cart's
+  and `texLoad` uses it. The Spanish patch packs its texture table into 4-byte
+  entries (size in the low 23 bits); `romdataImageTextures` picks the entry size
+  that gives the cart's texture count.
+- Text that runs past its space: tab labels (`frontFitTabText`) and the mission
+  and arena names (`frontFitCut`, the photos are 70 apart) are cut with a full
+  stop. `msgctxt "tab"` in `port.po` gives a tab its own short label.

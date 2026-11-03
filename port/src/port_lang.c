@@ -44,6 +44,8 @@ extern const char *portLogPath(const char *name);  /* main.c: Data/Logs/name */
 extern int romdataImageFiles(const uint8_t *img, uint32_t size,
                              void (*cb)(const char *name, uint32_t ofs, uint32_t size, void *ctx), void *ctx);
 extern int romdataSegRange(const char *name, uint32_t *ofs, uint32_t *size);
+extern int romdataImageTextures(const uint8_t *img, uint32_t size, uint32_t expect,
+                                void (*cb)(uint32_t num, uint32_t ofs, uint32_t size, void *ctx), void *ctx);
 
 #ifdef _WIN32
 #define LANG_SEP "\\"
@@ -547,12 +549,26 @@ static void langInsert(int *table, uint32_t h, int idx)
     table[i] = idx + 1;
 }
 
+/* msgctxt "x" + msgid "Y" is looked up as "x\004Y", as gettext's pgettext does
+ * (portTrCtx) */
+static void langAddCtxEntry(const char *ctx, const char *id, const char *str)
+{
+    char key[LANG_STR_MAX];
+
+    if (ctx[0] == '\0') {
+        langAddEntry(id, str);
+    } else if (strlen(ctx) + 1 + strlen(id) < sizeof(key)) {
+        snprintf(key, sizeof(key), "%s\004%s", ctx, id);
+        langAddEntry(key, str);
+    }
+}
+
 static void langLoadCatalogue(const char *code)
 {
     FILE *f = langOpen(code, sStringsFile, "rb");
     long len;
     char *text, *line, *next;
-    static char id[LANG_STR_MAX], str[LANG_STR_MAX];
+    static char id[LANG_STR_MAX], str[LANG_STR_MAX], ctx[LANG_STR_MAX];
     int state = 0;   /* 0 none, 1 msgctxt, 2 msgid, 3 msgstr */
     int fuzzy = 0, have = 0, maxentries = 0, i;
     uint32_t cap;
@@ -606,13 +622,19 @@ static void langLoadCatalogue(const char *code)
         }
         if (strncmp(s, "msgctxt", 7) == 0 || strncmp(s, "msgid ", 6) == 0 || s[0] == '\0') {
             if (have && state == 3 && !fuzzy && id[0] != '\0') {
-                langAddEntry(id, str);
+                langAddCtxEntry(ctx, id, str);
+            }
+            if (have) {
+                ctx[0] = '\0';   /* a context belongs to the one entry after it */
             }
             if (s[0] == '\0' || strncmp(s, "msgctxt", 7) == 0) {
                 have = 0;
                 fuzzy = (s[0] != '\0') ? fuzzy : 0;
                 state = (s[0] == '\0') ? 0 : 1;
-                id[0] = str[0] = '\0';
+                id[0] = str[0] = ctx[0] = '\0';
+                if (state == 1) {
+                    langPoUnquote(s + 7, ctx, sizeof(ctx));
+                }
                 continue;
             }
         }
@@ -631,7 +653,9 @@ static void langLoadCatalogue(const char *code)
                 state = 4;
             }
         } else if (s[0] == '"') {
-            if (state == 2) {
+            if (state == 1) {
+                langPoUnquote(s, ctx, sizeof(ctx));
+            } else if (state == 2) {
                 langPoUnquote(s, id, sizeof(id));
             } else if (state == 3) {
                 langPoUnquote(s, str, sizeof(str));
@@ -639,7 +663,7 @@ static void langLoadCatalogue(const char *code)
         }
     }
     if (have && state == 3 && !fuzzy && id[0] != '\0') {
-        langAddEntry(id, str);
+        langAddCtxEntry(ctx, id, str);
     }
     free(text);
 
@@ -835,6 +859,19 @@ const char *portTrUtf8(const char *en)
     return langTranslate(en, 0, 1);
 }
 
+const char *portTrCtx(const char *ctx, const char *en)
+{
+    char key[LANG_STR_MAX];
+    const char *t;
+
+    if (sEntryCount == 0 || en == NULL || strlen(ctx) + 1 + strlen(en) >= sizeof(key)) {
+        return NULL;
+    }
+    snprintf(key, sizeof(key), "%s\004%s", ctx, en);
+    t = langTranslate(key, 0, 0);
+    return (t == key) ? NULL : t;
+}
+
 const char *portLangDraw(const char *s)
 {
     if (sEntryCount == 0) {
@@ -954,6 +991,103 @@ static int sBankCount;
 static uint8_t *sFontSeg[2];
 static uint32_t sFontSize[2];
 
+/* textures the patch changed (titles, stamps): their compressed bytes, as
+ * the image bank holds them, by texture number */
+#define LANG_TEX_MAX 256
+#define LANG_TEX_BYTES 3900u   /* texLoad's buffer is 4000 */
+static struct langtex {
+    uint32_t num, size;
+    uint8_t *data;
+} sTex[LANG_TEX_MAX];
+static int sTexCount;
+
+struct texctx {
+    const uint8_t *img;
+    uint32_t imgsize;
+    uint32_t *ofs, *size, count;   /* the stock cart's, by number */
+    const uint8_t *rom;
+};
+
+static void langStockTex(uint32_t num, uint32_t ofs, uint32_t size, void *vctx)
+{
+    struct texctx *ctx = (struct texctx *) vctx;
+    if (num < ctx->count) {
+        ctx->ofs[num] = ofs;
+        ctx->size[num] = size;
+    }
+}
+
+static void langKeepTex(uint32_t num, uint32_t ofs, uint32_t size, void *vctx)
+{
+    struct texctx *ctx = (struct texctx *) vctx;
+
+    if (num >= ctx->count || sTexCount >= LANG_TEX_MAX || size == 0 || size > LANG_TEX_BYTES ||
+        size > ctx->imgsize || ofs > ctx->imgsize - size) {
+        return;
+    }
+    if (size == ctx->size[num] && memcmp(ctx->img + ofs, ctx->rom + ctx->ofs[num], size) == 0) {
+        return;   /* the cart's own */
+    }
+    sTex[sTexCount].data = (uint8_t *) malloc(size);
+    if (sTex[sTexCount].data == NULL) {
+        return;
+    }
+    memcpy(sTex[sTexCount].data, ctx->img + ofs, size);
+    sTex[sTexCount].num = num;
+    sTex[sTexCount].size = size;
+    sTexCount++;
+}
+
+/* walk the stock cart's texture table, then the patched one's, keeping each
+ * texture whose bytes differ */
+static void langKeepTextures(const uint8_t *rom, size_t romsize, const uint8_t *img, size_t imgsize)
+{
+    struct texctx ctx;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.count = 8192;
+    ctx.ofs = (uint32_t *) calloc(ctx.count, sizeof(uint32_t));
+    ctx.size = (uint32_t *) calloc(ctx.count, sizeof(uint32_t));
+    ctx.rom = rom;
+    ctx.img = img;
+    ctx.imgsize = (uint32_t) imgsize;
+    if (ctx.ofs != NULL && ctx.size != NULL) {
+        uint32_t n = 0, i;
+        if (romdataImageTextures(rom, (uint32_t) romsize, 0, langStockTex, &ctx)) {
+            for (i = 0; i < ctx.count; i++) {
+                if (ctx.size[i] != 0) {
+                    n = i + 1;
+                }
+            }
+            /* the stock image is the source: each stock range lies inside it */
+            for (i = 0; i < n; i++) {
+                if (ctx.size[i] > romsize || ctx.ofs[i] > romsize - ctx.size[i]) {
+                    n = 0;
+                }
+            }
+        }
+        ctx.count = n;
+        if (n == 0 || !romdataImageTextures(img, (uint32_t) imgsize, n, langKeepTex, &ctx)) {
+            portConLogf("ge: lang: %s: the patched cart's texture table did not parse - the game's own images stay English\n",
+                        sLangs[sCurrent].code);
+        }
+    }
+    free(ctx.ofs);
+    free(ctx.size);
+}
+
+const uint8_t *portLangTexture(uint32_t num, uint32_t *size)
+{
+    int i;
+    for (i = 0; i < sTexCount; i++) {
+        if (sTex[i].num == num) {
+            *size = sTex[i].size;
+            return sTex[i].data;
+        }
+    }
+    return NULL;
+}
+
 struct bankctx {
     const uint8_t *img;
     uint32_t size;
@@ -1050,6 +1184,7 @@ void portLangRomLoaded(const uint8_t *rom, size_t size)
         portConLogf("ge: lang: %s: the patched cart's file table did not parse - the game's own text stays English\n",
                     sLangs[sCurrent].code);
     }
+    langKeepTextures(rom, size, img, imgsize);
     for (i = 0; i < 2; i++) {
         uint32_t ofs, sz;
         if (romdataSegRange(segs[i], &ofs, &sz) && sz <= imgsize && ofs <= imgsize - sz) {
@@ -1063,8 +1198,9 @@ void portLangRomLoaded(const uint8_t *rom, size_t size)
         for (i = 0xA0; i < 0x100; i++) {
             glyphs += sGlyphSrc[i] != 0;
         }
-        portConLogf("ge: lang: %s: %s applied to the cart in memory: %d text banks, %d extra letters in the fonts\n",
-                    sLangs[sCurrent].code, sPatchFile, sBankCount, (sFontSeg[0] != NULL && sFontSeg[1] != NULL) ? glyphs : 0);
+        portConLogf("ge: lang: %s: %s applied to the cart in memory: %d text banks, %d images, %d extra letters in the fonts\n",
+                    sLangs[sCurrent].code, sPatchFile, sBankCount, sTexCount,
+                    (sFontSeg[0] != NULL && sFontSeg[1] != NULL) ? glyphs : 0);
     }
 }
 

@@ -89,6 +89,17 @@ msgstr "RESTABLECER TODO"
 msgid "RESET"
 msgstr "RESTABLECER"
 
+# A folder tab has room for about eight capitals. msgctxt "tab" gives a tab
+# its own short label; a tab label with none that is still too long is cut
+# with a full stop, as the patch's "SIGUIEN.".
+msgctxt "tab"
+msgid "RESET"
+msgstr "REINICIO"
+
+msgctxt "tab"
+msgid "CREDITS"
+msgstr "AUTORES"
+
 msgid "Default"
 msgstr "Predet."
 
