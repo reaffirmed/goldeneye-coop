@@ -19,6 +19,7 @@
 #include "coop.h"
 #include "coop_net.h"
 #include "port_update.h"
+#include "port_lang.h"   /* portTr: the port's own text in the player's language */
 
 extern void portConLogf(const char *fmt, ...);
 
@@ -208,15 +209,15 @@ const char *coopBrowseRefusedHint(void)
 
         if (rel[0] != '\0' && portUpdateOwn()[0] != '\0' && portUpdCompareVersions(rel, portUpdateOwn()) == -1)
         {   /* we are the newer one: nothing for us to get */
-            snprintf(text, sizeof(text), "Host has %.12s and needs to update.\n", rel);
+            snprintf(text, sizeof(text), portTr("Host has %.12s and needs to update.\n"), rel);
         }
         else if (rel[0] != '\0')
         {
-            snprintf(text, sizeof(text), "Host has %.12s, you %.12s\n", rel, portUpdateOwn()[0] != '\0' ? portUpdateOwn() : coopSteamOwnBuild());
+            snprintf(text, sizeof(text), portTr("Host has %.12s, you %.12s\n"), rel, portUpdateOwn()[0] != '\0' ? portUpdateOwn() : coopSteamOwnBuild());
         }
         else if (theirs[0] != '\0')
         {
-            snprintf(text, sizeof(text), "Host %.7s, you %.7s\n", theirs, coopSteamOwnBuild());
+            snprintf(text, sizeof(text), portTr("Host %.7s, you %.7s\n"), theirs, coopSteamOwnBuild());
         }
         else
         {
@@ -464,11 +465,11 @@ void coopBrowseTick(s32 inmission)
 
                 if (rel[0] != '\0' && !portUpdateNewer(rel) && portUpdateOwn()[0] != '\0')
                 {
-                    snprintf(text, sizeof(text), "The host has %.12s and needs\nto update before you can join.", rel);
+                    snprintf(text, sizeof(text), portTr("The host has %.12s and needs\nto update before you can join."), rel);
                 }
                 else if (rel[0] != '\0')
                 {
-                    snprintf(text, sizeof(text), "The host has %.12s. Pick\nUpdate on PLAY to get it,\nthen join again.", rel);
+                    snprintf(text, sizeof(text), portTr("The host has %.12s. Pick\nUpdate on PLAY to get it,\nthen join again."), rel);
                 }
                 else
                 {

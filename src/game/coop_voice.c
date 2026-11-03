@@ -46,6 +46,7 @@
 #include "propobj.h"
 #include "coop.h"
 #include "coop_net.h"
+#include "port_lang.h"   /* portTr: the port's own text in the player's language */
 
 extern void portConLogf(const char *fmt, ...);
 extern s32 portVideoVoiceMode(void);
@@ -230,11 +231,11 @@ static void coopVoiceLabels(void)
 
         if (p < 0)
         {
-            snprintf(g_coopVoiceMuteLabel[k], sizeof(g_coopVoiceMuteLabel[k]), "Mute Player %d\n", (int) k + 2);
+            snprintf(g_coopVoiceMuteLabel[k], sizeof(g_coopVoiceMuteLabel[k]), portTr("Mute Player %d\n"), (int) k + 2);
             continue;
         }
         coopAsciiName(name, sizeof(name), coopPlayerName(p), 0);
-        snprintf(g_coopVoiceMuteLabel[k], sizeof(g_coopVoiceMuteLabel[k]), "Mute %s\n", name);
+        snprintf(g_coopVoiceMuteLabel[k], sizeof(g_coopVoiceMuteLabel[k]), portTr("Mute %s\n"), name);
     }
 }
 

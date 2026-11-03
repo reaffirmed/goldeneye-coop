@@ -29,6 +29,7 @@
 #endif
 #include "game/frametiming.h"   /* portTickSetHz: [display] tickhz */
 #include "romdata.h"            /* romdataIsIniKey: [data] keys are not "unknown controls" */
+#include "port_lang.h"          /* portLangIsIniKey */
 #include "port_save.h"          /* portFileWriteBegin: midas.ini and kbm binds replaced whole */
 extern const char *portRootPath(const char *name);
 
@@ -3412,7 +3413,8 @@ static void videoLoadConfig(void)
             char *val = iniTrim(eq + 1);
 
             if (!videoSetDisplayOption(key, val) && !portInputSetOption(key, val) && !portJoyPortSetOption(key, val)
-                && !romdataIsIniKey(key) /* [data] rom=: romdata.c reads it itself, section-aware */)
+                && !romdataIsIniKey(key) /* [data] rom=: romdata.c reads it itself, section-aware */
+                && !portLangIsIniKey(key) /* [display] language=: port_lang.c reads it before the ROM */)
             {
                 portConLogf("ge: midas.ini: unknown control \"%s\"\n", key);
             }
@@ -4927,13 +4929,13 @@ static void videoIniWritableCheck(void)
         return;
     }
     portConLogf("ge: midas.ini: the game folder is not writable, settings and saves will not be kept\n");
-    portShowErrorBox("GoldenEye Coop: nothing will be saved",
-                     "The game can't write to its own folder, so your settings, mission progress, "
+    portShowErrorBox(portTrUtf8("GoldenEye Coop: nothing will be saved"),
+                     portTrUtf8("The game can't write to its own folder, so your settings, mission progress, "
                      "co-op campaign and profiles will be lost when you quit, and the updater can't "
                      "install updates.\n\n"
                      "Move the game folder somewhere you can write to, such as C:\\Games\\GoldenEye-Coop. "
                      "Avoid Program Files. If the folder is under Documents or Desktop, Windows "
-                     "Controlled Folder Access may be blocking it.");
+                     "Controlled Folder Access may be blocking it."));
 }
 
 s32 videoInit(void)
