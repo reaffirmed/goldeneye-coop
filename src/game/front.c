@@ -8871,6 +8871,13 @@ Gfx *constructor_menu1C_portsheet(Gfx *DL)
         char pagetext[12];
         sprintf(pagetext, "%d/%d\n", (int) port_sheet_page + 1, (int) port_sheet_pages);
         x = PORT_SHEET_VALUE_X;
+        if (!port_sheet_twocol)
+        {   /* clear of a long title, such as Spanish's OPCIONES DEL PORT */
+            th = 0;
+            tw = 0;
+            textMeasure(&th, &tw, (char *) portSheetTitle(), ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+            x = (PORT_SHEET_LABEL_X + tw + 8 > x) ? PORT_SHEET_LABEL_X + tw + 8 : x;
+        }
         y = PORT_SHEET_TITLE_Y;
         DL = frontPrintText(DL, &x, &y, pagetext, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
     }
