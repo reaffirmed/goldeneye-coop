@@ -1,2 +1,7 @@
 # Normalize line endings to LF for text files.
 * text=auto eol=lf
+
+# language packs (lang/README.md): a translation's patch and its own readme
+# ship byte for byte, as their authors made them
+*.xdelta binary
+lang/es/leeme.txt -text

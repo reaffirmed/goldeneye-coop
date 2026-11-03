@@ -120,6 +120,7 @@ static void testPaths(void)
     static const char *const yes[] = {
         "ProjectMidas.exe", "SDL2.dll", "steam_api.dll", "steam_appid.txt", "Host co-op.bat",
         "README-COOP.txt", "gamecontrollerdb.txt", "Data/README.txt", "Data/shaders_base.txt", "ProjectMidas",
+        "lang/es/language.ini", "lang/es/port.po", "lang/es/GE-ESP-NTSC.xdelta", "lang/es/leeme.txt",
     };
     static const char *const no[] = {
         "", "/etc/passwd", "../ProjectMidas.exe", "Data/../../x", "C:/Windows/x.dll", "a\\b.dll",
@@ -127,6 +128,8 @@ static void testPaths(void)
         "Data/Saves/eeprom.bin", "Data/Saves/coop_campaign.txt", "Data/Profiles/a.txt", "Data/Logs/ge_direct.log",
         "Data/Crashes/pending.txt", "Data/foo.dll", "coop_campaign.txt", "coop_character.txt", "eeprom.bin",
         "Mods/x.dll", "Data/", ".hidden", "ProjectMidas.exe.old", "x\001y",
+        "lang/es.po", "lang/es/sub/port.po", "lang//port.po", "lang/es/", "lang/es/x.dll", "lang/es/.po",
+        "lang/../midas.ini", "lang/es/baserom.u.z64",
     };
     size_t i;
 

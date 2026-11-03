@@ -10,6 +10,7 @@
 #                  LICENSE.txt THIRD_PARTY_NOTICES.txt
 #                  gamecontrollerdb.txt gamecontrollerdefault.txt midas_ini_help.txt
 #                  Data/README.txt Data/shaders_base.txt
+#                  lang/<code>/ (each language: lang/README.md)
 #
 # LICENSE.txt and THIRD_PARTY_NOTICES.txt: the MIT code in the exe (the port
 # itself, Fast3D, glad) asks for its notice in every copy; the notices also
@@ -44,6 +45,7 @@ sed 's/\r$//; s/$/\r/' tools/THIRD_PARTY_NOTICES.txt > "$dir/THIRD_PARTY_NOTICES
 cp tools/gamecontrollerdb.txt tools/gamecontrollerdefault.txt tools/midas_ini_help.txt "$dir/"
 cp tools/Data_README.txt "$dir/Data/README.txt"
 cp tools/shaders_base.txt "$dir/Data/shaders_base.txt"
+cp -r lang "$dir/lang"   # the languages: language.ini, port.po, and a translation's own patch and readme
 
 rm -f "$out"
 (cd "$stage" && zip -q -r -X "$out" GoldenEye-Coop)
