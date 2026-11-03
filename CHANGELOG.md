@@ -6,6 +6,7 @@ GoldenEye Coop releases, newest first. Each release's full notes, including whic
 
 | Release | Date | Co-op protocol | Highlights |
 | --- | --- | --- | --- |
+| [v0.8.1](coop/release-notes/v0.8.1.md) | 2026-11-03 | 17 | Pick your own player colour for chat, the party list, the radar and pings; Spanish accents show on Windows. |
 | [v0.8.0](coop/release-notes/v0.8.0.md) | 2026-11-03 | 17 | Spanish for the whole game; Bunker 2 ending on joiners; one missed throw no longer fails the team; quiet silenced guns; Partner Fade strength; versus bodies block. |
 | [v0.7.1](coop/release-notes/v0.7.1.md) | 2026-11-03 | 17 | The update offer comes when the game opens; Surface 2 alarm guards, Streets casualty failure and body fades fixed for joiners. |
 | [v0.7.0](coop/release-notes/v0.7.0.md) | 2026-11-02 | 17 | Everyone must update. A long dropout no longer splits the game in two; saves and updates survive a crash; clearer first-run messages. |
