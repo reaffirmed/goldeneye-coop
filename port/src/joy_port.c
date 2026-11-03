@@ -840,6 +840,13 @@ s32 portJoyPortChatPressed(void)
     return pad >= 0 && portJoyPortTake(pad, PORTACT_CHAT) && joyPortPermitted();
 }
 
+/** The co-op lobby's Ready / Start button: a fresh reload press on player 1's
+ * pad or keyboard (R, X, Square, Y), which no menu takes for anything else. */
+s32 portJoyPortReadyPressed(void)
+{
+    return portJoyPortTake(0, PORTACT_RELOAD);
+}
+
 /** coop_photo.c: a fresh photo-mode press for this tick's player. Not gated
  * on live controls: photo mode locks them, and the same key leaves it. */
 s32 portJoyPortPhotoPressed(void)
