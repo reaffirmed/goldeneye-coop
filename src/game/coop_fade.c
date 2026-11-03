@@ -10,7 +10,13 @@
  *
  * Story only: versus players are never faded (they are targets, coop_versus.c
  * draws them as Rare does), nor in cutscenes or while spectating, where the
- * camera isn't where our Bond stands. The partner_fade option turns it off.
+ * camera isn't where our Bond stands.
+ *
+ * The partner_fade option is each player's own strength, a percent: 0 is off
+ * (the partner always drawn whole), 100 the standard above. Below 100 the
+ * partner fades only part way (at 50 % they are half see-through at their
+ * closest); above 100 they are gone up close and the fade starts further out,
+ * both distances scaled with it (at 200 % gone at 2 m, whole from 5.2 m).
  */
 #include <ultra64.h>
 #include <string.h>
@@ -26,7 +32,7 @@
 #include "coop.h"
 
 extern void portConLogf(const char *fmt, ...);
-extern s32 portPartnerFade(void);   /* video.c: [display] partner_fade */
+extern s32 portPartnerFade(void);   /* video.c: [display] partner_fade, percent 0..200 */
 
 #define COOPFADE_FAR   260.0f   /* about 2.6 m: whole */
 #define COOPFADE_NEAR  100.0f   /* about 1 m, about where two Bonds touch: gone */
@@ -47,18 +53,22 @@ static u32 coopFadeNowMs(void)
     return (u32) (osGetTime() / 46875ull);
 }
 
-/* how much of a partner the distance alone asks for, 0..1 */
+/* how much of a partner the distance alone asks for, 0..1, at the player's strength */
 static f32 coopFadeTarget(PropRecord *prop)
 {
     PropRecord *self;
-    f32 dx, dy, dz, d, t;
-    s32 who;
+    f32 dx, dy, dz, d, t, s, depth, nearD, farD;
+    s32 who, pct = portPartnerFade();
 
-    if (!portPartnerFade() || coopVersus() || getPlayerCount() != 1 || g_CurrentPlayer == NULL
+    if (pct <= 0 || coopVersus() || getPlayerCount() != 1 || g_CurrentPlayer == NULL
         || (self = g_CurrentPlayer->prop) == NULL || coopCutsceneActive() || coopSpectateHud(&who) != 0)
     {
         return 1.0f;
     }
+    s = (f32) pct / 100.0f;
+    depth = (s < 1.0f) ? s : 1.0f;              /* how far toward gone it goes */
+    nearD = COOPFADE_NEAR * ((s > 1.0f) ? s : 1.0f);
+    farD = COOPFADE_FAR * ((s > 1.0f) ? s : 1.0f);
     dx = prop->pos.f[0] - self->pos.f[0];
     dy = prop->pos.f[1] - self->pos.f[1];
     dz = prop->pos.f[2] - self->pos.f[2];
@@ -67,16 +77,17 @@ static f32 coopFadeTarget(PropRecord *prop)
         return 1.0f;
     }
     d = sqrtf(dx * dx + dz * dz);
-    if (d >= COOPFADE_FAR)
+    if (d >= farD)
     {
         return 1.0f;
     }
-    if (d <= COOPFADE_NEAR)
+    if (d <= nearD)
     {
-        return 0.0f;
+        return 1.0f - depth;
     }
-    t = (d - COOPFADE_NEAR) / (COOPFADE_FAR - COOPFADE_NEAR);
-    return t * t * (3.0f - 2.0f * t);   /* smoothstep: no edge where it starts or ends */
+    t = (d - nearD) / (farD - nearD);
+    t = t * t * (3.0f - 2.0f * t);   /* smoothstep: no edge where it starts or ends */
+    return 1.0f - depth * (1.0f - t);
 }
 
 /* chr.c chrRenderProp: scale a chr's fade alpha (0..255) for a partner up close;
@@ -186,7 +197,18 @@ void coopFadeHarness(void)
     done = fwd ? gone >= metres[next] * 100.0f : in ? d <= metres[next] * 100.0f : d >= metres[next] * 100.0f;
     if (done || now - base > (u32) at[next] * 1000u + 8000u)
     {
-        portConLogf("ge: coop: testwalk %s %.1f m done, partner %.0f cm away\n", mode[next], metres[next], d);
+        f32 drawn = -1.0f;
+        s32 i;
+
+        for (i = 0; i < COOP_MAX_PLAYERS && drawn < 0.0f; i++)
+        {
+            if (sFade[i].prop != NULL && coopPropIsPartner(sFade[i].prop))
+            {
+                drawn = sFade[i].amount;
+            }
+        }
+        portConLogf("ge: coop: testwalk %s %.1f m done, partner %.0f cm away, fade strength %d%%, partner drawn %.0f%%\n",
+                    mode[next], metres[next], d, (int) portPartnerFade(), drawn * 100.0f);
         g_PortGotoActive = 0;
         g_PortGotoStickX = 0;
         g_PortGotoStickY = 0;
