@@ -281,5 +281,6 @@ build_deck/
 # Local-only developer back-story notes (debug history moved out of source comments)
 docs/devnotes/
 
-# the docs live in the private repo
-/docs/
+# the docs live in the private repo, except the README's screenshots
+/docs/*
+!/docs/images/
