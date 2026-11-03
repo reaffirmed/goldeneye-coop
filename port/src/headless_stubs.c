@@ -199,7 +199,7 @@ s32 portCaptionsClassic(void)
 
 s32 portPartnerFade(void)
 {
-    return 1;
+    return 100;
 }
 
 void portVideoBindsResetDefaults(void)

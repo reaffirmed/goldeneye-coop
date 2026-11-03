@@ -2559,8 +2559,8 @@ msgstr "Cuántas veces por misión los guardias listos pueden pedir ayuda, ir a 
 msgid "Modern is the dark tabbed CO-OP screen; Classic is the original folder."
 msgstr "Moderno es la pantalla CO-OP oscura con pestañas; Clásico es la carpeta original."
 
-msgid "Story co-op: a partner right in front of you fades out."
-msgstr "Historia co-op: un compañero justo delante de ti se vuelve transparente."
+msgid "Story co-op: how much a partner right in front of you fades out. Lower leaves them partly visible, higher fades them from further away."
+msgstr "Historia co-op: cuánto se vuelve transparente un compañero justo delante de ti. Menos lo deja en parte visible; más lo funde desde más lejos."
 
 msgid "Up to 100 explosions at once."
 msgstr "Hasta 100 explosiones a la vez."

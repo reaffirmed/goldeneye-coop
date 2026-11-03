@@ -1565,8 +1565,12 @@ static void coopItemsApplyStuck(const CoopStuckMsg *m, s32 from)
     obj = it->obj;
     prop = obj->prop;
     if (obj->runtime_bitflags & RUNTIMEBITFLAG_EMBEDDED)
-    {
-        return;     /* ours stuck by itself */
+    {   /* ours stuck by itself: what it completes (Frigate's tracker, Surface 2's mine) is still theirs */
+        if (m->objofs >= 0)
+        {
+            coopObjNoteUse(from);
+        }
+        return;
     }
     if (prop->parent != NULL)
     {

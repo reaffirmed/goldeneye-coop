@@ -149,7 +149,7 @@ static int s_CfgColorblind = 0;     /* [display] colorblind: player colours, 0 s
 static int s_CfgScreenShake = 1;    /* [display] screen_shake: explosions shake the view (vanilla on) */
 static int s_CfgTextSize = 100;     /* [display] text_size: co-op text, captions and messages, percent */
 static int s_CfgCaptionStyle = 0;   /* [display] caption_style: 0 Modern (coop_captions.c), 1 Classic (Rare's message lines) */
-static int s_CfgPartnerFade = 1;    /* [display] partner_fade: a partner up close fades out (coop_fade.c) */
+static int s_CfgPartnerFade = 100;  /* [display] partner_fade: how strongly a partner up close fades out (coop_fade.c), percent, 0 off .. 200 */
 static int s_CfgWeaponFov = 0;      /* [display] weapon_fov: 1 = the gun draws at the default FOV (gunfire.c), 0 = Match View */
 static int s_CfgSettingHelp = 1;   /* [display] setting_help: the folder sheets' help box (front.c), default on */
 /* Classic Mode's NTSC composite filter (gfx_opengl.cpp vi_prog[3]) is a Classic
@@ -1353,7 +1353,13 @@ static int videoSetDisplayOption(const char *key, const char *value)
     if (SDL_strcasecmp(key, "screen_shake") == 0) { s_CfgScreenShake = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "text_size") == 0)    { s_CfgTextSize = SDL_clamp(SDL_atoi(value), 100, 200); return 1; }
     if (SDL_strcasecmp(key, "caption_style") == 0) { s_CfgCaptionStyle = SDL_atoi(value) != 0; return 1; }
-    if (SDL_strcasecmp(key, "partner_fade") == 0) { s_CfgPartnerFade = SDL_atoi(value) != 0; return 1; }
+    if (SDL_strcasecmp(key, "partner_fade") == 0)
+    {   /* a percent; 1 is the old on/off toggle's on, so an older midas.ini keeps the standard strength */
+        const int pct = SDL_atoi(value);
+
+        s_CfgPartnerFade = (pct == 1) ? 100 : SDL_clamp(pct, 0, 200);
+        return 1;
+    }
     if (SDL_strcasecmp(key, "weapon_fov") == 0)   { s_CfgWeaponFov = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "setting_help") == 0) { s_CfgSettingHelp = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "mouse_auto_aim") == 0) { s_CfgMouseAutoAim = SDL_atoi(value) != 0; return 1; }

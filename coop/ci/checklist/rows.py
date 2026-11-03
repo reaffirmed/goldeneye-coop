@@ -61,6 +61,25 @@ ROWS = {
     # the host watches its whole intro (no A taps), the joiner starts 8 s after it: a drop-in during the swirl
     'D6': ('dam', 0, f'{INV} GE_SKIPINTRO=0', f'{INV} GE_COOP_STEPS=p278@20', 60, 8,
            ['h:intro: overview camera ended .* by its timer', 'j:cutscene: the host.s intro of stage \\d+ is over', 'j:repl: join snapshot applied', 'j:step p278 at \\d+ s done']),
+    # one player's miss is not the team's (coop.c coopItemChanceLeft): the host throws its
+    # covert modem on the floor, the joiner still has one, so B stays open; the joiner's
+    # miss then fails it on both, and only once that modem has landed
+    'D8': ('dam', 2, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPSLINGER=40 GE_COOP_STEPS=h47@8,l60@9,f1@10',
+           f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h47@30,l60@31,f1@32', 60, 2,
+           ['h:item 47 lies loose, but player 2 still carries theirs', 'h:item 47 lies loose and nobody carries one',
+            'seqb:item 47 \\(id 4001\\)=>objective 1 \\(B\\) is now failed']),
+    # the joiner misses first and the host still has one: B never fails
+    'D8-join': ('dam', 2, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPSLINGER=40 GE_COOP_STEPS=p1@30',
+                f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h47@8,l60@9,f1@10', 50, 2,
+                ['h:item 47 lies loose, but we still carry ours', 'j:item 47 lies loose, but player 1 still carries theirs',
+                 '!b:objective 1 \\(B\\) is now failed']),
+    # B already complete (stage flag 0x100, as the modem on the link sets it), then both players
+    # throw theirs on the floor: ai_20 stops asking IFKeyDropped once 0x100 is set, so B stays
+    # complete and no loose modem is ever looked at
+    'D8-done': ('dam', 2, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_TESTFLAG=100:5 GE_COOP_STEPSLINGER=30 GE_COOP_STEPS=h47@10,l60@11,f1@12',
+                f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPSLINGER=30 GE_COOP_STEPS=h47@16,l60@17,f1@18', 50, 2,
+                ['b:objective 1 \\(B\\) is now complete', 'b:threw item 47 \\(id 4001\\)',
+                 '!b:objective 1 \\(B\\) is now failed', '!b:item 47 lies loose']),
     # ---- Facility
     'F5': ('facility', 0, f'{INV} GE_COOP_TESTDUMP=30 GE_COOP_STEPS=o1@10,b1@14,o2@16,b2@20', f'{INV} GE_COOP_TESTDUMP=30 GE_COOP_STEPS=o1@10,b1@14,o2@16,b2@20', 50, 2,
            ['b:dump: tag 1 .* destroyed [1-9]', 'b:dump: tag 2 .* destroyed [1-9]', '!b:objective 3 \\(D\\) is now failed']),
@@ -88,6 +107,12 @@ ROWS = {
     # ---- Surface 2
     'SU3': ('surface2', 0, INV, f'{INV} GE_COOP_STEPS=p3@10', 50, 2,
             ['b:objective 3 \\(\\w\\) is now complete', '=h:mission end', '=j:mission end']),
+    # Surface 2 (Secret Agent): the host's remote mine lands on the ground; the joiner still
+    # has one and sticks it to the helicopter (tag 9): B complete on both, never failed
+    'SU4': ('surface2', 1, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPSLINGER=40 GE_COOP_STEPS=h29@8,l60@9,f1@10',
+            f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h29@20,v9@22,f1@24', 60, 2,
+            ['h:item 29 lies loose, but player 2 still carries theirs', 'b:objective 2 \\(B\\) is now complete',
+             '!b:objective 2 \\(B\\) is now failed', 'h:objective 2 \\(B\\) complete, credit player 2']),
     # ---- Bunker 2 (Natalya is chr 0; the joiner opens her cell, tag 3, with GE_COOP_TESTDOOR)
     'BU1': ('bunker2', 1, f'{INV} GE_COOP_TESTDOOR=1 GE_COOP_STEPS=c27@8', f'{INV} GE_COOP_TESTDOOR=1 GE_COOP_STEPS=o3@8,c13@18,c12@30', 70, 2,
             ['h:chr 0 goes to player 2', '!h:chr 0 goes to player 1']),
@@ -145,9 +170,20 @@ ROWS = {
              'h:peer planted objective item 3 ', 'b:objective 0 \\(A\\) is now complete']),
     'SI4': ('silo', 2, f'{INV} GE_COOP_WATCHWORLD=1', f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h34@8,p4@10,f1@12,p1@40', 60, 2,
             ['b:watch: countdown running', 'clocksame']),
+    # Silo: the first plastique lying loose starts the countdown, a partner's charges or not
+    # (not a one-each item, so coopItemChanceLeft leaves it alone)
+    'SI7': ('silo', 0, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPSLINGER=25 GE_COOP_STEPS=h34@8,l60@9,f1@10',
+            f'{INV} GE_COOP_WATCHWORLD=1', 40, 2,
+            ['b:watch: countdown running', '!b:item 34 lies loose']),
     # ---- Frigate: the joiner throws the tracker bug onto the helicopter (tag 0); D on both
     'FR4': ('frigate', 0, f'{INV} GE_COOP_WATCHWORLD=1', f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h47@8,v0@10,f1@12', 50, 2,
             ['b:objective 3 \\(\\w\\) is now complete']),
+    # the host's tracker bug lands on deck; the joiner still has one and puts it on the
+    # helicopter: complete on both, never failed, the joiner's credit
+    'FR6': ('frigate', 0, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPSLINGER=40 GE_COOP_STEPS=h47@8,l60@9,f1@10',
+            f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h47@20,v0@22,f1@24', 60, 2,
+            ['h:item 47 lies loose, but player 2 still carries theirs', 'b:objective 3 \\(\\w\\) is now complete',
+             '!b:objective 3 \\(\\w\\) is now failed', 'h:objective 3 \\(\\w\\) complete, credit player 2']),
     # ---- Aztec: guidance data on the computer (A), then the launch: console 11 swaps the doors,
     # the joiner's gadget on 15 starts the 30 s countdown, and the shuttle goes (B)
     'AZ2': ('aztec', 0, f'{INV} GE_COOP_WATCHWORLD=1', f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h50@8,v19@10,x19@12', 45, 2,
@@ -241,6 +277,13 @@ ROWS = {
                  ['p3:step c79 at', '!p1:objective 1 \\(B\\) is now failed'], 3, {3: f'{INV} GE_COOP_STEPS=p11@10,c79@25'}),
     'X8-nat4': ('statue', 0, f'{INV} GE_COOP_TESTFLAG=8000:5', INV, 100, 2,
                 ['p1:objective 3 \\(D\\) is now complete'], 4, {4: f'{INV} GE_COOP_TESTGOTO=0'}),
+    # three players on Dam: two miss the modem, the third still has one; B fails only when
+    # the third misses too (each joiner hears the other's STATE through the host)
+    'X10-dam3': ('dam', 2, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPSLINGER=60 GE_COOP_STEPS=h47@10,l60@11,f1@12', INV, 70, 2,
+                 ['p2:item 47 lies loose, but player 3 still carries theirs', 'p1:item 47 lies loose and nobody carries one',
+                  'p3:objective 1 \\(B\\) is now failed'], 3,
+                 {2: f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPSLINGER=60 GE_COOP_STEPS=h47@14,l60@15,f1@16',
+                  3: f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPSLINGER=60 GE_COOP_STEPS=p1@30,h47@40,l60@41,f1@42'}),
 }
 
 
