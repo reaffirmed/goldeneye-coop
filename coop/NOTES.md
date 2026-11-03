@@ -3965,10 +3965,13 @@ Owner's report: in versus, collision is very odd when players get near each othe
   2 s, stands 2 s; "vsbump" lines every quarter second with where we are, their
   body, their diamond, the gap between edges and how far we moved).
 - Rig (Linux i686 headless, two copies over the mock Steam, Temple, both on
-  GE_VS_BUMP): before, every run-in ended inside each other (gap -50 to -60
-  cm). After, at GE_COOP_NETSIM 60:10 all 8 run-ins on both screens stopped at
-  the edge (gap -8 to -14 cm: a diamond is nearer across its sides) and every
-  strafe off moved within a quarter second; at 150:30 6 of 8 stopped at the
-  edge and 2 head-on sprints passed through. A 2- and a 3-player GE_VS_HUNT
-  match played hits and kills as before; co-op Dam and Facility mission runs
-  pass.
+  GE_VS_BUMP, 8 run-ins a run; logs in the project files, versus-collision/):
+  before, all 16 run-ins on the two screens ended inside each other (gap -55
+  to -60 cm). After, at GE_COOP_NETSIM 60:10, 6 of 8 stopped at the edge on
+  both screens (gap -9 to -14 cm: a diamond is nearer across its sides), and 8
+  of 8 in an earlier run. At 150:30, 6 of 8 stopped in each of two runs. Every
+  run-in that passed through was both players at full speed, head on: they
+  close about 16 cm a tick, so the body comes past the 15 cm limit before
+  either game sees the other stop. 13 of 14 strafes off a held run-in moved at
+  once; one hung about 0.75 s. A 2- and a 3-player GE_VS_HUNT match played
+  hits and kills as before; co-op Dam and Facility mission runs pass.

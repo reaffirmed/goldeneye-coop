@@ -479,6 +479,8 @@ static void coopVsBodyCollision(s32 li, struct player *pl, StandTile *stan)
         const f32 rin = g_playerPointers[0]->field_488.collision_radius - 0.02f;
         const f32 rout = g_playerPointers[0]->field_488.collision_radius + 0.1f;
 
+        /* (flat distance only: a body a floor above or below may turn ghost
+         * too, which costs nothing, since it blocks nothing from there) */
         if (d2 < VS_GHOST_IN * VS_GHOST_IN)
         {
             sVsGhost[li] = 1;
