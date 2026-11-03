@@ -32,6 +32,7 @@
 
 extern void portConLogf(const char *fmt, ...);
 #include "port_save.h"
+#include "port_lang.h"   /* portTr: the port's own text in the player's language */
 
 /* ---- mission stats --------------------------------------------------------- */
 
@@ -822,7 +823,8 @@ s32 coopCampaignNext(s32 *stage, s32 *difficulty, char *label, s32 labelcap)
     }
     if (label != NULL && labelcap > 0)
     {
-        snprintf(label, labelcap, "Continue: %s (%s)", sMissionNames[best + 1], sDiffNames[diff]);
+        /* "Continue:" stays English: front.c reads the label back by it (coopLobbyTrLead) */
+        snprintf(label, labelcap, "Continue: %s (%s)", portTr(sMissionNames[best + 1]), portTr(sDiffNames[diff]));
     }
     return 1;
 }

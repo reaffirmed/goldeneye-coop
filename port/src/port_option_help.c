@@ -9,6 +9,7 @@
  */
 #include <string.h>
 #include <ultra64.h>
+#include "port_lang.h"   /* portTr: the line in the player's language */
 
 struct PortOptHelp { const char *key; const char *text; };
 
@@ -23,6 +24,7 @@ static const struct PortOptHelp sHelp[] = {
     { "head_roll",          "Camera tilt and breathing sway." },
 
     /* PORT OPTIONS */
+    { "language",           "The game's text and this mod's, in your own language. Restart the game to switch." },
     { "unlock_all",         "Unlocks all missions and cheats, still saves progress." },
     { "fix_shootthrough",   "Fixes shots passing through some walls." },
     { "distance_fading",    "Distant props and characters fade out." },
@@ -195,7 +197,7 @@ const char *portOptHelp(const char *key)
     {
         if (strcmp(sHelp[i].key, norm) == 0)
         {
-            return sHelp[i].text;
+            return portTr(sHelp[i].text);
         }
     }
     return NULL;

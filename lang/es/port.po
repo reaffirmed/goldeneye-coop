@@ -1,0 +1,3384 @@
+# GoldenEye Coop: the port's own text in Spanish (lang/README.md)
+#
+# Each msgid is the English exactly as the game draws it, without its last
+# line break; msgstr is the Spanish. The game's own text (missions, briefings,
+# the watch) comes from the translation patch, not from here, and this file
+# follows its words: Presa, Agente secreto, Mirilla, Autoapuntado, Salud,
+# Escenario, Nivel. A string that is only ever drawn in capitals still needs
+# just one entry: the game capitalises the Spanish itself (and drops the
+# accents in capitals, as the patch does).
+#
+# Keep every %d / %s in the same order. A line the game wraps can be long; a
+# menu label has to fit beside its value, so keep those short.
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: es\n"
+
+# ==== the folders and their sheets (front.c) ================================
+
+msgid "Are you sure?"
+msgstr "¿Seguro?"
+
+msgid "Yes"
+msgstr "Sí"
+
+msgid "No"
+msgstr "No"
+
+msgid "Options"
+msgstr "Opciones"
+
+msgid "Exit Game"
+msgstr "Salir"
+
+msgid "GAMEPLAY"
+msgstr "JUEGO"
+
+msgid "CONTROL"
+msgstr "CONTROLES"
+
+msgid "AUDIO VISUAL"
+msgstr "AUDIO Y VÍDEO"
+
+msgid "CREDITS"
+msgstr "CRÉDITOS"
+
+msgid "PLAYER"
+msgstr "JUGADOR"
+
+msgid "REBIND"
+msgstr "BOTONES"
+
+msgid "VIDEO"
+msgstr "VÍDEO"
+
+msgid "AUDIO"
+msgstr "AUDIO"
+
+msgid "GRAPHICS"
+msgstr "GRÁFICOS"
+
+msgid "GENERAL SETTINGS"
+msgstr "AJUSTES GENERALES"
+
+msgid "MOUSE AND KEYBOARD"
+msgstr "RATÓN Y TECLADO"
+
+msgid "CONTROLLER"
+msgstr "MANDO"
+
+msgid "GENERAL CONTROL OPTIONS"
+msgstr "OPCIONES DE CONTROL"
+
+msgid "PORT OPTIONS"
+msgstr "OPCIONES DEL PORT"
+
+msgid "GAMEPLAY OPTIONS"
+msgstr "OPCIONES DE JUEGO"
+
+msgid "CLASSIC"
+msgstr "CLÁSICO"
+
+msgid "ACCESSIBILITY"
+msgstr "ACCESIBILIDAD"
+
+msgid "RESET ALL"
+msgstr "RESTABLECER TODO"
+
+msgid "RESET"
+msgstr "RESTABLECER"
+
+# A folder tab has room for about eight capitals. msgctxt "tab" gives a tab
+# its own short label; a tab label with none that is still too long is cut
+# with a full stop, as the patch's "SIGUIEN.".
+msgctxt "tab"
+msgid "RESET"
+msgstr "REINICIO"
+
+msgctxt "tab"
+msgid "CREDITS"
+msgstr "AUTORES"
+
+msgid "Default"
+msgstr "Predet."
+
+msgid "White"
+msgstr "Blanco"
+
+msgid "Orange"
+msgstr "Naranja"
+
+msgid "Yellow"
+msgstr "Amarillo"
+
+msgid "Green"
+msgstr "Verde"
+
+msgid "Cyan"
+msgstr "Cian"
+
+msgid "Blue"
+msgstr "Azul"
+
+msgid "Purple"
+msgstr "Morado"
+
+msgid "Magenta"
+msgstr "Magenta"
+
+msgid "Grey"
+msgstr "Gris"
+
+msgid "Red"
+msgstr "Rojo"
+
+msgid "Custom"
+msgstr "Personal."
+
+msgid "High Detail Models"
+msgstr "Modelos detallados"
+
+msgid "General Settings"
+msgstr "Ajustes generales"
+
+msgid "Port Options"
+msgstr "Opciones del port"
+
+msgid "Accessibility"
+msgstr "Accesibilidad"
+
+msgid "Video"
+msgstr "Vídeo"
+
+msgid "Audio"
+msgstr "Audio"
+
+msgid "Graphics"
+msgstr "Gráficos"
+
+msgid "Mouse and Keyboard"
+msgstr "Ratón y teclado"
+
+msgid "Controller"
+msgstr "Mando"
+
+msgid "Controllers"
+msgstr "Mandos"
+
+msgid "General Control Options"
+msgstr "Opciones de control"
+
+msgid "general control options"
+msgstr "opciones de control"
+
+msgid "Classic Mode"
+msgstr "Modo clásico"
+
+msgid "Music"
+msgstr "Música"
+
+msgid "FX"
+msgstr "Efectos"
+
+msgid "Press A"
+msgstr "Pulsa A"
+
+msgid "No Pad"
+msgstr "Sin mando"
+
+msgid "Press a Key"
+msgstr "Pulsa una tecla"
+
+msgid "Built In"
+msgstr "Integrado"
+
+msgid "Display"
+msgstr "Pantalla"
+
+msgid "Bind Config"
+msgstr "Configuración"
+
+msgid "Save This Layout"
+msgstr "Guardar esta config."
+
+msgid "Delete This Layout"
+msgstr "Borrar esta config."
+
+msgid "Manage Config"
+msgstr "Gestionar config."
+
+msgid "Rebind Inputs"
+msgstr "Asignar botones"
+
+msgid "Rebind Controller"
+msgstr "Asignar botones"
+
+msgid "Input Device"
+msgstr "Dispositivo"
+
+msgid "Reset to Default"
+msgstr "Restablecer"
+
+msgid "No Input"
+msgstr "Sin entrada"
+
+msgid "Press a Button on the Device"
+msgstr "Pulsa un botón del dispositivo"
+
+msgid "Input Mode"
+msgstr "Modo de entrada"
+
+msgid "Control Style"
+msgstr "Tipo de control"
+
+msgid "Crosshair Colour"
+msgstr "Color de la mirilla"
+
+msgid "Resolution"
+msgstr "Resolución"
+
+msgid "DEL"
+msgstr "BORR"
+
+msgid "CAPS"
+msgstr "MAYÚS"
+
+msgid "BACK"
+msgstr "VOLVER"
+
+msgid "OK"
+msgstr "OK"
+
+msgid "TYPING - PRESS TO STOP"
+msgstr "ESCRIBIENDO - PULSA PARA PARAR"
+
+msgid "TYPE WITH KEYBOARD"
+msgstr "ESCRIBIR CON TECLADO"
+
+msgid "SAVE LAYOUT AS"
+msgstr "GUARDAR CONFIG. COMO"
+
+msgid "SAVE CONFIG AS"
+msgstr "GUARDAR CONFIG. COMO"
+
+msgid "Reset All Settings?"
+msgstr "¿Restablecer todos los ajustes?"
+
+msgid "Reset All Binds?"
+msgstr "¿Restablecer todos los botones?"
+
+msgid "Save"
+msgstr "Guardar"
+
+msgid "Delete"
+msgstr "Borrar"
+
+msgid "Cancel"
+msgstr "Cancelar"
+
+msgid "James Bond has returned August 17th 2026."
+msgstr "James Bond volvió el 17 de agosto de 2026."
+
+msgid "A port based on the GoldenEye 007 decompilation by kholdfuzion."
+msgstr "Un port basado en la descompilación de GoldenEye 007 de kholdfuzion."
+
+msgid "With contributions by Luchador, Trevor, AXDOOMER and many others."
+msgstr "Con aportaciones de Luchador, Trevor, AXDOOMER y muchos más."
+
+msgid "Developed by Murk17 and AXDOOMER."
+msgstr "Desarrollado por Murk17 y AXDOOMER."
+
+msgid "Project Midas logos and additional textures by Redvox57."
+msgstr "Logotipos de Project Midas y texturas adicionales de Redvox57."
+
+msgid "Alpha tested by AdzyIn3D, Al, ben_GEDepot, EternallyAries, Graslu00, Paracusia, Raf, Redvox57, Scott, TH126, ShootersForever and ZKA."
+msgstr "Pruebas alfa: AdzyIn3D, Al, ben_GEDepot, EternallyAries, Graslu00, Paracusia, Raf, Redvox57, Scott, TH126, ShootersForever y ZKA."
+
+msgid "Apply Changes"
+msgstr "Aplicar cambios"
+
+msgid "Pending"
+msgstr "Pendiente"
+
+msgid "Press a Button"
+msgstr "Pulsa un botón"
+
+msgid "(unbound)"
+msgstr "(sin asignar)"
+
+msgid "Del or Hold to Unbind"
+msgstr "Supr o mantén: quitar"
+
+msgid "Normal"
+msgstr "Normal"
+
+msgid "High"
+msgstr "Alto"
+
+msgid "Live Twice"
+msgstr "Se vive dos veces"
+
+msgid "Flag Tag"
+msgstr "La bandera"
+
+msgid "Golden Gun"
+msgstr "Pistola de oro"
+
+msgid "Licence to Kill"
+msgstr "Licencia para matar"
+
+msgid "Teams 2 v 2"
+msgstr "Equipos 2 contra 2"
+
+msgid "Teams 3 v 1"
+msgstr "Equipos 3 contra 1"
+
+msgid "Teams 2 v 1"
+msgstr "Equipos 2 contra 1"
+
+msgid "No Limit"
+msgstr "Sin límite"
+
+msgid "5 Minutes"
+msgstr "5 minutos"
+
+msgid "10 Minutes"
+msgstr "10 minutos"
+
+msgid "20 Minutes"
+msgstr "20 minutos"
+
+msgid "First to 5"
+msgstr "5 puntos"
+
+msgid "First to 10"
+msgstr "10 puntos"
+
+msgid "First to 20"
+msgstr "20 puntos"
+
+msgid "Arena"
+msgstr "Nivel"
+
+msgid "ARENA"
+msgstr "NIVEL"
+
+msgid "Scenario"
+msgstr "Escenario"
+
+msgid "Game Length"
+msgstr "Duración"
+
+msgid "Two Lives"
+msgstr "Dos vidas"
+
+msgid "Weapons"
+msgstr "Armas"
+
+msgid "Radar"
+msgstr "Radar"
+
+msgid "Off"
+msgstr "No"
+
+msgid "On"
+msgstr "Sí"
+
+msgid "OFF"
+msgstr "NO"
+
+msgid "ON"
+msgstr "SÍ"
+
+msgid "Body Armour"
+msgstr "Chalecos"
+
+msgid "After a Match"
+msgstr "Tras la partida"
+
+msgid "Next Arena"
+msgstr "Siguiente nivel"
+
+msgid "Same Arena"
+msgstr "Mismo nivel"
+
+msgid "Lobby"
+msgstr "Sala"
+
+msgid "Public"
+msgstr "Pública"
+
+msgid "Friends Only"
+msgstr "Solo amigos"
+
+msgid "Enter"
+msgstr "Escribir"
+
+msgid "Password"
+msgstr "Contraseña"
+
+msgid "PASSWORD"
+msgstr "CONTRASEÑA"
+
+msgid "Set"
+msgstr "Puesta"
+
+msgid "None"
+msgstr "Ninguno"
+
+msgid "Field of View"
+msgstr "Campo de visión"
+
+msgid "Mouse Look"
+msgstr "Mirar con ratón"
+
+msgid "Mouse Speed"
+msgstr "Velocidad ratón"
+
+msgid "Voice Chat"
+msgstr "Chat de voz"
+
+msgid "Voice Volume"
+msgstr "Volumen de voz"
+
+msgid "Update Check"
+msgstr "Actualizaciones"
+
+msgid "Co-op Menu"
+msgstr "Menú co-op"
+
+msgid "Language"
+msgstr "Idioma"
+
+msgid "Profile"
+msgstr "Perfil"
+
+msgid "Button Layout"
+msgstr "Botones"
+
+msgid "No Controller"
+msgstr "Sin mando"
+
+msgid "Unknown"
+msgstr "Desconocida"
+
+msgid "Checking..."
+msgstr "Buscando..."
+
+msgid "Game Version"
+msgstr "Versión del juego"
+
+msgid "All Options"
+msgstr "Todas las opciones"
+
+msgid "Install"
+msgstr "Instalar"
+
+msgid "Not for this PC"
+msgstr "No para este PC"
+
+msgid "Restart Now"
+msgstr "Reiniciar ahora"
+
+msgid "Update failed"
+msgstr "Falló la actualización"
+
+msgid "Couldn't check for updates"
+msgstr "No se pudo comprobar"
+
+msgid "Try Again"
+msgstr "Reintentar"
+
+msgid "Check Again"
+msgstr "Volver a buscar"
+
+msgid "The game's Steam file,"
+msgstr "El archivo de Steam del juego,"
+
+msgid "is missing."
+msgstr "no está."
+
+msgid "is damaged."
+msgstr "está dañado."
+
+msgid "Unzip the game again."
+msgstr "Vuelve a descomprimir el juego."
+
+msgid "Some virus scanners"
+msgstr "Algunos antivirus"
+
+msgid "remove it."
+msgstr "lo borran."
+
+msgid "Steam turned the game away."
+msgstr "Steam rechazó el juego."
+
+msgid "Check you are logged in"
+msgstr "Comprueba que has iniciado sesión"
+
+msgid "and online in Steam,"
+msgstr "y estás en línea en Steam,"
+
+msgid "then open CO-OP again."
+msgstr "y vuelve a abrir CO-OP."
+
+msgid "Steam is not running."
+msgstr "Steam no está abierto."
+
+msgid "Start Steam and log in,"
+msgstr "Abre Steam e inicia sesión,"
+
+msgid "Host a Game"
+msgstr "Crear partida"
+
+msgid "Join a Friend's Game"
+msgstr "Unirse a un amigo"
+
+msgid "Character"
+msgstr "Personaje"
+
+msgid "Mission rules (lives, guards and"
+msgstr "Las reglas (vidas, guardias y"
+
+msgid "more) appear here once you host."
+msgstr "más) salen aquí al crear partida."
+
+msgid "Public Games"
+msgstr "Partidas públicas"
+
+msgid "Next Match"
+msgstr "Siguiente partida"
+
+msgid "Drop In"
+msgstr "Entrar ya"
+
+msgid "Join"
+msgstr "Unirse"
+
+msgid "Looking for public games..."
+msgstr "Buscando partidas públicas..."
+
+msgid "No public games right now"
+msgstr "No hay partidas públicas"
+
+msgid "Friends Online"
+msgstr "Amigos en línea"
+
+msgid "No friends online"
+msgstr "No hay amigos en línea"
+
+msgid "Opening a lobby..."
+msgstr "Abriendo una sala..."
+
+msgid "Looking for a friend's game..."
+msgstr "Buscando la partida de un amigo..."
+
+msgid "Waiting for friends..."
+msgstr "Esperando a los amigos..."
+
+msgid "Invite them under Invite a Friend."
+msgstr "Invítalos en Invitar a un amigo."
+
+msgid "Invite them from the INVITE tab."
+msgstr "Invítalos desde la pestaña INVITAR."
+
+msgid "Start Match"
+msgstr "Empezar partida"
+
+msgid "Not Ready"
+msgstr "No listos"
+
+msgid "No Players"
+msgstr "Sin jugadores"
+
+msgid "Select Mission"
+msgstr "Elegir misión"
+
+msgid "Checking the password..."
+msgstr "Comprobando la contraseña..."
+
+msgid "Connecting to the host..."
+msgstr "Conectando con el anfitrión..."
+
+msgid "Cancel Ready"
+msgstr "No estoy listo"
+
+msgid "Ready Up"
+msgstr "Estoy listo"
+
+msgid "The host starts the match."
+msgstr "El anfitrión empieza la partida."
+
+msgid "The host picks the mission."
+msgstr "El anfitrión elige la misión."
+
+msgid "Next:"
+msgstr "Siguiente:"
+
+msgid "Voice"
+msgstr "Voz"
+
+msgid "Muted"
+msgstr "Silenciado"
+
+msgid "Let In"
+msgstr "Dejar entrar"
+
+msgid "on Discord"
+msgstr "en Discord"
+
+msgid "Turn Down"
+msgstr "Rechazar"
+
+msgid "Leave Lobby"
+msgstr "Salir de la sala"
+
+msgid "Hand Over"
+msgstr "Ceder anfitrión"
+
+msgid "Type a Message"
+msgstr "Escribir mensaje"
+
+msgid "Mode"
+msgstr "Modo"
+
+msgid "Versus"
+msgstr "Versus"
+
+msgid "Co-op"
+msgstr "Cooperativo"
+
+msgid "Revive or Timer"
+msgstr "Reanimar o tiempo"
+
+msgid "Timer"
+msgstr "Tiempo"
+
+msgid "Revive"
+msgstr "Reanimar"
+
+msgid "When Down"
+msgstr "Al caer"
+
+msgid "Bleed Out"
+msgstr "Desangrado"
+
+msgid "Respawn"
+msgstr "Reaparecer"
+
+msgid "Lives"
+msgstr "Vidas"
+
+msgid "Life"
+msgstr "Vida"
+
+msgid "Guard Strength"
+msgstr "Fuerza guardias"
+
+msgid "Player Scaling"
+msgstr "Según jugadores"
+
+msgid "Guard AI"
+msgstr "IA de guardias"
+
+msgid "Friendly Fire"
+msgstr "Fuego amigo"
+
+msgid "Host Leaves"
+msgstr "Si se va anfitrión"
+
+msgid "Steam Invite Window"
+msgstr "Invitar con Steam"
+
+msgid "Invited"
+msgstr "Invitado"
+
+msgid "Invite"
+msgstr "Invitar"
+
+msgid "Rules"
+msgstr "Reglas"
+
+msgid "Invite a Friend"
+msgstr "Invitar a un amigo"
+
+msgid "Chat"
+msgstr "Chat"
+
+msgid "Hosting"
+msgstr "Anfitrión"
+
+# ---- the dark CO-OP screen's tabs and badges
+
+msgid "PLAY"
+msgstr "JUGAR"
+
+msgid "LOBBY"
+msgstr "SALA"
+
+msgid "GAME SETUP"
+msgstr "PARTIDA"
+
+msgid "FIND GAMES"
+msgstr "BUSCAR"
+
+msgid "INVITE"
+msgstr "INVITAR"
+
+msgid "OPTIONS"
+msgstr "OPCIONES"
+
+msgid "CHAT"
+msgstr "CHAT"
+
+msgid "YOU"
+msgstr "TÚ"
+
+msgid "PARTY"
+msgstr "GRUPO"
+
+msgid "CONNECTING"
+msgstr "CONECTANDO"
+
+msgid "NOT IN A LOBBY"
+msgstr "SIN SALA"
+
+msgid "OPEN"
+msgstr "LIBRE"
+
+msgid "TALKING"
+msgstr "HABLANDO"
+
+msgid "HOST"
+msgstr "ANFITRIÓN"
+
+msgid "READY"
+msgstr "LISTO"
+
+msgid "NOT READY"
+msgstr "NO LISTO"
+
+msgid "NEXT MISSION"
+msgstr "SIGUIENTE MISIÓN"
+
+msgid "CHANGE"
+msgstr "CAMBIAR"
+
+msgid "ACCEPT"
+msgstr "ACEPTAR"
+
+msgid "DONE"
+msgstr "HECHO"
+
+msgid "CANCEL"
+msgstr "CANCELAR"
+
+msgid "SELECT"
+msgstr "ELEGIR"
+
+msgid "CONTINUE"
+msgstr "CONTINUAR"
+
+msgid "CO-OP  /  LOBBY"
+msgstr "CO-OP  /  SALA"
+
+msgid "GOLDENEYE 007  /  ONLINE"
+msgstr "GOLDENEYE 007  /  EN LÍNEA"
+
+msgid "SELECT CHARACTER"
+msgstr "ELEGIR PERSONAJE"
+
+msgid "VERSUS LOBBY"
+msgstr "SALA VERSUS"
+
+msgid "CO-OP LOBBY"
+msgstr "SALA CO-OP"
+
+msgid "Switch to this tab."
+msgstr "Ir a esta pestaña."
+
+msgid "The host sets these for the whole party."
+msgstr "El anfitrión elige esto para todo el grupo."
+
+# ---- the lobby's help lines
+
+msgid "Open a lobby for your friends. You pick the missions."
+msgstr "Abre una sala para tus amigos. Tú eliges las misiones."
+
+msgid "Join the first friend who is hosting a game."
+msgstr "Únete al primer amigo que tenga una partida."
+
+msgid "Join this friend's lobby."
+msgstr "Únete a la sala de este amigo."
+
+msgid "Join this public game."
+msgstr "Únete a esta partida pública."
+
+msgid "Stop and go back."
+msgstr "Para y vuelve atrás."
+
+msgid "Tell the host you are ready to start."
+msgstr "Avisa al anfitrión de que estás listo."
+
+msgid "Pick any mission and difficulty. The whole party comes along."
+msgstr "Elige misión y dificultad. Todo el grupo te acompaña."
+
+msgid "Start the next mission of your campaign together."
+msgstr "Empezad juntos la siguiente misión de la campaña."
+
+msgid "Start the match with everyone in the lobby."
+msgstr "Empieza la partida con todos los de la sala."
+
+msgid "After each match, stay on this arena or move on to the next one."
+msgstr "Tras cada partida, seguir en este nivel o pasar al siguiente."
+
+msgid "Send this friend a Steam invite."
+msgstr "Envía a este amigo una invitación de Steam."
+
+msgid "Open Steam's own invite window."
+msgstr "Abre la ventana de invitaciones de Steam."
+
+msgid "Leave the lobby. The next player becomes the host."
+msgstr "Sal de la sala. El siguiente jugador será el anfitrión."
+
+msgid "Leave the lobby."
+msgstr "Sal de la sala."
+
+msgid "Who you play as. Select for the full roster; looks only."
+msgstr "Con quién juegas. Elige para ver a todos; solo cambia el aspecto."
+
+msgid "When a player goes down: a partner revives them, a timer brings them back, or both."
+msgstr "Cuando un jugador cae: un compañero lo reanima, vuelve tras un tiempo, o ambas."
+
+msgid "Hard and Brutal give guards more health, damage and aim, and add more of them."
+msgstr "Difícil y Brutal dan a los guardias más salud, daño y puntería, y ponen más."
+
+msgid "Every setting: video, audio, HUD, accessibility, controls and Port Options."
+msgstr "Todos los ajustes: vídeo, audio, HUD, accesibilidad, controles y opciones del port."
+
+msgid "Tougher guards, and more of them, for 3 or 4 players."
+msgstr "Guardias más duros, y más, para 3 o 4 jugadores."
+
+msgid "Smarter guards investigate noise, call for help, use cover and flank."
+msgstr "Los guardias listos investigan ruidos, piden ayuda, se cubren y flanquean."
+
+msgid "Whether your shots and blasts hurt partners, and how much."
+msgstr "Si tus disparos y explosiones hieren a los compañeros, y cuánto."
+
+msgid "What happens to the game if the host quits."
+msgstr "Qué pasa con la partida si el anfitrión se va."
+
+msgid "How many times each player can come back in a mission."
+msgstr "Cuántas veces puede volver cada jugador en una misión."
+
+msgid "How long a downed player waits for a revive."
+msgstr "Cuánto espera un jugador caído a que lo reanimen."
+
+msgid "How long a downed player waits to come back."
+msgstr "Cuánto espera un jugador caído para volver."
+
+msgid "Friends Only is invite only; Public lists the lobby in everyone's Find Games."
+msgstr "Solo amigos es con invitación; Pública muestra la sala en Buscar de todos."
+
+msgid "Players who are not your friends need this to join."
+msgstr "Los jugadores que no son tus amigos la necesitan para entrar."
+
+msgid "Load a saved profile: its controls, options and character."
+msgstr "Carga un perfil guardado: sus controles, opciones y personaje."
+
+msgid "The button layout of your first controller."
+msgstr "La disposición de botones de tu primer mando."
+
+msgid "Hear this player's voice, or mute them. Only for you."
+msgstr "Oír la voz de este jugador, o silenciarlo. Solo para ti."
+
+msgid "Type a message to the party."
+msgstr "Escribe un mensaje al grupo."
+
+msgid "Let this player into your lobby."
+msgstr "Deja entrar a este jugador en tu sala."
+
+msgid "Turn down this player's request."
+msgstr "Rechaza la petición de este jugador."
+
+msgid "Co-op plays the story missions together; Versus is a multiplayer match."
+msgstr "Cooperativo juega la historia en equipo; Versus es una partida multijugador."
+
+msgid "Where the match is played."
+msgstr "Dónde se juega la partida."
+
+msgid "The multiplayer scenario."
+msgstr "El escenario multijugador."
+
+msgid "When the match ends."
+msgstr "Cuándo acaba la partida."
+
+msgid "The weapons on the map."
+msgstr "Las armas del mapa."
+
+msgid "The radar in the corner, for everyone in the match."
+msgstr "El radar de la esquina, para todos en la partida."
+
+msgid "Body armour on the map, for everyone in the match."
+msgstr "Chalecos en el mapa, para todos en la partida."
+
+msgid "Install it from GitHub. Your saves, settings and cart stay."
+msgstr "Instálala desde GitHub. Tus partidas, ajustes y cartucho se quedan."
+
+msgid "Your version. Select to look for a newer one now."
+msgstr "Tu versión. Elige para buscar una más nueva ahora."
+
+msgid "The update is installed. Restart the game to play it."
+msgstr "La actualización está instalada. Reinicia el juego para jugarla."
+
+# ---- the character picker
+
+msgid "MI6"
+msgstr "MI6"
+
+msgid "Severnaya Station"
+msgstr "Estación Severnaya"
+
+msgid "Janus"
+msgstr "Janus"
+
+msgid "Russian Army"
+msgstr "Ejército ruso"
+
+msgid "Russian Mafia"
+msgstr "Mafia rusa"
+
+msgid "Russian Government"
+msgstr "Gobierno ruso"
+
+msgid "Zorin Industries"
+msgstr "Industrias Zorin"
+
+msgid "Drax Industries"
+msgstr "Industrias Drax"
+
+msgid "Research Staff"
+msgstr "Investigadores"
+
+msgid "Russian Navy"
+msgstr "Armada rusa"
+
+msgid "St. Petersburg"
+msgstr "San Petersburgo"
+
+msgid "Civilian"
+msgstr "Civil"
+
+msgid "Multiplayer Cast"
+msgstr "Reparto multijugador"
+
+msgid "AFFILIATION"
+msgstr "BANDO"
+
+msgid "GENDER"
+msgstr "SEXO"
+
+msgid "Female"
+msgstr "Mujer"
+
+msgid "Male"
+msgstr "Hombre"
+
+msgid "WORN IN THE LOBBY BY"
+msgstr "EN LA SALA LO LLEVA"
+
+msgid "Nobody yet"
+msgstr "Nadie aún"
+
+msgid "COSMETIC ONLY"
+msgstr "SOLO ASPECTO"
+
+msgid "Trevelyan (Janus)"
+msgstr "Trevelyan (Janus)"
+
+msgid "Scientist (M)"
+msgstr "Científico"
+
+msgid "Scientist (F)"
+msgstr "Científica"
+
+msgid "Civilian (F)"
+msgstr "Civil (mujer)"
+
+msgid "Civilian (M) 1"
+msgstr "Civil (hombre) 1"
+
+msgid "Civilian (M) 2"
+msgstr "Civil (hombre) 2"
+
+msgid "Civilian (M) 3"
+msgstr "Civil (hombre) 3"
+
+msgid "Siberian Guard 1"
+msgstr "Guardia siberiano 1"
+
+msgid "Siberian Guard 2"
+msgstr "Guardia siberiano 2"
+
+msgid "Moonraker Elite (M)"
+msgstr "Élite Moonraker (H)"
+
+msgid "Moonraker Elite (F)"
+msgstr "Élite Moonraker (M)"
+
+msgid "Bond (Boiler Suit)"
+msgstr "Bond (mono)"
+
+msgid "Bond (Formal)"
+msgstr "Bond (etiqueta)"
+
+msgid "Bond (Jungle)"
+msgstr "Bond (jungla)"
+
+msgid "Bond (Parka)"
+msgstr "Bond (parka)"
+
+msgid "Natalya (Jungle)"
+msgstr "Natalya (jungla)"
+
+# ---- after a mission and the stats
+
+msgid "Kills:"
+msgstr "Muertes:"
+
+msgid "Accuracy:"
+msgstr "Puntería:"
+
+msgid "Head hits:"
+msgstr "En la cabeza:"
+
+msgid "Objectives:"
+msgstr "Objetivos:"
+
+msgid "Revives:"
+msgstr "Reanimaciones:"
+
+msgid "Damage:"
+msgstr "Daño:"
+
+msgid "Downed:"
+msgstr "Caídas:"
+
+msgid "Friendly hits:"
+msgstr "Fuego amigo:"
+
+msgid "Waiting for the host's mission to end..."
+msgstr "Esperando a que acabe la misión del anfitrión..."
+
+msgid "The vote opens here when it does."
+msgstr "La votación se abrirá aquí entonces."
+
+msgid "Decided:"
+msgstr "Decidido:"
+
+msgid "Pick one and press A to vote."
+msgstr "Elige una y pulsa A para votar."
+
+msgid "Press A on another to change your vote."
+msgstr "Pulsa A en otra para cambiar tu voto."
+
+msgid "Guard alertness"
+msgstr "Alerta de guardias"
+
+msgid "Alert budget"
+msgstr "Límite de alertas"
+
+msgid "Game Limits:"
+msgstr "Límites:"
+
+msgid "Player Options"
+msgstr "Opciones de jugador"
+
+msgid "Gameplay Options"
+msgstr "Opciones de juego"
+
+msgid "Load / Save Settings"
+msgstr "Cargar / guardar ajustes"
+
+msgid "Style"
+msgstr "Tipo"
+
+msgid "Config"
+msgstr "Config."
+
+msgid "Look Up/Down"
+msgstr "Eje vertical"
+
+msgid "Look Ahead"
+msgstr "Centrar vista"
+
+msgid "Auto-Aim"
+msgstr "Autoapuntado"
+
+msgid "Crosshair"
+msgstr "Mirilla"
+
+msgid "Done"
+msgstr "Hecho"
+
+msgid "Port"
+msgstr "Port"
+
+msgid "Auto"
+msgstr "Auto"
+
+msgid "Ready"
+msgstr "Listo"
+
+msgid "Win Rate"
+msgstr "Victorias"
+
+msgid "K/D"
+msgstr "M/B"
+
+msgid "Time Played"
+msgstr "Tiempo jugado"
+
+msgid "Lemming Award"
+msgstr "Premio Lemming"
+
+msgid "Where's the Ammo?"
+msgstr "¿Y la munición?"
+
+msgid "Where's the Armor?"
+msgstr "¿Y el blindaje?"
+
+msgid "AC -10 Award"
+msgstr "Premio AC -10"
+
+msgid "Marksmanship Award"
+msgstr "Mejor puntería"
+
+msgid "Most Professional"
+msgstr "El más profesional"
+
+msgid "Most Deadly"
+msgstr "El más mortal"
+
+msgid "Mostly Harmless"
+msgstr "Inofensivo"
+
+msgid "Most Cowardly"
+msgstr "El más cobarde"
+
+msgid "Most Frantic"
+msgstr "El más frenético"
+
+msgid "Most Honorable"
+msgstr "El más honorable"
+
+msgid "Most Dishonorable"
+msgstr "El más deshonroso"
+
+msgid "Shortest Innings"
+msgstr "El menos duradero"
+
+msgid "Longest Innings"
+msgstr "El más duradero"
+
+msgid "Double Kill"
+msgstr "Doble muerte"
+
+msgid "Triple Kill"
+msgstr "Triple muerte"
+
+msgid "Quad Kill (Doh!)"
+msgstr "Cuádruple muerte (¡Ya!)"
+
+msgid "Damage Dealt"
+msgstr "Daño causado"
+
+msgid "Damage Taken"
+msgstr "Daño recibido"
+
+msgid "Accuracy"
+msgstr "Puntería"
+
+msgid "Head Hits"
+msgstr "En la cabeza"
+
+msgid "Body Hits"
+msgstr "En el cuerpo"
+
+msgid "Limb Hits"
+msgstr "En extremidades"
+
+msgid "Longest Life"
+msgstr "Vida más larga"
+
+msgid "on Your Controller"
+msgstr "en tu mando"
+
+msgid "Player 1 Skips"
+msgstr "El jugador 1 salta"
+
+msgid "Keyboard and Mouse"
+msgstr "Teclado y ratón"
+
+msgid "keyboard and mouse"
+msgstr "teclado y ratón"
+
+msgid "Waiting"
+msgstr "Esperando"
+
+msgid "Record"
+msgstr "Historial"
+
+msgid "Shooting"
+msgstr "Disparos"
+
+msgid "Awards"
+msgstr "Premios"
+
+# ---- weapons (the patch's names)
+
+msgid "Slappers"
+msgstr "Manos"
+
+msgid "PP7 Silenced"
+msgstr "PP7 (silenciada)"
+
+msgid "Cougar Magnum"
+msgstr "Cougar Mágnum"
+
+msgid "Throwing Knife"
+msgstr "Cuchillo arrojadizo"
+
+msgid "KF7 Soviet"
+msgstr "KF7 soviética"
+
+msgid "AR33 Assault"
+msgstr "AR33 de asalto"
+
+msgid "Auto Shotgun"
+msgstr "Escopeta automática"
+
+msgid "Sniper Rifle"
+msgstr "Rifle de francotirador"
+
+msgid "Hand Grenade"
+msgstr "Granada de mano"
+
+msgid "Grenade Launcher"
+msgstr "Lanzagranadas"
+
+msgid "Rocket Launcher"
+msgstr "Lanzacohetes"
+
+msgid "Remote Mine"
+msgstr "Mina remota"
+
+msgid "Timed Mine"
+msgstr "Mina de tiempo"
+
+msgid "Proximity Mine"
+msgstr "Mina de proximidad"
+
+msgid "Moonraker Laser"
+msgstr "Láser Moonraker"
+
+# ---- multiplayer setup and saved sets
+
+msgid "NAME THIS SET"
+msgstr "NOMBRE DEL GRUPO"
+
+msgid "NAME IN USE"
+msgstr "NOMBRE YA USADO"
+
+msgid "LIST FULL"
+msgstr "LISTA LLENA"
+
+msgid "SAVE SET AS"
+msgstr "GUARDAR GRUPO COMO"
+
+msgid "Confirm Delete"
+msgstr "Confirmar borrado"
+
+msgid "Delete Set"
+msgstr "Borrar grupo"
+
+msgid "Unlimited"
+msgstr "Sin límite"
+
+msgid "NAME THESE SETTINGS"
+msgstr "NOMBRE DE LOS AJUSTES"
+
+msgid "SAVE SETTINGS AS"
+msgstr "GUARDAR AJUSTES COMO"
+
+msgid "Time Limit"
+msgstr "Límite de tiempo"
+
+msgid "Kill Limit"
+msgstr "Límite de muertes"
+
+msgid "Teams"
+msgstr "Equipos"
+
+msgid "Load Settings"
+msgstr "Cargar ajustes"
+
+msgid "Save Settings"
+msgstr "Guardar ajustes"
+
+msgid "Delete Settings"
+msgstr "Borrar ajustes"
+
+msgid "Random"
+msgstr "Al azar"
+
+msgid "Random Set"
+msgstr "Grupo al azar"
+
+msgid "STATISTICS:"
+msgstr "ESTADÍSTICAS:"
+
+msgid "TEAM  1/3"
+msgstr "EQUIPO  1/3"
+
+msgid "YOURS  2/3"
+msgstr "TUYAS  2/3"
+
+msgid "WHAT NEXT  3/3"
+msgstr "Y AHORA  3/3"
+
+msgid "TEAM  1/2"
+msgstr "EQUIPO  1/2"
+
+msgid "YOURS  2/2"
+msgstr "TUYAS  2/2"
+
+msgid "Sniper/Rocket"
+msgstr "Franco./cohete"
+
+msgid "Enemy FF"
+msgstr "FA enemigo"
+
+msgid "Unlock Doors"
+msgstr "Abrir puertas"
+
+msgid "CHEATS"
+msgstr "TRUCOS"
+
+msgid "PORT"
+msgstr "PORT"
+
+msgid "the CREDITS sheet"
+msgstr "los CRÉDITOS"
+
+msgid "the mission list"
+msgstr "la lista de misiones"
+
+# ==== co-op in play (coop*.c) ===============================================
+
+msgid "Different Versions"
+msgstr "Versiones distintas"
+
+msgid "A partner is here"
+msgstr "Ha llegado un compañero"
+
+msgid "A partner rejoined"
+msgstr "Un compañero ha vuelto"
+
+msgid "2 min"
+msgstr "2 min"
+
+msgid "3 min"
+msgstr "3 min"
+
+msgid "Full"
+msgstr "Total"
+
+msgid "Reduced"
+msgstr "Reducido"
+
+msgid "You were out of this mission when you left. You are out until it ends."
+msgstr "Estabas fuera de esta misión al irte. Sigues fuera hasta que acabe."
+
+msgid "No lives left. You are out until the mission ends."
+msgstr "No te quedan vidas. Estás fuera hasta que acabe la misión."
+
+msgid "Waiting for your partners to get clear..."
+msgstr "Esperando a que tus compañeros se aparten..."
+
+msgid "Down! A partner can hold Use by you to revive you."
+msgstr "¡Caído! Un compañero puede mantener Acción a tu lado para reanimarte."
+
+msgid "Revived!"
+msgstr "¡Reanimado!"
+
+msgid "You bled out. You are out until the mission ends."
+msgstr "Te has desangrado. Estás fuera hasta que acabe la misión."
+
+msgid "THE MISSION IS ENDING|YOU JOIN THE NEXT ONE"
+msgstr "LA MISIÓN ESTÁ ACABANDO|ENTRARÁS EN LA SIGUIENTE"
+
+msgid "You"
+msgstr "Tú"
+
+msgid "Partner"
+msgstr "Compañero"
+
+msgid "A partner"
+msgstr "Un compañero"
+
+msgid "THE HOST ENDED THE MISSION"
+msgstr "EL ANFITRIÓN ACABÓ LA MISIÓN"
+
+msgid "BACK TO THE LOBBY"
+msgstr "VOLVIENDO A LA SALA"
+
+msgid "Mission Ended"
+msgstr "Misión acabada"
+
+msgid "The host ended the mission\nfor everyone."
+msgstr "El anfitrión acabó la misión\npara todos."
+
+msgid "YOU ARE THE HOST NOW"
+msgstr "AHORA ERES EL ANFITRIÓN"
+
+msgid "The Host Left"
+msgstr "El anfitrión se fue"
+
+msgid "The lobby's Host Leaves rule\nsends everyone back here.\nYou are the host now."
+msgstr "La regla Si se va anfitrión\nos devuelve a todos aquí.\nAhora eres el anfitrión."
+
+msgid "The lobby's Host Leaves rule\nsends everyone back here.\nThe next player hosts now."
+msgstr "La regla Si se va anfitrión\nos devuelve a todos aquí.\nAhora es anfitrión el siguiente."
+
+msgid "ANOTHER HOST HAS THE GAME"
+msgstr "OTRO ANFITRIÓN TIENE LA PARTIDA"
+
+msgid "JOINING IT"
+msgstr "UNIÉNDOSE"
+
+msgid "THE HOST LEFT THE MISSION"
+msgstr "EL ANFITRIÓN DEJÓ LA MISIÓN"
+
+msgid "Back to the Lobby"
+msgstr "Volver a la sala"
+
+msgid "The host left the mission,\nso it ended for everyone."
+msgstr "El anfitrión dejó la misión,\nasí que acabó para todos."
+
+msgid "THE HOST IS BACK"
+msgstr "EL ANFITRIÓN HA VUELTO"
+
+msgid "THE OLD HOST HANDED OVER"
+msgstr "EL ANTIGUO ANFITRIÓN CEDIÓ"
+
+msgid "THE OLD HOST LEFT"
+msgstr "EL ANTIGUO ANFITRIÓN SE FUE"
+
+msgid "Back to Lobby"
+msgstr "Volver a la sala"
+
+msgid "New Host"
+msgstr "Nuevo anfitrión"
+
+msgid "Gunfire"
+msgstr "Disparos"
+
+msgid "Explosion"
+msgstr "Explosión"
+
+msgid "Door opens"
+msgstr "Se abre una puerta"
+
+msgid "Alarm"
+msgstr "Alarma"
+
+msgid "OVER THERE!"
+msgstr "¡ALLÍ!"
+
+msgid "WHERE DID THEY GO?"
+msgstr "¿DÓNDE SE HA METIDO?"
+
+msgid "NEED BACKUP!"
+msgstr "¡REFUERZOS!"
+
+msgid "COVER ME!"
+msgstr "¡CÚBREME!"
+
+msgid "GRENADE!"
+msgstr "¡GRANADA!"
+
+msgid "MAN DOWN!"
+msgstr "¡HOMBRE ABAJO!"
+
+msgid "SOUND THE ALARM!"
+msgstr "¡DAD LA ALARMA!"
+
+msgid "FALL BACK!"
+msgstr "¡RETIRADA!"
+
+msgid "WHO'S THERE?"
+msgstr "¿QUIÉN ANDA AHÍ?"
+
+msgid "DON'T SHOOT!"
+msgstr "¡NO DISPARES!"
+
+msgid "no limit"
+msgstr "sin límite"
+
+msgid "Smarter"
+msgstr "Listos"
+
+msgid "Classic"
+msgstr "Clásico"
+
+msgid "Update needed to join."
+msgstr "Actualiza para unirte."
+
+msgid "Couldn't join that game."
+msgstr "No se pudo entrar en esa partida."
+
+msgid "Wrong password."
+msgstr "Contraseña incorrecta."
+
+msgid "It's full, or friends only."
+msgstr "Está llena, o es solo para amigos."
+
+msgid "Couldn't Join"
+msgstr "No se pudo entrar"
+
+msgid "Steam kept us out of that game.\nIt's full, or friends only."
+msgstr "Steam no nos dejó entrar.\nEstá llena, o es solo para amigos."
+
+msgid "Update Needed"
+msgstr "Hay que actualizar"
+
+msgid "Wrong Password"
+msgstr "Contraseña incorrecta"
+
+msgid "The host's game has a password,\nand that wasn't it."
+msgstr "La partida tiene contraseña,\ny no era esa."
+
+msgid "Warning"
+msgstr "Aviso"
+
+msgid "Caution"
+msgstr "Precaución"
+
+msgid "Mission Failure"
+msgstr "Misión fallida"
+
+msgid "Your partner is not here."
+msgstr "Tu compañero no está aquí."
+
+msgid "Nothing to give with this weapon."
+msgstr "No hay nada que dar con esta arma."
+
+msgid "No spare ammo to give."
+msgstr "No te sobra munición para dar."
+
+msgid "No room for more of that ammo."
+msgstr "No cabe más de esa munición."
+
+msgid "TALK"
+msgstr "HABLAR"
+
+msgid "START: END"
+msgstr "START: TERMINAR"
+
+msgid "- DONE"
+msgstr "- HECHO"
+
+msgid "- FAILED"
+msgstr "- FALLADO"
+
+msgid "PHOTO MODE - FIRE: TAKE A PHOTO - P: BACK"
+msgstr "MODO FOTO - DISPARAR: HACER FOTO - P: VOLVER"
+
+msgid "Pings are for team-mates only."
+msgstr "Los avisos son solo para compañeros."
+
+msgid "Nothing there to ping."
+msgstr "No hay nada que señalar ahí."
+
+msgid "Agent"
+msgstr "Agente"
+
+msgid "Secret Agent"
+msgstr "Agente secreto"
+
+msgid "00 Agent"
+msgstr "Agente 00"
+
+msgid "CO-OP MISSION"
+msgstr "MISIÓN CO-OP"
+
+msgid "LOADING..."
+msgstr "CARGANDO..."
+
+msgid "THE MISSION CARRIES ON WITH THE NEW HOST"
+msgstr "LA MISIÓN SIGUE CON EL NUEVO ANFITRIÓN"
+
+msgid "IF THEY STAY GONE, THE MISSION ENDS"
+msgstr "SI NO VUELVE, LA MISIÓN ACABA"
+
+msgid "IF THEY STAY GONE, THE NEXT PLAYER HOSTS"
+msgstr "SI NO VUELVE, EL SIGUIENTE SERÁ ANFITRIÓN"
+
+msgid "Player"
+msgstr "Jugador"
+
+msgid "Hard"
+msgstr "Difícil"
+
+msgid "Brutal"
+msgstr "Brutal"
+
+msgid "3 Players"
+msgstr "3 jugadores"
+
+msgid "4 Players"
+msgstr "4 jugadores"
+
+msgid "Someone else got there first."
+msgstr "Otro ha llegado antes."
+
+msgid "nothing yet"
+msgstr "nada aún"
+
+msgid "next mission"
+msgstr "siguiente misión"
+
+# ---- mission names (the patch's short names)
+
+msgid "Dam"
+msgstr "Presa"
+
+msgid "Facility"
+msgstr "Planta"
+
+msgid "Runway"
+msgstr "Pista"
+
+msgid "Surface I"
+msgstr "Superficie I"
+
+msgid "Bunker I"
+msgstr "Búnker I"
+
+msgid "Silo"
+msgstr "Silo"
+
+msgid "Frigate"
+msgstr "Fragata"
+
+msgid "Surface II"
+msgstr "Superficie II"
+
+msgid "Bunker II"
+msgstr "Búnker II"
+
+msgid "Statue"
+msgstr "Estatuas"
+
+msgid "Archives"
+msgstr "Archivos"
+
+msgid "Streets"
+msgstr "Calles"
+
+msgid "Depot"
+msgstr "Depósito"
+
+msgid "Train"
+msgstr "Tren"
+
+msgid "Jungle"
+msgstr "Jungla"
+
+msgid "Control"
+msgstr "Control"
+
+msgid "Caverns"
+msgstr "Cavernas"
+
+msgid "Cradle"
+msgstr "Antena"
+
+msgid "Aztec"
+msgstr "Azteca"
+
+msgid "Egyptian"
+msgstr "Egipto"
+
+# ==== the settings (port_options.c, port_watchpages.c) ======================
+
+msgid "Gameplay"
+msgstr "Juego"
+
+msgid "Mouse"
+msgstr "Ratón"
+
+msgid "Point"
+msgstr "Puntual"
+
+msgid "Bilinear"
+msgstr "Bilineal"
+
+msgid "3-Point"
+msgstr "3 puntos"
+
+msgid "Trilinear"
+msgstr "Trilineal"
+
+msgid "Windowed"
+msgstr "Ventana"
+
+msgid "Borderless"
+msgstr "Sin bordes"
+
+msgid "Fullscreen"
+msgstr "Pantalla completa"
+
+msgid "Match View"
+msgstr "Como la vista"
+
+msgid "Red-Green"
+msgstr "Rojo-verde"
+
+msgid "Blue-Yellow"
+msgstr "Azul-amarillo"
+
+msgid "Hold"
+msgstr "Mantener"
+
+msgid "Toggle"
+msgstr "Alternar"
+
+msgid "Modern"
+msgstr "Moderno"
+
+msgid "English"
+msgstr "English"
+
+msgid "Hardware"
+msgstr "Hardware"
+
+msgid "Uncapped"
+msgstr "Sin límite"
+
+msgid "Stretch"
+msgstr "Estirar"
+
+msgid "Wide"
+msgstr "Ancho"
+
+msgid "Native"
+msgstr "Nativa"
+
+msgid "Push to Talk"
+msgstr "Pulsar para hablar"
+
+msgid "Open Mic"
+msgstr "Micro abierto"
+
+msgid "Upright"
+msgstr "Normal"
+
+msgid "Reverse"
+msgstr "Invertido"
+
+msgid "Display Mode"
+msgstr "Modo de pantalla"
+
+msgid "Widescreen"
+msgstr "Panorámica"
+
+msgid "VSync"
+msgstr "VSync"
+
+msgid "Max FPS"
+msgstr "FPS máx."
+
+msgid "Texture Filter"
+msgstr "Filtro de texturas"
+
+msgid "Anisotropy"
+msgstr "Anisotrópico"
+
+msgid "MSAA"
+msgstr "MSAA"
+
+msgid "2D Filtering"
+msgstr "Filtrado 2D"
+
+msgid "High Detail"
+msgstr "Alto detalle"
+
+msgid "3D Resolution"
+msgstr "Resolución 3D"
+
+msgid "Mipmaps"
+msgstr "Mipmaps"
+
+msgid "4:3 Pillars"
+msgstr "Barras 4:3"
+
+msgid "Load Hitches"
+msgstr "Pausas de carga"
+
+msgid "N64 AA"
+msgstr "AA de N64"
+
+msgid "Composite Video"
+msgstr "Vídeo compuesto"
+
+msgid "Weapon FOV"
+msgstr "FOV del arma"
+
+msgid "FPS Counter"
+msgstr "Contador FPS"
+
+msgid "Mission Timer"
+msgstr "Tiempo de misión"
+
+msgid "Objective List"
+msgstr "Lista objetivos"
+
+msgid "Weapon Menu"
+msgstr "Menú de armas"
+
+msgid "Pause Pillars"
+msgstr "Barras en pausa"
+
+msgid "Health"
+msgstr "Salud"
+
+msgid "HUD Scale"
+msgstr "Escala HUD"
+
+msgid "Steady Scope"
+msgstr "Mira estable"
+
+msgid "Distance Fading"
+msgstr "Fundido lejano"
+
+msgid "Shoot-Through Fix"
+msgstr "Arreglo de balas"
+
+msgid "True Enemy Rockets"
+msgstr "Cohetes reales"
+
+msgid "Guard Barks"
+msgstr "Gritos guardias"
+
+msgid "Guard Alertness"
+msgstr "Alerta guardias"
+
+msgid "Alert Budget"
+msgstr "Límite alertas"
+
+msgid "Unlock All"
+msgstr "Desbloquear todo"
+
+msgid "Always Crosshair"
+msgstr "Punto de mira"
+
+msgid "Aim Lock"
+msgstr "Mirilla fija"
+
+msgid "Stamina Sway"
+msgstr "Balanceo"
+
+msgid "Sight on Screen"
+msgstr "Mostrar mirilla"
+
+msgid "No Auto Aim"
+msgstr "Sin autoapuntado"
+
+msgid "Player Names"
+msgstr "Nombres"
+
+msgid "Spawn with Weapon"
+msgstr "Salir con arma"
+
+msgid "Random Spawns"
+msgstr "Salida al azar"
+
+msgid "Unlimited Explosions"
+msgstr "Explosiones sin fin"
+
+msgid "LTK Health"
+msgstr "Salud LPM"
+
+msgid "No Armor"
+msgstr "Sin chalecos"
+
+msgid "Mouse Auto Aim"
+msgstr "Autoapunt. ratón"
+
+msgid "Watch Static"
+msgstr "Estática reloj"
+
+msgid "Fast Pause"
+msgstr "Pausa rápida"
+
+msgid "Armor Pickup HUD"
+msgstr "HUD de chaleco"
+
+msgid "Invisibility"
+msgstr "Invisibilidad"
+
+msgid "DK Mode"
+msgstr "Modo DK"
+
+msgid "Tiny Players"
+msgstr "Jugadores diminutos"
+
+msgid "Paintball Mode"
+msgstr "Bolas de pintura"
+
+msgid "No Radar"
+msgstr "Sin radar"
+
+msgid "Turbo Mode"
+msgstr "Modo turbo"
+
+msgid "Unlimited Ammo"
+msgstr "Munición infinita"
+
+msgid "HUD Layout"
+msgstr "Diseño HUD"
+
+msgid "Pillarbox"
+msgstr "Barras 4:3"
+
+msgid "Aim Control"
+msgstr "Modo apuntado"
+
+msgid "Ammo on Screen"
+msgstr "Mostrar munición"
+
+msgid "Smart Mouse Lock"
+msgstr "Bloqueo de ratón"
+
+msgid "P1 Hybrid Input"
+msgstr "Entrada mixta J1"
+
+msgid "Sensitivity X"
+msgstr "Sensibilidad X"
+
+msgid "Sensitivity Y"
+msgstr "Sensibilidad Y"
+
+msgid "Aim Sensitivity"
+msgstr "Sensib. apuntado"
+
+msgid "Move Deadzone"
+msgstr "Zona muerta mover"
+
+msgid "Look Deadzone"
+msgstr "Zona muerta mirar"
+
+msgid "Trigger Point"
+msgstr "Punto de gatillo"
+
+msgid "Stick Sensitivity"
+msgstr "Sensib. stick"
+
+msgid "Rumble"
+msgstr "Vibración"
+
+msgid "Use+Rld Detonate"
+msgstr "Acción+recarga det."
+
+msgid "Shoot+Next = Prev"
+msgstr "Disp.+sig. = ant."
+
+msgid "Gadget Switch"
+msgstr "Cambiar artilugio"
+
+msgid "L+R Classic Mode"
+msgstr "L+R modo clásico"
+
+msgid "Music Volume"
+msgstr "Volumen música"
+
+msgid "Sound Volume"
+msgstr "Volumen efectos"
+
+msgid "Stereo Pan"
+msgstr "Estéreo"
+
+msgid "Mute in Background"
+msgstr "Mudo sin foco"
+
+msgid "No Aim+Dn Crouch"
+msgstr "Sin agachar apunt."
+
+msgid "BG Input"
+msgstr "Entrada 2.º plano"
+
+msgid "Setting Help"
+msgstr "Ayuda de ajustes"
+
+msgid "Sound Captions"
+msgstr "Subtít. de sonido"
+
+msgid "Colour Blind"
+msgstr "Daltonismo"
+
+msgid "Screen Shake"
+msgstr "Temblor"
+
+msgid "Text Size"
+msgstr "Tamaño de texto"
+
+msgid "Caption Style"
+msgstr "Estilo subtítulos"
+
+msgid "Partner Fade"
+msgstr "Fundir compañero"
+
+msgid "Check for Updates"
+msgstr "Buscar versiones"
+
+msgid "Crouch Key"
+msgstr "Tecla agacharse"
+
+msgid "Walk Key"
+msgstr "Tecla caminar"
+
+msgid "N/A"
+msgstr "N/D"
+
+msgid "Audio Visual"
+msgstr "Audio y vídeo"
+
+msgid "Back"
+msgstr "Volver"
+
+# ---- the bindings
+
+msgid "Move Forward"
+msgstr "Avanzar"
+
+msgid "Move Back"
+msgstr "Retroceder"
+
+msgid "Strafe Left"
+msgstr "Paso izquierda"
+
+msgid "Strafe Right"
+msgstr "Paso derecha"
+
+msgid "Turn Left"
+msgstr "Girar izquierda"
+
+msgid "Turn Right"
+msgstr "Girar derecha"
+
+msgid "Look Up"
+msgstr "Mirar arriba"
+
+msgid "Look Down"
+msgstr "Mirar abajo"
+
+msgid "Fire"
+msgstr "Disparar"
+
+msgid "Aim"
+msgstr "Apuntar"
+
+msgid "Use"
+msgstr "Acción"
+
+msgid "Reload"
+msgstr "Recargar"
+
+msgid "Next Weapon"
+msgstr "Arma siguiente"
+
+msgid "Previous Weapon"
+msgstr "Arma anterior"
+
+msgid "Next Gadget"
+msgstr "Artilugio siguiente"
+
+msgid "Previous Gadget"
+msgstr "Artilugio anterior"
+
+msgid "Detonate"
+msgstr "Detonar"
+
+msgid "Zoom In"
+msgstr "Acercar"
+
+msgid "Zoom Out"
+msgstr "Alejar"
+
+msgid "Crouch (Hold)"
+msgstr "Agacharse (mantener)"
+
+msgid "Crouch (Toggle)"
+msgstr "Agacharse (alternar)"
+
+msgid "Walk"
+msgstr "Caminar"
+
+msgid "Pause"
+msgstr "Pausa"
+
+msgid "Watch Page Left"
+msgstr "Reloj: página izq."
+
+msgid "Watch Page Right"
+msgstr "Reloj: página der."
+
+msgid "Watch Up"
+msgstr "Reloj: arriba"
+
+msgid "Watch Down"
+msgstr "Reloj: abajo"
+
+msgid "Objectives"
+msgstr "Objetivos"
+
+msgid "Menu Accept"
+msgstr "Menú: aceptar"
+
+msgid "Menu Back"
+msgstr "Menú: volver"
+
+msgid "Stick Up"
+msgstr "Stick arriba"
+
+msgid "Stick Down"
+msgstr "Stick abajo"
+
+msgid "Stick Left"
+msgstr "Stick izquierda"
+
+msgid "Stick Right"
+msgstr "Stick derecha"
+
+msgid "A Button"
+msgstr "Botón A"
+
+msgid "B Button"
+msgstr "Botón B"
+
+msgid "Z Trigger"
+msgstr "Gatillo Z"
+
+msgid "L Button"
+msgstr "Botón L"
+
+msgid "R Button"
+msgstr "Botón R"
+
+msgid "C Up"
+msgstr "C arriba"
+
+msgid "C Down"
+msgstr "C abajo"
+
+msgid "C Left"
+msgstr "C izquierda"
+
+msgid "C Right"
+msgstr "C derecha"
+
+msgid "D-Pad Up"
+msgstr "Cruceta arriba"
+
+msgid "D-Pad Down"
+msgstr "Cruceta abajo"
+
+msgid "D-Pad Left"
+msgstr "Cruceta izquierda"
+
+msgid "D-Pad Right"
+msgstr "Cruceta derecha"
+
+msgid "Mouse Unlock"
+msgstr "Liberar ratón"
+
+msgid "Weapon Slot 1"
+msgstr "Arma 1"
+
+msgid "Weapon Slot 2"
+msgstr "Arma 2"
+
+msgid "Weapon Slot 3"
+msgstr "Arma 3"
+
+msgid "Weapon Slot 4"
+msgstr "Arma 4"
+
+msgid "Weapon Slot 5"
+msgstr "Arma 5"
+
+msgid "Mission Items"
+msgstr "Objetos de misión"
+
+msgid "Give To Partner"
+msgstr "Dar a compañero"
+
+msgid "Ping"
+msgstr "Señalar"
+
+msgid "Photo Mode"
+msgstr "Modo foto"
+
+msgid "B then Z = Next Gadget"
+msgstr "B y luego Z = artilugio"
+
+msgid "Hold L+R = Classic Mode"
+msgstr "Mantén L+R = modo clásico"
+
+msgid "Input"
+msgstr "Entrada"
+
+msgid "Raphnet: Use the Control Styles"
+msgstr "Raphnet: usa los tipos de control"
+
+msgid "Bindings"
+msgstr "Botones"
+
+msgid "Connect a Controller"
+msgstr "Conecta un mando"
+
+msgid "Confirm Reset"
+msgstr "Confirmar"
+
+msgid "Nintendo 64"
+msgstr "Nintendo 64"
+
+msgid "HOST:"
+msgstr "ANFITRIÓN:"
+
+msgid "HAND OVER"
+msgstr "CEDER"
+
+msgid "END ALL"
+msgstr "ACABAR PARA TODOS"
+
+msgid "PRESS A BUTTON"
+msgstr "PULSA UN BOTÓN"
+
+msgid "Press Start to Skip"
+msgstr "Pulsa Start para saltar"
+
+msgid "FAILED"
+msgstr "FALLADO"
+
+msgid "One minute left"
+msgstr "Queda un minuto"
+
+# ---- button and key names
+
+msgid "ENTER"
+msgstr "INTRO"
+
+msgid "ARROWS"
+msgstr "FLECHAS"
+
+msgid "CLICK"
+msgstr "CLIC"
+
+msgid "D-PAD"
+msgstr "CRUCETA"
+
+msgid "Left Shift"
+msgstr "Mayús izq."
+
+msgid "Left Ctrl"
+msgstr "Ctrl izq."
+
+msgid "Mouse Wheel Up"
+msgstr "Rueda arriba"
+
+msgid "Mouse Wheel Down"
+msgstr "Rueda abajo"
+
+msgid "Mouse Left"
+msgstr "Ratón izq."
+
+msgid "Mouse Right"
+msgstr "Ratón der."
+
+msgid "Mouse Middle"
+msgstr "Ratón central"
+
+msgid "Mouse X1"
+msgstr "Ratón X1"
+
+msgid "Mouse X2"
+msgstr "Ratón X2"
+
+msgid "Comma"
+msgstr "Coma"
+
+msgid "Keypad Comma"
+msgstr "Coma (teclado num.)"
+
+msgid "Return"
+msgstr "Intro"
+
+msgid "Tab"
+msgstr "Tab"
+
+msgid "Up"
+msgstr "Arriba"
+
+msgid "Down"
+msgstr "Abajo"
+
+msgid "Left"
+msgstr "Izquierda"
+
+msgid "Right"
+msgstr "Derecha"
+
+msgid "NEXT"
+msgstr "SIG."
+
+msgid "PREV"
+msgstr "ANT."
+
+msgid "Cross"
+msgstr "Cruz"
+
+msgid "Circle"
+msgstr "Círculo"
+
+msgid "Square"
+msgstr "Cuadrado"
+
+msgid "Triangle"
+msgstr "Triángulo"
+
+msgid "Share"
+msgstr "Share"
+
+msgid "Minus"
+msgstr "Menos"
+
+msgid "Plus"
+msgstr "Más"
+
+msgid "Home"
+msgstr "Home"
+
+msgid "Guide"
+msgstr "Guía"
+
+msgid "Start"
+msgstr "Start"
+
+msgid "L stick click"
+msgstr "Pulsar stick izq."
+
+msgid "R stick click"
+msgstr "Pulsar stick der."
+
+msgid "L stick Left"
+msgstr "Stick izq. izquierda"
+
+msgid "L stick Right"
+msgstr "Stick izq. derecha"
+
+msgid "L stick Up"
+msgstr "Stick izq. arriba"
+
+msgid "L stick Down"
+msgstr "Stick izq. abajo"
+
+msgid "R stick Left"
+msgstr "Stick der. izquierda"
+
+msgid "R stick Right"
+msgstr "Stick der. derecha"
+
+msgid "R stick Up"
+msgstr "Stick der. arriba"
+
+msgid "R stick Down"
+msgstr "Stick der. abajo"
+
+msgid "Mic"
+msgstr "Micro"
+
+msgid "Capture"
+msgstr "Captura"
+
+msgid "Touchpad"
+msgstr "Panel táctil"
+
+# ==== the updater, crash reports and warnings (shown in the game or by Windows)
+
+msgid "Can't write to the game's folder; move it somewhere you own"
+msgstr "No se puede escribir en la carpeta del juego; muévela a una tuya"
+
+msgid "couldn't reach the server (curl %d)"
+msgstr "no se pudo llegar al servidor (curl %d)"
+
+msgid "download failed (curl %d)"
+msgstr "falló la descarga (curl %d)"
+
+msgid "Couldn't check: GitHub's answer made no sense"
+msgstr "No se pudo comprobar: la respuesta de GitHub no tiene sentido"
+
+msgid "The download isn't a zip"
+msgstr "La descarga no es un zip"
+
+msgid "The zip is damaged"
+msgstr "El zip está dañado"
+
+msgid "The zip has too much in it"
+msgstr "El zip contiene demasiado"
+
+msgid "Couldn't unpack the update (disk full?)"
+msgstr "No se pudo descomprimir (¿disco lleno?)"
+
+msgid "No download for this system yet"
+msgstr "Aún no hay descarga para este sistema"
+
+msgid "The release's file name is odd"
+msgstr "El nombre del archivo es raro"
+
+msgid "GitHub gave no checksum for the zip"
+msgstr "GitHub no dio suma de control del zip"
+
+msgid "The download came out the wrong size"
+msgstr "La descarga tiene un tamaño incorrecto"
+
+msgid "The download doesn't match its checksum"
+msgstr "La descarga no cuadra con su suma de control"
+
+msgid "Nothing in the zip to install"
+msgstr "No hay nada que instalar en el zip"
+
+msgid "Couldn't start the install (disk full?)"
+msgstr "No se pudo instalar (¿disco lleno?)"
+
+msgid "A game file is in use; close other copies and retry"
+msgstr "Un archivo está en uso; cierra otras copias y reintenta"
+
+msgid "Couldn't replace the game files"
+msgstr "No se pudieron sustituir los archivos"
+
+msgid "Couldn't start the updater"
+msgstr "No se pudo abrir el actualizador"
+
+msgid "Installed, but couldn't start it: start the game again"
+msgstr "Instalada, pero no arrancó: vuelve a abrir el juego"
+
+msgid "Updating GoldenEye Coop"
+msgstr "Actualizando GoldenEye Coop"
+
+msgid "Play Now"
+msgstr "Jugar ya"
+
+msgid "Nothing was changed. Play Now starts the game you have."
+msgstr "No se ha cambiado nada. Jugar ya abre el juego que tienes."
+
+msgid "GoldenEye Coop update"
+msgstr "Actualización de GoldenEye Coop"
+
+msgid "Update Now"
+msgstr "Actualizar"
+
+msgid "Not Now"
+msgstr "Ahora no"
+
+msgid "Skip This Version"
+msgstr "Saltar esta versión"
+
+msgid "Later"
+msgstr "Más tarde"
+
+msgid "Couldn't save the bug report zip. The files are in %s\n"
+msgstr "No se pudo guardar el zip del informe. Los archivos están en %s\n"
+
+msgid "Bug report saved to your Desktop: %s\n"
+msgstr "Informe guardado en tu escritorio: %s\n"
+
+msgid "It is copied: paste it into Discord to send it.\n"
+msgstr "Está copiado: pégalo en Discord para enviarlo.\n"
+
+# ==== the settings' help lines (port_option_help.c) ========================
+
+msgid "Upright: push up to look up. Reverse inverts it."
+msgstr "Normal: arriba para mirar arriba. Invertido lo invierte."
+
+msgid "Gun aims at enemies for you."
+msgstr "El arma apunta sola a los enemigos."
+
+msgid "Hold: aim while held. Toggle: press to aim, again to stop."
+msgstr "Mantener: apunta mientras pulsas. Alternar: pulsa para apuntar y otra vez para parar."
+
+msgid "View tilts to follow slopes and stairs."
+msgstr "La vista se inclina en cuestas y escaleras."
+
+msgid "Crosshair stays centred."
+msgstr "La mirilla se queda en el centro."
+
+msgid "No sway or drift while zoomed in."
+msgstr "Sin balanceo ni deriva al usar el zoom."
+
+msgid "Camera tilt and breathing sway."
+msgstr "Inclinación de cámara y balanceo al respirar."
+
+msgid "The game's text and this mod's, in your own language. Restart the game to switch."
+msgstr "El texto del juego y del mod, en tu idioma. Reinicia el juego para cambiarlo."
+
+msgid "Unlocks all missions and cheats, still saves progress."
+msgstr "Desbloquea todas las misiones y trucos; el progreso se sigue guardando."
+
+msgid "Fixes shots passing through some walls."
+msgstr "Evita que los disparos atraviesen algunas paredes."
+
+msgid "Distant props and characters fade out."
+msgstr "Los objetos y personajes lejanos se desvanecen."
+
+msgid "Enemy Rockets cheat stops guards keeping their old guns."
+msgstr "Con el truco Enemigos cohetes los guardias no conservan sus armas."
+
+msgid "Smarter guards call out what they do, in text over their heads and a short sound."
+msgstr "Los guardias listos gritan lo que hacen, con texto sobre la cabeza y un sonido corto."
+
+msgid "How far smarter guards hear and notice things, and how long they stay on edge. The host's in co-op."
+msgstr "Hasta dónde oyen y notan cosas los guardias listos, y cuánto siguen alerta. En co-op, la del anfitrión."
+
+msgid "How many times a mission smarter guards may call for help, run for the alarm, throw grenades, sweep, cut you off or regroup. The host's in co-op."
+msgstr "Cuántas veces por misión los guardias listos pueden pedir ayuda, ir a la alarma, lanzar granadas, peinar la zona, cortarte el paso o reagruparse. En co-op, el del anfitrión."
+
+msgid "Modern is the dark tabbed CO-OP screen; Classic is the original folder."
+msgstr "Moderno es la pantalla CO-OP oscura con pestañas; Clásico es la carpeta original."
+
+msgid "Story co-op: a partner right in front of you fades out."
+msgstr "Historia co-op: un compañero justo delante de ti se vuelve transparente."
+
+msgid "Up to 100 explosions at once."
+msgstr "Hasta 100 explosiones a la vez."
+
+msgid "Shows the watch screen's static."
+msgstr "Muestra la estática de la pantalla del reloj."
+
+msgid "Watch opens and closes at full speed."
+msgstr "El reloj se abre y se cierra al instante."
+
+msgid "Lets Auto-Aim work with the mouse."
+msgstr "Permite el autoapuntado con el ratón."
+
+msgid "Always draws the most detailed models."
+msgstr "Siempre dibuja los modelos más detallados."
+
+msgid "Shows this help box."
+msgstr "Muestra este cuadro de ayuda."
+
+msgid "Shows gunfire, blasts, alarms and doors as text."
+msgstr "Muestra disparos, explosiones, alarmas y puertas como texto."
+
+msgid "Player colours you can tell apart."
+msgstr "Colores de jugador fáciles de distinguir."
+
+msgid "Explosions shake the view."
+msgstr "Las explosiones hacen temblar la vista."
+
+msgid "Size of co-op text, captions and messages."
+msgstr "Tamaño del texto co-op, subtítulos y mensajes."
+
+msgid "Modern: speaker names and dark boxes, bottom left. Classic: the original lines."
+msgstr "Moderno: nombre de quien habla y cuadros oscuros, abajo a la izquierda. Clásico: las líneas originales."
+
+msgid "Crouch key: hold it, or press on and off."
+msgstr "Tecla agacharse: mantenla, o pulsa para activar y desactivar."
+
+msgid "Walk key: hold it, or press on and off."
+msgstr "Tecla caminar: mantenla, o pulsa para activar y desactivar."
+
+msgid "Shows the aiming sight."
+msgstr "Muestra la mirilla."
+
+msgid "Small target at the gun's aim point."
+msgstr "Un pequeño punto donde apunta el arma."
+
+msgid "Colour of both crosshairs."
+msgstr "Color de las dos mirillas."
+
+msgid "Shows your ammo count."
+msgstr "Muestra tu munición."
+
+msgid "Shows elapsed mission time."
+msgstr "Muestra el tiempo de misión."
+
+msgid "Lists the mission's objectives in the top right. The Objective List key hides it."
+msgstr "Muestra los objetivos arriba a la derecha. La tecla Lista objetivos la oculta."
+
+msgid "Number keys and the wheel open a weapon menu; fire picks. Off: they switch at once."
+msgstr "Los números y la rueda abren un menú de armas; disparar elige. No: cambian al momento."
+
+msgid "Black side bars ease in while paused."
+msgstr "Aparecen barras negras a los lados en pausa."
+
+msgid "Wide moves ammo and messages to the screen edges."
+msgstr "Ancho lleva la munición y los mensajes a los bordes."
+
+msgid "Wide moves the health and armor arcs to the screen edges."
+msgstr "Ancho lleva los arcos de salud y chaleco a los bordes."
+
+msgid "High draws the HUD at half size."
+msgstr "Alto dibuja el HUD a la mitad de tamaño."
+
+msgid "Shows frames per second."
+msgstr "Muestra los fotogramas por segundo."
+
+msgid "Shows health and armor when you pick up armor."
+msgstr "Muestra salud y chaleco al coger un chaleco."
+
+msgid "Turns Auto-Aim off for every player."
+msgstr "Quita el autoapuntado a todos los jugadores."
+
+msgid "Shows each player's name."
+msgstr "Muestra el nombre de cada jugador."
+
+msgid "Spawn holding the weapon set's first gun."
+msgstr "Sales con la primera arma del grupo de armas."
+
+msgid "Players spawn at random points."
+msgstr "Los jugadores salen en puntos al azar."
+
+msgid "One-hit kills in any mode."
+msgstr "Muertes de un disparo en cualquier modo."
+
+msgid "Removes body armor pickups."
+msgstr "Quita los chalecos del mapa."
+
+msgid "Wide moves each view's HUD to its edges."
+msgstr "Ancho lleva el HUD de cada vista a sus bordes."
+
+msgid "Plays the match in 4:3 with side bars."
+msgstr "Juega la partida en 4:3 con barras laterales."
+
+msgid "Team-mates can hurt each other."
+msgstr "Los compañeros de equipo pueden herirse."
+
+msgid "Every player is invisible."
+msgstr "Todos los jugadores son invisibles."
+
+msgid "Big heads and long arms for every player."
+msgstr "Cabezones y brazos largos para todos."
+
+msgid "Every player is tiny."
+msgstr "Todos los jugadores son diminutos."
+
+msgid "Shots leave paint splats."
+msgstr "Los disparos dejan manchas de pintura."
+
+msgid "Hides the radar."
+msgstr "Oculta el radar."
+
+msgid "Everyone moves much faster."
+msgstr "Todos se mueven mucho más rápido."
+
+msgid "Guns never run out of ammo."
+msgstr "Las armas nunca se quedan sin munición."
+
+msgid "Look around with the mouse."
+msgstr "Mira alrededor con el ratón."
+
+msgid "Holds the pointer only during play."
+msgstr "Retiene el puntero solo mientras juegas."
+
+msgid "Mouse look speed, left and right."
+msgstr "Velocidad del ratón, izquierda y derecha."
+
+msgid "Mouse look speed, up and down."
+msgstr "Velocidad del ratón, arriba y abajo."
+
+msgid "Mouse crosshair speed while aiming."
+msgstr "Velocidad de la mirilla con el ratón al apuntar."
+
+msgid "Keyboard, mouse and player 1's pad all control player 1."
+msgstr "Teclado, ratón y el mando del jugador 1 controlan al jugador 1."
+
+msgid "Move stick travel ignored around the centre."
+msgstr "Recorrido del stick de mover que se ignora en el centro."
+
+msgid "Look stick travel ignored around the centre."
+msgstr "Recorrido del stick de mirar que se ignora en el centro."
+
+msgid "How far a trigger must be pulled to count as pressed."
+msgstr "Cuánto hay que apretar un gatillo para que cuente."
+
+msgid "Multiplies the Move stick's sensitivity."
+msgstr "Multiplica la sensibilidad del stick de mover."
+
+msgid "Controller vibration."
+msgstr "Vibración del mando."
+
+msgid "Press Z while holding B to switch gadget."
+msgstr "Pulsa Z manteniendo B para cambiar de artilugio."
+
+msgid "Hold L+R for half a second to toggle Classic Mode."
+msgstr "Mantén L+R medio segundo para el modo clásico."
+
+msgid "Use and reload together detonate remote mines."
+msgstr "Acción y recargar a la vez detonan las minas remotas."
+
+msgid "Hold next weapon and tap fire to go back one."
+msgstr "Mantén arma siguiente y pulsa disparar para volver a la anterior."
+
+msgid "Aiming and pushing down no longer crouches."
+msgstr "Apuntar y empujar abajo ya no agacha."
+
+msgid "Pads keep working in the background."
+msgstr "Los mandos siguen funcionando en segundo plano."
+
+msgid "Windowed, Borderless, or exclusive Fullscreen."
+msgstr "Ventana, Sin bordes, o Pantalla completa exclusiva."
+
+msgid "Window or Fullscreen size."
+msgstr "Tamaño de la ventana o de la pantalla completa."
+
+msgid "Waits for the screen's refresh."
+msgstr "Espera al refresco de la pantalla."
+
+msgid "Wide widens the view; Stretch stretches; 4:3 adds side bars."
+msgstr "Ancho amplía la vista; Estirar estira; 4:3 pone barras laterales."
+
+msgid "N64 look and pacing."
+msgstr "Aspecto y ritmo de N64."
+
+msgid "Horizontal view angle."
+msgstr "Ángulo de visión horizontal."
+
+msgid "Keeps the gun at its normal size at any FOV."
+msgstr "Mantiene el arma a su tamaño normal con cualquier FOV."
+
+msgid "3D render height."
+msgstr "Altura de la imagen 3D."
+
+msgid "Texture smoothing."
+msgstr "Suavizado de texturas."
+
+msgid "Sharper textures at glancing angles."
+msgstr "Texturas más nítidas en ángulos oblicuos."
+
+msgid "Smooths jagged edges."
+msgstr "Suaviza los bordes dentados."
+
+msgid "Smooths HUD and menu graphics."
+msgstr "Suaviza los gráficos del HUD y los menús."
+
+msgid "Frame rate cap."
+msgstr "Límite de fotogramas."
+
+msgid "Applies the changes on this page."
+msgstr "Aplica los cambios de esta página."
+
+msgid "Classic Mode renders 3D at the N64's 240 lines."
+msgstr "El modo clásico dibuja el 3D a las 240 líneas de la N64."
+
+msgid "Classic Mode uses N64-style 3-point texture filtering."
+msgstr "El modo clásico filtra las texturas a 3 puntos como la N64."
+
+msgid "Classic Mode sets anisotropy to 8x."
+msgstr "El modo clásico pone el anisotrópico a 8x."
+
+msgid "Classic Mode runs at the N64's own frame pacing."
+msgstr "El modo clásico va al ritmo de fotogramas de la N64."
+
+msgid "Classic Mode sets MSAA to 2x."
+msgstr "El modo clásico pone el MSAA a 2x."
+
+msgid "Classic Mode turns mipmaps on."
+msgstr "El modo clásico activa los mipmaps."
+
+msgid "Classic Mode smooths HUD and menu graphics."
+msgstr "El modo clásico suaviza los gráficos del HUD y los menús."
+
+msgid "Classic Mode shows a 4:3 picture with side bars."
+msgstr "El modo clásico muestra la imagen en 4:3 con barras laterales."
+
+msgid "Classic Mode adds the N64's loading pauses."
+msgstr "El modo clásico añade las pausas de carga de la N64."
+
+msgid "Classic Mode blends edges like the N64's video chip."
+msgstr "El modo clásico suaviza los bordes como el chip de vídeo de la N64."
+
+msgid "Classic Mode adds a composite TV cable look."
+msgstr "El modo clásico imita un cable de TV compuesto."
+
+msgid "How loud the music plays."
+msgstr "Volumen de la música."
+
+msgid "How loud sound effects play."
+msgstr "Volumen de los efectos de sonido."
+
+msgid "Effects pan left and right by position."
+msgstr "Los efectos suenan a izquierda o derecha según su posición."
+
+msgid "Mutes the game in the background."
+msgstr "Silencia el juego en segundo plano."
+
+msgid "Co-op voice: hold V to talk, or keep the mic open."
+msgstr "Voz co-op: mantén V para hablar, o deja el micro abierto."
+
+msgid "How loud your partners' voices play."
+msgstr "Volumen de la voz de tus compañeros."
+
+msgid "Stop hearing this player. Only on your game."
+msgstr "Dejas de oír a este jugador. Solo en tu juego."
+
+msgid "Look for a newer co-op release when the game starts, and ask whether to install it."
+msgstr "Busca una versión nueva al abrir el juego y pregunta si instalarla."
+
+msgid "Set up this player's device, binds and controls."
+msgstr "Configura el dispositivo, botones y controles de este jugador."
+
+msgid "Press, then press a button on the device this player uses."
+msgstr "Pulsa y luego pulsa un botón del dispositivo de este jugador."
+
+msgid "Change this device's buttons and keys."
+msgstr "Cambia los botones y teclas de este dispositivo."
+
+msgid "Mouse look, sensitivity and keyboard options."
+msgstr "Mirar con ratón, sensibilidad y opciones de teclado."
+
+msgid "Deadzones, trigger point, stick speed and rumble."
+msgstr "Zonas muertas, punto de gatillo, velocidad del stick y vibración."
+
+msgid "Detonate, weapon cycling, crouch and background input."
+msgstr "Detonar, cambio de arma, agacharse y entrada en segundo plano."
+
+msgid "Puts every bind on this device back to default."
+msgstr "Devuelve todos los botones de este dispositivo a los de serie."
+
+msgid "Port uses PC controls; N64 drives it as an N64 pad."
+msgstr "Port usa controles de PC; N64 lo usa como un mando de N64."
+
+msgid "Rare's N64 control style for this pad."
+msgstr "El tipo de control de N64 de Rare para este mando."
+
+msgid "Loads a saved button layout for this pad."
+msgstr "Carga una configuración de botones guardada para este mando."
+
+msgid "Saves the current layout, or deletes one you made."
+msgstr "Guarda la configuración actual, o borra una tuya."
+
+msgid "Press, then a key or button to add. Del or hold to unbind."
+msgstr "Pulsa y luego una tecla o botón para añadirlo. Supr o mantén para quitarlo."
+
+msgid "Look, aim and view options."
+msgstr "Opciones de mirar, apuntar y vista."
+
+msgid "What the in-game HUD shows and where."
+msgstr "Qué muestra el HUD y dónde."
+
+msgid "The port's own gameplay switches."
+msgstr "Los interruptores de juego propios del port."
+
+msgid "Captions, colours, shake, text size, hold or toggle."
+msgstr "Subtítulos, colores, temblor, tamaño de texto, mantener o alternar."
+
+msgid "Display mode, resolution and picture quality."
+msgstr "Modo de pantalla, resolución y calidad de imagen."
+
+msgid "Volume and sound options."
+msgstr "Volumen y opciones de sonido."
+
+# ==== lines with names and numbers in them ==================================
+# Keep each %s, %d, %.20s, %c in the same order.
+
+msgid "Player %d"
+msgstr "Jugador %d"
+
+msgid "PLAYER %d"
+msgstr "JUGADOR %d"
+
+msgid "P%d REBIND"
+msgstr "J%d BOTONES"
+
+msgid "Player %d Name"
+msgstr "Nombre del jugador %d"
+
+msgid "Player %d Profile"
+msgstr "Perfil del jugador %d"
+
+msgid "In Use by P%d"
+msgstr "En uso por J%d"
+
+msgid "Delete %s?"
+msgstr "¿Borrar %s?"
+
+msgid "Password: %s_"
+msgstr "Contraseña: %s_"
+
+msgid "Update to %.20s"
+msgstr "Actualizar a %.20s"
+
+msgid "You have %.20s"
+msgstr "Tienes %.20s"
+
+msgid "Downloading %.20s"
+msgstr "Descargando %.20s"
+
+msgid "Installing %.20s"
+msgstr "Instalando %.20s"
+
+msgid "Updated to %.20s"
+msgstr "Actualizado a %.20s"
+
+msgid " Voice"
+msgstr " (voz)"
+
+msgid "%s asks to join"
+msgstr "%s quiere unirse"
+
+msgid "Say: %s_"
+msgstr "Decir: %s_"
+
+msgid "SAY: %s_"
+msgstr "DECIR: %s_"
+
+msgid "%d%% LOSS"
+msgstr "%d%% PÉRD."
+
+msgid "%sYou"
+msgstr "%sTú"
+
+msgid "%d.%d bars"
+msgstr "%d.%d barras"
+
+msgid "%d (%d up)"
+msgstr "%d (%d reanimado)"
+
+msgid "Photos: %d, in the Photos folder"
+msgstr "Fotos: %d, en la carpeta Photos"
+
+msgid "Replay: %s"
+msgstr "Repetir: %s"
+
+msgid "this mission"
+msgstr "esta misión"
+
+msgid "Next mission: %s"
+msgstr "Siguiente misión: %s"
+
+msgid "Next mission (after a win)"
+msgstr "Siguiente misión (si ganáis)"
+
+msgid "Back to the lobby"
+msgstr "Volver a la sala"
+
+msgid "Voted: %d of %d - decided in %d s"
+msgstr "Votos: %d de %d - se decide en %d s"
+
+msgid "Voted: %d of %d - most votes wins"
+msgstr "Votos: %d de %d - gana la más votada"
+
+msgid "%d Min"
+msgstr "%d min"
+
+msgid "%d Min, %d Pts"
+msgstr "%d min, %d ptos"
+
+msgid "%d Points"
+msgstr "%d puntos"
+
+msgid "No limit"
+msgstr "Sin límite"
+
+msgid "Continue:"
+msgstr "Continuar:"
+
+msgid "%s lobby"
+msgstr "Sala %s"
+
+msgid "%s HOSTS, YOU LEAVE"
+msgstr "%s ES ANFITRIÓN, TÚ TE VAS"
+
+msgid "Mute Player %d"
+msgstr "Silenciar jugador %d"
+
+msgid "Mute %s"
+msgstr "Silenciar a %s"
+
+msgid "A player tried to join with\nanother version of the game\n(theirs %d, yours %d)."
+msgstr "Un jugador intentó unirse con\notra versión del juego\n(la suya %d, la tuya %d)."
+
+msgid "The host runs another version\n(theirs %d, yours %d). You both\nneed the same co-op build."
+msgstr "El anfitrión tiene otra versión\n(la suya %d, la tuya %d). Los dos\nnecesitáis la misma versión."
+
+msgid "%s|slow connection (%d ms, %d%% loss)"
+msgstr "%s|conexión lenta (%d ms, %d%% de pérdida)"
+
+msgid "Back in: last life"
+msgstr "De vuelta: última vida"
+
+msgid "Back in: %d lives left"
+msgstr "De vuelta: quedan %d vidas"
+
+msgid " Last life."
+msgstr " Última vida."
+
+msgid " %d lives left."
+msgstr " Quedan %d vidas."
+
+msgid "Dropped in beside %s"
+msgstr "Has entrado junto a %s"
+
+msgid "DROPPING IN"
+msgstr "ENTRANDO"
+
+msgid "WAITING FOR A PARTNER TO GET UP"
+msgstr "ESPERANDO A QUE SE LEVANTE UN COMPAÑERO"
+
+msgid "DROPPING IN BESIDE %s"
+msgstr "ENTRANDO JUNTO A %s"
+
+msgid "WHEN IT GOES QUIET %d"
+msgstr "CUANDO HAYA CALMA %d"
+
+msgid "IN %d"
+msgstr "EN %d"
+
+msgid "%s lost connection."
+msgstr "%s perdió la conexión."
+
+msgid "%s is back."
+msgstr "%s ha vuelto."
+
+msgid "%s disconnected."
+msgstr "%s se desconectó."
+
+msgid "%s left the game."
+msgstr "%s dejó la partida."
+
+msgid "%s left the mission."
+msgstr "%s dejó la misión."
+
+msgid "%s IS THE HOST NOW"
+msgstr "%s ES AHORA EL ANFITRIÓN"
+
+msgid "HOST NOT RESPONDING: %s"
+msgstr "EL ANFITRIÓN NO RESPONDE: %s"
+
+msgid "BACK TO THE LOBBY IN %d"
+msgstr "VOLVIENDO A LA SALA EN %d"
+
+msgid "WAITING FOR THE HOST %d"
+msgstr "ESPERANDO AL ANFITRIÓN %d"
+
+msgid "CONNECTING TO THE NEW HOST..."
+msgstr "CONECTANDO CON EL NUEVO ANFITRIÓN..."
+
+msgid "Host has %.12s and needs to update."
+msgstr "El anfitrión tiene %.12s y debe actualizar."
+
+msgid "Host has %.12s, you %.12s"
+msgstr "Anfitrión: %.12s, tú: %.12s"
+
+msgid "Host %.7s, you %.7s"
+msgstr "Anfitrión %.7s, tú %.7s"
+
+msgid "Host is on another build."
+msgstr "El anfitrión tiene otra versión."
+
+msgid "The host has %.12s and needs\nto update before you can join."
+msgstr "El anfitrión tiene %.12s y debe\nactualizar para que puedas unirte."
+
+msgid "The host has %.12s. Pick\nUpdate on PLAY to get it,\nthen join again."
+msgstr "El anfitrión tiene %.12s. Elige\nActualizar en JUGAR para tenerla\ny vuelve a unirte."
+
+msgid "The host is on another version.\nOne of you needs to update."
+msgstr "El anfitrión tiene otra versión.\nUno de los dos debe actualizar."
+
+msgid "%s is down."
+msgstr "%s está caído."
+
+msgid "Get closer to %s."
+msgstr "Acércate a %s."
+
+msgid "Face %s to give."
+msgstr "Mira a %s para darle algo."
+
+msgid "%s gave you the %s"
+msgstr "%s te ha dado: %s"
+
+msgid "%s gave you %s"
+msgstr "%s te ha dado %s"
+
+msgid "Gave %s the %s"
+msgstr "Le has dado a %s: %s"
+
+msgid "Gave %s to %s"
+msgstr "Has dado %s a %s"
+
+msgid "%s is full on that ammo"
+msgstr "%s no puede llevar más de esa munición"
+
+msgid "shell"
+msgstr "cartucho"
+
+msgid "shells"
+msgstr "cartuchos"
+
+msgid "grenade"
+msgstr "granada"
+
+msgid "grenades"
+msgstr "granadas"
+
+msgid "rocket"
+msgstr "cohete"
+
+msgid "rockets"
+msgstr "cohetes"
+
+msgid "mine"
+msgstr "mina"
+
+msgid "mines"
+msgstr "minas"
+
+msgid "knife"
+msgstr "cuchillo"
+
+msgid "knives"
+msgstr "cuchillos"
+
+msgid "grenade round"
+msgstr "proyectil de lanzagranadas"
+
+msgid "grenade rounds"
+msgstr "proyectiles de lanzagranadas"
+
+msgid "round"
+msgstr "bala"
+
+msgid "rounds"
+msgstr "balas"
+
+msgid "%s - LOST"
+msgstr "%s - PERDIDO"
+
+msgid "REVIVE %s %dM"
+msgstr "REANIMAR A %s %dM"
+
+msgid "ENEMY %dM"
+msgstr "ENEMIGO %dM"
+
+msgid "CONNECTION LOST"
+msgstr "CONEXIÓN PERDIDA"
+
+msgid "OUT"
+msgstr "FUERA"
+
+msgid "DOWN"
+msgstr "CAÍDO"
+
+msgid "DOWN - REVIVE THEM"
+msgstr "CAÍDO - REANÍMALO"
+
+msgid "DOWN - REVIVE THEM %d"
+msgstr "CAÍDO - REANÍMALO %d"
+
+msgid "DOWN - REVIVE OR %d"
+msgstr "CAÍDO - REANÍMALO O %d"
+
+msgid "DOWN - BACK IN %d"
+msgstr "CAÍDO - VUELVE EN %d"
+
+msgid "NO LIVES LEFT - OUT UNTIL THE MISSION ENDS"
+msgstr "SIN VIDAS - FUERA HASTA QUE ACABE LA MISIÓN"
+
+msgid "BLED OUT - OUT UNTIL THE MISSION ENDS"
+msgstr "DESANGRADO - FUERA HASTA QUE ACABE LA MISIÓN"
+
+msgid "BEING REVIVED"
+msgstr "TE ESTÁN REANIMANDO"
+
+msgid "WAIT FOR A REVIVE - BLEEDING OUT IN %d"
+msgstr "ESPERA A QUE TE REANIMEN - TE DESANGRAS EN %d"
+
+msgid "WAIT FOR A REVIVE OR BACK IN %d"
+msgstr "ESPERA A QUE TE REANIMEN O VUELVES EN %d"
+
+msgid "BACK BESIDE YOUR PARTNER IN %d"
+msgstr "VUELVES JUNTO A TU COMPAÑERO EN %d"
+
+msgid "LAST LIFE"
+msgstr "ÚLTIMA VIDA"
+
+msgid "%d LIVES LEFT"
+msgstr "QUEDAN %d VIDAS"
+
+msgid "REVIVING %s"
+msgstr "REANIMANDO A %s"
+
+msgid "HOLD USE TO REVIVE %s"
+msgstr "MANTÉN ACCIÓN PARA REANIMAR A %s"
+
+msgid "FREE CAMERA"
+msgstr "CÁMARA LIBRE"
+
+msgid "FIRE: WATCH %s   USE: BACK"
+msgstr "DISPARAR: VER A %s   ACCIÓN: VOLVER"
+
+msgid "WATCHING %s"
+msgstr "VIENDO A %s"
+
+msgid "FIRE / AIM: NEXT / BACK   USE: FREE CAMERA%s"
+msgstr "DISPARAR / APUNTAR: SIG. / ANT.   ACCIÓN: CÁMARA LIBRE%s"
+
+msgid "USE: FREE CAMERA%s"
+msgstr "ACCIÓN: CÁMARA LIBRE%s"
+
+msgid "START AGAIN: END THE MISSION FOR EVERYONE"
+msgstr "START OTRA VEZ: ACABAR LA MISIÓN PARA TODOS"
+
+msgid "START AGAIN: LEAVE THE MISSION"
+msgstr "START OTRA VEZ: DEJAR LA MISIÓN"
+
+msgid "SKIP %d/%d"
+msgstr "SALTAR %d/%d"
+
+msgid " - PRESS TO VOTE"
+msgstr " - PULSA PARA VOTAR"
+
+msgid " - WAITING FOR %s"
+msgstr " - ESPERANDO A %s"
+
+msgid "%s COMPLETED %c|%s"
+msgstr "%s CUMPLIÓ %c|%s"
+
+msgid "PARTNER"
+msgstr "COMPAÑERO"
+
+msgid "PHOTO SAVED IN PHOTOS (%d THIS MISSION)"
+msgstr "FOTO GUARDADA EN PHOTOS (%d EN ESTA MISIÓN)"
+
+msgid "%s spotted an enemy."
+msgstr "%s ha visto un enemigo."
+
+msgid "%s pinged a spot."
+msgstr "%s ha señalado un sitio."
+
+msgid "You revived %s."
+msgstr "Has reanimado a %s."
+
+msgid "IN"
+msgstr "DENTRO"
+
+msgid "LOADING%s"
+msgstr "CARGANDO%s"
+
+msgid "WAITING FOR EVERYONE TO LOAD IN - %d"
+msgstr "ESPERANDO A QUE CARGUEN TODOS - %d"
+
+msgid "EVERYONE IS IN"
+msgstr "YA ESTÁN TODOS"
+
+msgid "%s|LEFT THE MATCH"
+msgstr "%s|DEJÓ LA PARTIDA"
+
+msgid "A PLAYER|LEFT THE MATCH"
+msgstr "UN JUGADOR|DEJÓ LA PARTIDA"
+
+msgid "%s|KILLED THEMSELVES"
+msgstr "%s|SE SUICIDÓ"
+
+msgid "%s|KILLED %s"
+msgstr "%s|MATÓ A %s"
+
+msgid "EVERYONE BACK TO THE LOBBY"
+msgstr "TODOS DE VUELTA A LA SALA"
+
+msgid "Mission Bond"
+msgstr "Bond de la misión"
+
+msgid "New"
+msgstr "Nuevo"
+
+msgid "Load"
+msgstr "Cargar"
+
+msgid "Stats"
+msgstr "Estadísticas"
+
+msgid "Yes, Delete"
+msgstr "Sí, borrar"
+
+msgid "No Profile"
+msgstr "Sin perfil"
+
+msgid "Type a Name"
+msgstr "Escribe un nombre"
+
+msgid "Could Not Save"
+msgstr "No se pudo guardar"
+
+msgid "Load Profile"
+msgstr "Cargar perfil"
+
+msgid "Delete Which?"
+msgstr "¿Cuál borrar?"
+
+msgid "Wins"
+msgstr "Victorias"
+
+# ==== the updater's and crash reports' boxes (Windows / SDL dialogs) =======
+
+msgid "The update to %s didn't install:\n%s\n\nNothing was changed. Play Now starts the game you have."
+msgstr "La actualización a %s no se instaló:\n%s\n\nNo se ha cambiado nada. Jugar ya abre el juego que tienes."
+
+msgid "The update to %s was cut off last time and has now been finished.\n\nRestart Now to play %s."
+msgstr "La actualización a %s se cortó la última vez y ya se ha terminado.\n\nReinicia ahora para jugar a %s."
+
+msgid "GoldenEye Coop %s is out. You have %s.\n\nPlayers need the same version to play co-op together.\n\nUpdate Now downloads it%s, installs it and restarts the game. Your saves, settings and cart image are not touched."
+msgstr "Ya ha salido GoldenEye Coop %s. Tienes %s.\n\nPara jugar juntos en co-op hace falta la misma versión.\n\nActualizar la descarga%s, la instala y reinicia el juego. Tus partidas, ajustes e imagen del cartucho no se tocan."
+
+msgid "a build from source"
+msgstr "una versión compilada"
+
+msgid "GoldenEye Co-op crashed, sorry about that.\n\nA crash report was saved. Put it on your Desktop as a zip so you can send it?\nIt is copied too: paste it straight into Discord.\n\nIt has the game's log, its settings and a memory dump, nothing else."
+msgstr "GoldenEye Co-op se ha cerrado por un error. Lo sentimos.\n\nSe guardó un informe del error. ¿Lo dejamos en tu escritorio como zip para que lo envíes?\nTambién está copiado: pégalo directamente en Discord.\n\nContiene el registro del juego, sus ajustes y un volcado de memoria, nada más."
+
+msgid "GoldenEye Co-op crashed"
+msgstr "GoldenEye Co-op se ha cerrado"
+
+msgid "Saved %s\n\nIt is on the clipboard: paste it into Discord to send it."
+msgstr "Guardado: %s\n\nEstá en el portapapeles: pégalo en Discord para enviarlo."
+
+msgid "Crash report saved"
+msgstr "Informe del error guardado"
+
+msgid "The game crashed last time and saved a crash report.\n\nSave it to your Desktop as a zip so you can send it? It is copied too, so you can paste it straight into Discord.\n\nIt has the game's log, its settings and a memory dump, nothing else.\n\nYes: save it.   No: don't send it.   Cancel: ask me next time."
+msgstr "El juego se cerró por un error la última vez y guardó un informe.\n\n¿Lo guardamos en tu escritorio como zip para que lo envíes? También está copiado, así que puedes pegarlo directamente en Discord.\n\nContiene el registro del juego, sus ajustes y un volcado de memoria, nada más.\n\nSí: guardarlo.   No: no enviarlo.   Cancelar: preguntar la próxima vez."
+
+msgid "The game crashed last time and saved a crash report.\n\nSave it to your Desktop as a zip so you can send it? It is copied too, so you can paste it straight into Discord.\n\nIt has the game's log, its settings and a memory dump, nothing else."
+msgstr "El juego se cerró por un error la última vez y guardó un informe.\n\n¿Lo guardamos en tu escritorio como zip para que lo envíes? También está copiado, así que puedes pegarlo directamente en Discord.\n\nContiene el registro del juego, sus ajustes y un volcado de memoria, nada más."
+
+msgid "GoldenEye Co-op crashed last time"
+msgstr "GoldenEye Co-op se cerró por un error la última vez"
+
+msgid "Save to Desktop"
+msgstr "Guardar en escritorio"
+
+msgid "Don't send"
+msgstr "No enviar"
+
+msgid "Ask me later"
+msgstr "Preguntar luego"
+
+msgid "GoldenEye Coop: nothing will be saved"
+msgstr "GoldenEye Coop: no se guardará nada"
+
+msgid "The game can't write to its own folder, so your settings, mission progress, co-op campaign and profiles will be lost when you quit, and the updater can't install updates.\n\nMove the game folder somewhere you can write to, such as C:\\Games\\GoldenEye-Coop. Avoid Program Files. If the folder is under Documents or Desktop, Windows Controlled Folder Access may be blocking it."
+msgstr "El juego no puede escribir en su propia carpeta, así que tus ajustes, tu progreso, tu campaña co-op y tus perfiles se perderán al salir, y el actualizador no puede instalar actualizaciones.\n\nMueve la carpeta del juego a un sitio donde puedas escribir, como C:\\Games\\GoldenEye-Coop. Evita Archivos de programa. Si la carpeta está en Documentos o Escritorio, puede que la bloquee el Acceso controlado a carpetas de Windows."
