@@ -4143,3 +4143,58 @@ against this branch.
 - Not covered: the modem attached to the Dam link (no rig line attaches it yet, see D3),
   and an older build on one side (it never reports what it carries, so it counts as
   carrying nothing).
+
+## Bunker 2: the joiner's ending without Natalya (COOP_VERSION stays 17)
+
+Report (owner, joiner): Natalya was not in the cutscene at the end of the
+bunker escape. Bunker 2's exit script (list 0x1003) is the only cutscene with
+her: once Bond is in the exit room (pad 51) and every objective is complete it
+hides everyone, shows Natalya again, puts her on pad 50 (unless she is already
+by the exit), runs her to pad 120 (list 0x416), stands Bond's ending body on
+pad 119 and runs it out to the helipad (list 0x417), then leaves the level.
+The intro has no Natalya in it and looks the same on both screens (rig).
+
+- **The joiner's own copy of the exit script could end its mission a second
+  into the host's ending.** Once the host's ending had begun, a joiner's copy
+  that reached the ending ran on from there and asked "all objectives
+  complete?" itself. A no took the failure branch (global list 0x0f), which
+  ended the joiner's mission while the host's cutscene had just started: no
+  run out, no Natalya ("mission complete, telling the peer" on the joiner).
+  On the rig that is the joiner reaching the exit with its objectives read as
+  incomplete (GE_COOP_TESTALLOBJ on the host only): 0 cutscene frames on the
+  joiner on main. Now, once the host's ending plays here (sHostEndingBegun), a
+  joiner's copy of any level script that reaches an ending's first command
+  (BondDisableDamageAndPickups) waits there for good (coopAiSkip, "the host's
+  ending plays here: our copy of that script waits"). The host's ending
+  brings the cameras, fades, our body's list and the mission end as before.
+  Not shown in the real report's logs (there were none): the rig shows the
+  path, not which objective read incomplete in that game.
+- **When the host reached the exit, the joiner's Bond ran the ending off
+  the shot.** The host relays SetChrAiList(CHR_BOND_CINEMA) but not the
+  chr_try_teleporting_to_pad(CHR_BOND_CINEMA, 119) before it, and with a body
+  list running coopCinemaJoinStar leaves our body be ("it walks itself"). So
+  the joiner's Bond ran its 4 s at the start of the level and the joiner's
+  shot showed Natalya alone. Now, when the host's list reaches our body
+  (coopPendingCinemaTick), we look in our own copy of the setup for the
+  teleport that goes with that list (coopEndingBodyPad: the last
+  TRYTeleportingChrToPad of CHR_BOND_CINEMA before the SetChrAiList to that
+  list in the same level list) and run it on our body first ("our Bond goes
+  to the ending's pad 119"). Nothing new is sent: v17 hosts and joiners mix.
+  The same pairs are in Bunker 1, Surface 2 and Egyptian. Aztec stands the
+  body on a pad with no body list, which coopCinemaJoinStar already covers.
+- Harness: GE_COOP_TESTALLOBJ=1 counts every objective complete (the debug
+  menu's switch), so an exit pad plays the success ending.
+- Rig (Bunker 2, cutscene shots every 30 ticks, host and joiner):
+  - Host at the exit, joiner at the start, Natalya in her cell: main, the
+    joiner's shots show Natalya only; fixed, Bond and Natalya as on the host
+    (`bunker2-ending/bunker2-ending-before-after.png` in the project files).
+  - Joiner at the exit with its objectives incomplete: main, the joiner's
+    mission ends with no cutscene; fixed, the whole cutscene.
+  - Joiner at the exit, both complete; Natalya escorted by the joiner, then
+    the joiner or the host at the exit: Bond and Natalya on both, before and
+    after.
+  - rows.py BU6 and BU7 (new) pass; on main both fail. D1, R3, S3, FR5, SU3,
+    F8, BU1 and BU5 pass. Mission runs bunker2, bunker1, surface2, aztec,
+    egypt, dam, runway: 7/7 pass, 0 corrected desyncs. Warnings check: none
+    new.
+
