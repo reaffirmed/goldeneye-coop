@@ -3898,3 +3898,32 @@ network, not internet play.
 - After: 0 of 4 had captions or an unresolved desync. The joiner's count never moved.
 - One of those 4 failed SR1's "host chr 2 fades away" check, which fails under load on
   main too.
+
+## A body that fades between two of its snapshots (QA-11, 2026-11-02, COOP_VERSION stays 17)
+
+QA-11 (checklist row SR1): in some runs the joiner never logged "host chr 2 fades away"
+for the chr its tank had run over. Its copy of the body stood until the reaper's "chr 2
+gone on the host, removing", then vanished instead of fading.
+
+A body fades for 1.5 s of game time on the host (chrlvTickDead, CHRLV_TICK_DEAD_CHECK 90)
+and is then freed. coopGuardDue sends a fading body (ACT_DEAD) in one snapshot of 20.
+Snapshots go every 3 host ticks, so 20 of them take 1 s at 60 ticks a second but 1.8 s at
+33. Below about 40 ticks a second, a fade could start and end between two of the body's
+sends, and the joiner never saw it fading. In QA's ten runs on 04b7090, the two runs at
+about 33 ticks a second were the ones with two pairs on the machine, and one of them
+missed the fade. The other eight ran at 45 to 55 and all faded.
+
+Fix (host only; packets unchanged): a body goes out in the first 3 snapshots of its fade
+(COOP_DEAD_FIRST_SENDS), so a lost packet or two doesn't matter, then once in 20 as
+before. A fade lasts only 1.5 s, so this adds at most 3 entries per body.
+
+Rig: Linux i686, copies of the game on one machine over the mock Steam. This is a
+simulated network, not internet play.
+- SR1 with two pairs at once, as in QA's failing run (the host at 25 to 38 ticks a
+  second): main missed the fade in 3 of 16 runs, the fix in 0 of 16.
+- With four pairs at once (as low as 1 to 30 ticks a second, with 4 to 12 s frame
+  freezes): main missed it in 7 of 12, the fix in 2 of 12. In both of those 2, the
+  joiner froze for 4 to 6 s and dropped off the line. In 24 more such runs with the
+  sends and receipts logged, 1 missed. There the host sent the fading body three times,
+  and none of them arrived while the joiner was frozen for 4.5 s and off the line. That
+  is the rig being overloaded, which no snapshot timing can cover.
