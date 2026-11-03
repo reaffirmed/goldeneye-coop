@@ -3927,3 +3927,30 @@ simulated network, not internet play.
   sends and receipts logged, 1 missed. There the host sent the fading body three times,
   and none of them arrived while the joiner was frozen for 4.5 s and off the line. That
   is the rig being overloaded, which no snapshot timing can cover.
+
+## Languages: Spanish first (2026-11-03, COOP_VERSION stays 17)
+
+Port Options > Language (and the lobby's options) picks the language for the
+next start; `midas.ini` `[display] language=`, `GE_LANG`, `--lang`. Design and
+how to add one: [`lang/README.md`](../lang/README.md).
+
+- Game text: Sogun and IlDucci's Spanish patch v2.0 (`lang/es/GE-ESP-NTSC.xdelta`,
+  with their `leeme.txt`, which allows sharing it with the readme attached) is
+  applied in memory to each player's own USA cart (`port_vcdiff.c`). The port keeps
+  the 44 patched text banks and the two fonts, and frees the rest. The patch's
+  nine extra letters, drawn over unused punctuation, become Latin-1 inside the
+  port (`glyphs` in `language.ini`), and `textrelated.c` draws them.
+- Port text: `lang/es/port.po`, about 1,100 strings. Matched when drawn
+  (`portLangDraw` in `textRender`/`textMeasure`), and through `portTr` where a
+  line is built with `sprintf`. OS boxes use `portTrUtf8`.
+- Co-op: nothing new on the wire. Toasts, the kill feed and objective toasts
+  were already built on each PC from player numbers and names; they are now in
+  that PC's language. The public games line ("Co-op: Dam") stays English on the
+  wire and is translated by the reader; the Versus arena name in it, and in rich
+  presence, is ASCII (a translated arena name loses its accents). The campaign
+  label "Continue: ..." is still parsed by its English lead (`coopLobbyTrLead`).
+- `coopAsciiName` (the HUD font's capitals) now reads a Latin-1 byte that is not
+  part of a UTF-8 sequence as that letter, so translated toasts keep their letters
+  without accents instead of losing characters.
+- `GE_LANG_MISSING=1` writes each English string drawn without a translation to
+  `Data/Logs/lang-missing.txt`.
