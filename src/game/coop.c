@@ -136,7 +136,8 @@ typedef struct
                        COOP_REVIVE_HOLD the reviver has held (coop_revive.c) */
     u16 calm;       /* ticks since the sender was last in a fight (capped) */
     u8 out;         /* down for good this mission: no lives left, or bled out (COOPOUT_*) */
-    u8 pad[3];
+    u8 carry;       /* the one-each mission items the sender still carries (COOPCARRY_*, coopItemChanceLeft; was padding, 0) */
+    u8 pad[2];
     CoopLook look;  /* guns, movement, shots and character (coop_look.c) */
     u32 ms;         /* the sender's clock (coopNowMs) as it sent this: the puppet is drawn by it (coop_interp.c) */
 } CoopStatePkt;
@@ -438,6 +439,7 @@ typedef struct
     u32 seenMs;         /* the newest STATE, wall clock */
     CoopTrack track;    /* its recent positions, by its clock: the puppet is drawn between them */
     coord3d aimPos;     /* host: where this player is about now, for the guards (lag compensation) */
+    u32 carryMs[2];     /* when its STATE last said it carried each one-each item (coopItemChanceLeft) */
     StandTile *aimStan; /* NULL: use the drawn spot */
     f32 noise[2];       /* host: how loud each of their guns is now (gunTickNoise), for the guards' hearing */
     u8 noiseSeq;        /* the shotseq coopPuppetNoise last saw */
@@ -786,6 +788,157 @@ static s32 coopStateThin(s32 c)
     return coopLobbyPlayerCount() >= 3 || (coopNetLink(coopPlayerOfChan(c), &l) && l.quality == COOPLINK_POOR);
 }
 
+/* ---- one each: an item lying loose fails the objective only when nobody has one left ----
+ * Dam's covert modem, Frigate's tracker bug and Surface 2's remote mine: the
+ * level gives every player one, and its script fails the objective the moment
+ * one lies loose in the level (IFKeyDropped, propobj.c weaponFindThrown). In
+ * co-op one player's miss failed it for the team while a partner still had
+ * theirs to place. Now a loose one counts only once no player in the mission
+ * still carries one: each STATE says what its sender carries (carry), and a
+ * player out for good this mission, or gone, carries nothing. Silo's plastique
+ * is left out: its first charge lying loose starts the countdown, which is
+ * the world's, not anyone's lost chance. */
+enum
+{
+    COOPCARRY_BUG = 0x01,         /* ITEM_BUG: Dam's covert modem, Frigate's tracker bug */
+    COOPCARRY_REMOTEMINE = 0x02,  /* ITEM_REMOTEMINE: Surface 2's mine for the helicopter */
+    COOPCARRY_SENT = 0x80         /* the sender fills carry (an older build leaves it 0) */
+};
+
+/* A throw empties the hand a moment before the item is in the air, and a
+ * partner's STATE saying they carry none can beat their THROW event here: for
+ * this long after a player last carried one they still count, so a modem on
+ * its way to the link is never taken for a team with none left. */
+#define COOPCARRY_GRACE_MS 1000u
+
+extern s32 get_ammo_type_for_weapon(ITEM_IDS weapon);
+extern int bondinvHasInvItem(ITEM_IDS item);
+
+static u32 sCarryMs[2];     /* when our Bond last carried each (COOPCARRY_BUG, COOPCARRY_REMOTEMINE) */
+
+static s32 coopCarryBit(s32 item)
+{
+    switch (item)
+    {
+        case ITEM_BUG:        return COOPCARRY_BUG;
+        case ITEM_REMOTEMINE: return COOPCARRY_REMOTEMINE;
+        default:              return 0;
+    }
+}
+
+/* our Bond has one to throw: in the inventory, with a round of it left in
+ * the pocket or in the hand (drawing it loads it into the hand) */
+static s32 coopCarriesItem(s32 item)
+{
+    AMMOTYPE type;
+
+    if (!bondinvHasInvItem((ITEM_IDS) item))
+    {
+        return 0;
+    }
+    type = (AMMOTYPE) get_ammo_type_for_weapon((ITEM_IDS) item);
+    return type == 0 || currentPlayerGetAmmoCount(type) > 0;
+}
+
+static void coopCarryNote(u32 *ms, s32 carry)
+{
+    if (carry & COOPCARRY_BUG)
+    {
+        ms[0] = coopNowMs();
+    }
+    if (carry & COOPCARRY_REMOTEMINE)
+    {
+        ms[1] = coopNowMs();
+    }
+}
+
+static s32 coopCarryByte(void)
+{
+    s32 c = COOPCARRY_SENT;
+
+    if (!coopInMission() || coopVersus() || sBledOut)
+    {
+        return c;
+    }
+    if (coopCarriesItem(ITEM_BUG))
+    {
+        c |= COOPCARRY_BUG;
+    }
+    if (coopCarriesItem(ITEM_REMOTEMINE))
+    {
+        c |= COOPCARRY_REMOTEMINE;
+    }
+    coopCarryNote(sCarryMs, c);
+    return c;
+}
+
+/* someone in the mission still has one of these to place (-1 our Bond, else
+ * the partner's player number + 1; 0 nobody) */
+static s32 coopItemChanceWho(s32 item)
+{
+    s32 bit = coopCarryBit(item);
+    s32 k = (bit == COOPCARRY_BUG) ? 0 : 1;
+    u32 now = coopNowMs();
+    s32 p;
+
+    if (bit == 0 || sEnabled <= 0 || !coopNetHasPeer() || !coopInStage() || coopVersus())
+    {
+        return 0;
+    }
+    if (!sBledOut && (coopCarriesItem(item) || now - sCarryMs[k] < COOPCARRY_GRACE_MS))
+    {
+        return -1;
+    }
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        if (coopRemoteHere(p) && !sR[p].st.out && (sR[p].st.carry & COOPCARRY_SENT)
+            && ((sR[p].st.carry & bit) || now - sR[p].carryMs[k] < COOPCARRY_GRACE_MS + 2u * (u32) coopNetRttMs(p)))
+        {
+            return p + 1;
+        }
+    }
+    return 0;
+}
+
+/* propobj.c weaponFindThrown, which found one lying loose: is that the
+ * team's loss yet? 1 while someone still carries one, or one is still in the
+ * air (flying: thrown by a player who now carries none, it may yet land on
+ * the dish) */
+s32 coopItemChanceLeft(s32 item, s32 flying)
+{
+    static s32 said[2];     /* what we last logged, per item: who + 2, or 5 for one in the air */
+    s32 k = (coopCarryBit(item) == COOPCARRY_BUG) ? 0 : 1;
+    s32 who, now;
+
+    if (coopCarryBit(item) == 0 || sEnabled <= 0 || !coopNetHasPeer() || !coopInStage() || coopVersus())
+    {
+        return 0;
+    }
+    who = coopItemChanceWho(item);
+    now = (who == 0 && flying) ? 5 : who + 2;
+    if (said[k] != now)
+    {
+        said[k] = now;
+        if (who == -1)
+        {
+            portConLogf("ge: coop: item %d lies loose, but we still carry ours\n", item);
+        }
+        else if (who > 0)
+        {
+            portConLogf("ge: coop: item %d lies loose, but player %d still carries theirs\n", item, who);
+        }
+        else if (flying)
+        {
+            portConLogf("ge: coop: item %d lies loose, but another is still in the air\n", item);
+        }
+        else
+        {
+            portConLogf("ge: coop: item %d lies loose and nobody carries one: the team has lost it\n", item);
+        }
+    }
+    return who != 0 || flying;
+}
+
 static void coopSendState(void)
 {
     CoopStatePkt p;
@@ -814,6 +967,7 @@ static void coopSendState(void)
     p.revive = (u8) (p.dead ? ((sDeadSince != 0 && sReviveHold < 255) ? sReviveHold : 0) : coopReviveTarget());
     p.calm = (u16) coopLocalCalm();
     p.out = (u8) sBledOut;
+    p.carry = (u8) coopCarryByte();
     p.ms = coopNowMs();
     if (coopNetIsHost())
     {
@@ -1204,6 +1358,7 @@ static void coopRecvState(s32 c, CoopStatePkt *p)
     }
     r->st = *p;
     r->valid = 1;
+    coopCarryNote(r->carryMs, p->carry);
     r->seenTick = sTick;
     r->seenMs = coopNowMs();
     r->calmTick = sTick;
@@ -11297,8 +11452,11 @@ void coopScriptSetsFlags(void *script, void *chr, u32 newbits)
         p = (sTickChr == chr && g_CoopPropOverride != NULL) ? coopPlayerOfProp(g_CoopPropOverride) : -1;
         if (p < 0 && c->ailist != NULL && chraiGetAIListID(c->ailist, &global) >= 0x1000)
         {   /* a level script that watches the world, not a player (Jungle's "Xenia is
-             * dying"): whoever hurt something in the last few seconds did it */
+             * dying"): whoever hurt something in the last few seconds did it, else
+             * whoever last used, planted or stuck something (Frigate's tracker and
+             * Surface 2's mine, thrown by a partner, that the script finds stuck) */
             p = coopObjRecentDamage();
+            p = (p >= 0) ? p : coopObjRecentUse();
         }
         p = (p >= 0) ? p : coopSelf();
     }

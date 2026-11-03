@@ -85,6 +85,12 @@ s32 coopObjRecentDamage(void)
     return (sDmgActor >= 0 && sNow - sDmgTick <= COOPOBJ_DAMAGE) ? sDmgActor : -1;
 }
 
+/* the player who used, planted or stuck something in the last COOPOBJ_USE ticks, or -1 */
+s32 coopObjRecentUse(void)
+{
+    return (sUseActor >= 0 && sNow - sUseTick <= COOPOBJ_USE) ? sUseActor : -1;
+}
+
 /* a Use on an object, a gadget on one, a thrown item stuck where it lands:
  * the objective it finishes may turn complete a few seconds later (the
  * level script that watches the object runs on its own clock) */

@@ -3927,3 +3927,61 @@ simulated network, not internet play.
   sends and receipts logged, 1 missed. There the host sent the fading body three times,
   and none of them arrived while the joiner was frozen for 4.5 s and off the line. That
   is the rig being overloaded, which no snapshot timing can cover.
+
+## A one-each mission item fails its objective only when every player has lost theirs (2026-11-03, COOP_VERSION stays 17)
+
+Owner's report: on Dam, when one player misses with the covert modem, the mission fails
+for everyone. It should fail only once all players have lost theirs.
+
+- Cause: Dam's script (ai_20) sets stage flag 0x2000 ("Install covert modem" failed) as
+  soon as any covert modem lies still in the level (IFKeyDropped, propobj.c
+  weaponFindThrown). Every player starts with a modem, so one player's miss failed B
+  while a partner still had theirs to place.
+- Audit of every setup's item checks: IFKeyDropped is used four times. Dam (modem,
+  ITEM_BUG), Frigate (tracker bug, ITEM_BUG; its script fails the objective but lets a
+  later bug on the helicopter complete it) and Surface 2 (remote mine, one per player)
+  fail an objective on it. Silo's use (plastique, 8 each) starts the escape countdown,
+  which is a world event, so Silo is left alone. All other fail conditions are world
+  events: a chr or object destroyed, civilians killed, a timer, "Bond" near a pad. Collect,
+  photograph and copy objectives fail only when the target is destroyed.
+- Fix (coop.c coopItemChanceLeft, called from weaponFindThrown): for ITEM_BUG and
+  ITEM_REMOTEMINE, a loose one counts only when no player in the mission still has one to
+  throw and none is still in the air. "Has one" is in the inventory with a round left,
+  in the pocket or in the hand (drawing it moves the round into the hand). Each STATE
+  carries the sender's items in a former padding byte (CoopStatePkt carry: COOPCARRY_BUG,
+  COOPCARRY_REMOTEMINE, and COOPCARRY_SENT so an older build's 0 reads as "carries
+  nothing"). The host relays STATE, so every game sees every player. A player out of the
+  mission for good (no lives, bled out) or gone carries nothing. Host and joiners run the
+  same check, and the host's flags stay the word as before.
+- A throw empties the hand a few frames before the item is in the air, and a partner's
+  STATE saying "none" can arrive before their THROW event. So a player still counts for
+  1 s after they last carried one (plus two round trips for a partner). Before this was
+  added, the host failed B while the joiner's modem was still on its way.
+- Credit: a partner's tracker bug or mine that sticks to the helicopter now credits them.
+  coopItemsApplyStuck notes the thrower (coopObjNoteUse) also when our copy stuck by
+  itself. A level script that watches the world falls back to the last use or throw
+  (coopObjRecentUse) after recent damage, before the host. Before, Frigate and Surface 2
+  credited the host for the joiner's throw.
+- Logs: "item N lies loose, but player P still carries theirs" / "but we still carry
+  ours" / "but another is still in the air" / "and nobody carries one: the team has lost
+  it", each logged once per change.
+
+Rig: Linux i686, copies on one machine over the mock Steam, invulnerable, main dd88434
+against this branch.
+- Dam, 00 Agent, host throws its modem at the floor at 10 s, joiner at 32 s: main fails B
+  at 10 s on both. The fix keeps B open, then fails it on both after the joiner's modem
+  lands. The joiner missing first while the host keeps one: B never fails. Three players
+  (two miss, the third still has one): B fails only after the third misses, on all three.
+- Frigate, host's tracker bug on the deck, joiner's on the helicopter: main fails the bug
+  objective, then completes it when the second bug sticks. The fix completes it on both
+  without failing, credit player 2.
+- Surface 2, Secret Agent, host's mine on the ground, joiner's on the helicopter: main
+  fails B for good. The fix completes B on both, credit player 2.
+- Silo, host throws one plastique on the floor with the joiner holding 8: the countdown
+  starts at once on both, the same as main.
+- Checklist rows D8, D8-join, FR6, SU4, SI7 and X10-dam3 (rows.py) cover these. All
+  pass on this branch, and D8, D8-join, FR6 and SU4 fail on main. mission_runs.sh passes
+  all 20 stages. Logs: project files `goldeneye-coop/objectives-all-miss/`.
+- Not covered: the modem attached to the Dam link (no rig line attaches it yet, see D3),
+  and an older build on one side (it never reports what it carries, so it counts as
+  carrying nothing).

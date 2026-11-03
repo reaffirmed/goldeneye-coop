@@ -723,6 +723,7 @@ s32  coopItemsExplodingOwnRound(void);               /* a round launched in this
 s32  coopItemsIsPartners(ObjectRecord *obj);            /* a partner's remote mine: not our detonator's */
 s32  coopItemsEmbedPending(ObjectRecord *obj);          /* propobj.c: stuck by a partner's word, matrix still to work out */
 s32  coopItemsUnsettled(PropRecord *prop);             /* propobj.c weaponFindThrown: a partner's throw, still in the air for them */
+s32  coopItemChanceLeft(s32 item, s32 flying);          /* propobj.c weaponFindThrown: one lies loose, but a player still carries theirs or one is in the air (coop.c) */
 void coopItemsPickedUp(ObjectRecord *obj);
 void coopItemsBounced(ObjectRecord *obj);               /* propobj.c objHit: our shot sent a thrown or dropped item flying */
 void coopItemsParentKnocked(PropRecord *parent);        /* propobj.c objHit: our shot is knocking loose what sits on parent */
@@ -756,6 +757,7 @@ s32  coopVoiceMuteRowMask(void);
  * objective and every game shows a toast for a partner's */
 void coopObjNoteActor(s32 player, s32 damage);  /* host: something player did just changed the world */
 s32  coopObjRecentDamage(void);  /* host: who did damage in the last few seconds, or -1 (coop_objective.c) */
+s32  coopObjRecentUse(void);     /* host: who used, planted or stuck something in the last few seconds, or -1 (coop_objective.c) */
 void coopObjNoteSelf(void);     /* this game's own Bond did it: a photo, a room, a pickup, ... */
 void coopObjNoteUse(s32 player);    /* host: player used or planted something; credit for a few seconds */
 void coopObjStatusChanged(s32 index, s32 letter, s32 status);  /* objective_status.c */
