@@ -1450,6 +1450,11 @@ Gfx *frontDrawCursor(Gfx *DL)
     s32 unused;
     s32 option;
 
+    if (portColourPickerActive())
+    {
+        return DL;  /* the picker (port_imgui.cpp) has the pointer and draws its own */
+    }
+
     /* WIDESCREEN: no explicit clear here, because the scene-wide flag
      * self-expires (video.c) and frontend frames fall back to 4:3 on their own.
      * Clearing it here used to break the wide-rendered watch (pause) frames. */
@@ -9061,7 +9066,8 @@ enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLRO
        CLROW_CHARACTER, CLROW_CHAT, CLROW_PUBLIC, CLROW_PASSWORD, CLROW_JOINPUBLIC, CLROW_LAYOUT, CLROW_OPTION,
        CLROW_HOSTLEAVES, CLROW_VSMODE, CLROW_VSARENA, CLROW_VSSCENARIO, CLROW_VSLENGTH, CLROW_VSWEAPONS, CLROW_VSSTART,
        CLROW_DISCORDYES, CLROW_DISCORDNO, CLROW_PROFILE, CLROW_VOICEMUTE, CLROW_LIVES, CLROW_BLEEDOUT, CLROW_RESPAWN,
-       CLROW_UPDATE, CLROW_UPDATECHECK, CLROW_UPDATERESTART, CLROW_ALLOPTIONS, CLROW_VSRADAR, CLROW_VSARMOUR, CLROW_VSNEXT };
+       CLROW_UPDATE, CLROW_UPDATECHECK, CLROW_UPDATERESTART, CLROW_ALLOPTIONS, CLROW_VSRADAR, CLROW_VSARMOUR, CLROW_VSNEXT,
+       CLROW_COLOUR };
 #define COOP_LOBBY_ROWS     72      /* every tab's rows, chat lines wrapped included, and Classic's headings */
 /* The screen is laid out like Modern Warfare 2's lobbies (coopMw*): the
  * title top left, the tabs under it, the tab's rows down the left with
@@ -9554,8 +9560,81 @@ static s32 coopLobbyActionable(const struct CoopLobbyRow *r)
 static s32 coopLobbyChatColour(s32 player)
 {
     static const s32 inks[COOP_MAX_PLAYERS] = { (s32) 0xF0C850FF, 0x58B8F0FF, (s32) 0xE070C0FF, 0x70D070FF };
+    u32 own;
 
+    if (coopPlayerPicked(player, &own))
+    {   /* the colour they picked for themselves (the Colour row) */
+        return (s32) own;
+    }
     return (player >= 0 && player < COOP_MAX_PLAYERS) ? inks[player] : 0xFF;
+}
+
+static void coopLobbyBuild(void);
+
+/* our seat: the party's first out of a session */
+static s32 coopLobbyColourSelf(void)
+{
+    const s32 state = coopLobbyState();
+
+    return (state == COOPLOBBY_IDLE || state == COOPLOBBY_OFF || state == COOPLOBBY_BUSY) ? 0 : coopLobbySelfPlayer();
+}
+
+/* the Colour row's value: Default, or the hex */
+static const char *coopLobbyColourValue(void)
+{
+    static char hex[12];
+    const s32 rgb = portCoopColor();
+
+    if (rgb < 0)
+    {
+        return "Default\n";
+    }
+    snprintf(hex, sizeof(hex), "%06X\n", (unsigned) rgb);
+    return hex;
+}
+
+/* the swatch beside the Colour row's value: our pick, or our number's colour */
+static u32 coopLobbyColourSwatch(void)
+{
+    const s32 rgb = portCoopColor();
+
+    return (rgb >= 0) ? (((u32) rgb << 8) | 0xFF) : coopPlayerDefaultColour(coopLobbyColourSelf());
+}
+
+/* Select on the Colour row: Dear ImGui's colour picker over the lobby
+ * (port/src/port_imgui.cpp), on our colour, with our name as chat shows it */
+static void coopLobbyColourOpen(void)
+{
+    char name[32];
+
+    coopAsciiName(name, sizeof(name), coopLobbySelfName(), 1);
+    portColourPickerOpen(portCoopColor(), (s32) (coopPlayerDefaultColour(coopLobbyColourSelf()) >> 8), name);
+}
+
+/* the picker's answer, every lobby tick: OK saves it ([display] coop_color)
+ * and tells the others. 1 while the picker is up (it has the keys). */
+static s32 coopLobbyColourTick(void)
+{
+    s32 rgb = -1;
+
+    if (portColourPickerPoll(&rgb) == 1)
+    {
+        char hex[12];
+
+        snprintf(hex, sizeof(hex), "%06X", (unsigned) (rgb & 0xFFFFFF));
+        portVideoIniSetKey("coop_color", (rgb < 0) ? "default" : hex);
+        coopColourChanged();
+        coopLobbyBuild();
+    }
+    {   /* GE_COOP_COLOURPICK=<tick>: open the picker at that lobby tick (screenshots) */
+        const char *e = getenv("GE_COOP_COLOURPICK");
+
+        if (e != NULL && coop_lobby_ticks == atoi(e))
+        {
+            coopLobbyColourOpen();
+        }
+    }
+    return portColourPickerActive();
 }
 
 /* the host's lobby type and password (coop_browse.c): before hosting, and
@@ -9814,6 +9893,7 @@ static void coopLobbyBuildRows(void)
         coopLobbyAdd(CLROW_JOINANY, 0, "Join a Friend's Game\n", "");
         coopCharacterName(coopCharacter(), name, sizeof(name));
         coopLobbyAdd(CLROW_CHARACTER, 0, "Character\n", portSheetFitText(name, COOP_LOBBY_VALUE_W));
+        coopLobbyAdd(CLROW_COLOUR, 0, "Colour\n", coopLobbyColourValue());
         coop_lobby_build_tab = CLTAB_SETUP;
         coopLobbyAddHostOptions();
         r = coopLobbyAdd(CLROW_TEXT, 0, "Mission rules (lives, guards and\n", "");
@@ -10037,6 +10117,7 @@ static void coopLobbyBuildRows(void)
     /* the players are the party panel's (coopMwParty); ours is ours to change */
     coopCharacterName(coopCharacter(), name, sizeof(name));
     coopLobbyAdd(CLROW_CHARACTER, 0, "Character\n", portSheetFitText(name, COOP_LOBBY_VALUE_W));
+    coopLobbyAdd(CLROW_COLOUR, 0, "Colour\n", coopLobbyColourValue());
     for (i = 0; i < COOP_MAX_PLAYERS && (coopLobbyIsHost() || coopLobbyHasPartner()); i++)
     {   /* hearing each partner or not, on this game alone (coop_voice.c); the strip shows who is talking */
         if (!coopLobbyPlayerHere(i) || i == coopLobbySelfPlayer() || coopVoiceMuteRowMask() == 0)
@@ -10515,6 +10596,9 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
             break;
         case CLROW_CHARACTER:
             coopCharselOpen();     /* L / R on the row still step in place */
+            break;
+        case CLROW_COLOUR:
+            coopLobbyColourOpen();
             break;
         case CLROW_VSMODE:
         case CLROW_VSARENA:
@@ -11095,6 +11179,10 @@ void interface_menu1D_cooplobby(void)
     if (coopScreenErrorInput())
     {   /* an error panel is up (coop_screens.c): the rows wait until it is dismissed */
         frontUpdateControlStickPosition();
+        return;
+    }
+    if (coopLobbyColourTick())
+    {   /* the colour picker has the keys (it blanks the game's input too) */
         return;
     }
     coopCharselHarness();
@@ -11724,6 +11812,14 @@ static Gfx *coopMwRows(Gfx *DL)
             }
             DL = coopMwText(DL, vx, y, room, value,
                             hot ? MW_ACCENT : (r->dim ? MW_FAINT : (r->colour == 0xFF ? MW_TEXT : ink)), TRUE);
+            if (r->kind == CLROW_COLOUR)
+            {   /* the colour itself, left of its name, edged so a dark one shows */
+                const s32 sx = vx - vw - 0x10;
+
+                DL = microcode_constructor_related_to_menus(DL, sx - 1, y + 1, sx + 10, y + 10, MW_DIM);
+                DL = microcode_constructor_related_to_menus(DL, sx, y + 2, sx + 9, y + 9, coopLobbyColourSwatch());
+                DL = microcode_constructor(DL);
+            }
         }
         DL = coopMwText(DL, lx + (hot ? 3 : 0), y, lw + 1, hot ? coopMwScroll(label, lw + 1) : label, hot ? 0xFFFFFFFF : ink, FALSE);
     }
@@ -11930,6 +12026,7 @@ static const char *coopLobbyHelp(const struct CoopLobbyRow *r)
         case CLROW_LEAVE:       return coopLobbyIsHost() && coopLobbyHasPartner() ? "Leave the lobby. The next player becomes the host.\n"
                                                                                   : "Leave the lobby.\n";
         case CLROW_CHARACTER:   return "Who you play as. Select for the full roster; looks only.\n";
+        case CLROW_COLOUR:      return "Your colour: your name, chat, radar dot and pings, for everyone. Select to pick it.\n";
         case CLROW_DOWNRULE:    return "When a player goes down: a partner revives them, a timer brings them back, or both.\n";
         case CLROW_DIFFICULTY:  return "Hard and Brutal give guards more health, damage and aim, and add more of them.\n";
         case CLROW_ALLOPTIONS:  return "Every setting: video, audio, HUD, accessibility, controls and Port Options.\n";
@@ -12725,6 +12822,13 @@ static Gfx *coopClassicRows(Gfx *DL)
         {
             x = COOP_CLASSIC_VALUE_X;
             y = COOP_LOBBY_Y0 + slot * COOP_LOBBY_PITCH;
+            if (r->kind == CLROW_COLOUR)
+            {   /* the colour itself, then its name */
+                DL = microcode_constructor_related_to_menus(DL, x, y + 2, x + 11, y + 13, 0x000000FF);
+                DL = microcode_constructor_related_to_menus(DL, x + 1, y + 3, x + 10, y + 12, coopLobbyColourSwatch());
+                DL = microcode_constructor(DL);
+                x += 16;
+            }
             DL = frontPrintText(DL, &x, &y, (char *) portSheetFitText(r->value, COOP_LOBBY_R - COOP_CLASSIC_VALUE_X),
                                 ptrFontZurichBoldChars, ptrFontZurichBold,
                                 (r->colour == COOP_LOBBY_COL_OK) ? COOP_LOBBY_COL_OK : (r->dim ? PORT_SHEET_COL_DIM : 0xFF),

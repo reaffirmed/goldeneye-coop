@@ -148,6 +148,47 @@ static struct fontchar *portFontGlyph(struct fontchar *chars, u8 c)
 
 /* 1 = byte c is a plain glyph (not a space, a newline or a JPN code) */
 #define PORT_TEXT_IS_GLYPH(chars, c) ((c) != '\n' && ((c) < 0x80 || !j_text_trigger) && portFontGlyph((chars), (c)) != NULL)
+
+/* The game's fonts for the ImGui overlay (port_imgui.cpp), which draws its
+ * text with them: which 0 Bank Gothic, 1 Zurich Bold. The glyph byte c draws
+ * with (as textRender picks it): I8 rows of *stride bytes, *w by *h, drawn
+ * *top below the line's top and *gap after the previous glyph (its kerning
+ * after an 'H', where every line starts). 0 = none (a space, or the fonts
+ * are not loaded). */
+s32 portFontGlyphExport(s32 which, u8 c, s32 *w, s32 *h, s32 *stride, s32 *top, s32 *gap, const u8 **pixels)
+{
+    struct fontchar *chars = which ? ptrFontZurichBoldChars : ptrFontBankGothicChars;
+    struct font *font = which ? ptrFontZurichBold : ptrFontBankGothic;
+    struct fontchar *g;
+    struct fontchar *hh;
+
+    if (chars == NULL || font == NULL)
+    {
+        return 0;
+    }
+    g = portFontGlyph(chars, c);
+    hh = &chars['H' - 0x21];
+    if (g == NULL || g->pixeldata == NULL || g->width <= 0 || g->height <= 0
+        || g->kerningindex < 0 || g->kerningindex >= 13 || hh->kerningindex < 0 || hh->kerningindex >= 13)
+    {
+        return 0;
+    }
+    *w = g->width;
+    *h = g->height;
+    *stride = (g->width + 7) & 0xF8;
+    *top = g->baseline;
+    *gap = 1 - font->kerning[hh->kerningindex * 13 + g->kerningindex];
+    *pixels = g->pixeldata;
+    return 1;
+}
+
+/* textRender's line height for the font (0 = not loaded) */
+s32 portFontLineHeight(s32 which)
+{
+    struct fontchar *chars = which ? ptrFontZurichBoldChars : ptrFontBankGothicChars;
+
+    return (chars == NULL) ? 0 : chars['['].height + chars['['].baseline;
+}
 #endif
 
 // -------------------------------------------------------------------------------------------------

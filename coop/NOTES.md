@@ -206,7 +206,16 @@ Known gaps: grenades and mines thrown by the joiner don't hurt anything; (cutsce
 - Transport: COOP_NET_MAX_PEERS 3, coopNetSendTo/RecvFrom/PeerConnected per
   peer; the Steam lobby holds 4. Mock: GE_MOCK_FRIEND takes a comma list.
 - HUD: per-player colour (yellow, cyan, pink, green) on name tags, radar
-  dots and stacked partner status blocks. Stats page draws one column per
+  dots and stacked partner status blocks. A player can pick their own
+  (lobby row CLROW_COLOUR, [display] coop_color): Dear ImGui's ColorPicker4
+  over the lobby (port/src/port_imgui.cpp, port/imgui), drawn in the
+  lobby's look: Zurich Bold and Bank Gothic from the game
+  (portFontGlyphExport, textrelated.c) in ImGui's atlas, the Modern or
+  Classic layout's colours, the red crosshair for the pointer. It rides in HELLO
+  after linkjit (owncolour, and the host's colour[] for everyone), added
+  without a protocol bump: an older build sends none and reads none.
+  coopPlayerColour and the lobby's coopLobbyChatColour use it unless the
+  viewer's Colour Blind set is on. Stats page draws one column per
   player (names cut to about 5 letters with 4). Campaign record has a line
   per partner; Continue uses the least progress among those present.
 - Lobby: player list, invites shown while under 4. Select Mission needs all

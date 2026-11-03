@@ -1792,6 +1792,16 @@ static int inputFixedKeyDown(const SDL_KeyboardEvent *key)
     const SDL_Scancode sc = key->keysym.scancode;
     const int repeat = key->repeat != 0;
 
+    {   /* the colour picker (port_imgui.cpp) has the keyboard: Escape is its
+         * Cancel, and the console, watch and bug report wait until it closes */
+        extern s32 portColourPickerActive(void);
+
+        if (portColourPickerActive())
+        {
+            return 1;
+        }
+    }
+
     if (sc == SDL_SCANCODE_GRAVE)
     {
         {   /* Where this key types a digit or letter (Hungarian layout) it
@@ -8824,6 +8834,12 @@ static void mouseWarpFree(s32 x, s32 y, s32 parkaxes)
 
 void portInputMouseWarp(s32 x, s32 y)
 {
+    extern s32 portColourPickerActive(void);
+
+    if (portColourPickerActive())
+    {
+        return;   /* the picker has the pointer: the menu under it must not move it */
+    }
     s_MouseVX = x;
     s_MouseVY = y;
     if (!s_MouseLocked)
@@ -8842,6 +8858,12 @@ void portInputMouseWarp(s32 x, s32 y)
  */
 void portInputMousePark(s32 x, s32 y, s32 axes)
 {
+    extern s32 portColourPickerActive(void);
+
+    if (portColourPickerActive())
+    {
+        return;
+    }
     s_MouseVX = x;
     s_MouseVY = y;
     if (!s_MouseLocked)

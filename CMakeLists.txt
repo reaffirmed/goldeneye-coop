@@ -461,6 +461,7 @@ if(GE_VIDEO)
             set(SDL2_ROOT ${CMAKE_SOURCE_DIR}/third_party/SDL2-2.30.11/i686-w64-mingw32)
         endif()
         target_include_directories(ge PRIVATE ${SDL2_ROOT}/include ${SDL2_ROOT}/include/SDL2)
+        set(GE_SDL2_INCLUDE ${SDL2_ROOT}/include/SDL2)
         target_link_libraries(ge ${SDL2_ROOT}/lib/libSDL2.dll.a opengl32 gdi32 imm32 winmm setupapi hid version ole32 oleaut32 ws2_32 shell32)
         # the game needs SDL2.dll beside the exe
         add_custom_command(TARGET ge POST_BUILD
@@ -471,13 +472,27 @@ if(GE_VIDEO)
         # install, avoiding a system-wide /usr install).
         if(SDL2_LINUX_ROOT)
             target_include_directories(ge PRIVATE ${SDL2_LINUX_ROOT}/include/SDL2)
+            set(GE_SDL2_INCLUDE ${SDL2_LINUX_ROOT}/include/SDL2)
             target_link_libraries(ge ${SDL2_LINUX_ROOT}/lib/i386-linux-gnu/libSDL2.so GL dl pthread)
             set_target_properties(ge PROPERTIES BUILD_RPATH ${SDL2_LINUX_ROOT}/lib/i386-linux-gnu)
         else()
             target_include_directories(ge PRIVATE /usr/include/SDL2)
+            set(GE_SDL2_INCLUDE /usr/include/SDL2)
             target_link_libraries(ge SDL2 GL dl pthread)
         endif()
     endif()
+    # Dear ImGui (MIT, port/imgui): the co-op colour picker (port/src/port_imgui.cpp).
+    # Its own objects, built with only its own and SDL's headers: the game's
+    # include/ has a math.h, string.h and stdlib.h of its own that C++ can't use.
+    add_library(ge_imgui OBJECT
+        port/imgui/imgui.cpp
+        port/imgui/imgui_draw.cpp
+        port/imgui/imgui_tables.cpp
+        port/imgui/imgui_widgets.cpp
+        port/src/port_imgui.cpp
+        port/src/port_imgui_gl.cpp)
+    set_target_properties(ge_imgui PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/port/imgui;${GE_SDL2_INCLUDE}")
+    target_sources(ge PRIVATE $<TARGET_OBJECTS:ge_imgui>)
     # the files a release ships beside the game, so a fresh build runs the
     # same: controller mappings and layouts (without them a new install has
     # no default binds), the ini help and the base shader list
