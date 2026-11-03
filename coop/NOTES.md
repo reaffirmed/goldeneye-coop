@@ -4013,6 +4013,12 @@ how to add one: [`lang/README.md`](../lang/README.md).
   and `texLoad` uses it. The Spanish patch packs its texture table into 4-byte
   entries (size in the low 23 bits); `romdataImageTextures` picks the entry size
   that gives the cart's texture count.
+- Accented letters drew blank on Windows ("rat n", "Misi n"): the patched
+  fonts were copied to the heap, and the Windows heap sits below 0x10000000,
+  where fast3d's `seg_addr` reads a glyph's pixel pointer as an N64 segment
+  address (0x03xxxxxx = segment 3) and samples the wrong memory. The copies now
+  come from `portAllocHigh`, like every other pointer that reaches a display
+  list. Reproduced on Linux by mapping the copy at 0x03100000 and 0x05100000.
 - Text that runs past its space: tab labels (`frontFitTabText`) and the mission
   and arena names (`frontFitCut`, the photos are 70 apart) are cut with a full
   stop. `msgctxt "tab"` in `port.po` gives a tab its own short label.

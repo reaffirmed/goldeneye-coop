@@ -44,6 +44,7 @@ extern const char *portLogPath(const char *name);  /* main.c: Data/Logs/name */
 extern int romdataImageFiles(const uint8_t *img, uint32_t size,
                              void (*cb)(const char *name, uint32_t ofs, uint32_t size, void *ctx), void *ctx);
 extern int romdataSegRange(const char *name, uint32_t *ofs, uint32_t *size);
+extern void *portAllocHigh(uint32_t size);   /* pcsched.c: zeroed, above 0x10000000, never freed */
 extern int romdataImageTextures(const uint8_t *img, uint32_t size, uint32_t expect,
                                 void (*cb)(uint32_t num, uint32_t ofs, uint32_t size, void *ctx), void *ctx);
 
@@ -1126,7 +1127,11 @@ static uint8_t *langFontHost(const uint8_t *rom, uint32_t size)
     if (size < nativewords * 4) {
         return NULL;
     }
-    dst = (uint8_t *) malloc(size);
+    /* above 0x10000000, never the heap: the glyphs' pixel pointers go into
+     * display lists, and fast3d's seg_addr reads a lower word as an N64
+     * segment address (0x03xxxxxx = segment 3). The Windows heap sits down
+     * there, so every accented letter drew blank ("rat n"). */
+    dst = (uint8_t *) portAllocHigh(size);
     if (dst == NULL) {
         return NULL;
     }
