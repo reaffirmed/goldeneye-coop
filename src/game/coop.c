@@ -185,6 +185,12 @@ typedef struct
     u16 linkrtt[COOP_MAX_PLAYERS];  /* round trip, ms */
     u8 linkloss[COOP_MAX_PLAYERS];  /* packet loss, % */
     u8 linkjit[COOP_MAX_PLAYERS];   /* jitter, ms */
+    /* each player's own colour (the lobby's Colour row): R, G, B, then 1 when
+     * they picked one (all 0: their number's). Added after v0.8.0 the same
+     * way, without a version change: an older build's hello is read with
+     * these zero, and an older build reads only what it knows. */
+    u8 owncolour[4];                    /* the sender's */
+    u8 colour[COOP_MAX_PLAYERS][4];     /* host: every player's, by number */
 } CoopHelloPkt;
 #define COOP_HELLO_V020 ((s32) (size_t) &((CoopHelloPkt *) 0)->linkrtt)   /* what a v0.2.0 build sends */
 
@@ -1827,7 +1833,7 @@ static void coopPollNet(void)
             CoopChan *ch = &sChan[c];
 
             if (n < (s32) sizeof(CoopHelloPkt))
-            {   /* an older build's: no link numbers */
+            {   /* an older build's: no link numbers, no colours */
                 memset(buf + n, 0, sizeof(CoopHelloPkt) - (size_t) n);
             }
             if (coopChanSession(c, ((CoopHelloPkt *) buf)->session))
@@ -8979,6 +8985,19 @@ s32 coopHudRespawnEta(void)
 
 static s32 sHelloNow;   /* send this hello whatever the tick (coopSendHelloNow) */
 
+/* a hello's colour bytes (CoopHelloPkt owncolour) from 0xRRGGBB, -1 none */
+static void coopColourBytes(s32 rgb, u8 out[4])
+{
+    out[0] = (u8) ((rgb >> 16) & 0xFF);
+    out[1] = (u8) ((rgb >> 8) & 0xFF);
+    out[2] = (u8) (rgb & 0xFF);
+    out[3] = (rgb >= 0);
+    if (rgb < 0)
+    {
+        out[0] = out[1] = out[2] = 0;
+    }
+}
+
 static void coopSendHello(void)
 {
     CoopHelloPkt p;
@@ -9001,6 +9020,7 @@ static void coopSendHello(void)
     p.inlobby = (u8) sOnLobbyScreen;
     p.downrule = (u8) sDownRule;
     p.character = (u8) coopCharacter();
+    coopColourBytes(portCoopColor(), p.owncolour);
     if (coopNetIsHost())
     {   /* Guard AI is the host's Port Option; the slot only shows it to the joiner */
         sSettings[COOPSET_GUARDAI] = (u8) coopAiSmarterOption();
@@ -9035,6 +9055,7 @@ static void coopSendHello(void)
         e->ready = (i == 0) ? (u8) sLobbyReady : sChan[i - 1].hello.ready;
         e->inlobby = (i == 0) ? (u8) sOnLobbyScreen : sChan[i - 1].hello.inlobby;
         e->character = (i == 0) ? (u8) coopCharacter() : sChan[i - 1].hello.character;
+        memcpy(p.colour[i], (i == 0) ? p.owncolour : sChan[i - 1].hello.owncolour, sizeof(p.colour[i]));
         if (i > 0)
         {
             CoopLink l;
@@ -9462,6 +9483,49 @@ s32 coopPlayerCharacter(s32 p)
     }
     c = coopChanOfPlayer(p);
     return (c >= 0 && coopNetIsHost()) ? sChan[c].hello.character : sHostHello.roster[p].character;
+}
+
+/* the colour player p picked for themselves (the lobby's Colour row),
+ * 0xRRGGBB; -1 none, or an older build that sends none. Ours is ours from
+ * the start; out of a session we are the party's first seat. */
+s32 coopPlayerOwnColour(s32 p)
+{
+    const s32 insession = coopNetIsHost() || coopNetHasPeer();
+    const u8 *b;
+    s32 c;
+
+    if (p < 0 || p >= COOP_MAX_PLAYERS)
+    {
+        return -1;
+    }
+    if (p == (insession ? coopSelf() : 0))
+    {
+        return portCoopColor();
+    }
+    if (!insession)
+    {
+        return -1;
+    }
+    c = coopChanOfPlayer(p);
+    b = (c >= 0 && coopNetIsHost()) ? sChan[c].hello.owncolour : sHostHello.colour[p];
+    return b[3] ? (s32) (((u32) b[0] << 16) | ((u32) b[1] << 8) | b[2]) : -1;
+}
+
+/* ours changed (the lobby's Colour row): the others hear it now, not at the next hello */
+void coopColourChanged(void)
+{
+    if (portCoopColor() < 0)
+    {
+        portConLogf("ge: coop: our colour is now the default\n");
+    }
+    else
+    {
+        portConLogf("ge: coop: our colour is now %06X\n", (unsigned) portCoopColor());
+    }
+    if (sEnabled > 0 && (coopNetIsHost() || coopNetHasPeer()))
+    {
+        coopSendHelloNow();
+    }
 }
 
 s32 coopPropIsPartner(PropRecord *prop)

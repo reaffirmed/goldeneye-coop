@@ -3382,3 +3382,21 @@ msgstr "GoldenEye Coop: no se guardará nada"
 
 msgid "The game can't write to its own folder, so your settings, mission progress, co-op campaign and profiles will be lost when you quit, and the updater can't install updates.\n\nMove the game folder somewhere you can write to, such as C:\\Games\\GoldenEye-Coop. Avoid Program Files. If the folder is under Documents or Desktop, Windows Controlled Folder Access may be blocking it."
 msgstr "El juego no puede escribir en su propia carpeta, así que tus ajustes, tu progreso, tu campaña co-op y tus perfiles se perderán al salir, y el actualizador no puede instalar actualizaciones.\n\nMueve la carpeta del juego a un sitio donde puedas escribir, como C:\\Games\\GoldenEye-Coop. Evita Archivos de programa. Si la carpeta está en Documentos o Escritorio, puede que la bloquee el Acceso controlado a carpetas de Windows."
+
+msgid "Colour"
+msgstr "Color"
+
+msgid "Your colour: your name, chat, radar dot and pings, for everyone. Select to pick it."
+msgstr "Tu color: tu nombre, el chat, tu punto en el radar y tus avisos, para todos. Elige para cambiarlo."
+
+msgid "Player Colour"
+msgstr "Color del jugador"
+
+msgid "In chat:"
+msgstr "En el chat:"
+
+msgid "Default Colour"
+msgstr "Color predeterminado"
+
+msgid "Colour Blind is on, so you see its colours instead."
+msgstr "Daltonismo está activado, así que ves sus colores en su lugar."

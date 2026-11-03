@@ -243,6 +243,11 @@ padN_stickmode.
   coop_menu           | 0          | 1 draws the CO-OP screen on the
                       |            | original folder (Classic); 0 the
                       |            | Modern tabbed screen. Same options
+  coop_color          | default    | Your colour online, hex RRGGBB: your
+                      |            | name, chat, radar dot and pings, as
+                      |            | every player sees them (the lobby's
+                      |            | Colour row). default = your player
+                      |            | number's colour
   partner_fade        | 100        | Story co-op: how strongly a partner
                       |            | up close fades out, percent. 100: a
                       |            | partner closer than 2.6 m fades, gone

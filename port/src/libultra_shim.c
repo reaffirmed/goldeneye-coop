@@ -828,6 +828,42 @@ __attribute__((weak)) s32 portCrosshairColor(void)
     return -1;
 }
 
+/* CO-OP COLOUR: headless has no midas.ini, so the player number's (-1), or
+ * GE_COOP_COLOUR=RRGGBB (harness) */
+__attribute__((weak)) s32 portCoopColor(void)
+{
+    const char *e = getenv("GE_COOP_COLOUR");
+    char *end = NULL;
+    long v;
+
+    if (e == NULL || e[0] == '\0')
+    {
+        return -1;
+    }
+    v = strtol(e + (e[0] == '#'), &end, 16);
+    return (end != NULL && *end == '\0' && v >= 0 && v <= 0xFFFFFF) ? (s32) v : -1;
+}
+
+/* the ImGui colour picker (port_imgui.cpp): none headless */
+__attribute__((weak)) s32 portColourPickerOpen(s32 rgb, s32 defrgb, const char *name)
+{
+    (void) rgb;
+    (void) defrgb;
+    (void) name;
+    return 0;
+}
+
+__attribute__((weak)) s32 portColourPickerPoll(s32 *rgb)
+{
+    (void) rgb;
+    return 0;
+}
+
+__attribute__((weak)) s32 portColourPickerActive(void)
+{
+    return 0;
+}
+
 /* GLOBAL VOLUMES: headless has no midas.ini, so full volume - the vanilla
  * behaviour these replace. options.c / front.c call them every menu init. */
 __attribute__((weak)) s32 portMusicVolumeRaw(void)
@@ -1410,12 +1446,13 @@ void osContGetReadData(OSContPad *data)
                 e = getenv("GE_DRIVE");
                 if ((e != NULL) && (e[0] != '0')) mpdrive = 1;
             }
-            if (portConIsOpen()) {
+            if (portConIsOpen() || portColourPickerActive()) {
                 /* Console open: every pad reads neutral, not just the keyboard,
                  * because a controller reaches joy_port through
                  * portInputPadMerge and a held stick would steer Bond while
                  * typing. The commit below still runs with all-zero downs so
-                 * held Port actions release cleanly. */
+                 * held Port actions release cleanly. The colour picker
+                 * (port_imgui.cpp) takes the pads the same way. */
                 for (i = 0; i < MAXCONTROLLERS; i++) {
                     data[i].button = 0;
                     data[i].stick_x = 0;

@@ -40,6 +40,7 @@ extern void portConLogf(const char *fmt, ...);
 static bool s_VideoInitDone = false;
 
 static void portRenderThreadStart(void); /* item 15 render thread, defined below */
+extern void portImguiFrame(void);       /* port_imgui.cpp: the colour picker */
 
 /* ==== [display] settings (midas.ini) ======================================== */
 
@@ -306,6 +307,10 @@ static int   s_CfgCrosshairColor = -1;
 /* [display] playerN_crosshair_color: that player's own, -2 = follow
  * crosshair_color, -1 = vanilla red (2+ players only - portPlayerCrosshairColor) */
 static int   s_CfgPlayerXhair[4] = { -2, -2, -2, -2 };
+/* [display] coop_color=RRGGBB: our own colour online (the co-op lobby's Colour
+ * row), for our name, chat, radar dot and pings on every player's screen.
+ * -1 = default = our player number's colour. */
+static int   s_CfgCoopColor = -1;
 static int   s_CfgMusicVolume = 70;   /* [display] music_volume */
 static int   s_CfgSfxVolume = 70;     /* [display] sfx_volume */
 /* Has a global setting been established yet? Until it has, the first save
@@ -1392,6 +1397,11 @@ static int videoSetDisplayOption(const char *key, const char *value)
         }
         return 1;
     }
+    if (SDL_strcasecmp(key, "coop_color") == 0)
+    {
+        s_CfgCoopColor = (value[0] == '\0' || SDL_strcasecmp(value, "default") == 0) ? -1 : videoParseHexRGB(value);
+        return 1;
+    }
     if (SDL_strcasecmp(key, "crosshair_color") == 0)
     {
         extern void portTexCrosshairRefresh(s32 reorig); /* port_textures.c: the colour lives in the sprite's texels */
@@ -2432,6 +2442,7 @@ static void videoWriteDefaultIni(void)
     fprintf(f, "hfov_wide=%d\n", (int) videoHfovWide());
     fprintf(f, "weapon_fov=%d\n", s_CfgWeaponFov);
     fprintf(f, "crosshair_color=default\n");
+    fprintf(f, "coop_color=default\n");
     fprintf(f, "music_volume=%d\n", s_CfgMusicVolume);
     fprintf(f, "sfx_volume=%d\n", s_CfgSfxVolume);
     fprintf(f, "maxfps=%d\n", s_CfgMaxFps);
@@ -4332,6 +4343,16 @@ static void videoWheelDrain(void)
     if (sWheelDownNow) sWheelDownNotches--;
 }
 
+/* the console, or the colour picker (port_imgui.cpp), has the keyboard and
+ * mouse: videoGetPad blanks them for the game, and holds over what is still
+ * down when it closes */
+static int videoInputOverlay(void)
+{
+    extern s32 portColourPickerActive(void);
+
+    return portConIsOpen() || portColourPickerActive();
+}
+
 void videoGetPad(OSContPad *pad)
 {
     /* GE_NOINPUT=1: automated capture runs must not pick up stray clicks
@@ -4406,7 +4427,7 @@ void videoGetPad(OSContPad *pad)
            * takes the first new press after. */
             static int sConWasOpen;
             static int sFocusWas = 1;
-            const int conNow = portConIsOpen() != 0;
+            const int conNow = videoInputOverlay() != 0;
             const int focusNow = videoHasFocus();
 
             /* nor while the window is unfocused, and not on the first
@@ -4429,9 +4450,9 @@ void videoGetPad(OSContPad *pad)
             sConWasOpen = conNow;
             sFocusWas = focusNow;
         }
-        kbmOnly = !portConIsOpen() && !s_BindCapArmed && !portBindCooldownActive()
+        kbmOnly = !videoInputOverlay() && !s_BindCapArmed && !portBindCooldownActive()
                   && portInputP1KbmMuted() && portStageRunning() && portP1ControlsLive();
-        if (portConIsOpen() || (portInputP1KbmMuted() && portStageRunning() && portP1ControlsLive())
+        if (videoInputOverlay() || (portInputP1KbmMuted() && portStageRunning() && portP1ControlsLive())
             || s_BindCapArmed || portBindCooldownActive())
         {
             /* Armed, or just finished: the keyboard belongs to the capture.
@@ -4525,7 +4546,7 @@ void videoGetPad(OSContPad *pad)
         }
 
         videoWheelDrain(); /* one EDGE per notch (helper above) */
-        if (portConIsOpen() || (portInputP1KbmMuted() && portStageRunning() && portP1ControlsLive()))
+        if (videoInputOverlay() || (portInputP1KbmMuted() && portStageRunning() && portP1ControlsLive()))
         {
             /* the notch is drained (never banked) but nothing sees it: the
              * wheel levels are what videoCodeDown reads for the WHEEL bind
@@ -5186,6 +5207,7 @@ void videoSubmitCommands(Gfx *cmds)
             }
         }
 
+        portImguiFrame();   /* the colour picker's frame (port_imgui.cpp), drawn at gfx_run's end */
         gfx_run(cmds);
     }
 }
@@ -5331,6 +5353,7 @@ void videoSubmitAsync(Gfx *cmds)
     }
     t.lowRes = videoRenderLines(t.viY); /* mirror videoStartFrame */
     s_FrameNum++;
+    portImguiFrame();   /* the colour picker's frame, handed to the render thread beside this one */
 
     SDL_LockMutex(s_RtMtx);
     while (s_RtTaskPending)
@@ -5724,6 +5747,25 @@ static s32 videoParseHexRGB(const char *v)
 s32 portCrosshairColor(void)
 {
     return s_CfgCrosshairColor;
+}
+
+/** Our own co-op colour (coop_color): 0xRRGGBB, or -1 for the player number's.
+ * GE_COOP_COLOUR=RRGGBB sets it for one run (harness). */
+s32 portCoopColor(void)
+{
+    static int env = -2;
+
+    if (env == -2)
+    {
+        const char *e = getenv("GE_COOP_COLOUR");
+
+        env = (e != NULL && e[0] != '\0') ? videoParseHexRGB(e) : -1;
+        if (env >= 0)
+        {
+            s_CfgCoopColor = env;
+        }
+    }
+    return s_CfgCoopColor;
 }
 
 /** A player's own crosshair: -2 = none (follows crosshair_color), -1 = red, else 0xRRGGBB. */

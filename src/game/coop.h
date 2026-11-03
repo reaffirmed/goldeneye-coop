@@ -771,7 +771,18 @@ void coopCrashBye(void);   /* port_report.c: the game crashed, tell the partners
 
 /* accessibility (coop_access.c) */
 enum { COOPCAP_GUNFIRE, COOPCAP_EXPLOSION, COOPCAP_DOOR, COOPCAP_ALARM, COOPCAP_COUNT };
-u32  coopPlayerColour(s32 player);              /* RGBA, alpha 0xFF; the colour-blind set when it is on */
+u32  coopPlayerColour(s32 player);              /* RGBA, alpha 0xFF: their own pick, or the colour-blind set when it is on */
+u32  coopPlayerDefaultColour(s32 player);       /* RGBA: the player number's, whatever they picked */
+s32  coopPlayerPicked(s32 player, u32 *rgba);   /* 1: their own colour applies here (they picked one, Colour Blind off) */
+s32  coopPlayerOwnColour(s32 player);           /* coop.c: the colour they picked, 0xRRGGBB, -1 none (or an older build) */
+
+/* our own colour (the lobby's Colour row): video.c [display] coop_color, and
+ * Dear ImGui's colour picker for it (port/src/port_imgui.cpp) */
+s32  portCoopColor(void);                       /* 0xRRGGBB, -1 the player number's */
+s32  portColourPickerOpen(s32 rgb, s32 defrgb, const char *name);   /* 1: the picker is up */
+s32  portColourPickerPoll(s32 *rgb);            /* 0 up (or closed), 1 OK (*rgb, -1 the default), 2 Cancel */
+s32  portColourPickerActive(void);              /* the picker is up: the game gets no input */
+void coopColourChanged(void);                   /* coop.c: ours changed, tell the others now */
 f32  coopTextScale(void);                       /* Text Size: 1.0 to 2.0 */
 Gfx *coopTextScaleBegin(Gfx *gdl, f32 x, f32 y);   /* co-op text scaled about (x, y); HUD Scale included */
 Gfx *coopTextScaleEnd(Gfx *gdl);

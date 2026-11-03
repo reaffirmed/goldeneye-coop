@@ -11,7 +11,8 @@
  * co-op and versus.
  *
  * Colours: every player colour (name tags, radar, pings, chat, toasts) comes
- * from coopPlayerColour, which picks the colour-blind set when it is on.
+ * from coopPlayerColour: the colour the player picked for themselves (the
+ * lobby's Colour row), else their number's; the colour-blind set when it is on.
  * Text size scales the co-op text (chat, toasts, name tags, pings) and the
  * captions, through gfx_pc's HUD scale brackets.
  */
@@ -45,7 +46,7 @@ bool alarmIsActive(void);
 /* by player number, alpha 0xFF: standard (yellow, cyan, pink, green), then
  * sets for red-green (Okabe-Ito yellow, sky blue, white, vermilion) and
  * blue-yellow colour blindness (white, red, teal, lavender) */
-u32 coopPlayerColour(s32 player)
+u32 coopPlayerDefaultColour(s32 player)
 {
     static const u32 sets[3][COOP_MAX_PLAYERS] = {
         { 0xFFFF80FF, 0x80E0FFFF, 0xFF90E0FF, 0x90FF90FF },
@@ -59,6 +60,36 @@ u32 coopPlayerColour(s32 player)
         set = 0;
     }
     return sets[set][(player >= 0 && player < COOP_MAX_PLAYERS) ? player : 0];
+}
+
+/* The colour a player picked for themselves (the lobby's Colour row) applies
+ * unless our Colour Blind setting is on: that set is chosen to tell players
+ * apart, and a pick could undo it. */
+s32 coopPlayerPicked(s32 player, u32 *rgba)
+{
+    s32 own;
+
+    if (player < 0 || player >= COOP_MAX_PLAYERS || portAccessColorblind() != 0)
+    {
+        return 0;
+    }
+    own = coopPlayerOwnColour(player);
+    if (own < 0)
+    {
+        return 0;
+    }
+    if (rgba != NULL)
+    {
+        *rgba = ((u32) own << 8) | 0xFF;
+    }
+    return 1;
+}
+
+u32 coopPlayerColour(s32 player)
+{
+    u32 rgba;
+
+    return coopPlayerPicked(player, &rgba) ? rgba : coopPlayerDefaultColour(player);
 }
 
 /* ---- text size ------------------------------------------------------------ */

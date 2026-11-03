@@ -114,6 +114,7 @@ extern "C" uint32_t gfx_xbox_xlu_visits_max = 8000; /* [display] xbox_xlu_visits
 static const char* roc_capture_bad_why = "matrix load / rect / deferred-XLU inside its list";
 static uint32_t roc_mtx_gen = 0;                  /* bumped by every MTX / POPMTX: part draws split on it */
 extern "C" void portRoomCacheClear(void);
+extern "C" void portImguiRender(void);   /* port_imgui.cpp */
 #define MAX_VERTEX_COLORS 64
 
 #ifdef GE_XBOX
@@ -7908,6 +7909,9 @@ extern "C" void gfx_run(Gfx* commands) {
         gfx_present_game_fb();
     }
 
+#ifndef GE_XBOX
+    portImguiRender();  /* the co-op colour picker, over the finished frame (port_imgui.cpp) */
+#endif
     gfx_rapi->end_frame();
     gfx_wapi->swap_buffers_begin();
     { /* The upload path no longer asks glGetError per texture (gfx_opengl.cpp
