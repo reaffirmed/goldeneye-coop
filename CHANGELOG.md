@@ -6,6 +6,7 @@ GoldenEye Coop releases, newest first. Each release's full notes, including whic
 
 | Release | Date | Co-op protocol | Highlights |
 | --- | --- | --- | --- |
+| [v0.7.1](coop/release-notes/v0.7.1.md) | 2026-11-03 | 17 | The update offer comes when the game opens; Surface 2 alarm guards, Streets casualty failure and body fades fixed for joiners. |
 | [v0.7.0](coop/release-notes/v0.7.0.md) | 2026-11-02 | 17 | Everyone must update. A long dropout no longer splits the game in two; saves and updates survive a crash; clearer first-run messages. |
 | [v0.6.15](coop/release-notes/v0.6.15.md) | 2026-11-01 | 16 | Escorts follow one player; big fights no longer freeze everyone; versus drops the hit marker and hit-direction arc. |
 | [v0.6.14](coop/release-notes/v0.6.14.md) | 2026-10-31 | 16 | Objective credit goes to whoever did it; no arrivals during an ending; players face where they aim. |
