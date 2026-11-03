@@ -1,0 +1,147 @@
+Este parche contiene la traducción completa al castellano del juego
+"GoldenEye 007" para el sistema "Nintendo 64".
+
+-------------------------------------------------------------------
+-----------------------------ÍNDICE--------------------------------
+-------------------------------------------------------------------
+
+0.	Contenido del paquete
+1.	Instalación del parche y funcionamiento
+2.	Contenido de la traducción
+3.	Traducción y agradecimientos
+4.	Notas legales
+
+
+-------------------------------------------------------------------
+0. CONTENIDO DEL PAQUETE
+-------------------------------------------------------------------
+
+GE-SPA-NTSC.xdelta	Parche de la traducción en castellano para la rom americana (NTSC)
+GE-SPA-PAL.xdelta	Parche de la traducción en castellano para la rom europea (PAL)
+
+Nota: al contrario que con las anteriores versiones, esta vez no hay disponibles parches dedicados para que funcionen en el emulador de Wii: Wii64.
+
+
+-------------------------------------------------------------------
+1. INSTALACIÓN DEL PARCHE Y FUNCIONAMIENTO
+-------------------------------------------------------------------
+
+->Para instalar el parche de la traducción necesitarás:
+
+· La rom del juego GoldeneEye 007 sin datos girados. Ya sea, la versión NTSC americana [GoldenEye 007 (U).z64] o la versión PAL europea [GoldenEye 007 (E).z64]
+· El parche de traducción adecuado para la rom elegida. GE-SPA-NTSC.xdelta para la versión NTSC americana, o GE-SPA-PAL.xdelta para la versión PAL europea.
+· Un programa compatible con archivos .xdelta para parchear roms. Por ejemplo, xdeltaUI: http://www.romhacking.net/utilities/598/
+
+
+Aplicar el parche de traducción en roms ya parcheadas podría no funcionar. La traducción sólo está preparda para ser aplicada en una rom original.
+
+
+En Project 64, es necesario modificar la configuración del rom para
+que funcione correctamente. Ésta es la configuración para Project64 v1.6:
+Carga la rom parcheada y ve a 'Opciones' -> 'Configuración'
+Pulsa la pestaña 'Configuración del Rom' y déjala de la siguiente forma:
+-Estilo de CPU core:	Recompilador
+Método de trabajar código:	Cambia memoria & Caché
+Tamaño de Memoria:	4 MB
+Enlazado Avanzado de Bloques: No
+Tipo de Batería predeterminado:	Usar Primer Tipo Escogido
+Contra factor:		2
+[V] Buffer de compilación mayor
+[V] Registro a mem.cache
+[V] Hackear SP
+[V] usar TLB
+[ ] Demorar Interrupción 'SI'
+[ ] RSP Audio Signal
+
+Para otras versiones de Project64, la configuración de la ROM debe coincidir con la del GoldenEye original.
+
+
+--------------------------------------------------------------------
+2. CONTENIDO DE LA TRADUCCIÓN
+--------------------------------------------------------------------
+
+-> Características de la traducción completa:
+
+-Todos los textos en inglés del juego han sido traducidos y adaptados.
+Los textos traducidos incluyen:
+-Incorporación de los carácteres castellanos á,é,í,ó,ú,ñ,¡,¿.
+-Todos los diálogos, adaptados en la medida de lo posible a las
+frases de la película GoldenEye en castellano.
+-Todos los menús, tanto dentro como fuera de misión, incluídos los 
+nombres de las misiones en las diapositivas, los nombres de los trucos,
+los modos de juego y los textos de fondo en forma de textura.
+-Algunas texturas del juego con textos en inglés. Además, se han 
+cambiado las texturas del helicóptero Pirate para asemejarlo al 
+helicóptero de la película, llamado Tiger.
+-Se ha cambiado el nombre de "Arkangelsk" por "Arkhangelsk", el
+verdadero nombre ruso. También se ha traducido "Janus" por "Jano",
+de acuerdo a la película en castellano.
+-La secuencia de créditos ha sido modificada para incorporar a todo
+el personal involucrado en el desarrollo del juego original, así como
+los traductores al castellano y algunos agradecimientos.
+
+
+
+En la versión 1.1 se han corregido muchos errores ortográficos,
+de puntuación, de colocación de textos y traducciones incomprensibles.
+
+En la versión 1.2 se ha corregido un problema con el audio cuando
+se utilizaba la traducción en el flashcard Everdrive 64 en la consola
+original. También se han cambiado algunas entradas para adecuarlas
+mejor al idioma castellano.
+
+En la versión 2.0 se ha contado con la colaboración de IlDucci para una revisión exhaustiva de la traducción previa. Muchos textos han sido corregidos para conseguir una traducción más natural. También se han empleado técnicas más avanzadas de hackeo para adaptar los textos a la gramática castellana. Por último, se han incluído todos los cambios a la versión PAL.
+
+
+--------------------------------------------------------------------
+3. TRADUCCIÓN Y AGRADECIMIENTOS
+--------------------------------------------------------------------
+
+La traducción inicial fue realizada por Sogun (sogunstudio@gmail.com) 
+con el editor "GE Setup Editor" creado por SubDrag, Wreck y Zoinkity.
+Dicho editor puede ser descargado de la web www.goldeyevault.com
+desde el siguiente enlace:
+http://www.goldeneyevault.com/files/tools/setupeditor21/geeditsetupeditorinstaller2.exe
+
+Agradecer a Subdrag, Zoinkity, Wreck, Dragonsbrethren, Spyster y 
+Corrigo (autor de la traducción al francés) toda la ayuda proporcionada y
+todas las dudas resueltas.
+
+Muchísimas gracias a IlDucci por todo el trabajo realizado en la versión 2.0 del parche. Gracias a él la traducción tiene una precisión que a mí me hubiese sido imposible conseguir. Además, ahora es posible parchear la rom PAL también.
+
+El progreso de la traducción hasta la versión 1.2 puede verse en los foros de
+www.shootersforever.com, concretamente en el hilo:
+http://www.shootersforever.com/forums_message_boards/viewtopic.php?t=5139&postdays=0&postorder=asc&start=0
+
+
+Cualquier error que puedas encontrar en la traducción, comunícamelo a
+sogunstudio@gmail.com. Escribe en el asunto del correo que se trata
+de la traducción al castellano del Goldeneye o el correo podría ser
+ignorado.
+También puedes visitar mi blog y dejarme un comentario en la entrada
+correspondiente:
+http://sogunstudio.blogspot.com/2011/08/goldeneye-007-en-castellano.html
+
+IlDucci es el responsable de muchas otras traducciones al castellano. Entre ellas otros juegos de Nintendo 64. Si estás interesado visita su web: http://tiovictor.romhackhispano.org/
+
+
+--------------------------------------------------------------------
+4. NOTAS LEGALES
+--------------------------------------------------------------------
+
+Este parche de traducción al castellano de GoldenEye no es oficial y
+no tiene el apoyo de Nintendo o Rare.
+
+Este parche es gratuito y puede ser distribuido libremente. También 
+puede ser modificado y distribuido sin permiso del autor, con la 
+condición de que se adjunte este documento de texto como indicativo
+del trabajo realizado.
+
+
+--------------------------------------------------------------------
+
+Gracias por usar este parche de traducción y disfruta del juego.
+
+El traductor, Sogun.
+
+Visita mi blog: http://sogunstudio.blogspot.com/

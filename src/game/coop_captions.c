@@ -15,6 +15,7 @@
  * Caption Style = Classic brings Rare's back everywhere.
  */
 #include <ultra64.h>
+#include "port_lang.h"   /* portTr: the port's own text in the player's language */
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -234,7 +235,7 @@ static Gfx *coopSubPrint(Gfx *gdl, s32 x, s32 y, const char *text, u32 colour)
 static s32 coopSubWrap(const char *text, s32 first, s32 maxw, char rows[][COOPSUB_TEXT], s32 *widths)
 {
     s32 n = 0;
-    const char *p = text;
+    const char *p = portTr(text);   /* whole, before it is cut into rows */
 
     while (*p != '\0' && n < COOPSUB_ROWS)
     {
