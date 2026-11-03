@@ -575,6 +575,7 @@ void coopSendVersusEvent(s32 kind, s32 to, const void *payload, s32 len);
 void coopSendVersusPkt(void *pkt, s32 len);
 u32  coopMatchSerial(void);                         /* coop.c: the host's mission number, as both know it */
 s32  coopVersus(void);                  /* 1 in an online versus match */
+s32  coopVersusCollideSkip(PropRecord *prop); /* another player's body is inside ours: it blocks nothing for now */
 s32  coopVsViewCount(void);             /* 1 in one (one view, ours), else getPlayerCount() */
 s32  coopVsRemote(s32 li);              /* local player li is another PC's: no view, no tick */
 s32  coopVsNetOfLocal(s32 li);
