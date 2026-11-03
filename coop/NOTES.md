@@ -4233,3 +4233,21 @@ The intro has no Natalya in it and looks the same on both screens (rig).
   Data/README.txt only. v0.8.0 puts in lang/es/port.po and language.ini, leaves
   README.txt, midas.ini and a lang/es/deeper/ file alone, and clears the list and the
   zip. A v0.8.1 unzipped over it puts nothing in. Case 6 fails on the build before this.
+
+## Notification Size (2026-11-03, COOP_VERSION stays 17)
+
+- Testers' ask: a way to make the co-op notifications smaller. Text Size only
+  goes up (100 % to 200 %) and scales every piece of co-op text, so it can't.
+- Port Options > Notification Size (`toast_size` under `[display]`, 50 / 75 /
+  100 %, default 100). Each player's own, nothing sent.
+- coop_chat.c coopFeedRender: with it below 100 the toasts get a bracket of
+  their own at HUD Scale x Text Size x Notification Size, pinned at the screen
+  point where the stack sat (above the chat lines), so the left edge lines up
+  with the chat and the stack still grows upwards from the same spot. They wrap
+  to maxw / k (the same width on screen, so a small toast takes fewer rows),
+  but no further than the view's right edge less 0x14: textRenderOutlined clips
+  at viGetX() before the bracket scales, and a first try at 50 % lost the word
+  past it ("DESTROY ALL ALARMS [AND] COMMUNICATION ..."). Chat lines, the
+  typing line, captions and the HUD don't change.
+- coop_access.c coopTextScaleBeginBy is coopTextScaleBegin times k;
+  coopTextScaleNow is the scale both use.

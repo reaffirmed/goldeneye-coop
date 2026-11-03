@@ -281,6 +281,9 @@ Options > Gameplay > Accessibility:
 - Colour Blind: Red-Green or Blue-Yellow player colours for name tags, the
   radar and the chat feed.
 - Text Size: 100% to 200% for co-op text, captions and mission messages.
+- Notification Size (Port Options): 50%, 75% or 100% for the co-op
+  notifications at the bottom left (objectives done, players joining or
+  leaving), on top of Text Size. Chat stays at Text Size.
 - Screen Shake: Off stops explosions shaking the view.
 - Crouch Key and Walk Key: Hold or Toggle (press once on, again off).
 

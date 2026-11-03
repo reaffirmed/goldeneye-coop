@@ -127,6 +127,7 @@ __attribute__((weak)) s32 portAccessCaptions(void)    { return 0; }
 __attribute__((weak)) s32 portAccessColorblind(void)  { return 0; }
 __attribute__((weak)) s32 portAccessScreenShake(void) { return 1; }
 __attribute__((weak)) s32 portAccessTextSize(void)    { return 100; }
+__attribute__((weak)) s32 portAccessToastSize(void)   { return 100; }
 
 __attribute__((weak)) s32 portWeaponFov(void)   /* video.c: [display] weapon_fov, vanilla off (Match View) */
 {

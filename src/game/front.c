@@ -4775,6 +4775,7 @@ static const struct PortSheetRow port_sheet_rows_portopts[] = {
 #endif
     { SHROW_OPT, "coop_menu" },              /* the CO-OP screen: Modern, or Classic on the folder */
     { SHROW_OPT, "partner_fade" },           /* story co-op: a partner up close fades out (coop_fade.c) */
+    { SHROW_OPT, "toast_size" },             /* the co-op notifications bottom left, smaller (coop_chat.c) */
     { SHROW_OPT, "unlimited_explosions" },   /* default ON */
     { SHROW_OPT, "watch_static" },           /* the watch's fuzz, default ON (vanilla) */
     { SHROW_OPT, "fast_pause" },             /* the watch at Rare's top speed, default OFF */

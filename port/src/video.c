@@ -149,6 +149,7 @@ static int s_CfgCaptions = 0;       /* [display] captions: sound captions (gunfi
 static int s_CfgColorblind = 0;     /* [display] colorblind: player colours, 0 standard, 1 red-green, 2 blue-yellow */
 static int s_CfgScreenShake = 1;    /* [display] screen_shake: explosions shake the view (vanilla on) */
 static int s_CfgTextSize = 100;     /* [display] text_size: co-op text, captions and messages, percent */
+static int s_CfgToastSize = 100;    /* [display] toast_size: the co-op notifications (toasts), percent of Text Size */
 static int s_CfgCaptionStyle = 0;   /* [display] caption_style: 0 Modern (coop_captions.c), 1 Classic (Rare's message lines) */
 static int s_CfgPartnerFade = 100;  /* [display] partner_fade: how strongly a partner up close fades out (coop_fade.c), percent, 0 off .. 200 */
 static int s_CfgWeaponFov = 0;      /* [display] weapon_fov: 1 = the gun draws at the default FOV (gunfire.c), 0 = Match View */
@@ -424,6 +425,7 @@ s32 portAccessCaptions(void)   { return s_CfgCaptions; }
 s32 portAccessColorblind(void) { return s_CfgColorblind; }
 s32 portAccessScreenShake(void) { return s_CfgScreenShake; }
 s32 portAccessTextSize(void)   { return s_CfgTextSize; }
+s32 portAccessToastSize(void)  { return s_CfgToastSize; }
 s32 portCaptionsClassic(void)  { return s_CfgCaptionStyle; }
 s32 portPartnerFade(void)      { return s_CfgPartnerFade; }
 
@@ -1357,6 +1359,7 @@ static int videoSetDisplayOption(const char *key, const char *value)
     if (SDL_strcasecmp(key, "colorblind") == 0)   { s_CfgColorblind = SDL_clamp(SDL_atoi(value), 0, 2); return 1; }
     if (SDL_strcasecmp(key, "screen_shake") == 0) { s_CfgScreenShake = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "text_size") == 0)    { s_CfgTextSize = SDL_clamp(SDL_atoi(value), 100, 200); return 1; }
+    if (SDL_strcasecmp(key, "toast_size") == 0)   { s_CfgToastSize = SDL_clamp(SDL_atoi(value), 50, 100); return 1; }
     if (SDL_strcasecmp(key, "caption_style") == 0) { s_CfgCaptionStyle = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "partner_fade") == 0)
     {   /* a percent; 1 is the old on/off toggle's on, so an older midas.ini keeps the standard strength */
@@ -1645,6 +1648,7 @@ s32 portVideoOptionGet(const char *key, s32 *out)
     if (SDL_strcasecmp(key, "colorblind") == 0)   { *out = s_CfgColorblind; return 1; }
     if (SDL_strcasecmp(key, "screen_shake") == 0) { *out = s_CfgScreenShake; return 1; }
     if (SDL_strcasecmp(key, "text_size") == 0)    { *out = s_CfgTextSize; return 1; }
+    if (SDL_strcasecmp(key, "toast_size") == 0)   { *out = s_CfgToastSize; return 1; }
     if (SDL_strcasecmp(key, "caption_style") == 0) { *out = s_CfgCaptionStyle; return 1; }
     if (SDL_strcasecmp(key, "partner_fade") == 0) { *out = s_CfgPartnerFade; return 1; }
     if (SDL_strcasecmp(key, "weapon_fov") == 0)   { *out = s_CfgWeaponFov; return 1; }
@@ -2499,6 +2503,7 @@ static void videoWriteDefaultIni(void)
     fprintf(f, "colorblind=%d\n", s_CfgColorblind);
     fprintf(f, "screen_shake=%d\n", s_CfgScreenShake);
     fprintf(f, "text_size=%d\n", s_CfgTextSize);
+    fprintf(f, "toast_size=%d\n", s_CfgToastSize);
     fprintf(f, "caption_style=%d\n", s_CfgCaptionStyle);
     fprintf(f, "partner_fade=%d\n", s_CfgPartnerFade);
     fprintf(f, "setting_help=%d\n", s_CfgSettingHelp);
