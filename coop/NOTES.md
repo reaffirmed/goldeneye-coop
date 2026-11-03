@@ -4010,11 +4010,14 @@ the silenced PP7 for 4 s (GE_COOP_TESTAIMCHR=6:20:4 GE_COOP_TESTFIRE=5:22:4),
 host's for that player.
 - No added lag: before and after both counted 12 shots, the same loudness as
   the joiner's own game (1.00, 1.86, 2.72, 3.55 ...).
-- GE_COOP_NETSIM=60:40:2 and 120:100:5: before, 16 counts for 12 shots in
-  each (one STATE counted 3 times took the host to 4.72 where the joiner's own
-  game was at 3.54; another was counted 4 times); after, 12 counts, each within
-  0.02 of the joiner's own.
+- GE_COOP_NETSIM=60:40:2 and 120:100:5: before, 15 and 23 counts for 12
+  shots (a repeat adds the gun's 1.0 again: shot 3 read 2.86 on the host and
+  2.72 on the joiner); after, 12 counts, each within 0.06 of the joiner's own
+  (the noise decays on each game's own ticks, so a late packet moves where on
+  the decay a shot lands).
 - No added lag, the joiner at 30 ticks a second (GE_TICKHZ=30, a slower PC):
   before, every shot was counted twice (1.00, 1.99, 2.73, 3.72 ...), so the
   silenced PP7 was as loud on the host as an unsilenced one; after, once each
   (1.00, 1.73, 2.47, 3.16 against the joiner's own 0.98, 1.72, 2.45, 3.13).
+- Stamped logs and the temporary log patch: goldeneye-coop/suppressor/ in the
+  project files (evidence-db95143).
