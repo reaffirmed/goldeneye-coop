@@ -66,6 +66,7 @@
 #include "coop_net.h"
 #include "math_atan2f.h"
 #include "initanitable.h"
+#include "port_lang.h"   /* portTr: the port's own text in the player's language */
 
 extern void portConLogf(const char *fmt, ...);
 extern float sinf(float);
@@ -360,11 +361,11 @@ static void coopVsGone(s32 li)
     g_playerPlayerData[li].have_token_or_goldengun = 0;
     if (sVsName[li][0] != '\0')
     {
-        snprintf(msg, sizeof(msg), "%s|LEFT THE MATCH", sVsName[li]);
+        snprintf(msg, sizeof(msg), portTr("%s|LEFT THE MATCH"), sVsName[li]);
     }
     else
     {
-        snprintf(msg, sizeof(msg), "A PLAYER|LEFT THE MATCH");
+        snprintf(msg, sizeof(msg), "%s", portTr("A PLAYER|LEFT THE MATCH"));
     }
     coopFeedToast(msg, (p < COOP_MAX_PLAYERS) ? p : -1);
     portConLogf("ge: versus: local player %d (player %d) left the match\n", li + 1, p + 1);
@@ -739,11 +740,11 @@ static void coopVsKillFeed(s32 lk, s32 lv)
     victim[strcspn(victim, "\n")] = '\0';
     if (lk == lv)
     {
-        snprintf(msg, sizeof(msg), "%s|KILLED THEMSELVES", killer);
+        snprintf(msg, sizeof(msg), portTr("%s|KILLED THEMSELVES"), killer);
     }
     else
     {
-        snprintf(msg, sizeof(msg), "%s|KILLED %s", killer, victim);
+        snprintf(msg, sizeof(msg), portTr("%s|KILLED %s"), killer, victim);
     }
     coopFeedToast(msg, (sVsNet[lk] < COOP_MAX_PLAYERS) ? sVsNet[lk] : -1);
 }

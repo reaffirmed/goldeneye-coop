@@ -29,6 +29,8 @@
 #include "bondinv.h"
 #include "gun.h"
 #include "coop.h"
+#include "port_lang.h"   /* portTr: the port's own text in the player's language */
+#include "language.h"     /* j_text_trigger: Japanese two-byte text */
 
 extern void portConLogf(const char *fmt, ...);
 extern void hudmsgBottomShow(char *mess);
@@ -65,7 +67,9 @@ static void coopGiveCopy(char *out, s32 cap, const char *in)
 
     for (; in != NULL && *in != '\0' && *in != '\n' && k < cap - 1; in++)
     {
-        out[k++] = ((u8) *in >= 0x80 || (u8) *in < 0x20) ? '?' : *in;
+        /* a weapon's name from the game's text: a translation's Latin-1
+         * letters (0xA0..0xFF) stay, but not Japanese two-byte glyphs */
+        out[k++] = (((u8) *in >= 0x80 && ((u8) *in < 0xA0 || j_text_trigger)) || (u8) *in < 0x20) ? '?' : *in;
     }
     out[k] = '\0';
 }
@@ -86,7 +90,7 @@ static void coopGiveRounds(char *out, s32 cap, s32 type, s32 n)
         case AMMO_GRENADEROUND: what = (n == 1) ? "grenade round" : "grenade rounds"; break;
         default:               what = (n == 1) ? "round" : "rounds"; break;
     }
-    snprintf(out, cap, "%d %s", n, what);
+    snprintf(out, cap, "%d %s", n, portTr(what));
 }
 
 static void coopGiveWeaponName(char *out, s32 cap, s32 weapon)
@@ -160,18 +164,18 @@ void coopGivePress(void)
             if (near.dead)
             {
                 portConLogf("ge: coop: give: refused: the partner is down\n");
-                snprintf(msg, sizeof(msg), "%s is down.\n", name);
+                snprintf(msg, sizeof(msg), portTr("%s is down.\n"), name);
             }
             else if (neardist > COOPGIVE_RANGE || coopGiveAbs(near.pos.f[1] - bond->pos.f[1]) > COOPGIVE_HEIGHT)
             {
                 portConLogf("ge: coop: give: partner too far (%.0f %.0f %.0f vs %.0f %.0f %.0f)\n", near.pos.f[0], near.pos.f[1],
                             near.pos.f[2], bond->pos.f[0], bond->pos.f[1], bond->pos.f[2]);
-                snprintf(msg, sizeof(msg), "Get closer to %s.\n", name);
+                snprintf(msg, sizeof(msg), portTr("Get closer to %s.\n"), name);
             }
             else
             {
                 portConLogf("ge: coop: give: partner not in front\n");
-                snprintf(msg, sizeof(msg), "Face %s to give.\n", name);
+                snprintf(msg, sizeof(msg), portTr("Face %s to give.\n"), name);
             }
             hudmsgBottomShow(msg);
             return;
@@ -259,12 +263,12 @@ void coopGiveReceive(CoopGive *give, s32 from)
         coopGiveWeaponName(gun, sizeof(gun), give->weapon);
         if (a.gotweapon)
         {   /* a toast each, bottom left (coop_chat.c) */
-            snprintf(msg, sizeof(msg), "%s gave you the %s", name, gun);
+            snprintf(msg, sizeof(msg), portTr("%s gave you the %s"), name, gun);
             coopFeedToast(msg, from);
         }
         if (a.amount > 0)
         {
-            snprintf(msg, sizeof(msg), "%s gave you %s", name, rounds);
+            snprintf(msg, sizeof(msg), portTr("%s gave you %s"), name, rounds);
             coopFeedToast(msg, from);
         }
         else if (!a.gotweapon)
@@ -302,17 +306,17 @@ void coopGiveReturned(CoopGive *give, s32 from)
     coopGiveWeaponName(gun, sizeof(gun), give->weapon);
     if (give->gotweapon)
     {
-        snprintf(msg, sizeof(msg), "Gave %s the %s", name, gun);
+        snprintf(msg, sizeof(msg), portTr("Gave %s the %s"), name, gun);
         coopFeedToast(msg, from);
     }
     if (give->amount > 0)
     {
-        snprintf(msg, sizeof(msg), "Gave %s to %s", rounds, name);
+        snprintf(msg, sizeof(msg), portTr("Gave %s to %s"), rounds, name);
         coopFeedToast(msg, from);
     }
     else if (!give->gotweapon)
     {
-        snprintf(msg, sizeof(msg), "%s is full on that ammo", name);
+        snprintf(msg, sizeof(msg), portTr("%s is full on that ammo"), name);
         coopFeedToast(msg, from);
     }
 }

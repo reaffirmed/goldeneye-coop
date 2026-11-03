@@ -54,6 +54,7 @@
 #include "port_save.h"
 #include <music.h>
 #include <snd.h>
+#include "port_lang.h"   /* portTr: the port's own text in the player's language */
 
 extern s32 chrlvCurrentPlayerCall7F0B0E24(ChrRecord *self);
 extern PROP getPropForHeldItem(ITEM_IDS item);
@@ -1247,11 +1248,11 @@ static void coopVersionMismatch(s32 c, s32 theirs)
     portConLogf("ge: coop: player on channel %d runs co-op version %d, we run %d\n", c, theirs, COOP_VERSION);
     if (coopNetIsHost())
     {
-        snprintf(text, sizeof(text), "A player tried to join with\nanother version of the game\n(theirs %d, yours %d).", theirs, COOP_VERSION);
+        snprintf(text, sizeof(text), portTr("A player tried to join with\nanother version of the game\n(theirs %d, yours %d)."), theirs, COOP_VERSION);
     }
     else
     {
-        snprintf(text, sizeof(text), "The host runs another version\n(theirs %d, yours %d). You both\nneed the same co-op build.", theirs, COOP_VERSION);
+        snprintf(text, sizeof(text), portTr("The host runs another version\n(theirs %d, yours %d). You both\nneed the same co-op build."), theirs, COOP_VERSION);
     }
     coopScreenError("Different Versions", text);
 }
@@ -1407,7 +1408,7 @@ static void coopLinkWarnTick(u32 now)
         }
         told[p] = now;
         /* the host hears about a joiner's line, a joiner about its own: either way it is that pair's */
-        snprintf(text, sizeof(text), "%s|slow connection (%d ms, %d%% loss)", coopPlayerName(p), (int) l.rtt, (int) l.loss);
+        snprintf(text, sizeof(text), portTr("%s|slow connection (%d ms, %d%% loss)"), coopPlayerName(p), (int) l.rtt, (int) l.loss);
         coopFeedToast(text, p);
         portConLogf("ge: coop: net: player %d's line is poor: %d ms, %d%% loss, %d ms jitter\n", p + 1, (int) l.rtt, (int) l.loss, (int) l.jitter);
     }
@@ -8043,7 +8044,7 @@ static void coopLivesApply(const u8 *raw, s32 from)
         {
             char text[48];
 
-            snprintf(text, sizeof(text), (m.lives == 1) ? "Back in: last life" : "Back in: %d lives left", (int) m.lives);
+            snprintf(text, sizeof(text), (m.lives == 1) ? portTr("Back in: last life") : portTr("Back in: %d lives left"), (int) m.lives);
             coopFeedToast(text, -1);
         }
         if (m.out && !sLateJoin && !g_CurrentPlayer->bonddead)
@@ -8460,15 +8461,15 @@ s32 coopDeadTick(void)
         {
             char text[96];
             s32 n = snprintf(text, sizeof(text), "%s",
-                             sDownRule == COOPDOWN_TIMER ? "Waiting for your partners to get clear..." : "Down! A partner can hold Use by you to revive you.");
+                             sDownRule == COOPDOWN_TIMER ? portTr("Waiting for your partners to get clear...") : portTr("Down! A partner can hold Use by you to revive you."));
 
             if (sLivesLeft == 1)
             {
-                snprintf(text + n, sizeof(text) - n, " Last life.");
+                snprintf(text + n, sizeof(text) - n, "%s", portTr(" Last life."));
             }
             else if (sLivesLeft > 1)
             {
-                snprintf(text + n, sizeof(text) - n, " %d lives left.", (int) sLivesLeft);
+                snprintf(text + n, sizeof(text) - n, portTr(" %d lives left."), (int) sLivesLeft);
             }
             strcat(text, "\n");
             hudmsgBottomShow(text);
@@ -8681,7 +8682,7 @@ static void coopDropInTick(void)
     {
         char text[48];
 
-        snprintf(text, sizeof(text), "Dropped in beside %s", coopPlayerName(partner));
+        snprintf(text, sizeof(text), portTr("Dropped in beside %s"), coopPlayerName(partner));
         coopFeedToast(text, partner);
     }
     portConLogf("ge: coop: dropped in beside player %d after %.1f s (calm %.1f s)\n",
@@ -8717,8 +8718,8 @@ static s32 coopDropInBanner(char *line1, char *line2, s32 cap)
     {
         eta = coopDropInMin() - (s32) waited;
     }
-    snprintf(line1, cap, "DROPPING IN BESIDE %s", coopPlayerName(partner));
-    snprintf(line2, cap, calm < COOP_RESPAWN_CALM ? "WHEN IT GOES QUIET %d" : "IN %d", (int) ((eta < 0 ? 0 : eta) + 59) / 60);
+    snprintf(line1, cap, portTr("DROPPING IN BESIDE %s"), coopPlayerName(partner));
+    snprintf(line2, cap, calm < COOP_RESPAWN_CALM ? portTr("WHEN IT GOES QUIET %d") : portTr("IN %d"), (int) ((eta < 0 ? 0 : eta) + 59) / 60);
     return 1;
 }
 
@@ -9276,7 +9277,7 @@ const char *coopPlayerName(s32 p)
     {
         return n;
     }
-    snprintf(fallback[p], sizeof(fallback[p]), "Player %d", p + 1);
+    snprintf(fallback[p], sizeof(fallback[p]), portTr("Player %d"), p + 1);
     return fallback[p];
 }
 
@@ -10521,26 +10522,26 @@ static void coopApplyNote(CoopEvent *ev)
         case COOPNOTE_LOST:
             sR[p].lost = 1;
             sR[p].lostMs = coopNowMs();
-            snprintf(msg, sizeof(msg), "%s lost connection.\n", name);
+            snprintf(msg, sizeof(msg), portTr("%s lost connection.\n"), name);
             break;
         case COOPNOTE_BACK:
             sR[p].lost = 0;
-            snprintf(msg, sizeof(msg), "%s is back.\n", name);
+            snprintf(msg, sizeof(msg), portTr("%s is back.\n"), name);
             break;
         case COOPNOTE_GONE:
             sR[p].valid = 0;
             sR[p].lost = 0;
-            snprintf(msg, sizeof(msg), "%s disconnected.\n", name);
+            snprintf(msg, sizeof(msg), portTr("%s disconnected.\n"), name);
             break;
         case COOPNOTE_LEFT:
             sR[p].valid = 0;
             sR[p].lost = 0;
-            snprintf(msg, sizeof(msg), "%s left the game.\n", name);
+            snprintf(msg, sizeof(msg), portTr("%s left the game.\n"), name);
             break;
         case COOPNOTE_LEFTMISSION:
             sR[p].valid = 0;
             sR[p].lost = 0;
-            snprintf(msg, sizeof(msg), "%s left the mission.\n", name);
+            snprintf(msg, sizeof(msg), portTr("%s left the mission.\n"), name);
             break;
         default:
             if (ev->u.note.what >= 200)
@@ -10800,7 +10801,7 @@ static void coopSessionTick(void)
                 char line[56];
 
                 sHostWaiting = HOSTW_NONE;
-                snprintf(line, sizeof(line), "%s IS THE HOST NOW", sMigRoster[sMigNewHost].name);
+                snprintf(line, sizeof(line), portTr("%s IS THE HOST NOW"), sMigRoster[sMigNewHost].name);
                 coopUpper(line);
                 coopBanner(line, sHostLeftHow == COOPBYE_HANDOFF ? "THE OLD HOST HANDED OVER" : "THE OLD HOST LEFT");
                 portConLogf("ge: coop: connected to the new host, we are player %d now\n", coopSelf() + 1);
@@ -10835,8 +10836,8 @@ s32 coopHudSessionBanner(char *line1, char *line2, s32 cap)
     {
         s32 left = (s32) (coopHostWaitMs() - (now - sHostWaitMs) + 999) / 1000;
 
-        snprintf(line1, cap, "HOST NOT RESPONDING: %s", coopPlayerName(0));
-        snprintf(line2, cap, coopHostLeavesRule() == 1 ? "BACK TO THE LOBBY IN %d" : "WAITING FOR THE HOST %d",
+        snprintf(line1, cap, portTr("HOST NOT RESPONDING: %s"), coopPlayerName(0));
+        snprintf(line2, cap, coopHostLeavesRule() == 1 ? portTr("BACK TO THE LOBBY IN %d") : portTr("WAITING FOR THE HOST %d"),
                  left < 0 ? 0 : (int) left);
         return 1;
     }
@@ -12272,6 +12273,11 @@ void coopAsciiName(char *out, s32 cap, const char *in, s32 upper)
             cp = *p & 0x07;
             len = 4;
         }
+        else if (*p >= 0xA0)
+        {
+            cp = *p;    /* the game's own text: a translation's Latin-1 letter */
+            len = 1;
+        }
         else
         {
             p++;    /* a stray continuation byte */
@@ -12281,9 +12287,15 @@ void coopAsciiName(char *out, s32 cap, const char *in, s32 upper)
         {
             if ((p[k] & 0xC0) != 0x80)
             {
-                break;  /* cut short (a name clipped to its buffer) */
+                break;  /* cut short (a name clipped to its buffer), or Latin-1 */
             }
             cp = (cp << 6) | (p[k] & 0x3F);
+        }
+        if (k < len && p[k] != '\0' && *p >= 0xA0)
+        {   /* not UTF-8: a Latin-1 letter from the game's text */
+            cp = *p;
+            k = 1;
+            len = 1;
         }
         p += k;
         if (k < len)

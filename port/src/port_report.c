@@ -19,6 +19,7 @@
  * Each folder keeps its newest REPORT_KEEP reports.
  */
 #include <stdio.h>
+#include "port_lang.h"   /* portTr: the crash and bug report boxes in the player's language */
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -765,12 +766,13 @@ void portReportCrashAsk(void)
             return;     /* the next start asks */
         }
         EnumThreadWindows(GetCurrentThreadId(), reportHideWindow, 0);
+        /* MessageBoxA: the game's Latin-1 is the Western ANSI code page's letters */
         yes = MessageBoxA(NULL,
-            "GoldenEye Co-op crashed, sorry about that.\n\n"
+            portTr("GoldenEye Co-op crashed, sorry about that.\n\n"
             "A crash report was saved. Put it on your Desktop as a zip so you can send it?\n"
             "It is copied too: paste it straight into Discord.\n\n"
-            "It has the game's log, its settings and a memory dump, nothing else.",
-            "GoldenEye Co-op crashed", MB_YESNO | MB_ICONERROR | MB_TOPMOST | MB_SETFOREGROUND) == IDYES;
+            "It has the game's log, its settings and a memory dump, nothing else."),
+            portTr("GoldenEye Co-op crashed"), MB_YESNO | MB_ICONERROR | MB_TOPMOST | MB_SETFOREGROUND) == IDYES;
         if (!yes)
         {
             return;     /* asked again next start */
@@ -782,8 +784,8 @@ void portReportCrashAsk(void)
         if (!reportAutoAnswer())
         {
             reportShowInFolder(zip);
-            snprintf(text, sizeof(text), "Saved %s\n\nIt is on the clipboard: paste it into Discord to send it.", zip);
-            MessageBoxA(NULL, text, "Crash report saved", MB_OK | MB_ICONINFORMATION | MB_TOPMOST);
+            snprintf(text, sizeof(text), portTr("Saved %s\n\nIt is on the clipboard: paste it into Discord to send it."), zip);
+            MessageBoxA(NULL, text, portTr("Crash report saved"), MB_OK | MB_ICONINFORMATION | MB_TOPMOST);
         }
     }
 #endif
@@ -829,12 +831,12 @@ void portReportBootCheck(void)
     else if (getenv("GE_NOMSGBOX") == NULL && getenv("GE_FRAMES") == NULL)
     {
         switch (MessageBoxA(NULL,
-            "The game crashed last time and saved a crash report.\n\n"
+            portTr("The game crashed last time and saved a crash report.\n\n"
             "Save it to your Desktop as a zip so you can send it? It is copied too, "
             "so you can paste it straight into Discord.\n\n"
             "It has the game's log, its settings and a memory dump, nothing else.\n\n"
-            "Yes: save it.   No: don't send it.   Cancel: ask me next time.",
-            "GoldenEye Co-op crashed last time", MB_YESNOCANCEL | MB_ICONWARNING | MB_TOPMOST))
+            "Yes: save it.   No: don't send it.   Cancel: ask me next time."),
+            portTr("GoldenEye Co-op crashed last time"), MB_YESNOCANCEL | MB_ICONWARNING | MB_TOPMOST))
         {
         case IDYES: choice = 1; break;
         case IDNO:  choice = 2; break;
@@ -844,21 +846,21 @@ void portReportBootCheck(void)
 #elif defined(GE_VIDEO)
     else if (getenv("GE_NOMSGBOX") == NULL && getenv("GE_FRAMES") == NULL)
     {
-        static const SDL_MessageBoxButtonData buttons[] = {
-            { SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Save to Desktop" },
-            { 0, 2, "Don't send" },
-            { SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Ask me later" },
+        const SDL_MessageBoxButtonData buttons[] = {
+            { SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, portTrUtf8("Save to Desktop") },
+            { 0, 2, portTrUtf8("Don't send") },
+            { SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, portTrUtf8("Ask me later") },
         };
         SDL_MessageBoxData box;
         int hit = 0;
 
         memset(&box, 0, sizeof(box));
         box.flags = SDL_MESSAGEBOX_WARNING;
-        box.title = "GoldenEye Co-op crashed last time";
-        box.message = "The game crashed last time and saved a crash report.\n\n"
+        box.title = portTrUtf8("GoldenEye Co-op crashed last time");
+        box.message = portTrUtf8("The game crashed last time and saved a crash report.\n\n"
                       "Save it to your Desktop as a zip so you can send it? It is copied too, "
                       "so you can paste it straight into Discord.\n\n"
-                      "It has the game's log, its settings and a memory dump, nothing else.";
+                      "It has the game's log, its settings and a memory dump, nothing else.");
         box.numbuttons = 3;
         box.buttons = buttons;
         if (SDL_ShowMessageBox(&box, &hit) == 0)
@@ -983,7 +985,7 @@ static void reportBugFinish(void)
     reportShrinkShot(path);
     if (!reportPackToDesktop(sBugDir, sBugName, sBugFiles, COUNT(sBugFiles), zip, sizeof(zip)))
     {
-        portConPrintf(1, "Couldn't save the bug report zip. The files are in %s\n", sBugDir);
+        portConPrintf(1, portTr("Couldn't save the bug report zip. The files are in %s\n"), sBugDir);
         return;
     }
     leaf = strrchr(zip, '/');
@@ -995,8 +997,8 @@ static void reportBugFinish(void)
 #endif
     leaf = leaf != NULL ? leaf + 1 : zip;
     portConLogf("ge: bug report saved: %s\n", zip);
-    portConPrintf(1, "Bug report saved to your Desktop: %s\n", leaf);
-    portConPrintf(1, "It is copied: paste it into Discord to send it.\n");
+    portConPrintf(1, portTr("Bug report saved to your Desktop: %s\n"), leaf);
+    portConPrintf(1, "%s", portTr("It is copied: paste it into Discord to send it.\n"));
 }
 
 /* harness: GE_BUGTEST=<frame> presses F8, GE_CRASHTEST=<frame> crashes */

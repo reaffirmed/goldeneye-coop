@@ -1,4 +1,5 @@
 #include <os_extension.h>
+#include "port_lang.h"   /* portTr: the port's own text in the player's language */
 #ifndef TARGET_N64
 #include <stdio.h> /* frontDrawCursor GE_DUMP_BOND probe */
 #endif
@@ -4666,7 +4667,8 @@ static const struct PortSheetRow port_sheet_rows_general[] = {
 /* PORT OPTIONS: the port's own gameplay switches. p1 ends
  * match is ini-only (default on); play as ssf character is ini-only. */
 static const struct PortSheetRow port_sheet_rows_portopts[] = {
-    { SHROW_OPT, "unlock_all" },   /* first */
+    { SHROW_OPT, "language" },     /* the game's and the port's text (port_lang.c), at the next start */
+    { SHROW_OPT, "unlock_all" },
     { SHROW_OPT, "fix_shootthrough" }, { SHROW_OPT, "distance_fading" },
     { SHROW_OPT, "true_enemy_rockets" },
 #if COOP_SMARTER_AI   /* paused since v0.6.1 (coop.h) */
@@ -6393,7 +6395,7 @@ static const char *portSheetLabel(s32 row)
     if (port_sheet_row_kind[row] == SHROW_PLAYERPICK)
     {
         static char text[16];
-        sprintf(text, "Player %d\n", (s32) (port_sheet_row_bind[row] + 1));
+        sprintf(text, portTr("Player %d\n"), (s32) (port_sheet_row_bind[row] + 1));
         return text;
     }
     if (port_sheet_row_kind[row] == SHROW_GOBINDS)
@@ -7351,12 +7353,12 @@ static const char *portSheetTitle(void)
 
     if (port_sheet_kind == PORT_SHEET_PLAYER)
     {
-        sprintf(text, "PLAYER %d\n", (s32) (port_sheet_player + 1));
+        sprintf(text, portTr("PLAYER %d\n"), (s32) (port_sheet_player + 1));
         return text;
     }
     if (port_sheet_kind == PORT_SHEET_BINDS)
     {
-        sprintf(text, "P%d REBIND\n", (s32) (port_sheet_player + 1));
+        sprintf(text, portTr("P%d REBIND\n"), (s32) (port_sheet_player + 1));
         return text;
     }
     return port_sheet_title[port_sheet_kind];
@@ -7691,6 +7693,8 @@ static Gfx *portSheetDrawPanel(Gfx *DL, s32 bx0, s32 by0, s32 bx1, s32 by1, f32 
  * than `maxlines` = it does not fit, and only the first `maxlines` are kept). */
 static s32 portSheetHelpWrap(const char *text, s32 small, s32 maxlines, char out[][PORT_SHEET_HELP_LINE])
 {
+    /* PORT_LANG: whole, before it is cut into lines (a cut line is no longer a catalogue key) */
+    text = portTr(text);
     const s32 maxw = PORT_SHEET_HELP_X1 - 1 - PORT_SHEET_LIST_PAD - PORT_SHEET_LABEL_X;
     struct fontchar *chars = small ? ptrFontBankGothicChars : ptrFontZurichBoldChars;
     struct font *font = small ? ptrFontBankGothic : ptrFontZurichBold;
@@ -8516,7 +8520,7 @@ void interface_menu1C_portsheet(void)
                      * through the keyboard's 12-character cap */
                     char q[96];
 
-                    snprintf(q, sizeof(q), "Delete %s?\n", portInputLayoutName(port_sheet_del_idx));
+                    snprintf(q, sizeof(q), portTr("Delete %s?\n"), portInputLayoutName(port_sheet_del_idx));
                     portDlgOpen(q, "Yes\n", "No\n", 0);
                 }
             }
@@ -8685,7 +8689,7 @@ static Gfx *portSheetDrawCredits(Gfx *DL)
     sprintf(built, "%s Build %s", portPlatformName(), portBuildString());
     for (p = 0; p < (s32) (sizeof(port_credits_text) / sizeof(port_credits_text[0])); p++)
     {
-        const char *src = (port_credits_text[p] != NULL) ? port_credits_text[p] : built;
+        const char *src = (port_credits_text[p] != NULL) ? portTr(port_credits_text[p]) : built;   /* whole, before it is wrapped */
         char line[160];
         s32 len = 0;
 
@@ -9058,6 +9062,8 @@ static s32 coopLobbyWrap(const char *text, s32 maxw, char lines[][80], s32 maxli
 {
     s32 n = 0, p = 0;
 
+    text = portTr(text);   /* whole, before it is cut into lines */
+
     while (n < maxlines)
     {
         s32 len = 0, fit = 0, brk = -1;
@@ -9098,6 +9104,27 @@ static s32 coopLobbyWrap(const char *text, s32 maxw, char lines[][80], s32 maxli
         p += fit;
     }
     return n;
+}
+
+/* a campaign label ("Continue: Runway", "Next: Runway") in the player's
+ * language: the code reads it back by its English lead, so only the copy
+ * that is drawn changes */
+static void coopLobbyTrLead(char *label, size_t cap)
+{
+    static const char *const leads[] = { "Continue:", "Next:" };
+    char out[64];
+    size_t i, n;
+
+    for (i = 0; i < sizeof(leads) / sizeof(leads[0]); i++)
+    {
+        n = strlen(leads[i]);
+        if (strncmp(label, leads[i], n) == 0)
+        {
+            snprintf(out, sizeof(out), "%s%s", portTr(leads[i]), label + n);
+            snprintf(label, cap, "%s", out);
+            return;
+        }
+    }
 }
 
 static struct CoopLobbyRow *coopLobbyAdd(s32 kind, s32 arg, const char *label, const char *value)
@@ -9196,7 +9223,9 @@ static void coopVsTrimText(char *out, s32 cap, const char *in)
 
     for (; in != NULL && *in != '\0' && *in != '\n' && k < cap - 2; in++)
     {
-        out[k++] = (*in >= 0x20 && *in < 0x7F) ? *in : '?';
+        /* the game's text: ASCII, or a translation's Latin-1 letters (0xA0..0xFF)
+         * outside Japanese, where a high byte starts a two-byte glyph */
+        out[k++] = ((*in >= 0x20 && *in < 0x7F) || ((u8) *in >= 0xA0 && !j_text_trigger)) ? *in : '?';
     }
     out[k++] = '\n';
     out[k] = '\0';
@@ -9230,6 +9259,44 @@ void coopVsPresenceNames(s32 stage, char *arena, s32 arenacap, char *scenario, s
     }
     snprintf(scenario, scenariocap, "%s", coop_vs_scenario_names[coopVsScenario()]);
     scenario[strcspn(scenario, "\n")] = '\0';
+    for (i = 0; arena[i] != '\0'; i++)
+    {   /* ASCII for Steam and the lobby list: a translated arena name's
+         * Latin-1 letters lose their accents */
+        if ((u8) arena[i] >= 0x80)
+        {
+            arena[i] = (char) portLangAsciiFallback((u8) arena[i]);
+        }
+    }
+}
+
+/* a public game's "what" line ("Co-op: Dam", "Versus: Temple, Normal",
+ * "Co-op lobby", coop_browse.c coopBrowseSetWhat) travels in English; each
+ * player reads it in their own language */
+static void coopBrowseWhatTr(const char *what, char *out, s32 cap)
+{
+    char a[48], b[48];
+    const char *comma;
+    size_t n = strlen(what);
+
+    if (strncmp(what, "Co-op: ", 7) == 0)
+    {
+        snprintf(out, cap, "%s: %s", portTr("Co-op"), portTr(what + 7));
+    }
+    else if (strncmp(what, "Versus: ", 8) == 0 && (comma = strstr(what + 8, ", ")) != NULL)
+    {
+        snprintf(a, sizeof(a), "%.*s", (int) (comma - (what + 8)), what + 8);
+        snprintf(b, sizeof(b), "%s", comma + 2);
+        snprintf(out, cap, "Versus: %s, %s", portTr(a), portTr(b));
+    }
+    else if (n > 6 && strcmp(what + n - 6, " lobby") == 0)
+    {
+        snprintf(a, sizeof(a), "%.*s", (int) (n - 6), what);
+        snprintf(out, cap, portTr("%s lobby"), portTr(a));
+    }
+    else
+    {
+        snprintf(out, cap, "%s", what);
+    }
 }
 
 static void coopVsWeaponsName(s32 sc, s32 w, char *out, s32 cap)
@@ -9417,7 +9484,7 @@ static void coopLobbyAddHostOptions(void)
         char label[48];
 
         coopBrowseTypedMask(typed, sizeof(typed));
-        snprintf(label, sizeof(label), "Password: %s_\n", typed);
+        snprintf(label, sizeof(label), portTr("Password: %s_\n"), typed);
         r = coopLobbyAdd(CLROW_TEXT, 0, label, "Enter\n");
     }
     else
@@ -9438,6 +9505,7 @@ static const char *const coop_lobby_opts[][2] = {
     { "voice_volume", "Voice Volume\n" },
     { "auto_update", "Update Check\n" },   /* the updater (port/src/port_update.c) */
     { "coop_menu", "Co-op Menu\n" },       /* this screen: Modern, or Classic on the folder */
+    { "language", "Language\n" },          /* port_lang.c: this player's own, at the next start */
 };
 
 /* port_profiles.c: player 1's profile carries these rows and the character (its [settings]) */
@@ -9521,7 +9589,7 @@ static void coopLobbyAddUpdate(void)
     switch (portUpdateState())
     {
         case PORTUPD_AVAILABLE:
-            snprintf(label, sizeof(label), "Update to %.20s\n", latest);
+            snprintf(label, sizeof(label), portTr("Update to %.20s\n"), latest);
             if (portUpdateHasDownload())
             {
                 r = coopLobbyAdd(CLROW_UPDATE, 0, label, "Install\n");
@@ -9534,7 +9602,7 @@ static void coopLobbyAddUpdate(void)
             {
                 r->colour = COOP_LOBBY_COL_OK;
             }
-            snprintf(label, sizeof(label), "You have %.20s\n", portUpdateOwn()[0] != '\0' ? portUpdateOwn() : "a build from source");
+            snprintf(label, sizeof(label), portTr("You have %.20s\n"), portUpdateOwn()[0] != '\0' ? portUpdateOwn() : portTr("a build from source"));
             r = coopLobbyAdd(CLROW_TEXT, 0, label, "");
             if (r != NULL)
             {
@@ -9542,12 +9610,12 @@ static void coopLobbyAddUpdate(void)
             }
             break;
         case PORTUPD_DOWNLOADING:
-            snprintf(label, sizeof(label), "Downloading %.20s\n", latest);
+            snprintf(label, sizeof(label), portTr("Downloading %.20s\n"), latest);
             snprintf(value, sizeof(value), "%d%%\n", (int) portUpdateProgress());
             coopLobbyAdd(CLROW_TEXT, 0, label, value);
             break;
         case PORTUPD_INSTALLING:
-            snprintf(label, sizeof(label), "Installing %.20s\n", latest);
+            snprintf(label, sizeof(label), portTr("Installing %.20s\n"), latest);
             coopLobbyAdd(CLROW_TEXT, 0, label, "...\n");
             break;
         case PORTUPD_READY:
@@ -9569,7 +9637,7 @@ static void coopLobbyAddUpdate(void)
             }
             if (newer)
             {
-                snprintf(label, sizeof(label), "Update to %.20s\n", latest);
+                snprintf(label, sizeof(label), portTr("Update to %.20s\n"), latest);
                 coopLobbyAdd(CLROW_UPDATE, 1, label, "Try Again\n");
             }
             else
@@ -9581,7 +9649,7 @@ static void coopLobbyAddUpdate(void)
         default:
             if (portUpdateJustUpdated()[0] != '\0')
             {   /* the game restarted into the update */
-                snprintf(label, sizeof(label), "Updated to %.20s\n", portUpdateJustUpdated());
+                snprintf(label, sizeof(label), portTr("Updated to %.20s\n"), portUpdateJustUpdated());
                 r = coopLobbyAdd(CLROW_TEXT, 0, label, "");
                 if (r != NULL)
                 {
@@ -9692,7 +9760,10 @@ static void coopLobbyBuildRows(void)
             }
             if (coopBrowseWhat(i)[0] != '\0' && coop_lobby_nrows < COOP_LOBBY_ROWS - 4)
             {   /* what it plays, under its name */
-                snprintf(label, sizeof(label), "  %.40s\n", coopBrowseWhat(i));
+                char what[64];
+
+                coopBrowseWhatTr(coopBrowseWhat(i), what, sizeof(what));
+                snprintf(label, sizeof(label), "  %.40s\n", what);
                 r = coopLobbyAdd(CLROW_TEXT, 0, label, "");
                 if (r != NULL)
                 {
@@ -9704,7 +9775,7 @@ static void coopLobbyBuildRows(void)
                 char typed[32];
 
                 coopBrowseTypedMask(typed, sizeof(typed));
-                snprintf(label, sizeof(label), "Password: %s_\n", typed);
+                snprintf(label, sizeof(label), portTr("Password: %s_\n"), typed);
                 r = coopLobbyAdd(CLROW_TEXT, 0, label, "");
                 if (r != NULL)
                 {
@@ -9812,6 +9883,7 @@ static void coopLobbyBuildRows(void)
                     value[0] = '\0';
                 }
                 strcat(label, "\n");
+                coopLobbyTrLead(label, sizeof(label));
                 r = coopLobbyAdd(CLROW_CONTINUE, stage | (diff << 8), label, value);
                 if (r != NULL && !coopLobbyPartnerReady())
                 {
@@ -9862,6 +9934,7 @@ static void coopLobbyBuildRows(void)
                     memmove(label, label + 4, strlen(label + 4) + 1);
                     memcpy(label, "Next:", 5);
                 }
+                coopLobbyTrLead(label, sizeof(label));
                 r = coopLobbyAdd(CLROW_TEXT, 0, label, value);
                 if (r != NULL)
                 {
@@ -9882,7 +9955,7 @@ static void coopLobbyBuildRows(void)
         coopLobbyCopyName(name, sizeof(name), coopPlayerName(i));
         name[strcspn(name, "\n")] = '\0';
         name[(strlen(name) > 30) ? 30 : strlen(name)] = '\0';
-        strcat(name, " Voice\n");
+        strcat(name, portTr(" Voice\n"));
         r = coopLobbyAdd(CLROW_VOICEMUTE, i, name, coopVoiceMuted(i) ? "Muted\n" : "On\n");
         if (r != NULL && coopVoiceMuted(i))
         {
@@ -9895,7 +9968,7 @@ static void coopLobbyBuildRows(void)
 
         coopLobbyCopyName(name, sizeof(name), coopDiscordAskName(i));
         name[strcspn(name, "\n")] = '\0';
-        snprintf(ask, sizeof(ask), "%s asks to join\n", name);
+        snprintf(ask, sizeof(ask), portTr("%s asks to join\n"), name);
         r = coopLobbyAdd(CLROW_DISCORDYES, i, ask, "Let In\n");
         if (r != NULL)
         {
@@ -9933,7 +10006,7 @@ static void coopLobbyBuildRows(void)
         if (coopChatTyping())
         {
             coopChatTypedLine(typed, sizeof(typed));
-            snprintf(text, sizeof(text), "Say: %s_\n", typed);
+            snprintf(text, sizeof(text), portTr("Say: %s_\n"), typed);
             rows = coopLobbyWrap(text, COOP_LOBBY_CHAT_W, wrapped, COOP_LOBBY_VISIBLE - 1);
         }
         for (i = n - 1; i >= 0; i--)
@@ -9975,7 +10048,7 @@ static void coopLobbyBuildRows(void)
         if (coopChatTyping())
         {
             coopChatTypedLine(typed, sizeof(typed));
-            snprintf(text, sizeof(text), "Say: %s_\n", typed);
+            snprintf(text, sizeof(text), portTr("Say: %s_\n"), typed);
             nw[0] = coopLobbyWrap(text, COOP_LOBBY_CHAT_W, wrapped, COOP_LOBBY_VISIBLE - 1);
             for (j = 0; j < nw[0]; j++)
             {
@@ -11637,7 +11710,7 @@ static Gfx *coopMwSeat(Gfx *DL, s32 y, s32 slot, s32 pick, const char *name, con
 
         if (l.loss >= COOP_LINK_FAIR_LOSS)
         {
-            snprintf(text, sizeof(text), "%d%% LOSS", (int) l.loss);
+            snprintf(text, sizeof(text), portTr("%d%% LOSS"), (int) l.loss);
             col = (l.loss >= COOP_LINK_POOR_LOSS) ? MW_RED : MW_GOLD;
         }
         else
@@ -12364,7 +12437,7 @@ static Gfx *coopCharselRender(Gfx *DL)
     }
     if (pick == coopCharacter())
     {
-        snprintf(line + strlen(line), sizeof(line) - strlen(line), "%sYou", n++ ? ", " : "");
+        snprintf(line + strlen(line), sizeof(line) - strlen(line), portTr("%sYou"), n++ ? ", " : "");
     }
     strcat(line, n ? "\n" : "Nobody yet\n");
     DL = coopCharselText(DL, CS_PANEL_X + 2, y + 9, CS_PANEL_R - CS_PANEL_X - 4, line, n ? CS_INK(MW_GREEN, COOP_LOBBY_COL_OK) : CS_INK(MW_DIM, PORT_SHEET_COL_DIM));
@@ -12716,7 +12789,7 @@ static void coopDebriefValue(char *out, s32 player, s32 row, s32 wide)
             v = coopStatsGet(player, COOPSTAT_DAMAGE);
             if (v >= 0)
             {
-                sprintf(out, wide ? "%d.%d bars\n" : "%d.%d\n", v / 100, (v % 100) / 10);
+                sprintf(out, wide ? portTr("%d.%d bars\n") : "%d.%d\n", v / 100, (v % 100) / 10);
                 return;
             }
             break;
@@ -12728,7 +12801,7 @@ static void coopDebriefValue(char *out, s32 player, s32 row, s32 wide)
 
             if (deaths > 0 && revived > 0 && wide)
             {
-                sprintf(out, "%d (%d up)\n", deaths, revived);
+                sprintf(out, portTr("%d (%d up)\n"), deaths, revived);
                 return;
             }
             v = deaths;
@@ -12784,7 +12857,7 @@ static Gfx *coopDebriefStats(Gfx *DL, s32 y0, s32 pitch)
     }
     if (coopPhotoCount() > 0)
     {   /* photo mode's shots from this mission (coop_photo.c) */
-        sprintf(buf, "Photos: %d, in the Photos folder\n", (int) coopPhotoCount());
+        sprintf(buf, portTr("Photos: %d, in the Photos folder\n"), (int) coopPhotoCount());
         x = 0x37;
         y = y0 + (i + 1) * pitch + 4;
         DL = frontPrintText(DL, &x, &y, buf, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
@@ -12863,11 +12936,11 @@ static void coopDebriefVoteLabel(char *out, s32 cap, s32 choice)
     {
         case COOPVOTE_REPLAY:
             name = coopMissionName(coopVoteThisStage());
-            snprintf(out, cap, "Replay: %s\n", name ? name : "this mission");
+            snprintf(out, cap, portTr("Replay: %s\n"), name ? name : portTr("this mission"));
             break;
         case COOPVOTE_NEXT:
             name = (coopVoteNext() >= 0) ? coopMissionName(coopVoteNext()) : NULL;
-            snprintf(out, cap, name ? "Next mission: %s\n" : "Next mission (after a win)\n", name);
+            snprintf(out, cap, name ? portTr("Next mission: %s\n") : portTr("Next mission (after a win)\n"), name);
             break;
         default:
             snprintf(out, cap, "Back to the lobby\n");
@@ -13002,11 +13075,11 @@ static Gfx *coopDebriefVote(Gfx *DL, s32 pitch)
     }
     if (coopVoteLeft() >= 0)
     {
-        snprintf(buf, sizeof(buf), "Voted: %d of %d - decided in %d s\n", voted, here, (coopVoteLeft() + 59) / 60);
+        snprintf(buf, sizeof(buf), portTr("Voted: %d of %d - decided in %d s\n"), voted, here, (coopVoteLeft() + 59) / 60);
     }
     else
     {
-        snprintf(buf, sizeof(buf), "Voted: %d of %d - most votes wins\n", voted, here);
+        snprintf(buf, sizeof(buf), portTr("Voted: %d of %d - most votes wins\n"), voted, here);
     }
     x = 0x37;
     DL = frontPrintText(DL, &x, &y, buf, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
@@ -17331,7 +17404,7 @@ static void portPpoPanelTick(s32 i)
             }
             else if (seat >= 0 && seat != i)
             {
-                snprintf(p->keyMsg, sizeof(p->keyMsg), "In Use by P%d", (int) seat + 1);
+                snprintf(p->keyMsg, sizeof(p->keyMsg), portTr("In Use by P%d"), (int) seat + 1);
             }
             else
             {
@@ -17740,7 +17813,7 @@ static Gfx *portPpoDraw(Gfx *DL)
         {
             const s32 dev = portInputSlotDevice(i);
 
-            snprintf(head, sizeof(head), "Player %d\n", (int) i + 1);
+            snprintf(head, sizeof(head), portTr("Player %d\n"), (int) i + 1);
             DL = portPpoPrintCentred(DL, cx, py + PORT_PPO_HEAD_Y, head, 0xFF);
             if (i == port_ppo_seat)
             {
@@ -17779,7 +17852,7 @@ static Gfx *portPpoDraw(Gfx *DL)
             }
             else
             {
-                snprintf(head, sizeof(head), "Player %d Name\n", (int) i + 1);
+                snprintf(head, sizeof(head), portTr("Player %d Name\n"), (int) i + 1);
             }
         }
         else if (p->view == PORT_PPO_VIEW_LIST && p->listMode == PORT_PPO_LIST_LOAD)
@@ -17792,11 +17865,11 @@ static Gfx *portPpoDraw(Gfx *DL)
         }
         else if (p->view == PORT_PPO_VIEW_LIST && p->listMode == PORT_PPO_LIST_DELSURE)
         {
-            snprintf(head, sizeof(head), "Delete %s?\n", p->delName);
+            snprintf(head, sizeof(head), portTr("Delete %s?\n"), p->delName);
         }
         else if (p->view == PORT_PPO_VIEW_LIST)
         {
-            snprintf(head, sizeof(head), "Player %d Profile\n", (int) i + 1);
+            snprintf(head, sizeof(head), portTr("Player %d Profile\n"), (int) i + 1);
         }
         else if (p->view == PORT_PPO_VIEW_STATS)
         {
@@ -17813,7 +17886,7 @@ static Gfx *portPpoDraw(Gfx *DL)
         }
         else
         {
-            snprintf(head, sizeof(head), "Player %d\n", (int) i + 1);
+            snprintf(head, sizeof(head), portTr("Player %d\n"), (int) i + 1);
         }
         DL = portPpoPrintCentred(DL, cx, py + PORT_PPO_HEAD_Y, head, 0xFF);
         if (p->view == PORT_PPO_VIEW_KEYS)
@@ -19695,7 +19768,7 @@ static const char *portLimValue(const s32 v[PORT_SCEN_FIELDS], s32 field)
     }
     else if (field == PORT_SCEN_TIME)
     {
-        snprintf(text, sizeof(text), "%d Min\n", (int) x);
+        snprintf(text, sizeof(text), portTr("%d Min\n"), (int) x);
     }
     else
     {
@@ -19754,15 +19827,15 @@ static u8 *portMpLengthText(void)
         }
         else if (t > 0 && k > 0)
         {
-            snprintf(limits, sizeof(limits), "%d Min, %d Pts", (int) t, (int) k);
+            snprintf(limits, sizeof(limits), portTr("%d Min, %d Pts"), (int) t, (int) k);
         }
         else if (t > 0)
         {
-            snprintf(limits, sizeof(limits), "%d Min", (int) t);
+            snprintf(limits, sizeof(limits), portTr("%d Min"), (int) t);
         }
         else if (k > 0)
         {
-            snprintf(limits, sizeof(limits), "%d Points", (int) k);
+            snprintf(limits, sizeof(limits), portTr("%d Points"), (int) k);
         }
         else
         {
@@ -19778,15 +19851,15 @@ static u8 *portMpLengthText(void)
     }
     if (t > 0 && k > 0)
     {
-        snprintf(text, sizeof(text), "%d Min, %d Pts\n", (int) t, (int) k);
+        snprintf(text, sizeof(text), portTr("%d Min, %d Pts\n"), (int) t, (int) k);
     }
     else if (t > 0)
     {
-        snprintf(text, sizeof(text), "%d Min\n", (int) t);
+        snprintf(text, sizeof(text), portTr("%d Min\n"), (int) t);
     }
     else
     {
-        snprintf(text, sizeof(text), "%d Points\n", (int) k);
+        snprintf(text, sizeof(text), portTr("%d Points\n"), (int) k);
     }
     return (u8 *) text;
 }
@@ -19871,7 +19944,7 @@ static const char *portLimListText(s32 field, s32 idx)
     {
         return (field == PORT_SCEN_LIVES) ? "Unlimited" : "None";
     }
-    snprintf(text, sizeof(text), (field == PORT_SCEN_TIME) ? "%d Min" : "%d", (int) x);
+    snprintf(text, sizeof(text), (field == PORT_SCEN_TIME) ? portTr("%d Min") : "%d", (int) x);
     return text;
 }
 
@@ -20308,7 +20381,7 @@ static Gfx *portLimConstruct(Gfx *DL)
         {   /* a player's side */
             const s32 p = i - PORT_LIM_TEAMS_ROW - 1;
 
-            snprintf(line, sizeof(line), "Player %d\n", (int) p + 1);
+            snprintf(line, sizeof(line), portTr("Player %d\n"), (int) p + 1);
             value = port_mp_team[p] ? "Blue\n" : "Red\n";
             valcolour = port_mp_team[p] ? 0x2828FF00 : 0xD0000000;   /* the radar's blue and red */
         }
