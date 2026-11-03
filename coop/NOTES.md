@@ -4234,6 +4234,54 @@ The intro has no Natalya in it and looks the same on both screens (rig).
   README.txt, midas.ini and a lang/es/deeper/ file alone, and clears the list and the
   zip. A v0.8.1 unzipped over it puts nothing in. Case 6 fails on the build before this.
 
+## Revive counts from the fall; knockback no longer strands a player (2026-11-03, COOP_VERSION stays 17)
+
+Tester report: "you have to wait quite a while before reviving a teammate,
+otherwise the revive bar gets stuck and does not fill up", and on Facility
+"the knockback effect trapped a player on the stairs".
+
+- Revive bar: a downed player's death plays for a few seconds (the fall, the
+  blood, the fade to black) before bondview2.c hands it to coopDeadTick. Their
+  STATE already said dead and revivable from the first tick, so the partner's
+  HUD offered the revive and showed "REVIVING" with a bar, but only
+  coopDeadTick counted the hold. Until the fade was over the bar stood at 0.
+  coopReviveFallTick (every coopTick) now counts the hold during the fall, with
+  the same reach test (coopReviveOver, shared with coopDeadTick). The count goes
+  out in STATE and shows on the downed HUD from the fall. When the bar fills
+  before the fade ends, coopDeadTick takes the death at once (the life it costs,
+  the down's message) and its own hold tick stands the player up. coopDeadTick's
+  first tick no longer zeroes a hold that is under way.
+- No revive is offered for a fall that can't be revived: on the last life under
+  Revive or Timer, the respawn byte is -1 during the fall, and revivable now
+  needs it to be >= 0 (Revive only still needs > 0, the bleed-out). An
+  out-on-arrival joiner's fall also sends -1.
+- Knockback: a hit's push (bondshotspeed, record_damage_kills) kept running
+  after the shot that downed a player, so the dead Bond slid for half a second
+  at the dying (low) height. The revive stands the player up where the body
+  came to rest, which on stairs can be under the flight above or against a
+  ledge, with no room to stand or walk out. While down the push is now zeroed,
+  so the body stays where the player last stood. coopTeleportPlayerTo (revive,
+  respawn, a cutscene's star) also zeroes it, so a push still running can't
+  carry a player off the spot.
+- A partner's shot (Friendly Fire) sent angle 0, which pushed every victim the
+  same way (+Z) whoever fired. It now sends the shot's direction, so the push
+  goes the way the shot flew, as a guard's does.
+- Rig (Linux headless pair, mock Steam, Facility, main 45a93df vs this branch,
+  with a scratch log of the downed player's position each 15 ticks; logs in the
+  project files, goldeneye-coop/revive-knockback/rig-logs-pr147.tgz):
+  - Host GE_COOP_TESTREVIVE=8, joiner GE_COOP_TESTDIE=1200, When Down 0. Main:
+    the death took 340 ticks to fade, the hold read 0 all that time, and the
+    joiner stood up 509 ticks (8.5 s) after falling. Here: the hold climbed from
+    the first tick and the joiner stood up 150 ticks (2.5 s) after falling, then
+    rose to standing height (392) within 60 ticks as on main.
+  - Same, GE_COOP_LIVES=1: main's host starts "reviving player 2" on a fall that
+    can only end out; here it never does.
+  - The testdie hit's push (0, 2) slid the dead joiner 23 units on main; here it
+    reads 0 from the first down tick (the few units left are the death camera).
+  - GE_COOP_TESTFF with a scratch shot flying +x: main's victim got angle 0,
+    push (0, 2); here angle 1.571, push (2, 0).
+  - Not covered: a down on Facility's stairs themselves (no stair pad picked).
+
 ## The lobby's Ready / Start button, and a host can start alone (2026-11-03, COOP_VERSION stays 17)
 
 - Players forgot the Ready row. Every tab now has a button at the bottom right
