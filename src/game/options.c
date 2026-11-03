@@ -10,6 +10,7 @@
 #include <snd.h>
 #include <random.h>
 #include "options.h"
+#include "port_lang.h"   /* portTr: the port's own text in the player's language */
 #include "bondview.h"
 #include "dyn.h"
 #include "file.h"
@@ -3941,7 +3942,7 @@ Gfx *draw_abort_cancel_confirm(Gfx *gdl)
 
             if (D_800409A4 != 0)
             {
-                snprintf(help, sizeof(help), "%s HOSTS, YOU LEAVE\n", coopHostAbortNextName());
+                snprintf(help, sizeof(help), portTr("%s HOSTS, YOU LEAVE\n"), coopHostAbortNextName());
             }
             else
             {

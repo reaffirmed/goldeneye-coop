@@ -37,6 +37,7 @@
 #include "chrai.h"
 #include "chraction.h"
 #include "coop.h"
+#include "port_lang.h"   /* portTr: the port's own text in the player's language */
 
 extern void portConLogf(const char *fmt, ...);
 extern void hudmsgBottomShow(char *mess);
@@ -349,7 +350,7 @@ void coopPingReceive(CoopPing *ping, s32 from)
         name[k++] = ((u8) *n >= 0x80 || (u8) *n < 0x20) ? '?' : *n;
     }
     name[k] = '\0';
-    snprintf(msg, sizeof(msg), (ping->kind == COOPPING_ENEMY) ? "%s spotted an enemy.\n" : "%s pinged a spot.\n", name);
+    snprintf(msg, sizeof(msg), (ping->kind == COOPPING_ENEMY) ? portTr("%s spotted an enemy.\n") : portTr("%s pinged a spot.\n"), name);
     hudmsgBottomShow(msg);
 }
 

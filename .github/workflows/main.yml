@@ -109,6 +109,13 @@ jobs:
           (cd ziptest/src && zip -qr ../d.zip . && zip -qr0 ../s.zip . && zip -qr9 ../d9.zip .)
           ./update_test ziptest/d.zip ziptest/src ziptest/s.zip ziptest/src ziptest/d9.zip ziptest/src
 
+      - name: Language patch decoder (no cart needed)
+        # port_vcdiff.c on crafted patches, 32-bit like the game: hostile
+        # offsets and lengths must be refused, not wrap
+        run: |
+          gcc -m32 -O1 -Wall -Iport/include -o vcdiff_test coop/ci/vcdiff_test.c port/src/port_vcdiff.c
+          ./vcdiff_test
+
       - name: Save writes are all or nothing (no cart needed)
         # port_save.c: settings and saves are replaced whole, never left half
         # written, and the new-build backup is all or nothing (/dev/full plays
@@ -232,6 +239,9 @@ jobs:
           seq 1 200000 > ziptest/src/seq.txt && : > ziptest/src/empty.txt && cp port/src/video.c ziptest/src/sub/
           (cd ziptest/src && zip -qr ../d.zip . && zip -qr0 ../s.zip . && zip -qr9 ../d9.zip .)
           ./update_test ziptest/d.zip ziptest/src ziptest/s.zip ziptest/src ziptest/d9.zip ziptest/src
+          # shellcheck disable=SC2086
+          gcc -m32 -O1 -Wall $SAN -Iport/include -o vcdiff_test coop/ci/vcdiff_test.c port/src/port_vcdiff.c
+          ./vcdiff_test
           # shellcheck disable=SC2086
           gcc -O1 -Wall $SAN -Iport/include -Ibuild_san/generated -o save_test coop/ci/save_test.c port/src/port_save.c
           ./save_test "$(mktemp -d)"

@@ -58,6 +58,98 @@ Gfx *textRenderGlyphOutlined(Gfx *gdl, s32 *x, s32 *y, struct fontchar *curchar,
                 s32 yOffset);
 Gfx *textDrawGlyphQuad(Gfx *gdl, s32 x, s32 y, struct fontchar *curchar, s32 clipX, s32 clipY, s32 clipWidth, s32 clipHeight);
 
+#ifndef TARGET_N64
+#include "port_lang.h"   /* languages: translated text, extra Latin-1 glyphs */
+
+/* PORT: text is Latin-1 outside Japanese. 0x21..0x7E are the fonts' own 94
+ * glyphs; 0xA0..0xFF come from the language's patched fonts (port_lang.c,
+ * the translators' accented letters), else draw as the plain letter
+ * (portLangAsciiFallback: a capital A-acute is an A, as the translators'
+ * own capitals are). Fonts other than the two Latin ones fall back too. */
+static struct fontchar sPortExtGlyphs[2][96];
+static u8 sPortExtHave[2][96];
+static s32 sPortExtBuilt;
+
+static void portFontClearPadding(struct fontchar *chars, s32 count);
+
+static void portFontExtBuild(void)
+{
+    s32 which, c;
+
+    sPortExtBuilt = 1;
+    for (which = 0; which < 2; which++)
+    {
+        u32 size = 0;
+        const u8 *seg = portLangFontSeg(which, &size);
+        const struct fontchar *src;
+
+        if (seg == NULL || size < (169 + 94 * 6) * 4)
+        {
+            continue;
+        }
+        src = (const struct fontchar *) (seg + 169 * 4);   /* after the 13x13 kerning table */
+        for (c = 0xA0; c <= 0xFF; c++)
+        {
+            const u8 a = portLangGlyphSource((u8) c);
+            const struct fontchar *g;
+            uintptr_t off;
+
+            if (a < 0x21 || a > 0x7E)
+            {
+                continue;
+            }
+            g = &src[a - 0x21];
+            off = (uintptr_t) g->pixeldata;   /* a segment offset in the table */
+            if (off >= size || g->width <= 0 || g->height <= 0
+                || off + (u32) (((g->width + 7) & 0xF8) * g->height) > size)
+            {
+                continue;
+            }
+            sPortExtGlyphs[which][c - 0xA0] = *g;
+            sPortExtGlyphs[which][c - 0xA0].pixeldata = (u8 *) (seg + off);
+            sPortExtHave[which][c - 0xA0] = 1;
+        }
+        portFontClearPadding(sPortExtGlyphs[which], 96);
+    }
+}
+
+/* the glyph byte c draws with in `chars`' font; NULL = none (a space) */
+static struct fontchar *portFontGlyph(struct fontchar *chars, u8 c)
+{
+    s32 which;
+
+    if (c >= 0x21 && c <= 0x7E)
+    {
+        return &chars[c - 0x21];
+    }
+    if (c < 0xA0)
+    {
+        return NULL;
+    }
+    if (!sPortExtBuilt)
+    {
+        portFontExtBuild();
+    }
+    which = (chars == ptrFontBankGothicChars) ? 0 : (chars == ptrFontZurichBoldChars) ? 1 : -1;
+    if (which >= 0)
+    {
+        if (sPortExtHave[which][c - 0xA0])
+        {
+            return &sPortExtGlyphs[which][c - 0xA0];
+        }
+        if (c == 0xD1 && sPortExtHave[which][0xF1 - 0xA0])
+        {
+            return &sPortExtGlyphs[which][0xF1 - 0xA0];   /* capital N-tilde: the small one, never a bare N */
+        }
+    }
+    c = portLangAsciiFallback(c);
+    return (c >= 0x21 && c <= 0x7E) ? &chars[c - 0x21] : NULL;
+}
+
+/* 1 = byte c is a plain glyph (not a space, a newline or a JPN code) */
+#define PORT_TEXT_IS_GLYPH(chars, c) ((c) != '\n' && ((c) < 0x80 || !j_text_trigger) && portFontGlyph((chars), (c)) != NULL)
+#endif
+
 // -------------------------------------------------------------------------------------------------
 
 void textInit(void /*, char* asset */)
@@ -524,6 +616,7 @@ Gfx *textRender(Gfx *gdl, s32 *x, s32 *y, char *text,
     g_JpnTextTlutNeedsLoad = 1;
 #ifndef TARGET_N64
     PORT_TEXT_GLYPHS(gdl, 1);   /* every texrect until the matching 0 is a font glyph */
+    text = (char *) portLangDraw(text);   /* the port's own text, in the player's language */
 #endif
 
     savedx = *x;
@@ -545,9 +638,8 @@ Gfx *textRender(Gfx *gdl, s32 *x, s32 *y, char *text,
     {
 		if (*text == ' '
 #ifndef TARGET_N64
-		    || (*text < 0x21 && *text != '\n') || *text == 0x7F /* no glyph for this char (chars[] is
-		                                                         * 0x21..0x7E): draw a space, never index
-		                                                         * outside the table */
+		    || (*text != '\n' && (*text < 0x80 || !j_text_trigger) && portFontGlyph(chars, *text) == NULL)
+		       /* no glyph for this byte: draw a space, never index outside the table */
 #endif
 		    ) {
 #ifndef TARGET_N64
@@ -571,11 +663,21 @@ Gfx *textRender(Gfx *gdl, s32 *x, s32 *y, char *text,
             
 			text++;
 			*x = savedx;
-		} else if (*text < 0x80) {
+		}
+#ifndef TARGET_N64
+		else if (*text < 0x80 || !j_text_trigger) {
+			gdl = textRenderGlyph(gdl, x, y, portFontGlyph(chars, *text), portFontGlyph(chars, prevchar), font, savedx, savedy, width, height, yOffset);
+			prevchar = *text;
+			text++;
+		}
+#else
+		else if (*text < 0x80) {
 			gdl = textRenderGlyph(gdl, x, y, &chars[*text - 0x21], &chars[prevchar - 0x21], font, savedx, savedy, width, height, yOffset);
 			prevchar = *text;
 			text++;
-		} else {
+		}
+#endif
+		else {
 #ifndef TARGET_N64
 			/* High-bit bytes are the two-byte JPN glyph codes. In English the
 			 * glyph cache is not allocated (langInit), so skip them as gaps; in
@@ -798,6 +900,7 @@ Gfx *textRenderOutlined(Gfx *gdl, s32 *x, s32 *y,
     g_JpnTextTlutNeedsLoad = 1;
 #ifndef TARGET_N64
     PORT_TEXT_GLYPHS(gdl, 1);   /* every texrect until the matching 0 is a font glyph */
+    text = (char *) portLangDraw(text);
 #endif
 
     savedx = *x;
@@ -816,9 +919,8 @@ Gfx *textRenderOutlined(Gfx *gdl, s32 *x, s32 *y,
     {
 		if (*text == ' '
 #ifndef TARGET_N64
-		    || (*text < 0x21 && *text != '\n') || *text == 0x7F /* no glyph for this char (chars[] is
-		                                                         * 0x21..0x7E): draw a space, never index
-		                                                         * outside the table */
+		    || (*text != '\n' && (*text < 0x80 || !j_text_trigger) && portFontGlyph(chars, *text) == NULL)
+		       /* no glyph for this byte: draw a space, never index outside the table */
 #endif
 		    ) {
 			*x += SPACE_WIDTH;
@@ -829,12 +931,22 @@ Gfx *textRenderOutlined(Gfx *gdl, s32 *x, s32 *y,
 			*x = savedx;
             *y += lineheight;
 			text++;
-		} else if (*text < 0x80) {
+		}
+#ifndef TARGET_N64
+		else if (*text < 0x80 || !j_text_trigger) {
+            gdl = textRenderGlyphOutlined(gdl, x, y, portFontGlyph(chars, *text), portFontGlyph(chars, prevchar), font, savedx, savedy, colour, colour2, width, height, yOffset);
+			prevchar = *text;
+			text++;
+		}
+#else
+		else if (*text < 0x80) {
             // Render individual characters with outline.
             gdl = textRenderGlyphOutlined(gdl, x, y, &chars[*text - 0x21], &chars[prevchar - 0x21], font, savedx, savedy, colour, colour2, width, height, yOffset);
 			prevchar = *text;
 			text++;
-		} else {
+		}
+#endif
+		else {
 #ifndef TARGET_N64
 			/* see the non-outlined renderer: English skips two-byte codes,
 			 * Japanese takes Rare's path */
@@ -893,6 +1005,9 @@ void textMeasure(s32 *textheight, s32 *textwidth, char *text, struct fontchar *f
 	longest = 0;
 	*textheight = 0;
 	*textwidth = 0;
+#ifndef TARGET_N64
+    text = (char *) portLangDraw(text);   /* measure what textRender will draw */
+#endif
 
     if (lineheight == 0)
     {
@@ -908,9 +1023,8 @@ void textMeasure(s32 *textheight, s32 *textwidth, char *text, struct fontchar *f
     {
         if (*text == ' '
 #ifndef TARGET_N64
-            || (*text < 0x21 && *text != '\n') || *text == 0x7F /* no glyph for this char (chars[] is
-                                                                 * 0x21..0x7E): draw a space, never index
-                                                                 * outside the table */
+            || (*text != '\n' && (*text < 0x80 || !j_text_trigger) && portFontGlyph(font1, *text) == NULL)
+               /* no glyph for this byte: a space, never index outside the table */
 #endif
             )
         {
@@ -937,6 +1051,17 @@ void textMeasure(s32 *textheight, s32 *textwidth, char *text, struct fontchar *f
             *textheight += lineheight;
             text++;
         }
+#ifndef TARGET_N64
+        else if (*text < 0x80 || !j_text_trigger)
+        {
+            const struct fontchar *cur = portFontGlyph(font1, *text);
+            tmp = font2->kerning[portFontGlyph(font1, prevchar)->kerningindex * 13 + cur->kerningindex] + text_spacing - 1;
+            /* the same rounded terms textRenderGlyph moves the pen by */
+            *textwidth = portTextScaledAdvance(cur->width) + *textwidth - portTextScaledGap(tmp);
+            prevchar = *text;
+            text++;
+        }
+#endif
         else if (*text < 0x80)
         {
             // Normal single-byte character
@@ -1001,15 +1126,24 @@ void textWrap(s32 wrapwidth, char *src, char *dst, struct fontchar *chars, struc
         // Read one word into the curword buffer.
         while (*src > ' ')
         {
+#ifndef TARGET_N64
+            curword[wordlen] = *src;
+            src++;
+            wordlen++;
+            if (curword[wordlen - 1] >= 0x80 && j_text_trigger)   /* Latin-1 outside Japanese: one byte */
+#else
             curword[wordlen] = *src;
 			v1 += chars[*src - 0x21].width;
 			src++;
 			wordlen++;
 
             if (curword[wordlen - 1] >= 0x80)
+#endif
             {
                 curword[wordlen] = *src;
+#ifdef TARGET_N64
                 v1 += chars[*src - 0x21].width;
+#endif
                 src++;
                 wordlen++;
             }

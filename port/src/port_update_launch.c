@@ -30,6 +30,7 @@
 #include <stdlib.h>
 
 #include "port_update.h"
+#include "port_lang.h"   /* portTrUtf8: the dialogs in the player's language */
 
 extern void portConLogf(const char *fmt, ...);
 
@@ -52,7 +53,7 @@ static int launchAsk(const char *title, const char *text, const char *const *lab
     for (i = 0; i < n && i < 3; i++)
     {
         buttons[i].buttonid = i;
-        buttons[i].text = labels[i];
+        buttons[i].text = portTrUtf8(labels[i]);
         buttons[i].flags = (i == 0) ? SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT
                          : (i == esc) ? SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT : 0;
     }
@@ -61,8 +62,8 @@ static int launchAsk(const char *title, const char *text, const char *const *lab
 #if SDL_VERSION_ATLEAST(2, 0, 12)
     box.flags |= SDL_MESSAGEBOX_BUTTONS_LEFT_TO_RIGHT;
 #endif
-    box.title = title;
-    box.message = text;
+    box.title = portTrUtf8(title);
+    box.message = text;   /* the callers' own, translated as they build it */
     box.numbuttons = (n < 3) ? n : 3;
     box.buttons = buttons;
     if (SDL_ShowMessageBox(&box, &hit) != 0 || hit < 0)
@@ -95,7 +96,7 @@ static int launchProgress(void)
 
     if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0)
     {
-        win = SDL_CreateWindow("Updating GoldenEye Coop", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 480, 96, 0);
+        win = SDL_CreateWindow(portTrUtf8("Updating GoldenEye Coop"), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 480, 96, 0);
         if (win != NULL)
         {
             ren = SDL_CreateRenderer(win, -1, 0);
@@ -211,9 +212,9 @@ static void launchInstall(void)
             return;
         }
         portConLogf("ge: update: launch install failed: %s\n", portUpdateError());
-        snprintf(text, sizeof(text), "The update to %s didn't install:\n%s\n\n"
-                 "Nothing was changed. Play Now starts the game you have.",
-                 portUpdateLatest(), portUpdateError());
+        snprintf(text, sizeof(text), portTrUtf8("The update to %s didn't install:\n%s\n\n"
+                 "Nothing was changed. Play Now starts the game you have."),
+                 portUpdateLatest(), portTrUtf8(portUpdateError()));
         if (launchQuiet() || launchAsk("GoldenEye Coop update", text, again, 2, 1) != 0)
         {
             return;
@@ -242,8 +243,8 @@ void portUpdateLaunch(void)
     if (portUpdateState() == PORTUPD_READY)
     {   /* the last install was cut off and has just been finished: the new
          * build is in the folder, this is the old one */
-        snprintf(text, sizeof(text), "The update to %s was cut off last time and has now been finished.\n\n"
-                 "Restart Now to play %s.", portUpdateLatest(), portUpdateLatest());
+        snprintf(text, sizeof(text), portTrUtf8("The update to %s was cut off last time and has now been finished.\n\n"
+                 "Restart Now to play %s."), portUpdateLatest(), portUpdateLatest());
         if ((autoans != NULL && SDL_strcmp(autoans, "restart") == 0)
             || (!launchQuiet() && launchAsk("GoldenEye Coop update", text, restart, 2, 1) == 0))
         {
@@ -279,11 +280,11 @@ void portUpdateLaunch(void)
         {
             snprintf(size, sizeof(size), " (%.1f MB)", bytes / (1024.0 * 1024.0));
         }
-        snprintf(text, sizeof(text), "GoldenEye Coop %s is out. You have %s.\n\n"
+        snprintf(text, sizeof(text), portTrUtf8("GoldenEye Coop %s is out. You have %s.\n\n"
                  "Players need the same version to play co-op together.\n\n"
                  "Update Now downloads it%s, installs it and restarts the game. "
-                 "Your saves, settings and cart image are not touched.",
-                 portUpdateLatest(), own[0] != '\0' ? own : "a build from source", size);
+                 "Your saves, settings and cart image are not touched."),
+                 portUpdateLatest(), own[0] != '\0' ? own : portTrUtf8("a build from source"), size);
         answer = launchAsk("GoldenEye Coop update", text, offer, 3, PORTUPD_ANSWER_LATER);
     }
     portUpdatePromptAnswer(answer);

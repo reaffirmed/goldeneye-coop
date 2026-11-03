@@ -44,6 +44,7 @@
 #define PHOTO_MKDIR(p) _mkdir(p)
 #else
 #include <sys/stat.h>
+#include "port_lang.h"   /* portTr: the port's own text in the player's language */
 #define PHOTO_MKDIR(p) mkdir(p, 0777)
 #endif
 
@@ -377,7 +378,7 @@ Gfx *coopPhotoRender(Gfx *gdl)
     gdl = microcode_constructor(gdl);
     if (sSaved > 0)
     {
-        snprintf(text, sizeof(text), "PHOTO SAVED IN PHOTOS (%d THIS MISSION)\n", (int) coopPhotoCount());
+        snprintf(text, sizeof(text), portTr("PHOTO SAVED IN PHOTOS (%d THIS MISSION)\n"), (int) coopPhotoCount());
         gdl = coopPhotoPrint(gdl, y - 0x0C, text);
     }
     gdl = coopPhotoPrint(gdl, y, "PHOTO MODE - FIRE: TAKE A PHOTO - P: BACK\n");

@@ -66,6 +66,7 @@
 #include "coop_net.h"
 #include "math_atan2f.h"
 #include "initanitable.h"
+#include "port_lang.h"   /* portTr: the port's own text in the player's language */
 
 extern void portConLogf(const char *fmt, ...);
 extern float sinf(float);
@@ -126,6 +127,8 @@ static s32 sVsHeard[MAX_PLAYER_COUNT];      /* their STATE has come in this matc
 static s32 sVsEnded;
 static s32 sVsGone[MAX_PLAYER_COUNT];       /* left the match: quit, or stopped answering */
 static s32 sVsAbsent[MAX_PLAYER_COUNT];     /* ticks their STATE has been missing */
+static s32 sVsGhost[MAX_PLAYER_COUNT];      /* their body is inside ours: it blocks nothing until we are apart */
+static f32 sVsBoxOff[MAX_PLAYER_COUNT][2];  /* their collision diamond, off their body by the bit it came into ours */
 static s32 sVsQuit;                         /* we quit: our end is ours alone */
 static char sVsName[MAX_PLAYER_COUNT][24];  /* their name as the match began (a renumbering loses it) */
 static s32 sVsInBlast;                  /* explosion.c: damage from a blast is being dealt */
@@ -280,6 +283,8 @@ void coopVersusStageStart(void)
         sVsHeard[i] = 0;
         sVsGone[i] = 0;
         sVsAbsent[i] = 0;
+        sVsGhost[i] = 0;
+        sVsBoxOff[i][0] = sVsBoxOff[i][1] = 0.0f;
     }
     sVsEnded = 0;
     sVsQuit = 0;
@@ -360,11 +365,11 @@ static void coopVsGone(s32 li)
     g_playerPlayerData[li].have_token_or_goldengun = 0;
     if (sVsName[li][0] != '\0')
     {
-        snprintf(msg, sizeof(msg), "%s|LEFT THE MATCH", sVsName[li]);
+        snprintf(msg, sizeof(msg), portTr("%s|LEFT THE MATCH"), sVsName[li]);
     }
     else
     {
-        snprintf(msg, sizeof(msg), "A PLAYER|LEFT THE MATCH");
+        snprintf(msg, sizeof(msg), "%s", portTr("A PLAYER|LEFT THE MATCH"));
     }
     coopFeedToast(msg, (p < COOP_MAX_PLAYERS) ? p : -1);
     portConLogf("ge: versus: local player %d (player %d) left the match\n", li + 1, p + 1);
@@ -412,6 +417,160 @@ void coopVersusQuit(void)
     portConLogf("ge: versus: we quit the match\n");
 }
 
+/* Their body's collision, here where it is drawn. Our Bond's moves are
+ * tested against each other player's diamond (bondview2.c
+ * bondviewGetPropHeightRelatedValues: collision_bounds, from field_70 up),
+ * which only that player's own MoveBond sets, and this PC never runs theirs
+ * (boss.c): so the diamond sat at 0,0 all match and everyone ran through
+ * everyone, into each other's bodies. It follows the body now.
+ *
+ * The body is drawn a moment behind (coop_interp.c), and their own game
+ * stops them on our body of a moment ago, so a body pushing into ours comes
+ * a little way inside it here. Starting inside a shape, the stock test
+ * blocks every step, even a step away or along it (a move out of a shape
+ * crosses its edge): two players pressing into each other stood stuck for
+ * seconds. So the diamond stops at our edge, short of the body by the few
+ * cm it came in; and a body that is well inside ours (a fast head-on run
+ * over a slow line, a respawn on top of us) blocks nothing until we are
+ * apart, as a co-op partner's (coop.c coopPuppetUpdateGhost). */
+#define VS_GHOST_IN  45.0f  /* well inside (a walk-up stops 51 to 60 apart): no shape */
+#define VS_BOX_OFF   15.0f  /* the diamond backs off the body this far at most; further in counts as well inside */
+#define VS_GHOST_OUT 65.0f  /* solid again once this far apart */
+
+/* from (u, v) to the diamond |x| + |z| <= r round 0,0 */
+static f32 coopVsDiamondDist(f32 u, f32 v, f32 r)
+{
+    const f32 a = (u < 0.0f) ? -u : u;
+    const f32 b = (v < 0.0f) ? -v : v;
+    const f32 s = (a + b - r) * 0.5f;
+
+    if (s <= 0.0f)
+    {
+        return 0.0f;    /* inside */
+    }
+    if (a - s < 0.0f)
+    {
+        return sqrtf(a * a + (b - r) * (b - r));    /* off the corner at (0, r) */
+    }
+    if (b - s < 0.0f)
+    {
+        return sqrtf((a - r) * (a - r) + b * b);    /* off the corner at (r, 0) */
+    }
+    return s * 1.4142135f;                          /* off a side */
+}
+
+static void coopVsBodyCollision(s32 li, struct player *pl, StandTile *stan)
+{
+    PropRecord *bond = (g_playerPointers[0] != NULL) ? g_playerPointers[0]->prop : NULL;
+    f32 *off = sVsBoxOff[li];
+    f32 x = pl->field_488.collision_position.f[0];
+    f32 z = pl->field_488.collision_position.f[2];
+    const f32 r = pl->field_488.collision_radius;
+
+    pl->field_70 = stanGetPositionYValue(stan, x, z);   /* its foot, on their floor, not the spawn's */
+    if (bond != NULL)
+    {
+        const f32 bx = bond->pos.f[0], bz = bond->pos.f[2];
+        const f32 dx = x - bx, dz = z - bz;
+        const f32 dy = pl->field_488.collision_position.f[1] - bond->pos.f[1];
+        const f32 d2 = dx * dx + dz * dz;
+        /* our edge: the stock test stops a walk-up exactly on it, so only a
+         * body that came further in pushed in (the least bit inside and
+         * every move is blocked), and the diamond goes back just past it */
+        const f32 rin = g_playerPointers[0]->field_488.collision_radius - 0.02f;
+        const f32 rout = g_playerPointers[0]->field_488.collision_radius + 0.1f;
+
+        /* (flat distance only: a body a floor above or below may turn ghost
+         * too, which costs nothing, since it blocks nothing from there) */
+        if (d2 < VS_GHOST_IN * VS_GHOST_IN)
+        {
+            sVsGhost[li] = 1;
+        }
+        else if (d2 > VS_GHOST_OUT * VS_GHOST_OUT)
+        {
+            sVsGhost[li] = 0;
+        }
+        if (sVsGhost[li] || dy > 200.0f || dy < -200.0f)
+        {
+            off[0] = off[1] = 0.0f;
+        }
+        else
+        {
+            static const f32 back[3] = { 0.0f, 0.5f, 0.8f };
+            s32 k;
+
+            /* back onto the body as far as it leaves us outside (only ever
+             * nearer: walking into the diamond must not push it off) */
+            for (k = 0; k < 3; k++)
+            {
+                if (coopVsDiamondDist(bx - (x + off[0] * back[k]), bz - (z + off[1] * back[k]), r) >= rout)
+                {
+                    off[0] *= back[k];
+                    off[1] *= back[k];
+                    break;
+                }
+            }
+            if (coopVsDiamondDist(bx - (x + off[0]), bz - (z + off[1]), r) < rin)
+            {   /* the body came into ours: the diamond stops at our edge, along the line between us */
+                f32 ux = x + off[0] - bx, uz = z + off[1] - bz;
+                f32 n = sqrtf(ux * ux + uz * uz);
+                f32 lo = 0.0f, hi = rout + r;
+
+                ux = (n > 0.01f) ? ux / n : 1.0f;
+                uz = (n > 0.01f) ? uz / n : 0.0f;
+                for (k = 0; k < 12; k++)
+                {
+                    const f32 t = (lo + hi) * 0.5f;
+
+                    if (coopVsDiamondDist(bx - (x + off[0] + ux * t), bz - (z + off[1] + uz * t), r) < rout)
+                    {
+                        lo = t;
+                    }
+                    else
+                    {
+                        hi = t;
+                    }
+                }
+                off[0] += ux * hi;
+                off[1] += uz * hi;
+                if (off[0] * off[0] + off[1] * off[1] > VS_BOX_OFF * VS_BOX_OFF)
+                {   /* a diamond that far off the body would only leave the body to
+                     * walk into round its side */
+                    sVsGhost[li] = 1;
+                    off[0] = off[1] = 0.0f;
+                }
+            }
+            x += off[0];
+            z += off[1];
+        }
+    }
+    /* as bondviewUpdatePlayerCollisionBounds does for our own */
+    pl->collision_bounds.f[0] = x + r;
+    pl->collision_bounds.f[1] = z;
+    pl->collision_bounds.f[2] = x;
+    pl->collision_bounds.f[3] = z + r;
+    pl->collision_bounds.f[4] = x - r;
+    pl->collision_bounds.f[5] = z;
+    pl->collision_bounds.f[6] = x;
+    pl->collision_bounds.f[7] = z - r;
+}
+
+/* coop.c coopCollideSkip, in versus: another player's body that is inside
+ * ours right now gives no shape */
+s32 coopVersusCollideSkip(PropRecord *prop)
+{
+    s32 li;
+
+    for (li = 1; li < sVsCount; li++)
+    {
+        if (g_playerPointers[li] != NULL && g_playerPointers[li]->prop == prop)
+        {
+            return sVsGhost[li];
+        }
+    }
+    return 0;
+}
+
 /* the body of local player li moves to where their game says it is */
 static void coopVsMoveBody(s32 li, const CoopRemoteInfo *info)
 {
@@ -455,6 +614,7 @@ static void coopVsMoveBody(s32 li, const CoopRemoteInfo *info)
     pl->bondprevpos = pos;
     pl->field_488.collision_position = pos;     /* where the multiplayer body code puts the body back */
     pl->field_488.current_tile_ptr = stan;
+    coopVsBodyCollision(li, pl, stan);
 }
 
 /* Rare's split-screen code (bondview2.c playerTick, run as the props tick
@@ -739,11 +899,11 @@ static void coopVsKillFeed(s32 lk, s32 lv)
     victim[strcspn(victim, "\n")] = '\0';
     if (lk == lv)
     {
-        snprintf(msg, sizeof(msg), "%s|KILLED THEMSELVES", killer);
+        snprintf(msg, sizeof(msg), portTr("%s|KILLED THEMSELVES"), killer);
     }
     else
     {
-        snprintf(msg, sizeof(msg), "%s|KILLED %s", killer, victim);
+        snprintf(msg, sizeof(msg), portTr("%s|KILLED %s"), killer, victim);
     }
     coopFeedToast(msg, (sVsNet[lk] < COOP_MAX_PLAYERS) ? sVsNet[lk] : -1);
 }
@@ -1237,6 +1397,41 @@ static s32 sVsGotoAt = -2;
 static s32 sVsGrabAt = -2;
 static s32 sVsRespawn;
 
+/* harness: put our Bond <dist> from them, on the first of 8 sides (from <dir>)
+ * with floor under it and a straight walk to them, so no wall stands between */
+static s32 coopVsStepUpTo(PropRecord *them, f32 dist, s32 dir)
+{
+    coord3d to;
+    StandTile *stan = NULL;
+    s32 k;
+
+    for (k = 0; k < 8 && stan == NULL; k++)
+    {
+        f32 a = (f32) ((k + dir) % 8) * 0.785f;
+
+        to.f[0] = them->pos.f[0] + sinf(a) * dist;
+        to.f[1] = them->pos.f[1] + 30.0f;
+        to.f[2] = them->pos.f[2] + cosf(a) * dist;
+        stan = stanFindTileBelowPos(&to, NULL, NULL);
+        if (stan != NULL)
+        {   /* (from here: this tile is surely under this spot) */
+            StandTile *from = stan;
+
+            if (!walkTilesBetweenPoints_NoCallback(&from, to.f[0], to.f[2], them->pos.f[0], them->pos.f[2]))
+            {
+                stan = NULL;
+            }
+        }
+    }
+    if (stan == NULL)
+    {
+        return 0;
+    }
+    coopRespawnPlayerAt(&to, stan, 0.0f, getCurrentPlayerWeaponId(GUNRIGHT));
+    portConLogf("ge: versus: harness: %.0f cm from player %d at %.0f %.0f %.0f\n", dist, sVsNet[1] + 1, to.f[0], to.f[1], to.f[2]);
+    return 1;
+}
+
 static void coopVsHarness(void)
 {
     struct player *me = g_playerPointers[0];
@@ -1327,36 +1522,7 @@ static void coopVsHarness(void)
     sVsHuntAlive = g_playerPointers[1]->bonddead ? 0 : sVsHuntAlive + 1;
     if (sVsHuntDone < 1 || (sVsHuntAlive > 60 && sVsHuntDone == 2))   /* (their respawn has settled) */
     {   /* in front of them (again after they respawn) */
-        coord3d to;
-        StandTile *stan = NULL;
-        f32 yaw = 6.2831855f - g_playerPointers[1]->vv_theta * 6.2831855f / 360.0f;
-        s32 k;
-
-        for (k = 0; k < 8 && stan == NULL; k++)
-        {
-            f32 a = (f32) ((k + sVsHuntDir) % 8) * 0.785f;
-
-            to.f[0] = them->pos.f[0] + sinf(a) * 400.0f;
-            to.f[1] = them->pos.f[1] + 30.0f;
-            to.f[2] = them->pos.f[2] + cosf(a) * 400.0f;
-            stan = stanFindTileBelowPos(&to, NULL, NULL);
-            if (stan != NULL)
-            {   /* a straight walk to them, so no wall stands between (from here:
-                 * this tile is surely under this spot) */
-                StandTile *from = stan;
-
-                if (!walkTilesBetweenPoints_NoCallback(&from, to.f[0], to.f[2], them->pos.f[0], them->pos.f[2]))
-                {
-                    stan = NULL;
-                }
-            }
-        }
-        (void) yaw;
-        if (stan != NULL)
-        {
-            coopRespawnPlayerAt(&to, stan, 0.0f, getCurrentPlayerWeaponId(GUNRIGHT));
-            portConLogf("ge: versus: harness: 4 m from player %d at %.0f %.0f %.0f\n", sVsNet[1] + 1, to.f[0], to.f[1], to.f[2]);
-        }
+        coopVsStepUpTo(them, 400.0f, sVsHuntDir);
         sVsHuntDone = 1;
     }
     if (g_playerPointers[1]->bonddead)
@@ -1491,10 +1657,73 @@ static void coopVsDoorHarness(void)
  * their body is drawn here against what their STATE says. */
 static s32 sVsWanderAt = -2;
 static s32 sVsStrafeAt = -1;
+static s32 sVsBumpAt = -1;
 static s32 sVsAudit;
 
 static s8 sVsWanderX, sVsWanderY;
 static u16 sVsWanderButtons;
+
+/* GE_VS_BUMP=<s>: from <s> seconds, run into the first opponent and try to
+ * get past them, every 10 s: the host steps 3 m from them (the joiner stays
+ * where it is), then everyone runs at them, facing them, for 4 s, strafes
+ * right for 2 s, backs off for 2 s and stands for 2 s. Every quarter second
+ * a "vsbump" line: where we are, where their body is drawn, where their
+ * collision box is here, the gap between our edges, and how far we moved.
+ * Run on every PC, it is two players running into each other. */
+static coord3d sVsBumpLast;
+
+static void coopVsBump(s32 t)
+{
+    struct player *me = g_playerPointers[0];
+    struct player *pl = g_playerPointers[1];
+    PropRecord *bond = me->prop;
+    PropRecord *them = (pl != NULL) ? pl->prop : NULL;
+    const s32 c = t % 600;
+    f32 dx, dz;
+
+    if (them == NULL || bond == NULL || me->bonddead || !sVsHeard[1])
+    {
+        return;
+    }
+    if (c == 0 && coopNetIsHost())
+    {
+        coopVsStepUpTo(them, 300.0f, t / 600);
+    }
+    dx = them->pos.f[0] - bond->pos.f[0];
+    dz = them->pos.f[2] - bond->pos.f[2];
+    if (c < 240)
+    {   /* keep facing them (then strafe and back off in a straight line) */
+        me->vv_theta = -(atan2f(dx, dz) * 180.0f) / M_PI_F;
+        if (me->vv_theta < 0.0f)
+        {
+            me->vv_theta += 360.0f;
+        }
+    }
+    if (c < 240)
+    {
+        sVsWanderY = 80;    /* into them */
+    }
+    else if (c < 360)
+    {
+        sVsWanderX = 80;    /* past them, sideways */
+    }
+    else if (c < 480)
+    {
+        sVsWanderY = -70;   /* away */
+    }
+    if ((c % 15) == 0)
+    {
+        f32 bx = pl->collision_bounds.f[2], bz = pl->collision_bounds.f[1];  /* the diamond's middle */
+        f32 mx = bond->pos.f[0] - sVsBumpLast.f[0], mz = bond->pos.f[2] - sVsBumpLast.f[2];
+        f32 r = me->field_488.collision_radius + pl->field_488.collision_radius;
+
+        portConLogf("ge: vsbump: t %d me %.0f %.0f them %.0f %.0f box %.0f %.0f (%.0f off) gap %.0f moved %.0f\n",
+                    c, bond->pos.f[0], bond->pos.f[2], them->pos.f[0], them->pos.f[2], bx, bz,
+                    sqrtf((bx - them->pos.f[0]) * (bx - them->pos.f[0]) + (bz - them->pos.f[2]) * (bz - them->pos.f[2])),
+                    sqrtf(dx * dx + dz * dz) - r, sqrtf(mx * mx + mz * mz));
+        sVsBumpLast = bond->pos;
+    }
+}
 
 static void coopVsWander(void)
 {
@@ -1506,14 +1735,24 @@ static void coopVsWander(void)
 
         sVsWanderAt = (w != NULL) ? atoi(w) * 60 : -1;
         sVsStrafeAt = (getenv("GE_VS_STRAFE") != NULL) ? atoi(getenv("GE_VS_STRAFE")) * 60 : -1;
+        sVsBumpAt = (getenv("GE_VS_BUMP") != NULL) ? atoi(getenv("GE_VS_BUMP")) * 60 : -1;
         sVsAudit = getenv("GE_VS_AUDIT") != NULL;
         if (sVsWanderAt < 0 && sVsStrafeAt >= 0)
         {
             sVsWanderAt = sVsStrafeAt;
         }
+        if (sVsWanderAt < 0 && sVsBumpAt >= 0)
+        {
+            sVsWanderAt = sVsBumpAt;
+        }
     }
     sVsWanderX = sVsWanderY = 0;
     sVsWanderButtons = 0;
+    if (sVsBumpAt >= 0 && (s32) sVsTick >= sVsBumpAt)
+    {
+        coopVsBump((s32) sVsTick - sVsBumpAt);
+        return;
+    }
     if (sVsStrafeAt >= 0 && (s32) sVsTick >= sVsStrafeAt && !g_playerPointers[0]->bonddead)
     {   /* GE_VS_STRAFE=<s>: from <s> seconds face the first opponent and strafe:
          * 2 s right, 2 s left, 2 s standing */

@@ -38,6 +38,7 @@ extern s32 portVoiceOptionGet(const char *key, s32 *out);   /* coop_voice.c: the
 extern s32 portVoiceOptionSet(const char *key, s32 value);
 extern char g_coopVoiceMuteLabel[3][40];                    /* coop_voice.c: "Mute <name>" */
 extern s32 portIniWriteStrs(const char *section, const char *const *keys, const char *const *vals, s32 n);
+#include "port_lang.h"   /* the Language row: installed languages, portLangOption* */
 
 enum {
     PORTOPT_CAT_DISPLAY = 0,
@@ -118,6 +119,11 @@ static const char *const sGuardBudgetText[] = {
     "None\n", "10\n", "20\n", "30\n", "40\n", "50\n", "60\n", "80\n", "100\n", "No Limit\n"
 };
 static const char *const sCoopMenuText[] = { "Modern\n", "Classic\n" };
+/* Language (port_lang.c): one entry per installed lang/<code> folder, English
+ * first; filled by portOptLanguagesInit, the row's count with it */
+static const s32 sLangVals[PORT_LANG_MAX] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+static const char *sLangText[PORT_LANG_MAX] = { "English\n" };
+static const char *sLangIni[PORT_LANG_MAX] = { "en" };
 static const char *const sMsaaText[] = { "OFF\n", "2x\n", "4x\n", "8x\n" };
 
 /* -1 = "hardware": the N64's own frame pacing on the 60 Hz sim (tickhz=hw in the ini) */
@@ -209,7 +215,9 @@ static const char *const sStickSensIni[] = {
 /* an enum over raw units shown as a percent of `base`: an off-list value reads as its percent */
 #define ENUMP(key, sec, label, cat, vals, text, base) { key, sec, label, cat, KIND_ENUM, (s32)(sizeof(vals) / sizeof(vals[0])), 0, 1, "%", base, vals, text, NULL }
 
-static const struct PortOpt sOpts[] = {
+/* not const: the Language row's value count is the installed languages
+ * (portOptLanguagesInit); every other row is fixed */
+static struct PortOpt sOpts[] = {
     /* display - [display], video.c */
     ENUMR ("fullscreen",    "[display]", "Display Mode\n",    PORTOPT_CAT_DISPLAY, sDisplayModeVals, sDisplayModeText, sDisplayModeIni),
     ENUMR ("widescreen",    "[display]", "Widescreen\n",      PORTOPT_CAT_DISPLAY, sWideVals, sWideText, NULL),
@@ -396,6 +404,9 @@ static const struct PortOpt sOpts[] = {
     TOGGLE("auto_update",       "[display]", "Check for Updates\n", PORTOPT_CAT_GAMEPLAY),
     TOGGLET("crouch_key",       "[input]",   "Crouch Key\n",    PORTOPT_CAT_CONTROLLER, sHoldToggleText),
     TOGGLET("walk_key",         "[input]",   "Walk Key\n",      PORTOPT_CAT_CONTROLLER, sHoldToggleText),
+    /* the game's and the port's text (port_lang.c); takes effect at the next start */
+    { "language", "[display]", "Language\n", PORTOPT_CAT_GAMEPLAY, KIND_ENUM, 1, 0, 1, "", 0, sLangVals,
+      (const char *const *) sLangText, (const char *const *) sLangIni },
 };
 
 #define PORTOPT_COUNT ((s32)(sizeof(sOpts) / sizeof(sOpts[0])))
@@ -410,7 +421,26 @@ void portOptSave(void);
 static s32 optGet(const char *key, s32 *out)
 {
     return portVideoOptionGet(key, out) || portInputOptionGet(key, out) || portJoyPortOptionGet(key, out)
-        || portVoiceOptionGet(key, out);
+        || portVoiceOptionGet(key, out) || portLangOptionGet(key, out);
+}
+
+/* main.c, after portLangInit: the Language row lists the installed languages */
+void portOptLanguagesInit(void)
+{
+    s32 i, n = portLangCount();
+
+    for (i = 0; i < n && i < PORT_LANG_MAX; i++)
+    {
+        sLangText[i] = portLangNameAt(i);
+        sLangIni[i] = portLangCodeAt(i);
+    }
+    for (i = 0; i < PORTOPT_COUNT; i++)
+    {
+        if (strcmp(sOpts[i].key, "language") == 0)
+        {
+            sOpts[i].min = (n < PORT_LANG_MAX) ? n : PORT_LANG_MAX;
+        }
+    }
 }
 
 static void classicPartChanged(const char *key, s32 on);   /* "classic mode" below */
@@ -418,7 +448,7 @@ static void classicPartChanged(const char *key, s32 on);   /* "classic mode" bel
 static s32 optSet(const char *key, s32 v)
 {
     if (portVideoOptionSet(key, v) || portInputOptionSet(key, v) || portJoyPortOptionSet(key, v)
-        || portVoiceOptionSet(key, v))
+        || portVoiceOptionSet(key, v) || portLangOptionSet(key, v))
     {
         classicPartChanged(key, v != 0);
         return 1;

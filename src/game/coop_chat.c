@@ -24,6 +24,7 @@
  * The HUD font has no lowercase, so everything shows in capitals.
  */
 #include <ultra64.h>
+#include "port_lang.h"   /* portTr: the port's own text in the player's language */
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -889,7 +890,7 @@ static Gfx *coopToastsRender(Gfx *gdl, s32 left, s32 y)
 static s32 coopFeedWrap(const char *line, s32 maxw, CoopToastPiece *pc, s32 *rows)
 {
     s32 row = 0, x = 0;
-    s32 n = coopToastFlowRows(pc, 0, &row, &x, line, maxw, 1, COOPFEED_ROWS);
+    s32 n = coopToastFlowRows(pc, 0, &row, &x, portTr(line), maxw, 1, COOPFEED_ROWS);
 
     *rows = row + 1;
     return n;
@@ -938,7 +939,7 @@ Gfx *coopFeedRender(Gfx *gdl)
         char typed[COOP_FEED_TEXT];
         s32 rows = 0, w = 0, n, k;
 
-        snprintf(typed, sizeof(typed), "SAY: %s_", sLine);
+        snprintf(typed, sizeof(typed), portTr("SAY: %s_"), sLine);
         n = coopFeedWrap(typed, maxw, pc, &rows);
         for (k = 0; k < n; k++)
         {

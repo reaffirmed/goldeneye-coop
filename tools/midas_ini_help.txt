@@ -208,6 +208,11 @@ padN_stickmode.
                       |            | downloads until you pick it.
                       |            | 0 = only when you pick Check Now, or a
                       |            | host has another version
+  Language
+  language            | en         | The game's text and the port's: en, or
+                      |            | a folder in lang/ (es = Spanish). Read
+                      |            | at startup; the Port Options row writes
+                      |            | it. GE_LANG=es overrides it for a run
   Player options (global, not per save file)
   look_updown         | 1          | 1 = upright, 0 = reverse (inverted)
                       |            | up/down look. Also on the Mouse and

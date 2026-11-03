@@ -896,6 +896,16 @@ int main(int argc, char **argv)
      * GE_ROM, midas.ini [data] rom=, or ./Data. Runs after the arena reservations
      * (the ROM takes its own high mapping next) and before anything that
      * consumes it. */
+    /* the language (port_lang.c): GE_LANG, --lang or midas.ini [display]
+     * language=, and its catalogue - before the ROM, whose loader applies
+     * the language's patch, and before any text is shown (the ROM error box
+     * is translated too) */
+    {
+        extern void portLangInit(int argc, char **argv);
+        extern void portOptLanguagesInit(void);
+        portLangInit(argc, argv);
+        portOptLanguagesInit();
+    }
     {
         extern s32 romdataInit(int argc, char **argv);
         romdataInit(argc, argv);
