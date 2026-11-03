@@ -4266,6 +4266,18 @@ otherwise the revive bar gets stuck and does not fill up", and on Facility
 - A partner's shot (Friendly Fire) sent angle 0, which pushed every victim the
   same way (+Z) whoever fired. It now sends the shot's direction, so the push
   goes the way the shot flew, as a guard's does.
-- Not reproduced here: this container has no cart image, so these come from
-  reading the code. Built with GE_SANITIZE; warnings check: nothing new in the
-  changed files.
+- Rig (Linux headless pair, mock Steam, Facility, main 45a93df vs this branch,
+  with a scratch log of the downed player's position each 15 ticks; logs in the
+  project files, goldeneye-coop/revive-knockback/rig-logs-pr147.tgz):
+  - Host GE_COOP_TESTREVIVE=8, joiner GE_COOP_TESTDIE=1200, When Down 0. Main:
+    the death took 340 ticks to fade, the hold read 0 all that time, and the
+    joiner stood up 509 ticks (8.5 s) after falling. Here: the hold climbed from
+    the first tick and the joiner stood up 150 ticks (2.5 s) after falling, then
+    rose to standing height (392) within 60 ticks as on main.
+  - Same, GE_COOP_LIVES=1: main's host starts "reviving player 2" on a fall that
+    can only end out; here it never does.
+  - The testdie hit's push (0, 2) slid the dead joiner 23 units on main; here it
+    reads 0 from the first down tick (the few units left are the death camera).
+  - GE_COOP_TESTFF with a scratch shot flying +x: main's victim got angle 0,
+    push (0, 2); here angle 1.571, push (2, 0).
+  - Not covered: a down on Facility's stairs themselves (no stair pad picked).
