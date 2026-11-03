@@ -149,3 +149,7 @@ A language patch feeds the game's own decompressor, like a cart image does:
 `port_vcdiff.c` refuses any patch whose offsets or lengths fall outside its
 buffers, but the text banks it produces are trusted as the cart's are. Only add
 patches from their translators.
+
+Shipping: the project owner decided on 2026-11-03 that the patch ships in the
+repository and the release zip, with its readme beside it, rather than having
+players download it themselves.
