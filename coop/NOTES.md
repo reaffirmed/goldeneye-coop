@@ -4005,6 +4005,16 @@ for everyone. It should fail only once all players have lost theirs.
   STATE saying "none" can arrive before their THROW event. So a player still counts for
   1 s after they last carried one (plus two round trips for a partner). Before this was
   added, the host failed B while the joiner's modem was still on its way.
+- One player misses and the other's modem goes on the link: after the grace nobody
+  carries one, so the floor modem would reach IFKeyDropped, but Dam's ai_20 never asks
+  once B is done. Its loop (assets/obseg/setup/UsetupdamZ.c, labels search forward,
+  chraiGoToLabel) runs: C complete -> idle; link or mainframe destroyed -> fail B and C;
+  then `if_objective_bitfield_is_set_on(0x100 B done)` and `(0x2000 B failed)` both jump
+  past the item checks; only then `if_item_is_attached_to_object(modem, link)` (sets
+  0x100) and last `if_item_is_stationary_within_level(modem)` (sets 0x2000). Rig row
+  D8-done sets 0x100 on the host, then both players throw at the floor: B stays complete
+  on both and neither game logs a loose-modem check at all. Frigate's ai_5 and Surface 2's
+  ai_44 also test "attached" before "loose" and stop or wait after the attach (FR6, SU4).
 - Credit: a partner's tracker bug or mine that sticks to the helicopter now credits them.
   coopItemsApplyStuck notes the thrower (coopObjNoteUse) also when our copy stuck by
   itself. A level script that watches the world falls back to the last use or throw
@@ -4027,7 +4037,7 @@ against this branch.
   fails B for good. The fix completes B on both, credit player 2.
 - Silo, host throws one plastique on the floor with the joiner holding 8: the countdown
   starts at once on both, the same as main.
-- Checklist rows D8, D8-join, FR6, SU4, SI7 and X10-dam3 (rows.py) cover these. All
+- Checklist rows D8, D8-join, D8-done, FR6, SU4, SI7 and X10-dam3 (rows.py) cover these. All
   pass on this branch, and D8, D8-join, FR6 and SU4 fail on main. mission_runs.sh passes
   all 20 stages. Logs: project files `goldeneye-coop/objectives-all-miss/`.
 - Not covered: the modem attached to the Dam link (no rig line attaches it yet, see D3),

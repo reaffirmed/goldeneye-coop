@@ -73,6 +73,13 @@ ROWS = {
                 f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h47@8,l60@9,f1@10', 50, 2,
                 ['h:item 47 lies loose, but we still carry ours', 'j:item 47 lies loose, but player 1 still carries theirs',
                  '!b:objective 1 \\(B\\) is now failed']),
+    # B already complete (stage flag 0x100, as the modem on the link sets it), then both players
+    # throw theirs on the floor: ai_20 stops asking IFKeyDropped once 0x100 is set, so B stays
+    # complete and no loose modem is ever looked at
+    'D8-done': ('dam', 2, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_TESTFLAG=100:5 GE_COOP_STEPSLINGER=30 GE_COOP_STEPS=h47@10,l60@11,f1@12',
+                f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPSLINGER=30 GE_COOP_STEPS=h47@16,l60@17,f1@18', 50, 2,
+                ['b:objective 1 \\(B\\) is now complete', 'b:threw item 47 \\(id 4001\\)',
+                 '!b:objective 1 \\(B\\) is now failed', '!b:item 47 lies loose']),
     # ---- Facility
     'F5': ('facility', 0, f'{INV} GE_COOP_TESTDUMP=30 GE_COOP_STEPS=o1@10,b1@14,o2@16,b2@20', f'{INV} GE_COOP_TESTDUMP=30 GE_COOP_STEPS=o1@10,b1@14,o2@16,b2@20', 50, 2,
            ['b:dump: tag 1 .* destroyed [1-9]', 'b:dump: tag 2 .* destroyed [1-9]', '!b:objective 3 \\(D\\) is now failed']),
