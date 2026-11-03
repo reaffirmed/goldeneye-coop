@@ -759,6 +759,30 @@ msgstr "LISTO"
 msgid "NOT READY"
 msgstr "NO LISTO"
 
+msgid "START"
+msgstr "EMPEZAR"
+
+msgid "Waiting for the host"
+msgstr "Espera al anfitrión"
+
+msgid "The party is waiting"
+msgstr "El grupo te espera"
+
+msgid "You are not ready"
+msgstr "No estás listo"
+
+msgid "%d PLAYER NOT READY"
+msgstr "%d JUGADOR NO LISTO"
+
+msgid "%d PLAYERS NOT READY"
+msgstr "%d JUGADORES NO LISTOS"
+
+msgid "Friends can drop in"
+msgstr "Pueden unirse luego"
+
+msgid "Everyone is ready"
+msgstr "Todos están listos"
+
 msgid "NEXT MISSION"
 msgstr "SIGUIENTE MISIÓN"
 
@@ -823,6 +847,24 @@ msgstr "Avisa al anfitrión de que estás listo."
 
 msgid "Pick any mission and difficulty. The whole party comes along."
 msgstr "Elige misión y dificultad. Todo el grupo te acompaña."
+
+msgid "Pick any mission and difficulty. Friends who join later drop in."
+msgstr "Elige misión y dificultad. Los amigos que lleguen después entrarán."
+
+msgid "You are ready. Select again if you need more time."
+msgstr "Estás listo. Vuelve a elegirlo si necesitas más tiempo."
+
+msgid "Tell the host you are ready. The host starts once everyone is."
+msgstr "Avisa al anfitrión de que estás listo. Empieza cuando todos lo estén."
+
+msgid "A match needs at least one more player."
+msgstr "Una partida necesita al menos otro jugador."
+
+msgid "Starts once every player is ready."
+msgstr "Empieza cuando todos los jugadores estén listos."
+
+msgid "Play a mission on your own. Friends who join later drop in."
+msgstr "Juega una misión tú solo. Los amigos que lleguen después entrarán."
 
 msgid "Start the next mission of your campaign together."
 msgstr "Empezad juntos la siguiente misión de la campaña."

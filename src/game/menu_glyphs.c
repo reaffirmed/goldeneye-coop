@@ -62,6 +62,7 @@ static struct GlyphLook glyphLook(s32 action)
         g.text = (action == MENUGLYPH_ACCEPT) ? "ENTER" : (action == MENUGLYPH_BACK) ? "ESC"
                : (action == MENUGLYPH_CHAT) ? "T" : (action == MENUGLYPH_ARROWS || action == MENUGLYPH_DPAD) ? "ARROWS"
                : (action == MENUGLYPH_TABS) ? "," : (action == MENUGLYPH_TABS_R) ? "TAB"   /* the tab bar's: Tab steps on (, and . still work) */
+               : (action == MENUGLYPH_READY) ? "R"
                : "CLICK";   /* L and R: a click steps the row */
         return g;
     }
@@ -83,6 +84,12 @@ static struct GlyphLook glyphLook(s32 action)
         g.round = 0;
         g.face = 0x383838FF;
         g.text = (style == GLYPH_XBOX) ? (l ? "LB" : "RB") : (style == GLYPH_PS) ? (l ? "L1" : "R1") : (l ? "L" : "R");
+        return g;
+    }
+    if (action == MENUGLYPH_READY)
+    {   /* the reload bind: the left face button on the shipped pad layouts */
+        g.text = (style == GLYPH_PS) ? "" : (style == GLYPH_NINTENDO) ? "Y" : "X";
+        g.face = (style == GLYPH_PS) ? 0x1C1C1CFF : (style == GLYPH_XBOX) ? 0x2F6FD0FF : 0x3A3A3AFF;
         return g;
     }
     if (action == MENUGLYPH_CHAT)
@@ -128,6 +135,11 @@ static s32 glyphTextW(const char *text)
     return tw;
 }
 
+s32 menuGlyphShown(s32 action)
+{   /* an N64 pad's layout has no Port actions, so no reload button */
+    return action != MENUGLYPH_READY || portInputGlyphStyle() != GLYPH_N64;
+}
+
 s32 menuGlyphWidth(s32 action)
 {
     const struct GlyphLook g = glyphLook(action);
@@ -169,6 +181,16 @@ Gfx *menuGlyphDraw(Gfx *gdl, s32 x, s32 y, s32 action, u32 alpha)
         gdl = glyphShape(gdl, x, y + 1, w, (0x8A8676FF & 0xFFFFFF00) | a, 0);
     }
     gdl = glyphShape(gdl, x, y, w, (g.face & 0xFFFFFF00) | (((g.face & 0xFF) * a) / 0xFF), g.round);
+    if (action == MENUGLYPH_READY && portInputGlyphStyle() == GLYPH_PS)
+    {   /* the square, in its pink: the font has no shape for it */
+        const u32 pink = (0xE07AC8FF & 0xFFFFFF00) | a;
+
+        gdl = microcode_constructor_related_to_menus(gdl, x + 3, y + 3, x + w - 3, y + 4, pink);
+        gdl = microcode_constructor_related_to_menus(gdl, x + 3, y + GLYPH_H - 4, x + w - 3, y + GLYPH_H - 3, pink);
+        gdl = microcode_constructor_related_to_menus(gdl, x + 3, y + 3, x + 4, y + GLYPH_H - 3, pink);
+        gdl = microcode_constructor_related_to_menus(gdl, x + w - 4, y + 3, x + w - 3, y + GLYPH_H - 3, pink);
+        return microcode_constructor(gdl);
+    }
     gdl = microcode_constructor(gdl);
     snprintf(t, sizeof(t), "%s\n", g.text);
     tx = x + (w - tw) / 2;

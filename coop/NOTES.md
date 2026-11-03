@@ -4281,3 +4281,36 @@ otherwise the revive bar gets stuck and does not fill up", and on Facility
   - GE_COOP_TESTFF with a scratch shot flying +x: main's victim got angle 0,
     push (0, 2); here angle 1.571, push (2, 0).
   - Not covered: a down on Facility's stairs themselves (no stair pad picked).
+
+## The lobby's Ready / Start button, and a host can start alone (2026-11-03, COOP_VERSION stays 17)
+
+- Players forgot the Ready row. Every tab now has a button at the bottom right
+  (front.c coopLobbyButton, coopMwButton, coopClassicButton): a joiner's READY UP,
+  the host's START. Modern puts it in the foot, right of the row's description
+  (which narrows to make room), above the prompts; Classic stamps it on the paper
+  under the rows, which show one fewer to make room.
+- A click, Select with the crosshair on it, or the reload bind from any tab
+  presses it: R on the keyboard, X / Square / Y on the shipped pad layouts
+  (joy_port.c portJoyPortReadyPressed, taken every lobby tick so a press while
+  typing is dropped). Its prompt is MENUGLYPH_READY; an N64 pad has no reload
+  bind, so none is drawn.
+- A joiner's pulses until they are ready ("THE PARTY IS WAITING" when every
+  other joiner is), then shows a steady green READY. The host's is grey with
+  "N PLAYERS NOT READY", and pulses "EVERYONE IS READY" once they are. Start does
+  the campaign's Continue row when there is one, else Select Mission (Start
+  Match in versus).
+- A host alone can start a co-op mission (coopLobbyHostCanStart): Select
+  Mission and the button work with nobody else in the lobby, and friends who
+  join later drop in. With partners, all of them still have to be ready first.
+  Versus still needs a partner. The party panel and Classic's strip keep the
+  host's own seat while it is alone (it showed 0/4 and four open seats).
+- Harness: GE_COOP_LOBBY_NOREADY=1 stops a GE_COOP_LOBBY=join copy from
+  readying itself, so the button can be pressed instead.
+- Tested over the mock Steam, two copies on one Linux machine (xdotool): the
+  joiner clicked READY UP, pressed R to ready and again to cancel, and an r
+  typed in the chat line did not press it; the host pressed R and both went
+  into Dam together. A host alone clicked START and got
+  the mission select; a host alone pressed R into Dam, and a friend who started
+  10 s later followed it in and dropped in. Screenshots on Modern and Classic, English and Spanish,
+  with keyboard, Xbox, PlayStation and Switch prompts. Host and joiner both
+  need the change for the joiner's button; a host alone needs it to start.
