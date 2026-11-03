@@ -3927,3 +3927,51 @@ simulated network, not internet play.
   sends and receipts logged, 1 missed. There the host sent the fading body three times,
   and none of them arrived while the joiner was frozen for 4.5 s and off the line. That
   is the rig being overloaded, which no snapshot timing can cover.
+
+## Versus: players ran into each other's bodies (2026-11-03, COOP_VERSION stays 17)
+
+Owner's report: in versus, collision is very odd when players get near each other.
+
+- Cause: our Bond's moves are tested against each other player's diamond
+  (bondview2.c bondviewGetPropHeightRelatedValues: their collision_bounds and
+  field_70). Only that player's own MoveBond sets those, and boss.c skips
+  MoveBond for the other PCs' players, so the diamond stayed at 0,0 all match.
+  Nobody blocked anybody: a player ran into the other's body and stood inside
+  it, the camera in the other's head (rig: 12 of 12 run-ins ended centre on
+  centre).
+- Fix (coop_versus.c coopVsBodyCollision, from coopVsMoveBody): the diamond and
+  field_70 follow the drawn body each tick, as bondviewUpdatePlayerCollisionBounds
+  does for our own. Bodies block like split screen.
+- Lag: the body is drawn a moment behind, and their game stops them on our body
+  of a moment ago, so a body pushing into ours comes a little way inside it on
+  our screen. The stock test then blocks every move (a move out of a shape
+  crosses its edge): strafing off someone still pushing into you hung for 0.5 to
+  2 s. The stock walk-up stops exactly on the edge, so anything further in was
+  pushed in: the diamond backs off along the line between us to just past our
+  edge, and settles back onto the body as soon as that leaves us outside (never
+  on our own walk-up, which would let us ratchet through). A body more than
+  15 cm in, or within 45 cm of our middle (a head-on sprint over a slow line,
+  a respawn on top of us), blocks nothing until we are 65 cm apart
+  (coopCollideSkip asks coopVersusCollideSkip in versus), as a co-op partner's.
+  No packets change.
+- Co-op checked: a partner's puppet is a chr diamond 20 wide, so a walk-up
+  stops 44 to 50 cm apart, but coopPuppetUpdateGhost makes it non-solid under
+  60 cm (meant for the shared start pad). Partners never block each other: you
+  walk into your partner and stand inside them (rig, Dam: 3 m run-in ended 2 to
+  7 cm apart). Not changed here; it is the owner's call whether co-op partners
+  should block each other.
+- Harness: GE_VS_BUMP=<s> (from <s> s, every 10 s: the host steps 3 m from the
+  first opponent, everyone runs at them for 4 s, strafes right 2 s, backs off
+  2 s, stands 2 s; "vsbump" lines every quarter second with where we are, their
+  body, their diamond, the gap between edges and how far we moved).
+- Rig (Linux i686 headless, two copies over the mock Steam, Temple, both on
+  GE_VS_BUMP, 8 run-ins a run; logs in the project files, versus-collision/):
+  before, all 16 run-ins on the two screens ended inside each other (gap -55
+  to -60 cm). After, at GE_COOP_NETSIM 60:10, 6 of 8 stopped at the edge on
+  both screens (gap -9 to -14 cm: a diamond is nearer across its sides), and 8
+  of 8 in an earlier run. At 150:30, 6 of 8 stopped in each of two runs. Every
+  run-in that passed through was both players at full speed, head on: they
+  close about 16 cm a tick, so the body comes past the 15 cm limit before
+  either game sees the other stop. 13 of 14 strafes off a held run-in moved at
+  once; one hung about 0.75 s. A 2- and a 3-player GE_VS_HUNT match played
+  hits and kills as before; co-op Dam and Facility mission runs pass.
