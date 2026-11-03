@@ -4198,3 +4198,23 @@ The intro has no Natalya in it and looks the same on both screens (rig).
     egypt, dam, runway: 7/7 pass, 0 corrected desyncs. Warnings check: none
     new.
 
+## Updates from older builds leave lang/ out: the new build puts it in (2026-11-03, COOP_VERSION stays 17)
+
+- The updater stages only what its own portUpdPathAllowed takes, and before v0.8.0
+  that was the files beside the exe and the plain text in Data/. "No other folders in
+  the zip today" made lang/ a "leaving ... alone" line, so an in-game update from v0.7.1
+  or older to v0.8.0 brought the new exe but no Spanish.
+- Every updater since v0.3.0 keeps its checked download in Data/Update/<zip> and names it
+  in installed.txt ("<from> <to> <zip>") until the new build's tidyUp clears it. tidyUp
+  now calls catchUp(zip) first, when the install's <to> is this build's own release (a
+  newer build unzipped over the folder since leaves it alone, as resumeSwap does).
+- catchUp unpacks every entry under the zip's top folder that this build's
+  portUpdPathAllowed takes and that is missing from the folder: written to <name>.tmp,
+  flushed, renamed in. A file that is there is never touched, so nothing the install put
+  in or the player changed is overwritten, and a tidyUp that runs again (files in use)
+  does nothing new. The log says "put in N file(s) from <zip> that the last update left
+  out".
+- update_resume_test cases 6 and 7: an install from v0.7.1 whose list has the exe and
+  Data/README.txt only. v0.8.0 puts in lang/es/port.po and language.ini, leaves
+  README.txt, midas.ini and a lang/es/deeper/ file alone, and clears the list and the
+  zip. A v0.8.1 unzipped over it puts nothing in. Case 6 fails on the build before this.

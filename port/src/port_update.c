@@ -927,6 +927,92 @@ static void waitForOld(unsigned long pid)
 #endif
 }
 
+/* After a restart into a new build, from the download the old build kept
+ * (Data/Update/<zip>, checked against GitHub's checksum when it came): put
+ * in every file this build's portUpdPathAllowed takes that isn't there at
+ * all. An older build's updater only takes the kinds of file it knew, so it
+ * leaves out anything new to the zip, such as the languages under lang/
+ * (v0.8.0). Only missing files are written, so nothing the install put in,
+ * or the player changed, is touched, and running it again (tidyUp waiting
+ * on files in use) does nothing. Each is written to <name>.tmp, flushed to
+ * the disk and renamed in. */
+static void catchUp(const char *zipname)
+{
+    char path[200], top[64];
+    unsigned char *zip;
+    long len = 0;
+    int n, i, put = 0;
+
+    if (zipname[0] == '\0' || strchr(zipname, '/') != NULL || strchr(zipname, '\\') != NULL || strstr(zipname, "..") != NULL)
+    {
+        return;
+    }
+    snprintf(path, sizeof(path), UPD_DIR "/%s", zipname);
+    zip = readFile(rootPathCopy(path), &len);
+    if (zip == NULL)
+    {
+        return;
+    }
+    n = portUpdZipCount(zip, (size_t) len);
+    if (n <= 0 || zipTopFolder(zip, (size_t) len, top, sizeof(top)) != 0)
+    {
+        free(zip);
+        return;
+    }
+    for (i = 0; i < n; i++)
+    {
+        struct PortUpdZipEntry e;
+        const char *rel;
+        unsigned char *data;
+        char target[1200], tmp[1200];
+        FILE *f;
+        int ok;
+
+        if (portUpdZipEntry(zip, (size_t) len, i, &e) != 0 || e.dir || strncmp(e.name, top, strlen(top)) != 0)
+        {
+            continue;
+        }
+        rel = e.name + strlen(top);
+        snprintf(target, sizeof(target), "%s", portRootPath(rel));
+        if (!portUpdPathAllowed(rel) || e.size > (unsigned long) UPD_MAX_ZIP || fileExists(target))
+        {
+            continue;
+        }
+        data = malloc(e.size + 1);
+        if (data == NULL || portUpdZipExtract(zip, (size_t) len, i, data) != 0)
+        {
+            free(data);
+            portConLogf("ge: update: couldn't read %s in %s\n", rel, zipname);
+            continue;
+        }
+        snprintf(tmp, sizeof(tmp), "%s.tmp", target);
+        makeParents(target);
+        f = fopen(tmp, "wb");
+        ok = f != NULL;
+        if (ok)
+        {
+            ok = fwrite(data, 1, e.size, f) == e.size;
+            ok = (syncClose(f) == 0) && ok;
+        }
+        ok = ok && moveFile(tmp, target) == 0;
+        if (ok)
+        {
+            put++;
+        }
+        else
+        {
+            portConLogf("ge: update: couldn't put in %s from %s\n", rel, zipname);
+            remove(tmp);
+        }
+        free(data);
+    }
+    free(zip);
+    if (put > 0)
+    {
+        portConLogf("ge: update: put in %d file(s) from %s that the last update left out\n", put, zipname);
+    }
+}
+
 /* after an update: the .old files go, and the log says what changed;
  * `to` gets the release installed ("" when there was no update) */
 static void tidyUp(char *to, size_t tocap)
@@ -961,6 +1047,10 @@ static void tidyUp(char *to, size_t tocap)
         }
     }
     fclose(f);
+    if (to[0] != '\0' && strcmp(to, sOwn) == 0)
+    {   /* we are the build that install brought (not one unzipped over it since) */
+        catchUp(zip);
+    }
     if (left == 0)
     {
         if (zip[0] != '\0' && strchr(zip, '/') == NULL && strchr(zip, '\\') == NULL && strstr(zip, "..") == NULL)
