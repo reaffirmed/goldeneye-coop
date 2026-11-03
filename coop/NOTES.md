@@ -4233,3 +4233,39 @@ The intro has no Natalya in it and looks the same on both screens (rig).
   Data/README.txt only. v0.8.0 puts in lang/es/port.po and language.ini, leaves
   README.txt, midas.ini and a lang/es/deeper/ file alone, and clears the list and the
   zip. A v0.8.1 unzipped over it puts nothing in. Case 6 fails on the build before this.
+
+## Revive counts from the fall; knockback no longer strands a player (2026-11-03, COOP_VERSION stays 17)
+
+Tester report: "you have to wait quite a while before reviving a teammate,
+otherwise the revive bar gets stuck and does not fill up", and on Facility
+"the knockback effect trapped a player on the stairs".
+
+- Revive bar: a downed player's death plays for a few seconds (the fall, the
+  blood, the fade to black) before bondview2.c hands it to coopDeadTick. Their
+  STATE already said dead and revivable from the first tick, so the partner's
+  HUD offered the revive and showed "REVIVING" with a bar, but only
+  coopDeadTick counted the hold. Until the fade was over the bar stood at 0.
+  coopReviveFallTick (every coopTick) now counts the hold during the fall, with
+  the same reach test (coopReviveOver, shared with coopDeadTick). The count goes
+  out in STATE and shows on the downed HUD from the fall. When the bar fills
+  before the fade ends, coopDeadTick takes the death at once (the life it costs,
+  the down's message) and its own hold tick stands the player up. coopDeadTick's
+  first tick no longer zeroes a hold that is under way.
+- No revive is offered for a fall that can't be revived: on the last life under
+  Revive or Timer, the respawn byte is -1 during the fall, and revivable now
+  needs it to be >= 0 (Revive only still needs > 0, the bleed-out). An
+  out-on-arrival joiner's fall also sends -1.
+- Knockback: a hit's push (bondshotspeed, record_damage_kills) kept running
+  after the shot that downed a player, so the dead Bond slid for half a second
+  at the dying (low) height. The revive stands the player up where the body
+  came to rest, which on stairs can be under the flight above or against a
+  ledge, with no room to stand or walk out. While down the push is now zeroed,
+  so the body stays where the player last stood. coopTeleportPlayerTo (revive,
+  respawn, a cutscene's star) also zeroes it, so a push still running can't
+  carry a player off the spot.
+- A partner's shot (Friendly Fire) sent angle 0, which pushed every victim the
+  same way (+Z) whoever fired. It now sends the shot's direction, so the push
+  goes the way the shot flew, as a guard's does.
+- Not reproduced here: this container has no cart image, so these come from
+  reading the code. Built with GE_SANITIZE; warnings check: nothing new in the
+  changed files.
