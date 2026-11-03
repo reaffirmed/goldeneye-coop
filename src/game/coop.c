@@ -2171,7 +2171,11 @@ s32 coopCollideSkip(PropRecord *prop)
 {
     s32 p, i;
 
-    if (sEnabled <= 0 || prop == NULL || coopVersus() || !coopPartnerHere())
+    if (sEnabled > 0 && prop != NULL && coopVersus())
+    {
+        return coopVersusCollideSkip(prop);    /* another player's body inside ours (coop_versus.c) */
+    }
+    if (sEnabled <= 0 || prop == NULL || !coopPartnerHere())
     {
         return 0;
     }
