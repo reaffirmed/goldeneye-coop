@@ -4981,6 +4981,7 @@ static const struct PortSheetRow port_sheet_rows_audio[] = {
     { SHROW_OPT, "mute_unfocused" },   /* silence while the window has no focus */
     { SHROW_OPT, "voice_mode" },       /* co-op voice chat (coop_voice.c) */
     { SHROW_OPT, "voice_volume" },
+    { SHROW_OPT, "chat_volume" },      /* the beep for a partner's chat line (coop_audio.c) */
 };
 static const struct PortSheetRow port_sheet_rows_graphics[] = {
     /* EMPTY: FOV went to VIDEO, High Detail Models to PORT

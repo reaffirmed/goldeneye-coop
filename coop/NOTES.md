@@ -4421,7 +4421,7 @@ Rig: Linux i686, copies on one machine over the mock Steam, main 45a93df against
   already did for the stats screen. A kill or break from before a partner joined has no
   owner and falls back to the old windows.
 
-## Polish: tags behind walls, hit flash, chat beep, merged toasts, give hint, revive time (2026-11-04, COOP_VERSION stays 17)
+## Polish: tags behind walls, hit flash, chat beep, merged toasts, give hint, revive bar (2026-11-04, COOP_VERSION stays 17)
 
 The owner's pick from a list of small details. Nothing new goes over the wire: each
 player's own game does all of it.
@@ -4438,7 +4438,9 @@ player's own game does all of it.
   piece stays pale for 450 ms then shrinks into the bar, and the bar's frame flashes red
   for 300 ms. Healing, a respawn or a second without the bar resets it.
 - Chat beep (coop_audio.c coopAudioChat): a partner's line plays CAMERA_BEEP1_SFX (the
-  cheat unlock beep) at half volume, at most once in 400 ms; our own lines don't.
+  cheat unlock beep), at most once in 400 ms; our own lines don't. Its volume is the
+  Chat Sound slider (Options > Audio and the watch's Audio page, ini [display] chat_volume,
+  0..200 %, step 10, default 100 = half of full scale, 0x4000; 200 = 0x7FFF). 0 skips it.
 - Toasts (coop_chat.c coopFeedToastKeyed): the same text from the same player while it is
   still up comes back as the newest with "X2", "X3"; a keyed toast takes the new text.
   coop_give.c keys its "gave" toasts by direction, player and ammo type and keeps a running
@@ -4452,9 +4454,12 @@ player's own game does all of it.
   prompt, the weapon menu, chat or spectating is up. At first it sat where the revive prompt
   is (2/3 down) and the toasts ran into it; now it is under the crosshair on a dark band,
   drawn after the toasts, which a tall stack of them can still reach.
-- REVIVE tag: "REVIVE NAME 3M 53S", the seconds to bleed out (Revive) or to come back
-  anyway (Revive or Timer). Under Revive it pulses (70 % +- 30 %), at 1 Hz, 2 Hz from 10 s
-  and 4 Hz from 5 s, and stops pulsing while someone holds Use over them.
+- REVIVE tag: a red bar under "REVIVE NAME 3M", as wide as the tag (24 px at least),
+  drains with the time left to bleed out (Revive) or to come back anyway (Revive or Timer).
+  Its full length is the bleed-out under Revive, else the longest wait seen since they went
+  down. The owner first got the seconds as text ("3M 53S") and asked for a bar instead.
+  Under Revive the tag pulses (70 % +- 30 %), at 1 Hz, 2 Hz from 10 s and 4 Hz from 5 s,
+  and stops pulsing while someone holds Use over them.
 - Harness: GE_COOP_TESTGIVE takes up to four times ("14,16,18"); GE_COOP_TESTTOASTS ends
   with a repeat (X2); GE_COOP_DOWNRULE also works for a -coophost start.
 
@@ -4465,6 +4470,7 @@ Rig: Linux i686, two copies on one machine over the mock Steam.
 - Bunker 1 and Facility: the joiner on a waypoint 12 and 25 m away in another room; the
   host's tag for them dims (room not drawn) and shows dark through the door. Guards shooting
   the joiner show the pale piece on the host's bar.
-- Dam, Revive rule, joiner killed at 10 s: "REVIVE MOCK2 3M 53S" counting down.
+- Dam, Revive rule (60 s bleed-out on the rig), joiner killed at 10 s: the host's bar
+  under the tag at 58, 42, 26 and 20 s left is full, about 70 %, 43 % and 33 %.
 - Not covered: the beep's sound itself (the rig plays no audio), a real gamepad's bind text
   in the hint, 3 or 4 players.

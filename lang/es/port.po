@@ -442,6 +442,9 @@ msgstr "Chat de voz"
 msgid "Voice Volume"
 msgstr "Volumen de voz"
 
+msgid "Chat Sound"
+msgstr "Sonido del chat"
+
 msgid "Update Check"
 msgstr "Actualizaciones"
 
@@ -2880,6 +2883,9 @@ msgstr "Voz co-op: mantén V para hablar, o deja el micro abierto."
 msgid "How loud your partners' voices play."
 msgstr "Volumen de la voz de tus compañeros."
 
+msgid "How loud the beep is when a partner's chat line comes in. All the way down turns it off."
+msgstr "Volumen del pitido al llegar una línea de chat de un compañero. Al mínimo no suena."
+
 msgid "Stop hearing this player. Only on your game."
 msgstr "Dejas de oír a este jugador. Solo en tu juego."
 
@@ -3218,9 +3224,6 @@ msgstr "%s - PERDIDO"
 
 msgid "REVIVE %s %dM"
 msgstr "REANIMAR A %s %dM"
-
-msgid "REVIVE %s %dM %dS"
-msgstr "REANIMAR A %s %dM %dS"
 
 msgid "ENEMY %dM"
 msgstr "ENEMIGO %dM"

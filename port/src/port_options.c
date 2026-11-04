@@ -383,6 +383,8 @@ static struct PortOpt sOpts[] = {
     /* co-op voice chat (coop_voice.c): push to talk is its own bind (push_to_talk, V) */
     ENUMR ("voice_mode",        "[display]", "Voice Chat\n",   PORTOPT_CAT_AUDIO, sVoiceModeVals, sVoiceModeText, NULL),
     INTR  ("voice_volume",      "[display]", "Voice Volume\n", PORTOPT_CAT_AUDIO, 0, 200, 10, "%"),
+    /* the beep for a partner's chat line (coop_audio.c); 0 is off */
+    INTR  ("chat_volume",       "[display]", "Chat Sound\n",   PORTOPT_CAT_AUDIO, 0, 200, 10, "%"),
     /* this session's partners, muted on this game alone: never saved (portOptSave),
      * labelled with their names, and only on the watch while they are here */
     TOGGLET("voice_mute_1",     "[display]", g_coopVoiceMuteLabel[0], PORTOPT_CAT_AUDIO, sVoiceMuteText),

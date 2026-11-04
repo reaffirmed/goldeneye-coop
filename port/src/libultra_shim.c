@@ -269,6 +269,11 @@ __attribute__((weak)) s32 portVideoVoiceVolume(void)
     return 100;
 }
 
+__attribute__((weak)) s32 portChatVolume(void)
+{
+    return 100;
+}
+
 /** Weak default: look for updates at startup; video.c overrides ([display] auto_update). */
 __attribute__((weak)) s32 portVideoAutoUpdate(void)
 {

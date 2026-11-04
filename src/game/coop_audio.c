@@ -14,7 +14,8 @@
  *     gun.c gunCoopSpawnThrown).
  *   - a ping's click (BEEP) from where the ping is, out to 300 m, never
  *     quieter than a third, so one behind us is heard from that side.
- *   - a partner's chat line: the watch's short beep, at half volume.
+ *   - a partner's chat line: the watch's short beep, at half volume times the
+ *     player's Chat Sound (chat_volume).
  *   - when a partner goes down: the game's own short death sting on the X
  *     music track (the slot the alarm and exit music use), only while that
  *     track is free, faded out after 3 s; the level music is not touched.
@@ -37,6 +38,7 @@
 #include "coop.h"
 
 extern void portConLogf(const char *fmt, ...);
+extern s32 portChatVolume(void);   /* video.c: [display] chat_volume, percent 0..200 */
 extern s32 g_musicXTrack2CurrentTrackNum;   /* music.c: the X track's tune, 0 when none */
 s32 sub_GAME_7F0537B8(f32 distance, f32 min, f32 max);  /* propobj.c: a distance's volume */
 extern float sqrtf(float);
@@ -181,16 +183,18 @@ void coopAudioPing(coord3d *pos, s32 self)
 /* ---- chat ---- */
 
 /* a partner's chat line came in: the watch's short beep (the one the cheat
- * unlocks play), at half volume, in both ears; at most one every
+ * unlocks play), at half volume times the player's Chat Sound ([display]
+ * chat_volume, 0 off .. 200 %, the full beep), in both ears; at most one every
  * COOP_CHAT_BEEP_GAP_MS so a burst of lines is one beep */
 #define COOP_CHAT_BEEP_GAP_MS 400u
 void coopAudioChat(void)
 {
     static u32 last;
     u32 now = (u32) (osGetTime() / 46875ull);
+    s32 pct = portChatVolume();
     ALSoundState *state;
 
-    if (last != 0 && now - last < COOP_CHAT_BEEP_GAP_MS)
+    if (pct <= 0 || (last != 0 && now - last < COOP_CHAT_BEEP_GAP_MS))
     {
         return;
     }
@@ -199,7 +203,9 @@ void coopAudioChat(void)
     portConLogf("ge: coop: audio: chat beep%s\n", (state != NULL) ? "" : " (no voice free)");
     if (state != NULL)
     {
-        sndCreatePostEvent(state, 8, 0x4000);
+        s32 vol = 0x4000 * pct / 100;
+
+        sndCreatePostEvent(state, 8, (vol > 0x7FFF) ? 0x7FFF : vol);
     }
 }
 

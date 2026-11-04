@@ -131,7 +131,9 @@ Rules
   everyone is down at the same time, the mission fails.
 - T opens a chat line (in a mission and in the lobby). Type and press Enter
   to send it to everyone, or Escape to close it. Lines show at the bottom
-  left in each player's colour. The key can be changed (Chat).
+  left in each player's colour, with a short beep when a partner's line
+  comes in (Chat Sound in Options > Audio sets how loud; all the way down
+  turns it off). The key can be changed (Chat).
 - Voice chat goes through Steam Voice. Hold V to talk (Push to Talk in the
   controls), or set Voice Chat to Open Mic or Off in Options > Audio. You
   hear partners from where they stand in a mission: quieter far away, and

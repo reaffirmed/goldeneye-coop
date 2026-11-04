@@ -155,6 +155,7 @@ static Gfx *coopHudBar(Gfx *gdl, s32 x, s32 y, s32 w, f32 frac, u32 colour)
 #define COOP_TAG_FADE_FROM   4000.0f    /* and faint from here out */
 #define COOP_TAG_FADE_TO     7000.0f
 #define COOP_TAG_FAR_ALPHA   0x60
+#define COOP_TAG_BAR_MIN     24         /* a REVIVE tag's time bar is at least this wide */
 
 static u32 coopHudWithAlpha(u32 colour, f32 a)
 {
@@ -388,7 +389,11 @@ static Gfx *coopHudBark(Gfx *gdl, CoopBarkMark *m)
     return combiner_bayer_lod_perspective(gdl);
 }
 
-/* the partner's name and distance over their head, when they are in front of us */
+/* a downed partner's wait (bleed-out, or back anyway) at its longest, for the bar under their REVIVE tag */
+static s32 sDownFull[COOP_MAX_PLAYERS];
+
+/* the partner's name and distance over their head, when they are in front of us;
+ * a downed one's REVIVE tag has a bar under it draining with the time they have left */
 static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
 {
     PropRecord *self = g_CurrentPlayer->prop;
@@ -401,7 +406,26 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
     s32 th = 0, tw = 0;
     s32 x, y, px, py;
     u32 ink;
+    f32 left = -1.0f;
 
+    if (p->player >= 0 && p->player < COOP_MAX_PLAYERS)
+    {   /* the longest wait seen since they went down is the bar's full length */
+        s32 *full = &sDownFull[p->player];
+
+        if (!p->dead || p->respawn < 0)
+        {
+            *full = 0;
+        }
+        else
+        {
+            if (*full == 0 && coopHudDownRule() == COOPDOWN_REVIVE)
+            {
+                *full = coopBleedOutTicks();   /* the lobby's Bleed Out time, if we see them late */
+            }
+            *full = (p->respawn > *full) ? p->respawn : *full;
+            left = (*full > 0) ? (f32) p->respawn / (f32) *full : -1.0f;
+        }
+    }
     if (self == NULL || (p->dead && !p->revivable))
     {
         return gdl;
@@ -450,11 +474,6 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
     if (coopHudPlayerLost(p->player))
     {
         snprintf(text, sizeof(text), portTr("%s - LOST\n"), name);
-    }
-    else if (p->dead && p->respawn >= 0)
-    {   /* the seconds they have left: to bleed out, or until they are back anyway */
-        snprintf(text, sizeof(text), portTr("REVIVE %s %dM %dS\n"), name, (int) (dist / 100.0f + 0.5f),
-                 (int) ((p->respawn + 59) / 60));
     }
     else if (p->dead)
     {
@@ -507,6 +526,15 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
                              coopHudWithAlpha(COOP_HUD_COL_SHADOW, alpha), (s32) viGetX(), viGetY(), 0, 0);
     gDPNoOpTag(gdl++, 0x58FFFFFFu);
     gdl = combiner_bayer_lod_perspective(gdl);
+    if (p->dead && left >= 0.0f)
+    {   /* the time left, unscaled under the tag: as wide as the tag, at least COOP_TAG_BAR_MIN */
+        s32 bw = (s32) (tw * scale);
+
+        bw = (bw < COOP_TAG_BAR_MIN) ? COOP_TAG_BAR_MIN : bw;
+        gdl = microcode_constructor(gdl);
+        gdl = coopHudBar(gdl, px - bw / 2, py + 2, bw, left, coopHudWithAlpha(0xFF3030FF, alpha));
+        gdl = combiner_bayer_lod_perspective(gdl);
+    }
     if (coopVoiceTalking(p->player))
     {   /* talking: a speaker just left of the tag, unscaled (right of it at the screen's left edge) */
         s32 sx = px - (s32) (tw * scale) / 2 - 13;
