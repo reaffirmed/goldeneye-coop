@@ -14,6 +14,7 @@
  *     gun.c gunCoopSpawnThrown).
  *   - a ping's click (BEEP) from where the ping is, out to 300 m, never
  *     quieter than a third, so one behind us is heard from that side.
+ *   - a partner's chat line: the watch's short beep, at half volume.
  *   - when a partner goes down: the game's own short death sting on the X
  *     music track (the slot the alarm and exit music use), only while that
  *     track is free, faded out after 3 s; the level music is not touched.
@@ -175,6 +176,31 @@ void coopAudioPing(coord3d *pos, s32 self)
     }
     sndCreatePostEvent(state, 8, vol);
     portSndApplyPan(state, pos);
+}
+
+/* ---- chat ---- */
+
+/* a partner's chat line came in: the watch's short beep (the one the cheat
+ * unlocks play), at half volume, in both ears; at most one every
+ * COOP_CHAT_BEEP_GAP_MS so a burst of lines is one beep */
+#define COOP_CHAT_BEEP_GAP_MS 400u
+void coopAudioChat(void)
+{
+    static u32 last;
+    u32 now = (u32) (osGetTime() / 46875ull);
+    ALSoundState *state;
+
+    if (last != 0 && now - last < COOP_CHAT_BEEP_GAP_MS)
+    {
+        return;
+    }
+    last = (now == 0) ? 1 : now;
+    state = sndPlaySfx((struct ALBankAlt_s *) g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, NULL);
+    portConLogf("ge: coop: audio: chat beep%s\n", (state != NULL) ? "" : " (no voice free)");
+    if (state != NULL)
+    {
+        sndCreatePostEvent(state, 8, 0x4000);
+    }
 }
 
 /* ---- stings ---- */

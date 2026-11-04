@@ -3219,6 +3219,9 @@ msgstr "%s - PERDIDO"
 msgid "REVIVE %s %dM"
 msgstr "REANIMAR A %s %dM"
 
+msgid "REVIVE %s %dM %dS"
+msgstr "REANIMAR A %s %dM %dS"
+
 msgid "ENEMY %dM"
 msgstr "ENEMIGO %dM"
 
@@ -3272,6 +3275,12 @@ msgstr "REANIMANDO A %s"
 
 msgid "HOLD USE TO REVIVE %s"
 msgstr "MANTÉN ACCIÓN PARA REANIMAR A %s"
+
+msgid "%s: GIVE AMMO TO %s"
+msgstr "%s: DAR MUNICIÓN A %s"
+
+msgid "GIVE AMMO TO %s"
+msgstr "DAR MUNICIÓN A %s"
 
 msgid "FREE CAMERA"
 msgstr "CÁMARA LIBRE"

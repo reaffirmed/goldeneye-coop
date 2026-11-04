@@ -291,6 +291,7 @@ typedef struct
     u8 pad[3];
 } CoopGive;
 void coopGivePress(void);       /* the give_partner key (bondview2.c) */
+s32  coopGiveHint(CoopHudPartner *out);   /* a give_partner press now would reach *out (coop_hud.c's hint) */
 void coopGiveSend(s32 answer, s32 to, CoopGive *give);
 void coopGiveReceive(CoopGive *give, s32 from);
 void coopGiveReturned(CoopGive *give, s32 from);
@@ -531,6 +532,7 @@ u16  coopLookTestButtons(u16 buttons);
 enum { COOPCUE_NONE, COOPCUE_DRAW, COOPCUE_RELOAD };
 void coopAudioCue(s32 kind, s32 item);      /* gunfire.c: our Bond drew a gun or reloaded (the sound it played) */
 u8   coopAudioCueByte(void);                /* coop_look.c coopLookFill: CoopLook.cue */
+void coopAudioChat(void);   /* a partner's chat line came in (coop_chat.c) */
 void coopAudioPuppetCue(CoopLookPuppet *lp, ChrRecord *chr, const CoopLook *look);   /* coop_look.c: play a partner's new cue there */
 void coopAudioPing(coord3d *pos, s32 self);         /* coop_ping.c: a ping arrived */
 void coopAudioPartnerDowned(s32 player);
@@ -694,6 +696,8 @@ void coopChatTickStill(void);   /* the open line while the stage clock is stoppe
 void coopChatApply(const u8 *raw, s32 from);
 #define COOPTOAST_ALERT (-2)    /* a toast's "player" for session news (host left, ...): red */
 void coopFeedToast(const char *text, s32 player);   /* bottom left, the lead in the player's colour (-1 white); '|' starts the rest */
+void coopFeedToastKeyed(const char *key, const char *text, s32 player);   /* takes the place of a live toast with that key */
+s32  coopFeedToastLive(const char *key);     /* 1 while a toast with that key is on screen */
 void coopFeedClock(void);   /* the feed's clock while co-op is off */
 Gfx *coopFeedRender(Gfx *gdl);                       /* in play (coop_hud.c) */
 #define COOP_FEED_TEXT 144     /* a chat line: a name, ": " and the most a message holds */

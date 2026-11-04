@@ -4420,3 +4420,50 @@ Rig: Linux i686, copies on one machine over the mock Steam, main 45a93df against
 - Not covered: a guard's bullet killing another guard counts as the host's kill, as it
   already did for the stats screen. A kill or break from before a partner joined has no
   owner and falls back to the old windows.
+
+## Polish: tags behind walls, hit flash, chat beep, merged toasts, give hint, revive time (2026-11-04, COOP_VERSION stays 17)
+
+The owner's pick from a list of small details. Nothing new goes over the wire: each
+player's own game does all of it.
+
+- Name tags behind a wall (coop_hud.c coopHudTagDim): every 100 ms per partner, hidden
+  when their stan's room wasn't drawn this frame (portals shut it out: a wall or a closed
+  door), or when the level's walls cut both lines from our camera to their eyes and to
+  their chest (bgTestBulletHitBackground over our room and every drawn room). The tag
+  eases (120 ms) to 45 % ink and 60 % colour. A REVIVE tag stays full. The bg test
+  reports the nearest wall along the whole line, past its end too: a hit only counts
+  short of the partner, or Dam's open yard dimmed a partner in plain sight.
+  Log: "hud: player N's tag dimmed: behind a wall" / "bright: in sight".
+- Partner hit flash (coopHudHitBar): when a partner's health or armour drops, the lost
+  piece stays pale for 450 ms then shrinks into the bar, and the bar's frame flashes red
+  for 300 ms. Healing, a respawn or a second without the bar resets it.
+- Chat beep (coop_audio.c coopAudioChat): a partner's line plays CAMERA_BEEP1_SFX (the
+  cheat unlock beep) at half volume, at most once in 400 ms; our own lines don't.
+- Toasts (coop_chat.c coopFeedToastKeyed): the same text from the same player while it is
+  still up comes back as the newest with "X2", "X3"; a keyed toast takes the new text.
+  coop_give.c keys its "gave" toasts by direction, player and ammo type and keeps a running
+  total while that toast is up ("GAVE 81 ROUNDS TO ...", not three toasts). A repeat
+  doesn't fade in again.
+- Give hint (coopHudGiveHint, coop_give.c coopGiveHint): "G: GIVE AMMO TO NAME" under the
+  crosshair when a press would give (coopGivePick: alive, 2.5 m, within 60 degrees, spare
+  rounds for the gun in hand) and we look their way (within 30 degrees, and further than
+  40 cm, so it doesn't show while everyone stands in one spot at a mission's start). The key
+  is the give_partner bind of the device pressed last, else no key. Not while the revive
+  prompt, the weapon menu, chat or spectating is up. At first it sat where the revive prompt
+  is (2/3 down) and the toasts ran into it.
+- REVIVE tag: "REVIVE NAME 3M 53S", the seconds to bleed out (Revive) or to come back
+  anyway (Revive or Timer). Under Revive it pulses (70 % +- 30 %), at 1 Hz, 2 Hz from 10 s
+  and 4 Hz from 5 s, and stops pulsing while someone holds Use over them.
+- Harness: GE_COOP_TESTGIVE takes up to four times ("14,16,18"); GE_COOP_TESTTOASTS ends
+  with a repeat (X2); GE_COOP_DOWNRULE also works for a -coophost start.
+
+Rig: Linux i686, two copies on one machine over the mock Steam.
+- Dam: tags bright in the open yard at 6 m (no dim), three gives at 14/16/18 s make one
+  toast on each side (46, 69, 81 rounds), the joiner's chat line beeps on the host, the give
+  hint shows when the host faces the joiner up close.
+- Bunker 1 and Facility: the joiner on a waypoint 12 and 25 m away in another room; the
+  host's tag for them dims (room not drawn) and shows dark through the door. Guards shooting
+  the joiner show the pale piece on the host's bar.
+- Dam, Revive rule, joiner killed at 10 s: "REVIVE MOCK2 3M 53S" counting down.
+- Not covered: the beep's sound itself (the rig plays no audio), a real gamepad's bind text
+  in the hint, 3 or 4 players.

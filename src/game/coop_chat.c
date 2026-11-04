@@ -131,8 +131,10 @@ static s32 sFeedCount;
 static struct
 {
     char text[112];
+    char key[24];   /* coopFeedToastKeyed: a newer toast with this key takes its place */
     s32 player;     /* -1 a note from the game, COOPTOAST_ALERT session news */
     u32 tick;
+    s32 count;      /* the same toast again while this one showed: "X2", "X3" */
 } sToast[COOPTOAST_MAX];
 static s32 sToastCount;
 
@@ -184,6 +186,10 @@ static void coopChatShow(s32 player, const char *said)
     snprintf(name, sizeof(name), "%s", (who != NULL && who[0] != '\0') ? who : "PARTNER");
     snprintf(line, sizeof(line), "%s: %s", name, said);
     coopFeedPush(line, player);
+    if (player != coopExtSelf())
+    {
+        coopAudioChat();   /* a partner's line: a beep, so it isn't missed in a fight */
+    }
     portConLogf("ge: coop: chat from player %d: %s\n", player + 1, said);
 }
 
@@ -194,27 +200,70 @@ void coopFeedClock(void)
     sNow++;
 }
 
-void coopFeedToast(const char *text, s32 player)
+/* A toast. One still on screen with the same text and player (or with the
+ * same key) is taken out and shown again as the newest, so repeats don't push
+ * the others off: the same text counts up ("X2"), a keyed one takes the new
+ * text (a running total). Either way it doesn't fade in again. */
+void coopFeedToastKeyed(const char *key, const char *text, s32 player)
 {
+    char t[sizeof(sToast[0].text)];
+    s32 count = 1, again = 0;
+    s32 n, i;
+
+    snprintf(t, sizeof(t), "%s", text);
+    n = (s32) strlen(t);
+    while (n > 0 && (t[n - 1] == '\n' || t[n - 1] == '.'))
+    {   /* hudmsg style ("... left the game.\n"): no full stop on a toast */
+        t[--n] = '\0';
+    }
+    if (key == NULL)
+    {
+        key = "";
+    }
+    for (i = sToastCount - 1; i >= 0; i--)
+    {
+        if (sNow - sToast[i].tick < COOPTOAST_SHOW && sToast[i].player == player
+            && ((key[0] != '\0') ? strcmp(sToast[i].key, key) == 0 : (sToast[i].key[0] == '\0' && strcmp(sToast[i].text, t) == 0)))
+        {
+            count = (key[0] != '\0') ? 1 : sToast[i].count + 1;
+            again = 1;
+            memmove(&sToast[i], &sToast[i + 1], sizeof(sToast[0]) * (sToastCount - 1 - i));
+            sToastCount--;
+            break;
+        }
+    }
     if (sToastCount == COOPTOAST_MAX)
     {
         memmove(&sToast[0], &sToast[1], sizeof(sToast[0]) * (COOPTOAST_MAX - 1));
         sToastCount--;
     }
-    snprintf(sToast[sToastCount].text, sizeof(sToast[0].text), "%s", text);
-    {   /* hudmsg style ("... left the game.\n"): no full stop on a toast */
-        char *t = sToast[sToastCount].text;
-        s32 n = (s32) strlen(t);
+    snprintf(sToast[sToastCount].text, sizeof(sToast[0].text), "%s", t);
+    snprintf(sToast[sToastCount].key, sizeof(sToast[0].key), "%s", key);
+    sToast[sToastCount].player = player;
+    sToast[sToastCount].tick = again ? sNow - COOPTOAST_FADEIN : sNow;
+    sToast[sToastCount].count = count;
+    sToastCount++;
+    portConLogf("ge: coop: toast: %s%s (x%d)\n", text, again ? " [merged]" : "", (int) count);
+}
 
-        while (n > 0 && (t[n - 1] == '\n' || t[n - 1] == '.'))
+void coopFeedToast(const char *text, s32 player)
+{
+    coopFeedToastKeyed(NULL, text, player);
+}
+
+/* 1 while a toast with this key is on screen */
+s32 coopFeedToastLive(const char *key)
+{
+    s32 i;
+
+    for (i = 0; i < sToastCount; i++)
+    {
+        if (sNow - sToast[i].tick < COOPTOAST_SHOW && strcmp(sToast[i].key, key) == 0)
         {
-            t[--n] = '\0';
+            return 1;
         }
     }
-    sToast[sToastCount].player = player;
-    sToast[sToastCount].tick = sNow;
-    sToastCount++;
-    portConLogf("ge: coop: toast: %s\n", text);
+    return 0;
 }
 
 /* ---- sending -------------------------------------------------------------- */
@@ -445,6 +494,7 @@ static void coopToastTestTick(s32 inmission)
         { "Partner 3 left the mission.\n", 2 },
         { "PARTNER 4 COMPLETED C|DESTROY ALL ALARMS AND COMMUNICATION EQUIPMENT", 3 },
         { "YOU ARE THE HOST NOW|PARTNER 1 LEFT", COOPTOAST_ALERT },
+        { "Partner 3 left the mission.\n", 2 },   /* again while the first shows: one toast, X2 */
     };
     static s32 at = -2;
     s32 t;
@@ -973,7 +1023,17 @@ static Gfx *coopToastsRender(Gfx *gdl, s32 left, s32 y, s32 maxw)
         {
             a = (s32) ((COOPTOAST_SHOW - age) * 0xFF / COOPTOAST_FADE);
         }
-        n = coopToastLayout(sToast[i].text, maxw, pc, &rows);
+        if (sToast[i].count > 1)
+        {
+            char counted[sizeof(sToast[0].text) + 8];
+
+            snprintf(counted, sizeof(counted), "%s X%d", sToast[i].text, (int) sToast[i].count);
+            n = coopToastLayout(counted, maxw, pc, &rows);
+        }
+        else
+        {
+            n = coopToastLayout(sToast[i].text, maxw, pc, &rows);
+        }
         y -= rows * COOPTOAST_LINE + 3;
         gdl = coopToastDraw(gdl, left, y + 3, pc, n, rows, coopFeedColour(sToast[i].player), a);
     }
