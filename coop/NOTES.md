@@ -4234,6 +4234,128 @@ The intro has no Natalya in it and looks the same on both screens (rig).
   README.txt, midas.ini and a lang/es/deeper/ file alone, and clears the list and the
   zip. A v0.8.1 unzipped over it puts nothing in. Case 6 fails on the build before this.
 
+## Opening chat on Facility crashed the game: the display list ran over (2026-11-03, COOP_VERSION stays 17)
+
+- Tester report: the second player's game crashed twice on Facility when they pressed T.
+  Opening the line shows every chat line again (up to 6, each up to 5 rows), and the HUD
+  font's outlined text costs about 250 bytes of display list a letter (nine quads). Six long
+  lines and the typed one came to about 190 KB on top of the stage's ~40 KB, and Facility's
+  pool (-mgfx70, doubled on PC) is 140 KB. Nothing bounds dyn.c's buffer, so the frame ran
+  into the next allocation and the renderer stopped on "FATAL: Unknown GBI opcode 0x30".
+- coop_chat.c: every piece of the feed (the typed line, chat rows, toasts, their boxes)
+  checks dynGetFreeGfx2 first (40 Gfx a letter, 1024 kept for the rest of the frame); once one
+  does not fit, nothing more is drawn that frame, so what goes is the oldest. Logged as "the
+  display list is nearly full", every 600 frames short.
+- dyn.c: the PC display list is four times what the stage asks for, not twice (Facility 280
+  KB, Streets/Depot/Aztec 240 KB), so the whole feed fits on most stages.
+- Harness: GE_COOP_TESTFEED=<s>:<n> puts n of the longest chat lines in the feed <s>
+  seconds into the mission, already faded, so GE_COOP_TESTCHAT then opens the line over them.
+- Joiner on Facility, GE_ROOM_AUDIT=1 GE_COOP_TESTFEED=15:6 GE_COOP_TESTCHAT=20:hola: main
+  "DYN POOL OVERFLOW gfx=228792/143360" then the FATAL, the joiner's game gone; with 3 lines
+  134 KB of 140. Fixed: 248 KB of 280 with toasts too, the line sent, no overflow. Streets
+  (240 KB): the check left the oldest rows out for a frame, no overflow; Aztec 233 of 240 KB.
+- Mission runs (sanitizer build) dam, facility, silo, streets, aztec, egypt: 6/6 pass, 0
+  corrected desyncs.
+
+## Notification Size (2026-11-03, COOP_VERSION stays 17)
+
+- Testers' ask: a way to make the co-op notifications smaller. Text Size only
+  goes up (100 % to 200 %) and scales every piece of co-op text, so it can't.
+- Port Options > Notification Size (`toast_size` under `[display]`, 50 / 75 /
+  100 %, default 100). Each player's own, nothing sent.
+- coop_chat.c coopFeedRender: with it below 100 the toasts get a bracket of
+  their own at HUD Scale x Text Size x Notification Size, pinned at the screen
+  point where the stack sat (above the chat lines), so the left edge lines up
+  with the chat and the stack still grows upwards from the same spot. They wrap
+  to maxw / k (the same width on screen, so a small toast takes fewer rows),
+  but no further than the view's right edge less 0x14: textRenderOutlined clips
+  at viGetX() before the bracket scales, and a first try at 50 % lost the word
+  past it ("DESTROY ALL ALARMS [AND] COMMUNICATION ..."). Chat lines, the
+  typing line, captions and the HUD don't change.
+- coop_access.c coopTextScaleBeginBy is coopTextScaleBegin times k;
+  coopTextScaleNow is the scale both use.
+
+## Revive counts from the fall; knockback no longer strands a player (2026-11-03, COOP_VERSION stays 17)
+
+Tester report: "you have to wait quite a while before reviving a teammate,
+otherwise the revive bar gets stuck and does not fill up", and on Facility
+"the knockback effect trapped a player on the stairs".
+
+- Revive bar: a downed player's death plays for a few seconds (the fall, the
+  blood, the fade to black) before bondview2.c hands it to coopDeadTick. Their
+  STATE already said dead and revivable from the first tick, so the partner's
+  HUD offered the revive and showed "REVIVING" with a bar, but only
+  coopDeadTick counted the hold. Until the fade was over the bar stood at 0.
+  coopReviveFallTick (every coopTick) now counts the hold during the fall, with
+  the same reach test (coopReviveOver, shared with coopDeadTick). The count goes
+  out in STATE and shows on the downed HUD from the fall. When the bar fills
+  before the fade ends, coopDeadTick takes the death at once (the life it costs,
+  the down's message) and its own hold tick stands the player up. coopDeadTick's
+  first tick no longer zeroes a hold that is under way.
+- No revive is offered for a fall that can't be revived: on the last life under
+  Revive or Timer, the respawn byte is -1 during the fall, and revivable now
+  needs it to be >= 0 (Revive only still needs > 0, the bleed-out). An
+  out-on-arrival joiner's fall also sends -1.
+- Knockback: a hit's push (bondshotspeed, record_damage_kills) kept running
+  after the shot that downed a player, so the dead Bond slid for half a second
+  at the dying (low) height. The revive stands the player up where the body
+  came to rest, which on stairs can be under the flight above or against a
+  ledge, with no room to stand or walk out. While down the push is now zeroed,
+  so the body stays where the player last stood. coopTeleportPlayerTo (revive,
+  respawn, a cutscene's star) also zeroes it, so a push still running can't
+  carry a player off the spot.
+- A partner's shot (Friendly Fire) sent angle 0, which pushed every victim the
+  same way (+Z) whoever fired. It now sends the shot's direction, so the push
+  goes the way the shot flew, as a guard's does.
+- Rig (Linux headless pair, mock Steam, Facility, main 45a93df vs this branch,
+  with a scratch log of the downed player's position each 15 ticks; logs in the
+  project files, goldeneye-coop/revive-knockback/rig-logs-pr147.tgz):
+  - Host GE_COOP_TESTREVIVE=8, joiner GE_COOP_TESTDIE=1200, When Down 0. Main:
+    the death took 340 ticks to fade, the hold read 0 all that time, and the
+    joiner stood up 509 ticks (8.5 s) after falling. Here: the hold climbed from
+    the first tick and the joiner stood up 150 ticks (2.5 s) after falling, then
+    rose to standing height (392) within 60 ticks as on main.
+  - Same, GE_COOP_LIVES=1: main's host starts "reviving player 2" on a fall that
+    can only end out; here it never does.
+  - The testdie hit's push (0, 2) slid the dead joiner 23 units on main; here it
+    reads 0 from the first down tick (the few units left are the death camera).
+  - GE_COOP_TESTFF with a scratch shot flying +x: main's victim got angle 0,
+    push (0, 2); here angle 1.571, push (2, 0).
+  - Not covered: a down on Facility's stairs themselves (no stair pad picked).
+
+## The lobby's Ready / Start button, and a host can start alone (2026-11-03, COOP_VERSION stays 17)
+
+- Players forgot the Ready row. Every tab now has a button at the bottom right
+  (front.c coopLobbyButton, coopMwButton, coopClassicButton): a joiner's READY UP,
+  the host's START. Modern puts it in the foot, right of the row's description
+  (which narrows to make room), above the prompts; Classic stamps it on the paper
+  under the rows, which show one fewer to make room.
+- A click, Select with the crosshair on it, or the reload bind from any tab
+  presses it: R on the keyboard, X / Square / Y on the shipped pad layouts
+  (joy_port.c portJoyPortReadyPressed, taken every lobby tick so a press while
+  typing is dropped). Its prompt is MENUGLYPH_READY; an N64 pad has no reload
+  bind, so none is drawn.
+- A joiner's pulses until they are ready ("THE PARTY IS WAITING" when every
+  other joiner is), then shows a steady green READY. The host's is grey with
+  "N PLAYERS NOT READY", and pulses "EVERYONE IS READY" once they are. Start does
+  the campaign's Continue row when there is one, else Select Mission (Start
+  Match in versus).
+- A host alone can start a co-op mission (coopLobbyHostCanStart): Select
+  Mission and the button work with nobody else in the lobby, and friends who
+  join later drop in. With partners, all of them still have to be ready first.
+  Versus still needs a partner. The party panel and Classic's strip keep the
+  host's own seat while it is alone (it showed 0/4 and four open seats).
+- Harness: GE_COOP_LOBBY_NOREADY=1 stops a GE_COOP_LOBBY=join copy from
+  readying itself, so the button can be pressed instead.
+- Tested over the mock Steam, two copies on one Linux machine (xdotool): the
+  joiner clicked READY UP, pressed R to ready and again to cancel, and an r
+  typed in the chat line did not press it; the host pressed R and both went
+  into Dam together. A host alone clicked START and got
+  the mission select; a host alone pressed R into Dam, and a friend who started
+  10 s later followed it in and dropped in. Screenshots on Modern and Classic, English and Spanish,
+  with keyboard, Xbox, PlayStation and Switch prompts. Host and joiner both
+  need the change for the joiner's button; a host alone needs it to start.
+
 ## Objective credit follows the kill or the break, not the last shot (2026-11-04, COOP_VERSION stays 17)
 
 Tester report (after v0.8.1): "It still sometimes fails to correctly indicate which player

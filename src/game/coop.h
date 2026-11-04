@@ -795,7 +795,10 @@ s32  portColourPickerPoll(s32 *rgb);            /* 0 up (or closed), 1 OK (*rgb,
 s32  portColourPickerActive(void);              /* the picker is up: the game gets no input */
 void coopColourChanged(void);                   /* coop.c: ours changed, tell the others now */
 f32  coopTextScale(void);                       /* Text Size: 1.0 to 2.0 */
+f32  coopToastScale(void);                      /* Notification Size: 0.5 to 1.0, the toasts on top of Text Size */
+f32  coopTextScaleNow(void);                    /* HUD Scale and Text Size together, what the bracket scales by */
 Gfx *coopTextScaleBegin(Gfx *gdl, f32 x, f32 y);   /* co-op text scaled about (x, y); HUD Scale included */
+Gfx *coopTextScaleBeginBy(Gfx *gdl, f32 x, f32 y, f32 k);   /* the same, times k */
 Gfx *coopTextScaleEnd(Gfx *gdl);
 s32  coopScreenShakeOn(void);
 void coopCaption(s32 kind, coord3d *pos);       /* a sound worth a caption happened at pos */

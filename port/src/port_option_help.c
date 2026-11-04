@@ -35,6 +35,7 @@ static const struct PortOptHelp sHelp[] = {
     { "guard_budget",       "How many times a mission smarter guards may call for help, run for the alarm, throw grenades, sweep, cut you off or regroup. The host's in co-op." },
     { "coop_menu",          "Modern is the dark tabbed CO-OP screen; Classic is the original folder." },
     { "partner_fade",       "Story co-op: how much a partner right in front of you fades out. Lower leaves them partly visible, higher fades them from further away." },
+    { "toast_size",         "Size of the co-op notifications at the bottom left, such as objectives done and players joining or leaving. Chat keeps Text Size." },
     { "unlimited_explosions", "Up to 100 explosions at once." },
     { "watch_static",       "Shows the watch screen's static." },
     { "fast_pause",         "Watch opens and closes at full speed." },

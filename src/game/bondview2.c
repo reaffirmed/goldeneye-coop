@@ -12502,6 +12502,11 @@ void coopTeleportPlayerTo(coord3d *pos, StandTile *stan, f32 yaw)
     g_CurrentPlayer->field_78 = 0.0f;
     g_CurrentPlayer->field_7C = -0.0001f;
     g_CurrentPlayer->field_80 = 0.0f;
+    /* a shot's knock still running (record_damage_kills) would carry us off
+     * the spot we were put on: a revive, a respawn or a cutscene's star */
+    g_CurrentPlayer->bondshotspeed.x = 0.0f;
+    g_CurrentPlayer->bondshotspeed.y = 0.0f;
+    g_CurrentPlayer->bondshotspeed.z = 0.0f;
     if (g_CurrentPlayer->prop->chr != NULL && g_CurrentPlayer->prop->chr->model != NULL)
     {   /* in a cinema Bond is a chr (solo_char_load): move its body too, as AI_TRYTeleportingChrToPad does */
         ChrRecord *chr = g_CurrentPlayer->prop->chr;

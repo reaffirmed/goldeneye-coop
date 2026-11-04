@@ -14,7 +14,8 @@
  * from coopPlayerColour: the colour the player picked for themselves (the
  * lobby's Colour row), else their number's; the colour-blind set when it is on.
  * Text size scales the co-op text (chat, toasts, name tags, pings) and the
- * captions, through gfx_pc's HUD scale brackets.
+ * captions, through gfx_pc's HUD scale brackets. Notification Size shrinks
+ * the toasts on top of that, for players who find them too big.
  */
 #include <ultra64.h>
 #include <string.h>
@@ -39,6 +40,7 @@ extern s32 portAccessCaptions(void);     /* video.c */
 extern s32 portAccessColorblind(void);
 extern s32 portAccessScreenShake(void);
 extern s32 portAccessTextSize(void);
+extern s32 portAccessToastSize(void);
 bool alarmIsActive(void);
 
 /* ---- colours -------------------------------------------------------------- */
@@ -101,13 +103,33 @@ f32 coopTextScale(void)
     return (pct >= 100 && pct <= 200) ? pct / 100.0f : 1.0f;
 }
 
+/* Notification Size: the toasts' own scale, 0.5 to 1.0 of the rest */
+f32 coopToastScale(void)
+{
+    s32 pct = portAccessToastSize();
+
+    return (pct >= 50 && pct <= 100) ? pct / 100.0f : 1.0f;
+}
+
+/* what coopTextScaleBegin scales by: HUD Scale's half size times Text Size */
+f32 coopTextScaleNow(void)
+{
+    return (portHudScaleOn() ? 0.5f : 1.0f) * coopTextScale();
+}
+
 static s32 sTextBracket;    /* coopTextScaleBegin opened a bracket */
 
 /* scale what follows about (x, y) by Text Size, on top of HUD Scale's half
  * size; ends with coopTextScaleEnd. Replaces portHudScaleBegin/End. */
 Gfx *coopTextScaleBegin(Gfx *gdl, f32 x, f32 y)
 {
-    f32 s = (portHudScaleOn() ? 0.5f : 1.0f) * coopTextScale();
+    return coopTextScaleBeginBy(gdl, x, y, 1.0f);
+}
+
+/* the same, times k more (the toasts' Notification Size) */
+Gfx *coopTextScaleBeginBy(Gfx *gdl, f32 x, f32 y, f32 k)
+{
+    f32 s = coopTextScaleNow() * k;
     s32 x4 = (s32) (x * 4.0f + 0.5f);
     s32 y4 = (s32) (y * 4.0f + 0.5f);
 
