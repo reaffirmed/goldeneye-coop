@@ -614,6 +614,7 @@ static void dynBuild(s32 page)
         }
         dynPush(PWROW_OPT, "voice_mode", NULL, 0);
         dynPush(PWROW_OPT, "voice_volume", NULL, 0);
+        dynPush(PWROW_OPT, "chat_volume", NULL, 0);
         for (i = 0; i < 3; i++)
         {
             if (mask & (1 << i))

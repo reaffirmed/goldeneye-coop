@@ -100,6 +100,93 @@ static void coopGiveWeaponName(char *out, s32 cap, s32 weapon)
 
 static s32 sGiveOnly = -1;   /* GE_COOP_TESTGIVETO: the harness's choice of partner */
 
+/* the partner most in front of us within reach (*best, 1), and the nearest one
+ * whatever their state (*near, at *neardist), to say why not when there is none */
+static s32 coopGivePick(PropRecord *bond, CoopHudPartner *best, CoopHudPartner *near, f32 *neardist)
+{
+    f32 t = g_CurrentPlayer->vv_theta * (M_PI_F / 180.0f);
+    f32 bestfront = -2.0f;
+    CoopHudPartner q;
+    s32 i, found = 0;
+
+    *neardist = 1.0e30f;
+    memset(near, 0, sizeof(*near));
+    for (i = 0; coopHudPartnerAt(i, &q); i++)
+    {
+        f32 dx, dz, dist, front;
+
+        if (sGiveOnly >= 0 && q.player != sGiveOnly)
+        {
+            continue;   /* the harness picked whom */
+        }
+        dx = q.pos.f[0] - bond->pos.f[0];
+        dz = q.pos.f[2] - bond->pos.f[2];
+        dist = sqrtf(dx * dx + dz * dz);
+        front = (dist > 1.0f) ? (-sinf(t) * dx + cosf(t) * dz) / dist : 1.0f;   /* (-sin, cos) of vv_theta, as bondview2.c builds theta_transform */
+        if (dist < *neardist)
+        {
+            *neardist = dist;
+            *near = q;
+        }
+        if (!q.dead && dist <= COOPGIVE_RANGE && coopGiveAbs(q.pos.f[1] - bond->pos.f[1]) <= COOPGIVE_HEIGHT
+            && front >= COOPGIVE_FRONT && front > bestfront)
+        {
+            bestfront = front;
+            *best = q;
+            found = 1;
+        }
+    }
+    return found;
+}
+
+/* the HUD's hint (coop_hud.c): a press of give_partner now would hand ammo to
+ * *out, and we look their way (within COOPGIVE_HINT_FRONT), not just stand in
+ * them as everyone does at a mission's start. Not while we are down, or with
+ * nothing spare in the gun in hand. */
+#define COOPGIVE_HINT_FRONT 0.87f   /* 30 degrees */
+#define COOPGIVE_HINT_NEAR  40.0f   /* closer than this we stand in them */
+s32 coopGiveHint(CoopHudPartner *out)
+{
+    PropRecord *bond = getCurrentPlayerProp();
+    CoopHudPartner near;
+    f32 neardist, t, dx, dz, dist;
+    s32 type;
+
+    if (bond == NULL || g_CurrentPlayer->bonddead || !coopGivePick(bond, out, &near, &neardist))
+    {
+        return 0;
+    }
+    t = g_CurrentPlayer->vv_theta * (M_PI_F / 180.0f);
+    dx = out->pos.f[0] - bond->pos.f[0];
+    dz = out->pos.f[2] - bond->pos.f[2];
+    dist = sqrtf(dx * dx + dz * dz);
+    if (dist < COOPGIVE_HINT_NEAR || (-sinf(t) * dx + cosf(t) * dz) / dist < COOPGIVE_HINT_FRONT)
+    {
+        return 0;
+    }
+    type = get_ammo_type_for_weapon(getCurrentPlayerWeaponId(GUNRIGHT));
+    return coopGiveAmmoOk(type) && g_CurrentPlayer->ammoheldarr[type] > 0;
+}
+
+/* A running total for the "gave" toasts: gives of one ammo type between the
+ * same two players while their toast is still up add up on it ("gave you 60
+ * rounds", not two toasts of 30). dir 0 given to us, 1 given by us. */
+static s32 sGiveTotal[2][COOP_MAX_PLAYERS][AMMOTYPE_GLOBAL_MAX + 1];
+
+static s32 coopGiveTotal(s32 dir, s32 player, s32 type, s32 amount, char *key, s32 cap)
+{
+    s32 *t;
+
+    snprintf(key, cap, "give%d.%d.%d", (int) dir, (int) player, (int) type);
+    if (player < 0 || player >= COOP_MAX_PLAYERS || type < 0 || type > AMMOTYPE_GLOBAL_MAX)
+    {
+        return amount;
+    }
+    t = &sGiveTotal[dir][player][type];
+    *t = coopFeedToastLive(key) ? *t + amount : amount;
+    return *t;
+}
+
 /* the give_partner key */
 void coopGivePress(void)
 {
@@ -126,36 +213,10 @@ void coopGivePress(void)
         return;
     }
     {   /* the partner most in front of us within reach; else the nearest, to say why not */
-        f32 t = g_CurrentPlayer->vv_theta * (M_PI_F / 180.0f);
-        f32 bestfront = -2.0f, neardist = 1.0e30f;
-        CoopHudPartner q, near;
-        s32 i, found = 0;
+        CoopHudPartner near;
+        f32 neardist;
+        s32 found = coopGivePick(bond, &p, &near, &neardist);
 
-        for (i = 0; coopHudPartnerAt(i, &q); i++)
-        {
-            f32 front;
-
-            if (sGiveOnly >= 0 && q.player != sGiveOnly)
-            {
-                continue;   /* the harness picked whom */
-            }
-            dx = q.pos.f[0] - bond->pos.f[0];
-            dz = q.pos.f[2] - bond->pos.f[2];
-            dist = sqrtf(dx * dx + dz * dz);
-            front = (dist > 1.0f) ? (-sinf(t) * dx + cosf(t) * dz) / dist : 1.0f;   /* (-sin, cos) of vv_theta, as bondview2.c builds theta_transform */
-            if (dist < neardist)
-            {
-                neardist = dist;
-                near = q;
-            }
-            if (!q.dead && dist <= COOPGIVE_RANGE && coopGiveAbs(q.pos.f[1] - bond->pos.f[1]) <= COOPGIVE_HEIGHT
-                && front >= COOPGIVE_FRONT && front > bestfront)
-            {
-                bestfront = front;
-                p = q;
-                found = 1;
-            }
-        }
         if (!found)
         {
             dx = near.pos.f[0] - bond->pos.f[0];
@@ -268,8 +329,11 @@ void coopGiveReceive(CoopGive *give, s32 from)
         }
         if (a.amount > 0)
         {
+            char key[24];
+
+            coopGiveRounds(rounds, sizeof(rounds), type, coopGiveTotal(0, from, type, a.amount, key, sizeof(key)));
             snprintf(msg, sizeof(msg), portTr("%s gave you %s"), name, rounds);
-            coopFeedToast(msg, from);
+            coopFeedToastKeyed(key, msg, from);
         }
         else if (!a.gotweapon)
         {
@@ -311,8 +375,11 @@ void coopGiveReturned(CoopGive *give, s32 from)
     }
     if (give->amount > 0)
     {
+        char key[24];
+
+        coopGiveRounds(rounds, sizeof(rounds), type, coopGiveTotal(1, from, type, give->amount, key, sizeof(key)));
         snprintf(msg, sizeof(msg), portTr("Gave %s to %s"), rounds, name);
-        coopFeedToast(msg, from);
+        coopFeedToastKeyed(key, msg, from);
     }
     else if (!give->gotweapon)
     {

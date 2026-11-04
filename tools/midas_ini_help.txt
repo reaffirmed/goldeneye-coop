@@ -199,6 +199,8 @@ padN_stickmode.
   mute_unfocused      | 0          | 1 = silent while the game window is not
                       |            | focused; sound returns at your volumes
                       |            | when it is focused again
+  chat_volume         | 100        | 0 to 200 percent: the beep when a
+                      |            | partner's chat line comes in. 0 = off
   Updates
   auto_update         | 1          | 1 = ask GitHub for a newer co-op release
                       |            | at startup; a window asks whether to

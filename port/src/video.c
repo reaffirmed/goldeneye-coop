@@ -143,6 +143,7 @@ static int s_CfgMuteUnfocused = 0; /* [display] mute_unfocused: audio_pc.c plays
 static int s_CfgAutoUpdate = 1;    /* [display] auto_update: look for a newer release at startup (port_update.c) */
 static int s_CfgVoiceMode = 0;     /* [display] voice_mode: co-op voice chat 0 push to talk, 1 open mic, 2 off (coop_voice.c) */
 static int s_CfgVoiceVolume = 100; /* [display] voice_volume: partners' voices, percent (0..200) */
+static int s_CfgChatVolume = 100;  /* [display] chat_volume: the beep for a partner's chat line (coop_audio.c), percent (0..200) */
 static int s_CfgArmorHud = 0;       /* [display] armor_hud: the health / armour arcs show on a body armour pickup (bondview2.c) */
 /* Accessibility (src/game/coop_access.c) */
 static int s_CfgCaptions = 0;       /* [display] captions: sound captions (gunfire, explosions, alarms, doors) */
@@ -391,6 +392,12 @@ s32 portVideoVoiceMode(void)
 s32 portVideoVoiceVolume(void)
 {
     return s_CfgVoiceVolume;
+}
+
+/** [display] chat_volume: the beep for a partner's chat line, percent (0 off .. 200) */
+s32 portChatVolume(void)
+{
+    return s_CfgChatVolume;
 }
 
 /** [display] mute_unfocused: audio_pc.c portAudioPump silences its output while unfocused */
@@ -1375,6 +1382,7 @@ static int videoSetDisplayOption(const char *key, const char *value)
     if (SDL_strcasecmp(key, "voice_mode") == 0)   { s_CfgVoiceMode = SDL_clamp(SDL_atoi(value), 0, 2); return 1; }
     if (SDL_strcasecmp(key, "auto_update") == 0)  { s_CfgAutoUpdate = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "voice_volume") == 0) { s_CfgVoiceVolume = SDL_clamp(SDL_atoi(value), 0, 200); return 1; }
+    if (SDL_strcasecmp(key, "chat_volume") == 0)  { s_CfgChatVolume = SDL_clamp(SDL_atoi(value), 0, 200); return 1; }
     if (SDL_strcasecmp(key, "composite") == 0)    { (void) value; return 1; }   /* a day-one ini line: Classic Mode owns it now */
     if (SDL_strcasecmp(key, "mp_ltk_health") == 0) { s_CfgMpLtkHealth = SDL_atoi(value) != 0; return 1; }
     if (SDL_strcasecmp(key, "mp_no_armor") == 0)   { s_CfgMpNoArmor = SDL_atoi(value) != 0; return 1; }
@@ -1658,6 +1666,7 @@ s32 portVideoOptionGet(const char *key, s32 *out)
     if (SDL_strcasecmp(key, "voice_mode") == 0)   { *out = s_CfgVoiceMode; return 1; }
     if (SDL_strcasecmp(key, "auto_update") == 0)  { *out = s_CfgAutoUpdate; return 1; }
     if (SDL_strcasecmp(key, "voice_volume") == 0) { *out = s_CfgVoiceVolume; return 1; }
+    if (SDL_strcasecmp(key, "chat_volume") == 0)  { *out = s_CfgChatVolume; return 1; }
     if (SDL_strcasecmp(key, "mp_ltk_health") == 0) { *out = s_CfgMpLtkHealth; return 1; }
     if (SDL_strcasecmp(key, "mp_no_armor") == 0)   { *out = s_CfgMpNoArmor; return 1; }
     if (SDL_strcasecmp(key, "mp_friendly_fire") == 0) { *out = s_CfgMpFriendlyFire; return 1; }
@@ -2511,6 +2520,7 @@ static void videoWriteDefaultIni(void)
     fprintf(f, "mute_unfocused=%d\n", s_CfgMuteUnfocused);
     fprintf(f, "voice_mode=%d\n", s_CfgVoiceMode);
     fprintf(f, "voice_volume=%d\n", s_CfgVoiceVolume);
+    fprintf(f, "chat_volume=%d\n", s_CfgChatVolume);
     fprintf(f, "auto_update=%d\n", s_CfgAutoUpdate);
     fprintf(f, "mp_ltk_health=%d\n", s_CfgMpLtkHealth);
     fprintf(f, "mp_no_armor=%d\n", s_CfgMpNoArmor);

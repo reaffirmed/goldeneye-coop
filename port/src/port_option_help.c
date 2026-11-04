@@ -150,6 +150,7 @@ static const struct PortOptHelp sHelp[] = {
     { "mute_unfocused",     "Mutes the game in the background." },
     { "voice_mode",         "Co-op voice: hold V to talk, or keep the mic open." },
     { "voice_volume",       "How loud your partners' voices play." },
+    { "chat_volume",        "How loud the beep is when a partner's chat line comes in. All the way down turns it off." },
     { "voice_mute_1",       "Stop hearing this player. Only on your game." },
     { "voice_mute_2",       "Stop hearing this player. Only on your game." },
     { "voice_mute_3",       "Stop hearing this player. Only on your game." },

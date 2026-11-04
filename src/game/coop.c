@@ -3497,25 +3497,37 @@ static void coopHarnessTick(void)
         }
     }
     if (coopPartnerHere() && coopInMission())
-    {   /* GE_COOP_TESTGIVE=<s>: <s> seconds into the mission, face the partner and
-         * press give_partner; GE_COOP_TESTGIVEWEAPON=<item> draws that gun 3 s
-         * before, with 100 rounds (harness only) */
-        static s32 testgive = -2;
+    {   /* GE_COOP_TESTGIVE=<s>[,<s>...]: <s> seconds into the mission (up to 4 times),
+         * face the partner and press give_partner; GE_COOP_TESTGIVEWEAPON=<item> draws
+         * that gun 3 s before the first, with 100 rounds (harness only) */
+        static s32 testgive[4] = { -2 };
         static s32 testweapon = -1;
-        if (testgive == -2)
+        s32 k;
+        if (testgive[0] == -2)
         {
             const char *e = getenv("GE_COOP_TESTGIVE");
             const char *w = getenv("GE_COOP_TESTGIVEWEAPON");
-            testgive = (e != NULL) ? atoi(e) * 60 : -1;
+            for (k = 0; k < 4; k++)
+            {
+                testgive[k] = (e != NULL) ? atoi(e) * 60 : -1;
+                while (e != NULL && *e != '\0' && *e != ',')
+                {
+                    e++;
+                }
+                e = (e != NULL && *e == ',') ? e + 1 : NULL;
+            }
             testweapon = (w != NULL) ? atoi(w) : -1;
         }
-        if (testweapon > 0 && testgive > 180 && (s32) sMissionTicks == testgive - 180)
+        if (testweapon > 0 && testgive[0] > 180 && (s32) sMissionTicks == testgive[0] - 180)
         {
             coopGiveTestDraw(testweapon);
         }
-        if (testgive > 0 && (s32) sMissionTicks == testgive)
+        for (k = 0; k < 4; k++)
         {
-            coopGiveTestPress();
+            if (testgive[k] > 0 && (s32) sMissionTicks == testgive[k])
+            {
+                coopGiveTestPress();
+            }
         }
     }
     if (coopPartnerHere() && coopInMission())
@@ -9171,6 +9183,12 @@ s32 coopFrontTick(void)
             const char *s = getenv("GE_COOP_SCALING");
             testdiff = 0;
             coopLobbyLoad();
+            if (getenv("GE_COOP_DOWNRULE") != NULL)
+            {   /* GE_COOP_DOWNRULE=<COOPDOWN_*>: the lobby's When Down (a joiner takes the host's from its hello) */
+                s32 rule = atoi(getenv("GE_COOP_DOWNRULE"));
+
+                sDownRule = (rule >= COOPDOWN_BOTH && rule <= COOPDOWN_REVIVE) ? rule : sDownRule;
+            }
             if (s != NULL)
             {   /* GE_COOP_SCALING=<COOPSCALE_*>: 0 auto, 1 off, 2 as 3, 3 as 4 */
                 sSettings[COOPSET_SCALING] = (u8) atoi(s);

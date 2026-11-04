@@ -46,11 +46,14 @@
 #include "language.h"
 #include "chr.h"
 #include "coop.h"
+#include "bg.h"
+#include "stan.h"
 #include "port_lang.h"   /* portTr: the port's own text in the player's language */
 
 extern Gfx *portHudScaleBegin(Gfx *gdl, f32 x, f32 y);
 extern Gfx *portHudScaleEnd(Gfx *gdl);
 extern s32 portObjectivesHudShown(void);
+extern void portConLogf(const char *fmt, ...);
 extern s32 portVideoShowFps(void);          /* video.c: [display] show_fps */    /* video.c: [display] objectives_hud and its key */
 
 #define COOP_HUD_COL_TEXT   0xFFFFFFFF
@@ -152,12 +155,138 @@ static Gfx *coopHudBar(Gfx *gdl, s32 x, s32 y, s32 w, f32 frac, u32 colour)
 #define COOP_TAG_FADE_FROM   4000.0f    /* and faint from here out */
 #define COOP_TAG_FADE_TO     7000.0f
 #define COOP_TAG_FAR_ALPHA   0x60
+#define COOP_TAG_BAR_MIN     24         /* a REVIVE tag's time bar is at least this wide */
 
 static u32 coopHudWithAlpha(u32 colour, f32 a)
 {
     u32 alpha = (u32) ((f32) (colour & 0xFF) * a + 0.5f);
 
     return (colour & ~0xFFu) | (alpha > 0xFF ? 0xFF : alpha);
+}
+
+/* the colour's RGB times k (0..1), alpha kept */
+static u32 coopHudShade(u32 colour, f32 k)
+{
+    u32 r = (u32) ((f32) ((colour >> 24) & 0xFF) * k + 0.5f);
+    u32 g = (u32) ((f32) ((colour >> 16) & 0xFF) * k + 0.5f);
+    u32 b = (u32) ((f32) ((colour >> 8) & 0xFF) * k + 0.5f);
+
+    return (r << 24) | (g << 16) | (b << 8) | (colour & 0xFF);
+}
+
+static u32 coopHudNowMs(void)
+{
+    return (u32) (osGetTime() / 46875ull);
+}
+
+/* A partner behind a wall: their tag goes darker and fainter, so it reads as
+ * "over there, out of sight". Looked up every COOP_TAG_LOOK_MS per partner:
+ * hidden when their room wasn't drawn this frame (a wall or a shut door
+ * between), or when the level's walls cut both lines from our eyes to their
+ * eyes and to their chest. The dim eases in and out (COOP_TAG_DIM_MS) so a
+ * door frame doesn't make it flicker. */
+#define COOP_TAG_LOOK_MS   100
+#define COOP_TAG_DIM_MS    120.0f
+#define COOP_TAG_DIM_ALPHA 0.45f    /* hidden: this much of the ink */
+#define COOP_TAG_DIM_SHADE 0.6f     /* and the colour this dark */
+
+static struct
+{
+    u32 looked;     /* wall clock of the last look */
+    u32 ms;         /* of the last ease */
+    s32 hidden;
+    f32 dim;        /* 0 in sight .. 1 hidden, eased */
+} sTagSight[COOP_MAX_PLAYERS];
+
+/* 1 when the level's walls cut the line from `from` to `to` in a room on screen
+ * (or ours). The test can report a wall past `to` along the same line, so a
+ * hit counts only short of it. */
+static s32 coopHudWallBetween(coord3d *from, coord3d *to, s32 *rooms, s32 n)
+{
+    f32 wscale = get_room_data_float2();
+    f32 dx = to->f[0] - from->f[0], dy = to->f[1] - from->f[1], dz = to->f[2] - from->f[2];
+    f32 len2 = dx * dx + dy * dy + dz * dz;
+    s32 i;
+
+    for (i = 0; i < n; i++)
+    {
+        HitThing hit;
+
+        if (rooms[i] > 0 && rooms[i] < 256 && bgTestBulletHitBackground(from, to, rooms[i], &hit))
+        {
+            f32 hx = hit.hitpos.f[0] * wscale - from->f[0];
+            f32 hy = hit.hitpos.f[1] * wscale - from->f[1];
+            f32 hz = hit.hitpos.f[2] * wscale - from->f[2];
+
+            if (hx * hx + hy * hy + hz * hz < len2)
+            {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static s32 coopHudPartnerHidden(CoopHudPartner *p)
+{
+    CoopExtView view;
+    PropRecord *self = g_CurrentPlayer->prop;
+    s32 rooms[MAXROOMCOUNT];
+    coord3d eye, head, chest;
+    s32 n, i, room, drawn = 0;
+
+    if (self == NULL || self->stan == NULL || !coopExtRemoteView(p->player, &view) || view.stan == NULL)
+    {
+        return 0;   /* nothing to go by: in sight */
+    }
+    room = getTileRoom(view.stan);
+    rooms[0] = getTileRoom(self->stan);
+    n = 1 + bgCopyDrawnRoomsToList(&rooms[1], MAXROOMCOUNT - 1);
+    for (i = 0; i < n && !drawn; i++)
+    {
+        drawn = (rooms[i] == room);
+    }
+    if (!drawn)
+    {
+        return 1;
+    }
+    eye = *bondviewGetCurrentPlayersPosition();
+    head = p->pos;
+    chest = p->pos;
+    chest.f[1] -= 60.0f;
+    return coopHudWallBetween(&eye, &head, rooms, n) && coopHudWallBetween(&eye, &chest, rooms, n);
+}
+
+/* how dim partner p's tag is now, 0 .. 1 */
+static f32 coopHudTagDim(CoopHudPartner *p)
+{
+    u32 now = coopHudNowMs();
+    s32 k = p->player;
+    f32 t;
+
+    if (k < 0 || k >= COOP_MAX_PLAYERS)
+    {
+        return 0.0f;
+    }
+    if (now - sTagSight[k].looked >= COOP_TAG_LOOK_MS || now - sTagSight[k].ms > 500u)
+    {
+        s32 hidden = coopHudPartnerHidden(p);
+
+        if (now - sTagSight[k].ms > 500u)
+        {
+            sTagSight[k].dim = hidden ? 1.0f : 0.0f;   /* not drawn for a while: no easing from stale */
+        }
+        if (hidden != sTagSight[k].hidden)
+        {
+            portConLogf("ge: coop: hud: player %d's tag %s\n", k + 1, hidden ? "dimmed: behind a wall" : "bright: in sight");
+        }
+        sTagSight[k].hidden = hidden;
+        sTagSight[k].looked = now;
+    }
+    t = (f32) (now - sTagSight[k].ms) / COOP_TAG_DIM_MS;
+    sTagSight[k].dim += ((sTagSight[k].hidden ? 1.0f : 0.0f) - sTagSight[k].dim) * ((t > 1.0f) ? 1.0f : t);
+    sTagSight[k].ms = now;
+    return sTagSight[k].dim;
 }
 
 /* A speaker, 10 x 7 with its top left at (x, y): the box and cone, and while
@@ -260,7 +389,11 @@ static Gfx *coopHudBark(Gfx *gdl, CoopBarkMark *m)
     return combiner_bayer_lod_perspective(gdl);
 }
 
-/* the partner's name and distance over their head, when they are in front of us */
+/* a downed partner's wait (bleed-out, or back anyway) at its longest, for the bar under their REVIVE tag */
+static s32 sDownFull[COOP_MAX_PLAYERS];
+
+/* the partner's name and distance over their head, when they are in front of us;
+ * a downed one's REVIVE tag has a bar under it draining with the time they have left */
 static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
 {
     PropRecord *self = g_CurrentPlayer->prop;
@@ -272,7 +405,27 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
     f32 k, scale, alpha;
     s32 th = 0, tw = 0;
     s32 x, y, px, py;
+    u32 ink;
+    f32 left = -1.0f;
 
+    if (p->player >= 0 && p->player < COOP_MAX_PLAYERS)
+    {   /* the longest wait seen since they went down is the bar's full length */
+        s32 *full = &sDownFull[p->player];
+
+        if (!p->dead || p->respawn < 0)
+        {
+            *full = 0;
+        }
+        else
+        {
+            if (*full == 0 && coopHudDownRule() == COOPDOWN_REVIVE)
+            {
+                *full = coopBleedOutTicks();   /* the lobby's Bleed Out time, if we see them late */
+            }
+            *full = (p->respawn > *full) ? p->respawn : *full;
+            left = (*full > 0) ? (f32) p->respawn / (f32) *full : -1.0f;
+        }
+    }
     if (self == NULL || (p->dead && !p->revivable))
     {
         return gdl;
@@ -341,6 +494,24 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
     {
         return gdl;
     }
+    ink = p->dead ? COOP_HUD_COL_FAIL : coopHudPlayerColour(p->player);
+    if (p->dead)
+    {   /* a REVIVE tag pulses, faster as the time to bleed out runs low; steady while someone revives them */
+        if (p->revivehold <= 0 && p->respawn >= 0 && coopHudDownRule() == COOPDOWN_REVIVE)
+        {
+            f32 hz = (p->respawn <= 5 * 60) ? 4.0f : (p->respawn <= 10 * 60) ? 2.0f : 1.0f;
+            f32 w = sinf((f32) (coopHudNowMs() % 4000u) * 0.001f * hz * 6.2831855f);
+
+            alpha = 0.7f + 0.3f * w;
+        }
+    }
+    else
+    {   /* behind a wall: darker and fainter */
+        f32 dim = coopHudTagDim(p);
+
+        ink = coopHudShade(ink, 1.0f - dim * (1.0f - COOP_TAG_DIM_SHADE));
+        alpha *= 1.0f - dim * (1.0f - COOP_TAG_DIM_ALPHA);
+    }
     gdl = microcode_constructor(gdl);
     {
         s32 x4 = px * 4, y4 = py * 4;
@@ -351,10 +522,19 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
         gDPNoOpTag(gdl++, 0x58000000u | ((u32) x4 << 12) | (u32) y4);
     }
     gdl = textRenderOutlined(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic,
-                             coopHudWithAlpha(p->dead ? COOP_HUD_COL_FAIL : coopHudPlayerColour(p->player), alpha),
+                             coopHudWithAlpha(ink, alpha),
                              coopHudWithAlpha(COOP_HUD_COL_SHADOW, alpha), (s32) viGetX(), viGetY(), 0, 0);
     gDPNoOpTag(gdl++, 0x58FFFFFFu);
     gdl = combiner_bayer_lod_perspective(gdl);
+    if (p->dead && left >= 0.0f)
+    {   /* the time left, unscaled under the tag: as wide as the tag, at least COOP_TAG_BAR_MIN */
+        s32 bw = (s32) (tw * scale);
+
+        bw = (bw < COOP_TAG_BAR_MIN) ? COOP_TAG_BAR_MIN : bw;
+        gdl = microcode_constructor(gdl);
+        gdl = coopHudBar(gdl, px - bw / 2, py + 2, bw, left, coopHudWithAlpha(0xFF3030FF, alpha));
+        gdl = combiner_bayer_lod_perspective(gdl);
+    }
     if (coopVoiceTalking(p->player))
     {   /* talking: a speaker just left of the tag, unscaled (right of it at the screen's left edge) */
         s32 sx = px - (s32) (tw * scale) / 2 - 13;
@@ -364,7 +544,7 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
             sx = px + (s32) (tw * scale) / 2 + 3;
         }
         gdl = microcode_constructor(gdl);
-        gdl = coopHudSpeaker(gdl, sx, py - (s32) (th * scale) / 2 - 4, coopHudPlayerColour(p->player), 1, 0);
+        gdl = coopHudSpeaker(gdl, sx, py - (s32) (th * scale) / 2 - 4, coopHudWithAlpha(ink, alpha), 1, 0);
         gdl = combiner_bayer_lod_perspective(gdl);
     }
     return gdl;
@@ -605,6 +785,75 @@ static Gfx *coopHudRadar(Gfx *gdl)
     return combiner_bayer_lod_perspective(gdl);
 }
 
+/* A hit on a partner: the bar they lost stays as a pale piece behind what is
+ * left for COOP_HIT_HOLD_MS, then shrinks into it, and the bar's frame flashes
+ * red for COOP_HIT_FLASH_MS, so a partner in trouble catches the eye. */
+#define COOP_HIT_HOLD_MS  450u
+#define COOP_HIT_SHRINK_MS 250.0f   /* time constant of the shrink */
+#define COOP_HIT_FLASH_MS 300u
+
+typedef struct
+{
+    f32 last;       /* what the bar showed last frame, -1 none yet */
+    f32 ghost;      /* the pale piece reaches to here */
+    u32 hit;        /* wall clock of the last drop */
+    u32 ms;         /* of the last frame */
+} CoopHitBar;
+
+static CoopHitBar sHitBar[COOP_MAX_PLAYERS][2];   /* health, armour */
+
+static void coopHudHitTrack(CoopHitBar *b, f32 now_frac, u32 now)
+{
+    if (b->last < 0.0f || now - b->ms > 1000u || now_frac > b->last + 0.001f)
+    {   /* the first frame, back after a while, or healed: nothing to show */
+        b->ghost = now_frac;
+    }
+    else if (now_frac < b->last - 0.001f)
+    {
+        if (b->ghost < b->last)
+        {
+            b->ghost = b->last;
+        }
+        b->hit = now;
+    }
+    if (b->ghost > now_frac && now - b->hit > COOP_HIT_HOLD_MS)
+    {
+        f32 t = (f32) (now - b->ms) / COOP_HIT_SHRINK_MS;
+
+        b->ghost += (now_frac - b->ghost) * ((t > 1.0f) ? 1.0f : t);
+        if (b->ghost - now_frac < 0.004f)
+        {
+            b->ghost = now_frac;
+        }
+    }
+    b->last = now_frac;
+    b->ms = now;
+}
+
+/* a bar as coopHudBar draws it, with the hit's pale piece and the frame's flash */
+static Gfx *coopHudHitBar(Gfx *gdl, s32 x, s32 y, s32 w, f32 frac, u32 colour, CoopHitBar *b)
+{
+    u32 now = coopHudNowMs();
+    s32 fill, ghost;
+
+    frac = (frac < 0.0f) ? 0.0f : (frac > 1.0f) ? 1.0f : frac;
+    coopHudHitTrack(b, frac, now);
+    if (now - b->hit < COOP_HIT_FLASH_MS)
+    {
+        f32 a = 1.0f - (f32) (now - b->hit) / (f32) COOP_HIT_FLASH_MS;
+
+        gdl = microcode_constructor_related_to_menus(gdl, x - 2, y - 2, x + w + 2, y + 4, coopHudWithAlpha(0xFF3030FF, a));
+    }
+    gdl = coopHudBar(gdl, x, y, w, frac, colour);
+    fill = (s32) (frac * (f32) w + 0.5f);
+    ghost = (s32) (b->ghost * (f32) w + 0.5f);
+    if (ghost > fill)
+    {
+        gdl = microcode_constructor_related_to_menus(gdl, x + fill, y, x + ghost, y + 2, 0xFFF0E0D0);
+    }
+    return gdl;
+}
+
 /* the partner's name with health and armour bars, top left */
 static Gfx *coopHudPartnerStatus(Gfx *gdl, CoopHudPartner *p, s32 row)
 {
@@ -692,12 +941,14 @@ static Gfx *coopHudPartnerStatus(Gfx *gdl, CoopHudPartner *p, s32 row)
         }
         gdl = coopHudPrint(gdl, x, y, text, COOP_HUD_COL_FAIL);
     }
-    else
+    else if (p->player >= 0 && p->player < COOP_MAX_PLAYERS)
     {
-        gdl = coopHudBar(gdl, x, y + 1, 0x40, p->health, 0xD02020E0);
-        if (p->armour > 0.0f)
-        {
-            gdl = coopHudBar(gdl, x, y + 6, 0x40, p->armour, 0x4080FFE0);
+        CoopHitBar *hb = sHitBar[p->player];
+
+        gdl = coopHudHitBar(gdl, x, y + 1, 0x40, p->health, 0xD02020E0, &hb[0]);
+        if (p->armour > 0.0f || (hb[1].ghost > 0.0f && coopHudNowMs() - hb[1].ms < 1000u))
+        {   /* the armour bar stays while its last piece shrinks away */
+            gdl = coopHudHitBar(gdl, x, y + 6, 0x40, p->armour, 0x4080FFE0, &hb[1]);
         }
     }
     gdl = combiner_bayer_lod_perspective(gdl);
@@ -824,6 +1075,95 @@ static Gfx *coopHudReviving(Gfx *gdl)
         gdl = coopHudBar(gdl, viGetViewLeft() + (viGetViewWidth() - 0x50) / 2, y + th + 3, 0x50,
                          (f32) hold / (f32) COOP_REVIVE_HOLD, COOP_HUD_COL_DONE);
     }
+    return combiner_bayer_lod_perspective(gdl);
+}
+
+/* end a HUD line at its '\n' */
+static void coopHudChop(char *text)
+{
+    for (; *text != '\0' && *text != '\n'; text++)
+    {
+    }
+    *text = '\0';
+}
+
+/* what a bind is on the device pressed last, in capitals ("G"), or "" when
+ * it is unbound or there is no keyboard (headless) */
+static void coopHudBindText(const char *bind, char *out, s32 cap)
+{
+    char key[40];
+
+    key[0] = '\0';
+#ifdef GE_VIDEO
+    {
+        extern s32 portInputGlyphStyle(void);
+        extern s32 portVideoIniGetKey(const char *key, char *buf, s32 n);
+        extern s32 portInputDeviceBindText(s32 dev, const char *name, char *buf, s32 len);
+
+        if (!((portInputGlyphStyle() == 0) ? portVideoIniGetKey(bind, key, (s32) sizeof(key))
+                                             : portInputDeviceBindText(1, bind, key, (s32) sizeof(key))))
+        {
+            key[0] = '\0';
+        }
+    }
+#endif
+    coopHudChop(key);
+    coopHudText(out, cap, key);
+    coopHudChop(out);
+}
+
+/* Looking at a partner we could give ammo to now (coop_give.c's reach, and
+ * spare rounds for the gun in hand): "G: GIVE AMMO TO NAME" on a dark band just
+ * under the crosshair, drawn after the toasts so a tall stack of them doesn't
+ * cover it. It fades in and out over
+ * COOP_GIVE_HINT_MS so the edge of the reach doesn't make it blink. */
+#define COOP_GIVE_HINT_MS 150.0f
+static Gfx *coopHudGiveHint(Gfx *gdl, s32 show)
+{
+    static f32 a;
+    static u32 ms;
+    static char name[40];
+    static char key[40];
+    CoopHudPartner p;
+    char text[96];
+    u32 now = coopHudNowMs();
+    s32 th = 0, tw = 0;
+    s32 x, y;
+    f32 t = (f32) (now - ms) / COOP_GIVE_HINT_MS;
+
+    if (show && coopGiveHint(&p))
+    {
+        coopHudText(name, sizeof(name), p.name);
+        coopHudFit(name, viGetViewWidth() / 3);
+        coopHudChop(name);
+        coopHudBindText("give_partner", key, sizeof(key));
+        a += (1.0f - a) * ((t > 1.0f) ? 1.0f : t);
+    }
+    else
+    {
+        a -= a * ((t > 1.0f) ? 1.0f : t);
+    }
+    ms = now;
+    if (a < 0.02f || name[0] == '\0')
+    {
+        return gdl;
+    }
+    if (key[0] != '\0')
+    {
+        snprintf(text, sizeof(text), portTr("%s: GIVE AMMO TO %s\n"), key, name);
+    }
+    else
+    {
+        snprintf(text, sizeof(text), portTr("GIVE AMMO TO %s\n"), name);
+    }
+    textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+    x = viGetViewLeft() + (viGetViewWidth() - tw) / 2;
+    y = viGetViewTop() + viGetViewHeight() / 2 + 0x14;
+    gdl = microcode_constructor(gdl);
+    gdl = microcode_constructor_related_to_menus(gdl, x - 3, y - 2, x + tw + 3, y + th, coopHudWithAlpha(0x00000080, a));   /* a band like a toast's */
+    gdl = textRenderOutlined(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic,
+                             coopHudWithAlpha(0xFFFFFFD0, a), coopHudWithAlpha(COOP_HUD_COL_SHADOW, a),
+                             (s32) viGetX(), viGetY(), 0, 0);
     return combiner_bayer_lod_perspective(gdl);
 }
 
@@ -1054,6 +1394,7 @@ Gfx *coopHudRender(Gfx *gdl)
     CoopHudPartner p;
     s32 partner;
     s32 eta;
+    s32 givehint = 0;
     s32 i;
 
     if (coopVersus())
@@ -1123,7 +1464,12 @@ Gfx *coopHudRender(Gfx *gdl)
     }
     else
     {
+        CoopHudPartner rp;
+        s32 rh, who;
+        s32 reviving = coopReviveHud(&rp, &rh);   /* the revive prompt has that spot */
+
         gdl = coopHudReviving(gdl);
+        givehint = partner && !reviving && !weapmenuIsOpen() && !coopChatTyping() && coopSpectateHud(&who) == 0;
     }
     if (portObjectivesHudShown() && !g_CurrentPlayer->bonddead && !weapmenuIsOpen())
     {
@@ -1133,6 +1479,7 @@ Gfx *coopHudRender(Gfx *gdl)
     coopFadeHarness();
     gdl = coopCaptionsRender(gdl);   /* Sound Captions (coop_access.c) */
     gdl = coopFeedRender(gdl);   /* chat lines and toasts (coop_chat.c) */
+    gdl = coopHudGiveHint(gdl, givehint);   /* over a tall stack of toasts */
     gdl = coopChatGridRender(gdl);   /* a pad player typing on the on-screen keyboard */
     gdl = coopHudSkipVote(gdl);  /* an ending that waits for a press, outside a cinema */
     gdl = weapmenuRender(gdl);
