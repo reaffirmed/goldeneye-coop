@@ -45,6 +45,14 @@ ROWS = {
            ['h:objective 3 \\(A\\) is now complete', 'b:debrief: stage', '=h:mission end', '=j:mission end']),
     'D2': ('dam', 2, INV, f'{INV} GE_COOP_STEPS=o0@12,b0@14,o1@16,b1@18,o2@20,b2@22,o3@24,b3@26', 60, 2,
            ['b:objective 0 \\(A\\) is now complete']),
+    # objective credit: the host presses the mainframe console 2 s before the joiner breaks the
+    # last alarm; the "used something" window used to give A to the host
+    'D2-use': ('dam', 2, f'{INV} GE_COOP_STEPS=o6@20,u6@24', f'{INV} GE_COOP_STEPS=o0@12,b0@14,o1@16,b1@18,o2@20,b2@22,o3@24,b3@26', 60, 2,
+               ['b:objective 0 \\(A\\) is now complete', 'h:objective 0 \\(A\\) complete, credit player 2']),
+    # the joiner's grenade breaks the last alarm while the host fires at the sky during its fuse
+    'D2-gren': ('dam', 2, 'GE_CHEATS=invuln,guns GE_COOP_STEPS=h4@20,l-80@21,f2@26,f2@27,f2@28,f2@29,f2@30,f2@31,f2@32',
+                'GE_CHEATS=invuln,guns GE_COOP_STEPS=o0@12,b0@14,o1@16,b1@18,o2@20,b2@22,h26@23,v3@24,l80@25,f1@26', 60, 2,
+                ['b:objective 0 \\(A\\) is now complete', 'h:objective 0 \\(A\\) complete, credit player 2']),
     # the backup needs the modem in (stage flag 0x10000, set by the host here)
     'D4': ('dam', 2, f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_TESTFLAG=10000:5', f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=o6@8,u6@9,o7@11,u7@12', 70, 2,
            ['b:objective 2 \\(C\\) is now complete', '!b:objective 2 \\(C\\) is now failed']),
@@ -186,6 +194,11 @@ ROWS = {
              '!b:objective 3 \\(\\w\\) is now failed', 'h:objective 3 \\(\\w\\) complete, credit player 2']),
     # ---- Aztec: guidance data on the computer (A), then the launch: console 11 swaps the doors,
     # the joiner's gadget on 15 starts the 30 s countdown, and the shuttle goes (B)
+    # objective credit: the joiner kills Xenia while the host keeps firing (at the sky, so the
+    # kill is the joiner's); the script that finds her dead used to give B to whoever fired last
+    'J3-credit': ('jungle', 0, 'GE_CHEATS=invuln,guns GE_COOP_STEPS=c0@10,h4@11,l-80@12,f2@13,f2@14,f2@15,f2@16,f2@17,f2@18,f2@19,f2@20,f2@21,f2@22,f2@23,f2@24',
+                  'GE_CHEATS=invuln,guns GE_COOP_STEPS=c0@10,h4@11,k0@15,k0@17,k0@19', 50, 2,
+                  ['b:objective 1 \\(B\\) is now complete', 'h:objective 1 \\(B\\) complete, credit player 2']),
     'AZ2': ('aztec', 0, f'{INV} GE_COOP_WATCHWORLD=1', f'{INV} GE_COOP_WATCHWORLD=1 GE_COOP_STEPS=h50@8,v19@10,x19@12', 45, 2,
             ['b:objective 0 \\(A\\) is now complete']),
     'AZ4': ('aztec', 0, f'{INV} GE_COOP_WATCHWORLD=1',

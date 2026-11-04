@@ -459,6 +459,8 @@ static struct
 {
     void *script;
     s8 player;
+    u8 target;      /* coopScriptTargetPass: found a chr dead or an object destroyed */
+    u32 when;       /* then the tick (coopObjNow) of that kill or break */
 } sScriptPass[COOP_SCRIPTPASS];
 static s32 sScriptPassNext;
 /* host: who set each stage flag (credit), -1 nobody known. A script that
@@ -6374,6 +6376,7 @@ static void coopHostApplyShot(CoopEvent *ev)
     vec.f[2] = ev->u.shot.vector[2];
     g_CoopPropOverride = sR[ev->from].puppet; /* the stimulus belongs to that player */
     coopStatsBlameBegin(ev->from);            /* and so do the hit and the kill */
+    coopObjBlameBegin(ev->from);              /* and a kill an objective waits on (coop_objective.c) */
     coopObjNoteActor(ev->from, 1);
     chr->chrflags |= CHRFLAG_NEAR_MISS;       /* as chrTestHit flags a shot that reaches it: a script's "Bond
                                                * shot at me" sees a partner's hit too (Statue's Janus: the
@@ -6385,6 +6388,7 @@ static void coopHostApplyShot(CoopEvent *ev)
     handles_shot_actors(chr, ev->u.shot.hitpart, &vec, ev->u.shot.weaponid, TRUE);
     sForceChr = NULL;
     coopStatsBlameEnd();
+    coopObjBlameEnd();
     g_CoopPropOverride = NULL;
     portConLogf("ge: coop: player %d shot guard %d (part %d)\n", ev->from + 1, ev->u.shot.chrnum, ev->u.shot.hitpart);
 }
@@ -7103,6 +7107,10 @@ s32 coopObjDamage(ObjectRecord *obj, f32 damage, coord3d *pos, s32 item, s32 pla
     {
         return 0;   /* no damage here (objApplyDamage), so none to send */
     }
+    else
+    {   /* whose hit this is, should it break the object (a "destroy" objective's credit) */
+        coopObjNoteHit(obj, objIsHealthy(obj));
+    }
     memset(&ev, 0, sizeof(ev));
     ev.kind = COOPEV_OBJDMG;
     ev.u.obj.objofs = ofs;
@@ -7149,7 +7157,9 @@ static void coopApplyObjDamage(CoopEvent *ev)
     {
         /* the joiner's shot: apply as ours; the hook sends the result back */
         coopObjNoteActor(ev->from, 1);
+        coopObjBlameBegin(ev->from);    /* if it breaks the object, theirs (coop_objective.c) */
         objApplyDamage(obj, ev->u.obj.damage, &pos, ev->u.obj.item, ev->u.obj.player);
+        coopObjBlameEnd();
     }
     else
     {
@@ -11418,6 +11428,55 @@ static void coopScriptPassBy(void *script, s32 who)
     }
     sScriptPass[i].script = script;
     sScriptPass[i].player = (s8) who;
+    sScriptPass[i].target = 0;
+}
+
+/* chrai.c: a script's "chr dead" or "object destroyed" check passed: what it
+ * does next is whoever killed or broke it (a level script's "Xenia is dead"
+ * flag, Silo's broken objects). Among several such checks in a row ("all
+ * four destroyed?") the latest kill or break counts. */
+void coopScriptTargetPass(void *script, void *target)
+{
+    s32 i, who;
+    u32 age, when;
+
+    if (sEnabled <= 0 || !coopNetIsHost() || !coopInMission() || script == NULL)
+    {
+        return;
+    }
+    who = coopObjTargetBy(target, &age);
+    if (who < 0)
+    {
+        return;     /* killed or broken before a partner came, or by nobody known */
+    }
+    when = coopObjNow() - age;
+    for (i = 0; i < COOP_SCRIPTPASS && sScriptPass[i].script != script; i++)
+    {
+    }
+    if (i < COOP_SCRIPTPASS && sScriptPass[i].target && (s32) (when - sScriptPass[i].when) < 0)
+    {
+        return;     /* an earlier check of this script found a later one */
+    }
+    {
+        static void *lastscript;
+        static s32 lastwho = -1;
+
+        if (script != lastscript || who != lastwho)
+        {
+            lastscript = script;
+            lastwho = who;
+            portConLogf("ge: coop: a script found player %d's kill or break\n", who + 1);
+        }
+    }
+    coopScriptPassBy(script, who);
+    for (i = 0; i < COOP_SCRIPTPASS && sScriptPass[i].script != script; i++)
+    {
+    }
+    if (i < COOP_SCRIPTPASS)
+    {
+        sScriptPass[i].target = 1;
+        sScriptPass[i].when = when;
+    }
 }
 
 /* chrai.c: script found obj activated (or a gadget used on it); its next
@@ -11627,6 +11686,8 @@ void coopExplosionCreated(PropRecord *source, coord3d *pos, s32 type, u8 *rooms)
 #define COOP_BOOM_OWNERS 16
 static void *sBoomOwnerOf[COOP_BOOM_OWNERS];
 static s8 sBoomOwner[COOP_BOOM_OWNERS];     /* the player, -1 nobody's */
+static s8 sBoomCredit[COOP_BOOM_OWNERS];    /* whose for objective credit: the owner, or for an object's own
+                                             * blast whoever broke that object (not for friendly fire) */
 static u8 sBoomCounted[COOP_BOOM_OWNERS];   /* our blast already counted as a friendly hit */
 static s32 sBoomNext;
 
@@ -11671,6 +11732,7 @@ void coopExplosionNoteOwner(void *explosion)
     sBoomNext = (sBoomNext + 1) % COOP_BOOM_OWNERS;
     sBoomOwnerOf[i] = explosion;
     sBoomOwner[i] = (s8) coopExplosionOwnerNow();
+    sBoomCredit[i] = (sBoomOwner[i] >= 0) ? sBoomOwner[i] : (s8) coopObjExplodingBy();
     sBoomCounted[i] = 0;
 }
 
@@ -11686,6 +11748,15 @@ static s32 coopExplosionSlot(void *explosion)
         }
     }
     return -1;
+}
+
+/* explosion.c: whose this blast is for objective credit (what it breaks or
+ * kills), -1 nobody's */
+s32 coopExplosionCreditOf(void *explosion)
+{
+    const s32 i = coopExplosionSlot(explosion);
+
+    return (i >= 0) ? sBoomCredit[i] : -1;
 }
 
 /* explosion.c: the share of this blast's damage our Bond takes */

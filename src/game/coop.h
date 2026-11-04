@@ -762,6 +762,17 @@ s32  coopObjRecentUse(void);     /* host: who used, planted or stuck something i
 void coopObjNoteSelf(void);     /* this game's own Bond did it: a photo, a room, a pickup, ... */
 void coopObjNoteUse(s32 player);    /* host: player used or planted something; credit for a few seconds */
 void coopObjStatusChanged(s32 index, s32 letter, s32 status);  /* objective_status.c */
+s32  objectiveDestroyTargets(s32 objectiveNum, void **out, s32 max);  /* objective_status.c: a "destroy" objective's objects */
+void coopObjBlameBegin(s32 player);  /* host: the damage applied until coopObjBlameEnd is player's (-1 nobody's) */
+void coopObjBlameEnd(void);
+void coopObjNoteHit(ObjectRecord *obj, s32 healthy);  /* host: damage about to land on obj (coop.c coopObjDamage) */
+void coopObjNoteKill(void *chr);     /* host: chr was just killed (chraction.c) */
+s32  coopObjTargetBy(const void *target, u32 *age);  /* host: who broke that object or killed that chr, -1 not known */
+void coopObjExplodeBegin(const void *obj);  /* propobj.c: obj's own blast is being made */
+void coopObjExplodeEnd(void);
+u32  coopObjNow(void);               /* coop_objective.c's clock, in ticks */
+s32  coopObjExplodingBy(void);       /* whoever broke the object going off now, -1 none or not known */
+void coopScriptTargetPass(void *script, void *target);  /* chrai.c: script found target (a chr, an object) dead or destroyed */
 void coopObjTick(s32 inmission);
 void coopObjApply(s32 kind, const u8 *raw, s32 from);
 

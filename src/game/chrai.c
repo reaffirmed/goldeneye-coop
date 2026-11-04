@@ -1256,6 +1256,9 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
 
                     if (!chr || chrIsDead(chr))
                     {
+#ifndef TARGET_N64
+                        coopScriptTargetPass(Entityp, chr);  /* co-op: what follows is the killer's (objective credit) */
+#endif
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
                     else
@@ -2497,6 +2500,9 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     }
                     else
                     {
+#ifndef TARGET_N64
+                        coopScriptTargetPass(Entityp, obj);  /* co-op: what follows is whoever broke it (objective credit) */
+#endif
                         Offset += sizeof(AiIFObjectNotDestroyedRecord);
                     }
                     break;
