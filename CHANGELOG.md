@@ -6,6 +6,7 @@ GoldenEye Coop releases, newest first. Each release's full notes, including whic
 
 | Release | Date | Co-op protocol | Highlights |
 | --- | --- | --- | --- |
+| [v0.8.3](coop/release-notes/v0.8.3.md) | 2026-11-04 | 17 | Objective credit goes to the player who killed or broke the target, grenades and mines included; grenades land where they should. |
 | [v0.8.2](coop/release-notes/v0.8.2.md) | 2026-11-04 | 17 | Lobby Ready / Start button and solo host start; revives fill from the fall; knockback no longer strands a player; no Facility chat crash; Notification Size. |
 | [v0.8.1](coop/release-notes/v0.8.1.md) | 2026-11-03 | 17 | Pick your own player colour for chat, the party list, the radar and pings; Spanish accents show on Windows. |
 | [v0.8.0](coop/release-notes/v0.8.0.md) | 2026-11-03 | 17 | Spanish for the whole game; Bunker 2 ending on joiners; one missed throw no longer fails the team; quiet silenced guns; Partner Fade strength; versus bodies block. |
