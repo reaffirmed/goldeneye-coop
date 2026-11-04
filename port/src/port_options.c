@@ -111,6 +111,9 @@ static const s32 sColorblindVals[] = { 0, 1, 2 };
 static const char *const sColorblindText[] = { "Off\n", "Red-Green\n", "Blue-Yellow\n" };
 static const s32 sTextSizeVals[] = { 100, 125, 150, 200 };
 static const char *const sTextSizeText[] = { "100%\n", "125%\n", "150%\n", "200%\n" };
+/* Notification Size: the co-op toasts smaller than the rest of the co-op text */
+static const s32 sToastSizeVals[] = { 50, 75, 100 };
+static const char *const sToastSizeText[] = { "50%\n", "75%\n", "100%\n" };
 static const char *const sHoldToggleText[] = { "Hold\n", "Toggle\n" };
 static const char *const sGuardAiText[] = { "Classic\n", "Smarter\n" };
 /* smarter guards' alert budget: escalations a mission (coop_ai.c coopAiSpend); 101 is no limit */
@@ -400,6 +403,8 @@ static struct PortOpt sOpts[] = {
     TOGGLET("caption_style",    "[display]", "Caption Style\n", PORTOPT_CAT_GAMEPLAY, sCoopMenuText),
     /* story co-op: a partner right in front of you fades out (coop_fade.c), how strongly is each player's own */
     ENUMR ("partner_fade",      "[display]", "Partner Fade\n",  PORTOPT_CAT_GAMEPLAY, sPartnerFadeVals, sPartnerFadeText, NULL),
+    /* co-op notifications bottom left (coop_chat.c toasts), on top of Text Size */
+    ENUMR ("toast_size",        "[display]", "Notification Size\n", PORTOPT_CAT_GAMEPLAY, sToastSizeVals, sToastSizeText, NULL),
     /* the in-game updater (port_update.c): ask GitHub for a newer release at startup */
     TOGGLE("auto_update",       "[display]", "Check for Updates\n", PORTOPT_CAT_GAMEPLAY),
     TOGGLET("crouch_key",       "[input]",   "Crouch Key\n",    PORTOPT_CAT_CONTROLLER, sHoldToggleText),

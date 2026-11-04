@@ -4775,6 +4775,7 @@ static const struct PortSheetRow port_sheet_rows_portopts[] = {
 #endif
     { SHROW_OPT, "coop_menu" },              /* the CO-OP screen: Modern, or Classic on the folder */
     { SHROW_OPT, "partner_fade" },           /* story co-op: a partner up close fades out (coop_fade.c) */
+    { SHROW_OPT, "toast_size" },             /* the co-op notifications bottom left, smaller (coop_chat.c) */
     { SHROW_OPT, "unlimited_explosions" },   /* default ON */
     { SHROW_OPT, "watch_static" },           /* the watch's fuzz, default ON (vanilla) */
     { SHROW_OPT, "fast_pause" },             /* the watch at Rare's top speed, default OFF */
@@ -8870,6 +8871,13 @@ Gfx *constructor_menu1C_portsheet(Gfx *DL)
         char pagetext[12];
         sprintf(pagetext, "%d/%d\n", (int) port_sheet_page + 1, (int) port_sheet_pages);
         x = PORT_SHEET_VALUE_X;
+        if (!port_sheet_twocol)
+        {   /* clear of a long title, such as Spanish's OPCIONES DEL PORT */
+            th = 0;
+            tw = 0;
+            textMeasure(&th, &tw, (char *) portSheetTitle(), ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+            x = (PORT_SHEET_LABEL_X + tw + 8 > x) ? PORT_SHEET_LABEL_X + tw + 8 : x;
+        }
         y = PORT_SHEET_TITLE_Y;
         DL = frontPrintText(DL, &x, &y, pagetext, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
     }
