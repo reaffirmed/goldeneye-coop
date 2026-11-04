@@ -4234,6 +4234,29 @@ The intro has no Natalya in it and looks the same on both screens (rig).
   README.txt, midas.ini and a lang/es/deeper/ file alone, and clears the list and the
   zip. A v0.8.1 unzipped over it puts nothing in. Case 6 fails on the build before this.
 
+## Opening chat on Facility crashed the game: the display list ran over (2026-11-03, COOP_VERSION stays 17)
+
+- Tester report: the second player's game crashed twice on Facility when they pressed T.
+  Opening the line shows every chat line again (up to 6, each up to 5 rows), and the HUD
+  font's outlined text costs about 250 bytes of display list a letter (nine quads). Six long
+  lines and the typed one came to about 190 KB on top of the stage's ~40 KB, and Facility's
+  pool (-mgfx70, doubled on PC) is 140 KB. Nothing bounds dyn.c's buffer, so the frame ran
+  into the next allocation and the renderer stopped on "FATAL: Unknown GBI opcode 0x30".
+- coop_chat.c: every piece of the feed (the typed line, chat rows, toasts, their boxes)
+  checks dynGetFreeGfx2 first (40 Gfx a letter, 1024 kept for the rest of the frame); once one
+  does not fit, nothing more is drawn that frame, so what goes is the oldest. Logged as "the
+  display list is nearly full", every 600 frames short.
+- dyn.c: the PC display list is four times what the stage asks for, not twice (Facility 280
+  KB, Streets/Depot/Aztec 240 KB), so the whole feed fits on most stages.
+- Harness: GE_COOP_TESTFEED=<s>:<n> puts n of the longest chat lines in the feed <s>
+  seconds into the mission, already faded, so GE_COOP_TESTCHAT then opens the line over them.
+- Joiner on Facility, GE_ROOM_AUDIT=1 GE_COOP_TESTFEED=15:6 GE_COOP_TESTCHAT=20:hola: main
+  "DYN POOL OVERFLOW gfx=228792/143360" then the FATAL, the joiner's game gone; with 3 lines
+  134 KB of 140. Fixed: 248 KB of 280 with toasts too, the line sent, no overflow. Streets
+  (240 KB): the check left the oldest rows out for a frame, no overflow; Aztec 233 of 240 KB.
+- Mission runs (sanitizer build) dam, facility, silo, streets, aztec, egypt: 6/6 pass, 0
+  corrected desyncs.
+
 ## Notification Size (2026-11-03, COOP_VERSION stays 17)
 
 - Testers' ask: a way to make the co-op notifications smaller. Text Size only

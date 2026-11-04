@@ -42,6 +42,7 @@
 #include "lv.h"
 #include "coop.h"
 #include "joy.h"
+#include "dyn.h"
 
 extern void portConLogf(const char *fmt, ...);
 extern Gfx *portHudScaleBegin(Gfx *gdl, f32 x, f32 y);
@@ -523,11 +524,53 @@ static void coopChatTestGrid(s32 inmission)
 #endif
 }
 
+/* GE_COOP_TESTFEED=<s>:<n>: <s> seconds into the mission, put n chat lines
+ * of the longest kind in the feed, as said by the partner a while ago
+ * (already faded: opening the line shows them again) (harness only) */
+static void coopFeedTestTick(s32 inmission)
+{
+    static s32 at = -2;
+    static s32 count;
+
+    if (at == -2)
+    {
+        const char *e = getenv("GE_COOP_TESTFEED");
+        const char *colon = e;
+
+        while (colon != NULL && *colon != '\0' && *colon != ':')
+        {
+            colon++;
+        }
+        colon = (colon != NULL && *colon == ':') ? colon : NULL;
+        at = (colon != NULL) ? atoi(e) * 60 : -1;
+        count = (colon != NULL) ? atoi(colon + 1) : 0;
+    }
+    if (at < 0 || !inmission || (s32) coopExtMissionTicks() != at)
+    {
+        return;
+    }
+    while (count-- > 0)
+    {
+        char said[COOPCHAT_MAX + 1];
+        s32 k;
+
+        for (k = 0; k < COOPCHAT_MAX; k++)
+        {
+            said[k] = (k % 8 == 7) ? ' ' : (char) ('A' + (k + count) % 26);
+        }
+        said[COOPCHAT_MAX] = '\0';
+        coopChatShow(1, said);
+        sFeed[sFeedCount - 1].tick = sNow - COOPFEED_SHOW;
+    }
+    at = -1;
+}
+
 static void coopChatTestTick(s32 inmission)
 {
     static CoopChatTest mission = { "GE_COOP_TESTCHAT", -2 };
     static CoopChatTest lobby = { "GE_COOP_TESTLOBBYCHAT", -2 };
 
+    coopFeedTestTick(inmission);
     coopToastTestTick(inmission);
     coopChatTestGrid(inmission);
 
@@ -699,8 +742,60 @@ static void coopFeedFit(char *text, s32 maxw)
     }
 }
 
+/* Nothing bounds the frame's display list (dyn.c: an overrun spills into the
+ * buffer being drawn, or the next allocation, and the game dies on a bad
+ * display list command), and outlined HUD text is dear: nine glyph quads a
+ * letter, about 250 bytes. The feed with the line open (every line again,
+ * each up to five rows) can be 190 KB, and Facility's pool was 140 KB with
+ * the stage in it too (dyn.c now gives it 280 KB; Streets, Depot and Aztec
+ * 240 KB). So each piece asks first, and once one does
+ * not fit nothing more is drawn this frame: what is left out is the oldest
+ * (the typed line is drawn first, then the lines newest first, then the
+ * toasts). */
+#define COOPFEED_GFX_GLYPH  40      /* SetTextureLUT 1, LoadTextureBlock 7, two colours, 9 rectangles of 3 */
+#define COOPFEED_GFX_PIECE  8       /* the text's own setup, or a backing box */
+#define COOPFEED_GFX_KEEP   0x400   /* for the rest of the frame: the HUD after ours, the console, the end */
+
+static s32 sFeedGfxFull;     /* this frame's feed ran out of room */
+static u32 sFeedGfxShort;    /* frames it did */
+
+static s32 coopFeedRoom(Gfx *gdl, s32 glyphs)
+{
+    if (!sFeedGfxFull
+        && dynGetFreeGfx2(gdl) >= glyphs * COOPFEED_GFX_GLYPH + COOPFEED_GFX_PIECE + COOPFEED_GFX_KEEP)
+    {
+        return 1;
+    }
+    if (!sFeedGfxFull && sFeedGfxShort++ % 600 == 0)
+    {
+        portConLogf("ge: coop: chat: the display list is nearly full (%d left), older lines left out (%u frames)\n",
+                    dynGetFreeGfx2(gdl), sFeedGfxShort);
+    }
+    sFeedGfxFull = 1;
+    return 0;
+}
+
+static Gfx *coopFeedBox(Gfx *gdl, s32 l, s32 t, s32 r, s32 b, u32 colour)
+{
+    if (!coopFeedRoom(gdl, 0))
+    {
+        return gdl;
+    }
+    return microcode_constructor_related_to_menus(gdl, l, t, r, b, colour);
+}
+
 static Gfx *coopFeedPrint(Gfx *gdl, s32 x, s32 y, char *text, u32 colour)
 {
+    s32 len = 0;
+
+    while (text[len] != '\0')
+    {
+        len++;
+    }
+    if (!coopFeedRoom(gdl, len))
+    {
+        return gdl;
+    }
     return textRenderOutlined(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic, colour,
                               coopFeedAlpha(0x000000A0, (s32) (colour & 0xFF)), (s32) viGetX(), viGetY(), 0, 0);
 }
@@ -847,8 +942,7 @@ static Gfx *coopToastDraw(Gfx *gdl, s32 x, s32 y, CoopToastPiece *pc, s32 n, s32
     {
         right = (pc[i].x + pc[i].w > right) ? pc[i].x + pc[i].w : right;
     }
-    gdl = microcode_constructor_related_to_menus(gdl, x - 3, y - 2, x + right + 3, y + rows * COOPTOAST_LINE - 1,
-                                                 coopFeedAlpha(0x00000080, a));
+    gdl = coopFeedBox(gdl, x - 3, y - 2, x + right + 3, y + rows * COOPTOAST_LINE - 1, coopFeedAlpha(0x00000080, a));
     for (i = 0; i < n; i++)
     {
         gdl = coopFeedPrint(gdl, x + pc[i].x, y + pc[i].row * COOPTOAST_LINE, pc[i].text,
@@ -928,6 +1022,7 @@ Gfx *coopFeedRender(Gfx *gdl)
         return gdl;
     }
 
+    sFeedGfxFull = 0;
     if (hudAnchorsToEdges())
     {
         PORT_HUD_ANCHOR(gdl, PORT_HUD_ANCHOR_LEFT);
@@ -948,7 +1043,7 @@ Gfx *coopFeedRender(Gfx *gdl)
         }
         w = (w < viGetViewWidth() / 2) ? viGetViewWidth() / 2 : w + 3;
         y -= (rows - 1) * 0x0B;
-        gdl = microcode_constructor_related_to_menus(gdl, left - 3, y - 2, left + w, y + rows * 0x0B, 0x00000080);
+        gdl = coopFeedBox(gdl, left - 3, y - 2, left + w, y + rows * 0x0B, 0x00000080);
         for (k = 0; k < n; k++)
         {
             gdl = coopFeedPrint(gdl, left + pc[k].x, y + pc[k].row * 0x0B, pc[k].text, 0xFFFFFFFF);

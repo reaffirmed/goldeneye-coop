@@ -59,8 +59,11 @@ void dynInitMemory(void) {
     }
 
 #ifndef TARGET_N64
-    // Double graphics buffers size on PC to avoid graphics corruption bugs
-    g_GfxSizesByPlayerCount[getPlayerCount() - 1] *= 2;
+    // Double graphics buffers size on PC to avoid graphics corruption bugs.
+    // The display list gets four times: the port's HUD text on top of the
+    // stage (co-op chat with the line open) overran twice Facility's 70 KB
+    // and crashed the game (coop_chat.c also checks for room before drawing).
+    g_GfxSizesByPlayerCount[getPlayerCount() - 1] *= 4;
     g_VtxSizesByPlayerCount[getPlayerCount() - 1] *= 2;
     {   /* the menus' stage asks for 20 KB of vertices and matrices; the co-op
          * lobby draws up to fifteen characters a frame (coop_charsel.c) */
