@@ -2233,6 +2233,9 @@ void triggered_on_shot_hit(ChrRecord *self, coord3d *arg1, f32 arg2, s32 req_ani
 
             chrDropItems(self);
             increment_num_kills_display_text_in_MP();
+#ifndef TARGET_N64
+            coopObjNoteKill(self);  /* co-op: whose kill, for an objective a script finds later (coop_objective.c) */
+#endif
 
             if (self->chrflags & CHRFLAG_COUNT_DEATH_AS_CIVILIAN)
             {
@@ -2876,6 +2879,9 @@ s32 chrlvExplosionDamage(ChrRecord *self, coord3d *arg1, f32 damage, s32 arg3)
 
         chrDropItems(self);
         increment_num_kills_display_text_in_MP();
+#ifndef TARGET_N64
+        coopObjNoteKill(self);  /* co-op: whose kill (coop_objective.c) */
+#endif
 
         if (self->chrflags & CHRFLAG_COUNT_DEATH_AS_CIVILIAN)
         {

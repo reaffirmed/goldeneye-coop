@@ -604,12 +604,22 @@ void explosionInflictDamage(PropRecord *arg0, f32 horiz_range, f32 vert_range)
 
                         if (!(spCC->runtime_bitflags & 0x1000) && !(spCC->flags2 & 0x200400))
                         {
+#ifndef TARGET_N64
+                            /* co-op: an object it breaks is the blast's owner's (objective credit) */
+                            extern void coopObjBlameBegin(s32 player);
+                            extern void coopObjBlameEnd(void);
+                            extern s32 coopExplosionCreditOf(void *explosion);
+                            coopObjBlameBegin(coopExplosionCreditOf(temp_s2));
+#endif
                             maybe_detonate_object_and_its_children(
                                 temp_s0,
                                 ((RANDOMFRAC() * 0.5f) + 1.0f) * minfrac,
                                 &spCC->runtime_pos,
                                 0x1D,
                                 (s32) temp_s2->player);
+#ifndef TARGET_N64
+                            coopObjBlameEnd();
+#endif
                         }
                     }
 
@@ -682,6 +692,11 @@ void explosionInflictDamage(PropRecord *arg0, f32 horiz_range, f32 vert_range)
                             extern void coopStatsBlameEnd(void);
                             extern s32 coopStatsExplosionIsPartner(void *explosion);
                             coopStatsBlameBegin(coopStatsExplosionIsPartner(temp_s2));
+                            {   /* and a kill an objective waits on (coop_objective.c) */
+                                extern void coopObjBlameBegin(s32 player);
+                                extern s32 coopExplosionCreditOf(void *explosion);
+                                coopObjBlameBegin(coopExplosionCreditOf(temp_s2));
+                            }
                             {
                                 extern void coopExplosionHitChr(void *explosion, ChrRecord *chr);
                                 coopExplosionHitChr(temp_s2, temp_s0->chr);   /* ours on a partner: a friendly hit */
@@ -690,6 +705,10 @@ void explosionInflictDamage(PropRecord *arg0, f32 horiz_range, f32 vert_range)
                             chrlvExplosionDamage(temp_s0->chr, &arg0->pos, minfrac, 1);
 #ifndef TARGET_N64
                             coopStatsBlameEnd();
+                            {
+                                extern void coopObjBlameEnd(void);
+                                coopObjBlameEnd();
+                            }
 #endif
                         }
                         else

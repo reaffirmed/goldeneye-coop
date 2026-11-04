@@ -336,6 +336,35 @@ OBJECTIVESTATUS get_status_of_objective(s32 objectiveNum) //#MATCH
 
 
 
+#ifndef TARGET_N64
+/* co-op (coop_objective.c credit): the objects a "destroy" objective names,
+ * up to max of them; how many */
+s32 objectiveDestroyTargets(s32 objectiveNum, void **out, s32 max)
+{
+    MissionObjectiveRecord *objective;
+    s32 n = 0;
+
+    if (objectiveNum < 0 || objectiveNum >= 10 || objective_ptrs[objectiveNum] == NULL)
+    {
+        return 0;
+    }
+    for (objective = &objective_ptrs[objectiveNum]->id; objective->type != PROPDEF_OBJECTIVE_END && n < max;
+         objective = sizepropdef(objective) + (PropDefHeaderRecord *) objective)
+    {
+        if (objective->type == PROPDEF_OBJECTIVE_DESTROY_OBJECT)
+        {
+            ObjectRecord *obj = objFindByTagId(objective->ObjRefID);
+
+            if (obj != NULL)
+            {
+                out[n++] = obj;
+            }
+        }
+    }
+    return n;
+}
+#endif
+
 bool objectiveIsAllComplete(void)
 {
     DIFFICULTY objdiff;

@@ -9,8 +9,15 @@
  * explosions), and our own Bond notes itself (coopObjNoteSelf: shots, the
  * camera, rooms, thrown items, pickups, the key copy). A level script that
  * sets stage flags notes whoever passed its last "either player" check
- * (coop.c coopScriptSetsFlags: the elevator, a room). When an objective
- * turns complete on the host, the credit goes to
+ * (coop.c coopScriptSetsFlags: the elevator, a room). Each kill and each
+ * object broken is noted with its player too (coopObjNoteKill,
+ * coopObjNoteHit: a shot, a punch, a blast and whose it was), so a script that
+ * finds a chr dead or an object destroyed passes its check by that player
+ * (coop.c coopScriptTargetPass). When an objective turns complete on the
+ * host, the credit goes to
+ *   - for a "destroy" objective, whoever broke its last target, if that was
+ *     in the last COOPOBJ_DAMAGE ticks (a partner's shot or mine, though
+ *     someone else fired or pressed a switch since), else
  *   - whoever changed the world in the last COOPOBJ_NOW ticks (a room, a
  *     pickup, a photo: the objective turns in the same tick; a chr's script
  *     setting the flag credits the player it was dealing with), else
@@ -60,6 +67,22 @@ static u32 sDmgTick;
 static s32 sUseActor = -1;
 static u32 sUseTick;
 static u8 sShown[OBJECTIVES_MAX];
+
+/* Who broke an object or killed a chr (host): the last player to hit an
+ * object while it was still whole, and the player behind each kill. A blast
+ * is its owner's (coop.c coopExplosionCreditOf: the thrower, the launcher's
+ * shooter, or for an object's own blast whoever broke that object). */
+#define COOPOBJ_TARGETS 64
+static struct
+{
+    const void *target;     /* ObjectRecord * or ChrRecord * */
+    s8 player;
+    u32 tick;
+} sTargets[COOPOBJ_TARGETS];
+static s32 sTargetNext;
+static s32 sBlameSet;       /* coopObjBlameBegin: the damage being applied is sBlameWho's */
+static s32 sBlameWho;       /* -1 nobody's (a guard's grenade, a barrel nobody set off) */
+static const void *sExploding;  /* the object whose own blast is being made (propobj.c) */
 static u8 sWasOpen[OBJECTIVES_MAX];    /* seen not complete in this mission: a change to complete is news */
 
 void coopObjNoteActor(s32 player, s32 damage)
@@ -127,6 +150,126 @@ static s32 coopObjFallback(void)
     return coopExtSelf();
 }
 
+/* the damage applied until coopObjBlameEnd is player's (-1 nobody's): a
+ * partner's shot or blast on the host */
+void coopObjBlameBegin(s32 player)
+{
+    sBlameSet = 1;
+    sBlameWho = (player >= 0 && player < COOP_MAX_PLAYERS) ? player : -1;
+}
+
+void coopObjBlameEnd(void)
+{
+    sBlameSet = 0;
+}
+
+/* whose the damage being applied is: what coopObjBlameBegin said, else our
+ * own (the host's shot or punch) */
+static s32 coopObjBlameNow(void)
+{
+    return sBlameSet ? sBlameWho : coopExtSelf();
+}
+
+static void coopObjNoteTarget(const void *target, s32 player)
+{
+    s32 i;
+
+    if (target == NULL || !coopExtIsHost() || !coopLobbyHasPartner())
+    {
+        return;
+    }
+    for (i = 0; i < COOPOBJ_TARGETS && sTargets[i].target != target; i++)
+    {
+    }
+    if (i == COOPOBJ_TARGETS)
+    {
+        i = sTargetNext;
+        sTargetNext = (sTargetNext + 1) % COOPOBJ_TARGETS;
+    }
+    sTargets[i].target = target;
+    sTargets[i].player = (s8) player;
+    sTargets[i].tick = sNow;
+}
+
+/* coop.c coopObjDamage, the host's copy: damage is about to land on obj. The
+ * last hit while it is whole is the one that breaks it */
+void coopObjNoteHit(ObjectRecord *obj, s32 healthy)
+{
+    if (healthy)
+    {
+        coopObjNoteTarget(obj, coopObjBlameNow());
+    }
+}
+
+/* chraction.c: chr was just killed */
+void coopObjNoteKill(void *chr)
+{
+    coopObjNoteTarget(chr, coopObjBlameNow());
+}
+
+/* this module's clock, in ticks */
+u32 coopObjNow(void)
+{
+    return sNow;
+}
+
+/* who broke that object or killed that chr, -1 not known; *age in ticks */
+s32 coopObjTargetBy(const void *target, u32 *age)
+{
+    s32 i;
+
+    for (i = 0; target != NULL && i < COOPOBJ_TARGETS; i++)
+    {
+        if (sTargets[i].target == target)
+        {
+            if (age != NULL)
+            {
+                *age = sNow - sTargets[i].tick;
+            }
+            return sTargets[i].player;
+        }
+    }
+    return -1;
+}
+
+/* propobj.c: obj is going off (its blast is whoever broke it) */
+void coopObjExplodeBegin(const void *obj)
+{
+    sExploding = obj;
+}
+
+void coopObjExplodeEnd(void)
+{
+    sExploding = NULL;
+}
+
+/* coop.c, a blast being made that is nobody's own: an object's, whoever broke that object */
+s32 coopObjExplodingBy(void)
+{
+    return (sExploding != NULL) ? coopObjTargetBy(sExploding, NULL) : -1;
+}
+
+/* a "destroy" objective: whoever broke the last of its targets, if that was
+ * in the last COOPOBJ_DAMAGE ticks; else -1 */
+static s32 coopObjDestroyCredit(s32 index)
+{
+    void *objs[32];
+    s32 n = objectiveDestroyTargets(index, objs, 32);
+    s32 i, who = -1, p;
+    u32 best = COOPOBJ_DAMAGE + 1, age;
+
+    for (i = 0; i < n; i++)
+    {
+        p = coopObjTargetBy(objs[i], &age);
+        if (p >= 0 && age < best)
+        {
+            best = age;
+            who = p;
+        }
+    }
+    return who;
+}
+
 void coopObjNoteSelf(void)
 {
     if (coopExtIsHost())
@@ -181,7 +324,11 @@ void coopObjStatusChanged(s32 index, s32 letter, s32 status)
     {
         return;
     }
-    if (sActor >= 0 && sNow - sActorTick <= COOPOBJ_NOW)
+    if ((credit = coopObjDestroyCredit(index)) >= 0)
+    {
+        portConLogf("ge: coop: objective %d (%c): player %d broke its last target\n", index, 'A' + letter, credit + 1);
+    }
+    else if (sActor >= 0 && sNow - sActorTick <= COOPOBJ_NOW)
     {
         credit = sActor;
     }
@@ -287,6 +434,9 @@ void coopObjTick(s32 inmission)
             memset(sShown, 0, sizeof(sShown));
             sActor = sDmgActor = sUseActor = -1;
             memset(sWasOpen, 0, sizeof(sWasOpen));
+            memset(sTargets, 0, sizeof(sTargets));
+            sBlameSet = 0;
+            sExploding = NULL;
         }
     }
 }

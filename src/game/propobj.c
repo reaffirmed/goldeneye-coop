@@ -2069,6 +2069,12 @@ normaldone:
         arg2->x = target.f[0];
         arg2->y = target.f[1];
         arg2->z = target.f[2];
+#ifndef TARGET_N64
+        /* nowhere to go: stay put. partialpos was never set on this path, so
+         * the item's height came from whatever the stack held, and a thrown
+         * grenade could land somewhere else from one build to the next */
+        partialpos.y = target.f[1];
+#endif
     }
 
     tmp = partialpos.y;
@@ -3434,6 +3440,7 @@ void propExplode(PropRecord *prop, s32 /* enum EXPLOSION_DEF */ explosionType)
 #ifndef TARGET_N64
     coopItemsExplodeBegin(prop);    /* co-op: a thrown item's copies go off together (coop_items.c) */
     g_CoopObjExploding = 1;         /* co-op: the host's damage events replay it (coop.c coopExplosionCreated) */
+    coopObjExplodeBegin(prop_obj);  /* co-op: what its blast breaks is whoever broke it (coop_objective.c) */
 #endif
 
     if (prop->parent)
@@ -3498,6 +3505,7 @@ void propExplode(PropRecord *prop, s32 /* enum EXPLOSION_DEF */ explosionType)
 #ifndef TARGET_N64
     coopItemsExplodeEnd();
     g_CoopObjExploding = 0;
+    coopObjExplodeEnd();
 #endif
 
 #if defined(VERSION_JP) || defined(VERSION_EU)

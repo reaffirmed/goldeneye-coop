@@ -4355,3 +4355,68 @@ otherwise the revive bar gets stuck and does not fill up", and on Facility
   10 s later followed it in and dropped in. Screenshots on Modern and Classic, English and Spanish,
   with keyboard, Xbox, PlayStation and Switch prompts. Host and joiner both
   need the change for the joiner's button; a host alone needs it to start.
+
+## Objective credit follows the kill or the break, not the last shot (2026-11-04, COOP_VERSION stays 17)
+
+Tester report (after v0.8.1): "It still sometimes fails to correctly indicate which player
+completed each objective." The same report's "a key item used too early fails the mission
+for good, even if the other players still have theirs" is the Dam modem / Frigate tracker /
+Surface 2 mine case fixed in v0.8.0 (section above); the testers were most likely on
+v0.7.x, and it needs every player on v0.8.0 or later.
+
+- Cause: when an objective turned complete, the host credited whoever changed the world in
+  the last 3 ticks, else whoever used something in the last 5 s, else whoever did damage in
+  the last 5 s, else the host. "Damage" was every shot the host fired (misses too, from
+  coopLookShotBegin) and every hit a joiner landed, on anything. Three ways that went wrong:
+  - A "destroy" objective (Dam's alarms, Facility's tanks, Runway's guns, Depot, Jungle's
+    drone guns, Control's mainframe, Caverns...) finished by a joiner's grenade or mine: the
+    host's copy of the throw goes off with no note at all, so the credit went to whoever
+    fired last during the fuse, usually the host.
+  - Anyone pressing a console, switch or alarm box within 5 s beat the player who broke the
+    last target (the "use" window comes before the damage window).
+  - A level script that finds a chr dead or an object destroyed and then sets the flag
+    ("Xenia is dead", Silo's broken objects) credited the most recent shooter, not the
+    killer.
+- Fix (host only, nothing new on the wire):
+  - coop_objective.c keeps who broke each object and who killed each chr (64 recent ones).
+    coop.c coopObjDamage notes the player behind each hit on an object that is still whole;
+    the last such hit is the one that broke it. chraction.c notes the player behind each
+    kill. Whose a hit is: coopObjBlameBegin/End around a joiner's shot (coopHostApplyShot,
+    coopApplyObjDamage) and around a blast's damage (explosion.c, from the blast's owner),
+    else the host's own.
+  - A blast's owner for credit is coop.c's existing owner (thrower, launcher shooter, the
+    remote boom's sender), and for an object's own blast (a barrel, a tank going up),
+    whoever broke that object (sBoomCredit; friendly fire scaling is unchanged).
+  - A "destroy" objective now credits whoever broke its most recently broken target, if
+    that was in the last 5 s; that comes before the other windows.
+  - chrai.c: IFChrDyingOrDead passing and IFObjectNotDestroyed failing (the object is
+    broken) pass the script's check by the killer or breaker (coopScriptTargetPass), so the
+    flags it sets next are theirs. Among several such checks in one script, the latest kill
+    or break wins.
+- Found on the way: propobj.c objTryMovePropWithCollision set a moving object's height
+  from `partialpos.y` even on the path that never sets it (the target was where the object
+  already was), so a thrown item's height came from leftover stack. Any unrelated change to
+  a function earlier in the frame (here explosion.c) moved where a grenade landed by about
+  2 m. That path now keeps the target's height (non-N64 only). With it, main's and this
+  branch's grenade land in the same place.
+- Logs: "objective N (X): player P broke its last target", "a script found player P's kill
+  or break".
+
+Rig: Linux i686, copies on one machine over the mock Steam, main 45a93df against this branch.
+- `D2-use` (host presses the mainframe console 2 s before the joiner breaks the last alarm):
+  main credits player 1 (2 of 2 runs), this branch player 2 (3 of 3).
+- `D2-gren` (joiner's grenade breaks the last alarm while the host fires at the sky during
+  the fuse): main credits player 1, this branch player 2 (2 runs, and once more with the
+  joiner throwing from next to the alarm).
+- `J3-credit` (joiner kills Xenia, host firing): player 2 on both builds. Xenia's B turns
+  before the host's next shot, so this line does not catch main; an earlier version where
+  the host also hit her credited player 1 on main and player 2 here, but the kill there was
+  not always the joiner's.
+- Regression, this branch: D2, D8, SU4, FR6, AZ2, J3-credit and the objective sweeps for
+  Silo, Runway, Bunker 1 and Surface 2 pass; the sweeps for Control, Caverns, Jungle, Depot
+  and Facility passed before the propobj.c fix was added and were not re-run after. D4
+  fails the same way on main and here (the backup never starts, as noted on e1e93f5). Runs
+  logged "a joiner never got in" were the rig's Xvfb failing to open GL and were run again.
+- Not covered: a guard's bullet killing another guard counts as the host's kill, as it
+  already did for the stats screen. A kill or break from before a partner joined has no
+  owner and falls back to the old windows.
