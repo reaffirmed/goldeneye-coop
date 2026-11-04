@@ -4450,7 +4450,8 @@ player's own game does all of it.
   40 cm, so it doesn't show while everyone stands in one spot at a mission's start). The key
   is the give_partner bind of the device pressed last, else no key. Not while the revive
   prompt, the weapon menu, chat or spectating is up. At first it sat where the revive prompt
-  is (2/3 down) and the toasts ran into it.
+  is (2/3 down) and the toasts ran into it; now it is under the crosshair on a dark band,
+  drawn after the toasts, which a tall stack of them can still reach.
 - REVIVE tag: "REVIVE NAME 3M 53S", the seconds to bleed out (Revive) or to come back
   anyway (Revive or Timer). Under Revive it pulses (70 % +- 30 %), at 1 Hz, 2 Hz from 10 s
   and 4 Hz from 5 s, and stops pulsing while someone holds Use over them.

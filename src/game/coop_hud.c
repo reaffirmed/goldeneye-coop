@@ -1085,8 +1085,9 @@ static void coopHudBindText(const char *bind, char *out, s32 cap)
 }
 
 /* Looking at a partner we could give ammo to now (coop_give.c's reach, and
- * spare rounds for the gun in hand): "G: GIVE AMMO TO NAME" just under the
- * crosshair, clear of the toasts at the bottom left. It fades in and out over
+ * spare rounds for the gun in hand): "G: GIVE AMMO TO NAME" on a dark band just
+ * under the crosshair, drawn after the toasts so a tall stack of them doesn't
+ * cover it. It fades in and out over
  * COOP_GIVE_HINT_MS so the edge of the reach doesn't make it blink. */
 #define COOP_GIVE_HINT_MS 150.0f
 static Gfx *coopHudGiveHint(Gfx *gdl, s32 show)
@@ -1131,6 +1132,7 @@ static Gfx *coopHudGiveHint(Gfx *gdl, s32 show)
     x = viGetViewLeft() + (viGetViewWidth() - tw) / 2;
     y = viGetViewTop() + viGetViewHeight() / 2 + 0x14;
     gdl = microcode_constructor(gdl);
+    gdl = microcode_constructor_related_to_menus(gdl, x - 3, y - 2, x + tw + 3, y + th, coopHudWithAlpha(0x00000080, a));   /* a band like a toast's */
     gdl = textRenderOutlined(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic,
                              coopHudWithAlpha(0xFFFFFFD0, a), coopHudWithAlpha(COOP_HUD_COL_SHADOW, a),
                              (s32) viGetX(), viGetY(), 0, 0);
@@ -1364,6 +1366,7 @@ Gfx *coopHudRender(Gfx *gdl)
     CoopHudPartner p;
     s32 partner;
     s32 eta;
+    s32 givehint = 0;
     s32 i;
 
     if (coopVersus())
@@ -1438,7 +1441,7 @@ Gfx *coopHudRender(Gfx *gdl)
         s32 reviving = coopReviveHud(&rp, &rh);   /* the revive prompt has that spot */
 
         gdl = coopHudReviving(gdl);
-        gdl = coopHudGiveHint(gdl, partner && !reviving && !weapmenuIsOpen() && !coopChatTyping() && coopSpectateHud(&who) == 0);
+        givehint = partner && !reviving && !weapmenuIsOpen() && !coopChatTyping() && coopSpectateHud(&who) == 0;
     }
     if (portObjectivesHudShown() && !g_CurrentPlayer->bonddead && !weapmenuIsOpen())
     {
@@ -1448,6 +1451,7 @@ Gfx *coopHudRender(Gfx *gdl)
     coopFadeHarness();
     gdl = coopCaptionsRender(gdl);   /* Sound Captions (coop_access.c) */
     gdl = coopFeedRender(gdl);   /* chat lines and toasts (coop_chat.c) */
+    gdl = coopHudGiveHint(gdl, givehint);   /* over a tall stack of toasts */
     gdl = coopChatGridRender(gdl);   /* a pad player typing on the on-screen keyboard */
     gdl = coopHudSkipVote(gdl);  /* an ending that waits for a press, outside a cinema */
     gdl = weapmenuRender(gdl);
