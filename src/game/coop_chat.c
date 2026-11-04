@@ -18,7 +18,8 @@
  * objective, joined or left, gave us ammo; the host left, ...) stack above
  * the chat lines, newest lowest, for COOPTOAST_SHOW ticks, fading in and
  * out: the lead in the player's colour and the rest after it in white,
- * word-wrapped to three fifths of the screen, at most three rows. While the host is not
+ * word-wrapped to three fifths of the screen, at most three rows, at Text
+ * Size times Notification Size. While the host is not
  * answering (coop.c coopHudSessionBanner) coop_screens.c's panel says so.
  *
  * The HUD font has no lowercase, so everything shows in capitals.
@@ -950,10 +951,10 @@ static Gfx *coopToastDraw(Gfx *gdl, s32 x, s32 y, CoopToastPiece *pc, s32 n, s32
     return gdl;
 }
 
-/* the toasts stacked up from y (the line above the chat), newest lowest */
-static Gfx *coopToastsRender(Gfx *gdl, s32 left, s32 y)
+/* the toasts stacked up from y (the line above the chat), newest lowest,
+ * word-wrapped to maxw */
+static Gfx *coopToastsRender(Gfx *gdl, s32 left, s32 y, s32 maxw)
 {
-    const s32 maxw = viGetViewWidth() * 3 / 5;
     CoopToastPiece pc[COOPTOAST_LINES * 2];
     s32 n, rows;
     s32 i;
@@ -1072,7 +1073,31 @@ Gfx *coopFeedRender(Gfx *gdl)
         }
         y -= 0x0B;
     }
-    gdl = coopToastsRender(gdl, left, y + 0x0B - 4);
+    {
+        s32 tx = left, ty = y + 0x0B - 4;
+        s32 tw = maxw;
+        f32 k = coopToastScale();
+
+        if (k < 0.99f && sToastCount > 0)
+        {   /* Notification Size: a smaller bracket of their own, pinned where the
+             * stack starts on screen. They wrap wider, as wide on screen as at
+             * 100% where that fits: text past the view's right edge is clipped
+             * before it is scaled. */
+            f32 s = coopTextScaleNow();
+            f32 ox = (f32) viGetViewLeft(), oy = (f32) (viGetViewTop() + viGetViewHeight());
+            s32 room;
+
+            tx = (s32) (ox + (tx - ox) * s + 0.5f);
+            ty = (s32) (oy + (ty - oy) * s + 0.5f);
+            room = viGetViewLeft() + viGetViewWidth() - 0x14 - tx;
+            tw = (s32) (maxw / k);
+            tw = (tw > room) ? room : tw;
+            tw = (tw < maxw) ? maxw : tw;
+            gdl = coopTextScaleEnd(gdl);
+            gdl = coopTextScaleBeginBy(gdl, (f32) tx, (f32) ty, k);
+        }
+        gdl = coopToastsRender(gdl, tx, ty, tw);
+    }
     gdl = combiner_bayer_lod_perspective(gdl);
     gdl = coopTextScaleEnd(gdl);
     if (hudAnchorsToEdges())

@@ -415,6 +415,7 @@ static s32 sLivesLeft = -1; /* this mission's lives left (COOPSET_LIVES), -1 unl
 static s32 sArriveOut;      /* joiner: back in a mission we were out of (COOPOUT_*): out again on arrival */
 static s32 coopLivesStart(void);
 static void coopLivesTick(void);
+static void coopReviveFallTick(void);
 static void coopLivesApply(const u8 *raw, s32 from);
 static void coopSeenApply(const u8 *raw, s32 from);
 static void coopEndingApply(const u8 *raw, s32 from);
@@ -973,7 +974,7 @@ static void coopSendState(void)
     p.respawn = coopRespawnEta();
     p.downrule = sDownRule;
     p.player = (u8) coopSelf();
-    p.revive = (u8) (p.dead ? ((sDeadSince != 0 && sReviveHold < 255) ? sReviveHold : 0) : coopReviveTarget());
+    p.revive = (u8) (p.dead ? ((sReviveHold < 255) ? sReviveHold : 255) : coopReviveTarget());   /* the fall counts too (coopReviveFallTick) */
     p.calm = (u16) coopLocalCalm();
     p.out = (u8) sBledOut;
     p.carry = (u8) coopCarryByte();
@@ -2599,6 +2600,7 @@ static void coopTickBody(void)
     }
     coopStatsMissionTick(coopPartnerHere());
     coopAudioTick();        /* the downed and revived stings (coop_audio.c) */
+    coopReviveFallTick();   /* down and still falling: a partner's hold counts already */
     coopReviveTick((s32) sMissionTicks);   /* hold Use over a downed partner (coop_revive.c) */
     if (!sLateJoin)
     {   /* dropping in: nothing of ours until we arrive (coopDropInTick) */
@@ -6350,12 +6352,16 @@ s32 coopShotPuppet(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, s
     ev.kind = COOPEV_HIT;
     ev.u.hit.damage = damage;
     ev.u.hit.angle = 0.0f;
+    if (vector != NULL && (vector->f[0] != 0.0f || vector->f[2] != 0.0f))
+    {   /* the knock goes the way the shot flew, as a guard's does (record_damage_kills
+         * takes sinf/cosf of it); 0 sent everyone hit by a partner the same way, north */
+        ev.u.hit.angle = atan2f(vector->f[0], vector->f[2]);
+    }
     ev.u.hit.chrnum = -1;   /* a partner's shot: theirs to aim */
     ev.u.hit.friendly = 1;  /* their game scales it by the host's Friendly Fire, or drops it */
     coopQueueEventTo(&ev, p);
     coopStatsNote(COOPSTAT_FRIENDLY);
     portConLogf("ge: coop: friendly fire on player %d (part %d, weapon %d): %.3f before the level's scale\n", p + 1, hitpart, weaponid, damage);
-    (void) vector;
     return 1;
 }
 
@@ -8587,10 +8593,30 @@ static s32 coopRespawnPartner(u32 *calmout)
     return best;
 }
 
+/* a living partner holding Use over spot (their STATE names us, coop_revive.c), -1 none */
+static s32 coopReviveOver(const coord3d *spot)
+{
+    s32 p;
+
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
+    {
+        f32 dx = sR[p].st.pos[0] - spot->f[0];
+        f32 dz = sR[p].st.pos[2] - spot->f[2];
+        f32 dy = sR[p].st.pos[1] - spot->f[1];
+
+        if (coopRemoteAliveHere(p) && sR[p].st.revive == coopSelf() + 1
+            && dx * dx + dz * dz < COOP_REVIVE_DIST * COOP_REVIVE_DIST && dy < 250.0f && dy > -250.0f)
+        {
+            return p;
+        }
+    }
+    return -1;
+}
+
 s32 coopDeadTick(void)
 {
     u32 dead, calm;
-    s32 partner, p;
+    s32 partner;
 
     coopStatsDown();
     partner = coopRespawnPartner(&calm);
@@ -8603,9 +8629,7 @@ s32 coopDeadTick(void)
     {
         PropRecord *bond = getCurrentPlayerProp();
 
-        sDeadSince = sTick;
-        sReviveHold = 0;
-        sReviveFirst = 0;
+        sDeadSince = sTick;   /* sReviveHold and sReviveFirst: a hold during the fall carries on (coopReviveFallTick) */
         sBledOut = 0;
         sDeathStan = (bond != NULL) ? bond->stan : NULL;
         if (bond != NULL)
@@ -8652,20 +8676,8 @@ s32 coopDeadTick(void)
     /* revive: a partner holds Use beside where we fell (their STATE names us, coop_revive.c) */
     if (sDownRule != COOPDOWN_TIMER && !sBledOut && sDeathStan != NULL)
     {
-        s32 over = -1;
+        s32 over = coopReviveOver(&sDeathPos);
 
-        for (p = 0; p < COOP_MAX_PLAYERS && over < 0; p++)
-        {
-            f32 dx = sR[p].st.pos[0] - sDeathPos.f[0];
-            f32 dz = sR[p].st.pos[2] - sDeathPos.f[2];
-            f32 dy = sR[p].st.pos[1] - sDeathPos.f[1];
-
-            if (coopRemoteAliveHere(p) && sR[p].st.revive == coopSelf() + 1
-                && dx * dx + dz * dz < COOP_REVIVE_DIST * COOP_REVIVE_DIST && dy < 250.0f && dy > -250.0f)
-            {
-                over = p;
-            }
-        }
         if (over >= 0)
         {
             if (sReviveHold == 0 && sReviveFirst == 0)
@@ -8677,6 +8689,7 @@ s32 coopDeadTick(void)
                 portConLogf("ge: coop: revived by player %d after %.1f s (%.1f s from the first hold)\n", over + 1, dead / 60.0f,
                             (sTick - sReviveFirst) / 60.0f);
                 sReviveFirst = 0;
+                sReviveHold = 0;
                 sR[over].puppetGhost = 1;
                 coopRespawnPlayerAt(&sDeathPos, sDeathStan, sDeathYaw, sLastWeapon);
                 g_CurrentPlayer->bondhealth = 0.5f;     /* back on your feet, not fresh */
@@ -8730,6 +8743,63 @@ s32 coopDeadTick(void)
 }
 
 
+/* Every mission tick (coopTick). Our death plays for a few seconds (the
+ * fall, the blood, the fade to black) before bondview2.c hands it to
+ * coopDeadTick. A partner's HUD offers the revive from the moment we fall,
+ * but only coopDeadTick counted their hold, so a partner who started at once
+ * held Use over a bar that stood still until the fade was over. The hold now
+ * counts from the fall; once it is full, coopDeadTick takes the death there
+ * and then (the life it costs, the down's message) and stands us up.
+ *
+ * While we are down, the push of the shot that downed us stops too: the dead
+ * Bond slid with it at the dying (low) height, and the revive stands us up
+ * where the body came to rest, which could be under stairs or a ledge where a
+ * standing player has no room and cannot walk out. Without the slide the
+ * body stays where we last stood. */
+static void coopReviveFallTick(void)
+{
+    PropRecord *bond = getCurrentPlayerProp();
+    s32 over;
+
+    if (!g_CurrentPlayer->bonddead)
+    {
+        sReviveHold = 0;
+        sReviveFirst = 0;
+        return;
+    }
+    g_CurrentPlayer->bondshotspeed.f[0] = 0.0f;
+    g_CurrentPlayer->bondshotspeed.f[1] = 0.0f;
+    g_CurrentPlayer->bondshotspeed.f[2] = 0.0f;
+    if (sDeadSince != 0)
+    {
+        return;     /* coopDeadTick has it: it counts the hold */
+    }
+    if (sDownRule == COOPDOWN_TIMER || sArriveOut || sLivesLeft == 1 || bond == NULL || bond->stan == NULL
+        || !coopNetHasPeer() || coopRespawnPartner(NULL) < 0)
+    {   /* no revive for this down (a timer, out on arrival, the last life) */
+        sReviveHold = 0;
+        sReviveFirst = 0;
+        return;
+    }
+    over = coopReviveOver(&bond->pos);
+    if (over < 0)
+    {
+        sReviveHold = 0;
+        return;
+    }
+    if (sReviveHold == 0 && sReviveFirst == 0)
+    {
+        sReviveFirst = sTick;
+    }
+    if (sReviveHold + 1 >= COOP_REVIVE_HOLD)
+    {   /* full: coopDeadTick takes the death now, and its own hold tick finishes the revive */
+        portConLogf("ge: coop: revive done before the death faded out\n");
+        coopDeadTick();
+        return;
+    }
+    sReviveHold++;
+}
+
 /* Ticks until coopDeadTick brings us back: the minimum wait, the partner's
  * calm (if they stay calm from now), capped by the maximum. -1 = not waiting. */
 static s32 coopRespawnEta(void)
@@ -8747,9 +8817,9 @@ static s32 coopRespawnEta(void)
     }
     if (sDeadSince == 0)
     {   /* still falling: count from now, if co-op will take this death */
-        if (!g_CurrentPlayer->bonddead || sLivesLeft == 1)
+        if (!g_CurrentPlayer->bonddead || sLivesLeft == 1 || sArriveOut)
         {
-            return -1;  /* (on our last life this death is for good) */
+            return -1;  /* (on our last life, or out when we left, this death is for good) */
         }
         dead = 0;
     }
@@ -8926,7 +8996,8 @@ s32 coopHudPartnerAt(s32 i, CoopHudPartner *out)
     out->health = st->health;
     out->armour = st->armour;
     out->respawn = st->respawn;
-    out->revivable = st->dead && !st->out && st->downrule != COOPDOWN_TIMER && (st->downrule != COOPDOWN_REVIVE || st->respawn > 0);
+    out->revivable = st->dead && !st->out && st->downrule != COOPDOWN_TIMER
+                    && (st->downrule == COOPDOWN_REVIVE ? st->respawn > 0 : st->respawn >= 0);   /* -1: a fall on the last life, or nobody to wait for */
     out->revivehold = st->dead ? st->revive : 0;
     out->out = st->dead && st->out;
     out->name = coopPlayerName(p);
@@ -8947,7 +9018,7 @@ s32 coopHudDownRule(void)
 
 s32 coopHudReviveHold(void)
 {
-    return (sDeadSince != 0) ? sReviveHold : 0;
+    return g_CurrentPlayer->bonddead ? sReviveHold : 0;   /* the fall counts too */
 }
 
 s32 coopHudBleedOut(void)

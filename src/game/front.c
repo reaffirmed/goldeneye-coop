@@ -4775,6 +4775,7 @@ static const struct PortSheetRow port_sheet_rows_portopts[] = {
 #endif
     { SHROW_OPT, "coop_menu" },              /* the CO-OP screen: Modern, or Classic on the folder */
     { SHROW_OPT, "partner_fade" },           /* story co-op: a partner up close fades out (coop_fade.c) */
+    { SHROW_OPT, "toast_size" },             /* the co-op notifications bottom left, smaller (coop_chat.c) */
     { SHROW_OPT, "unlimited_explosions" },   /* default ON */
     { SHROW_OPT, "watch_static" },           /* the watch's fuzz, default ON (vanilla) */
     { SHROW_OPT, "fast_pause" },             /* the watch at Rare's top speed, default OFF */
@@ -8870,6 +8871,13 @@ Gfx *constructor_menu1C_portsheet(Gfx *DL)
         char pagetext[12];
         sprintf(pagetext, "%d/%d\n", (int) port_sheet_page + 1, (int) port_sheet_pages);
         x = PORT_SHEET_VALUE_X;
+        if (!port_sheet_twocol)
+        {   /* clear of a long title, such as Spanish's OPCIONES DEL PORT */
+            th = 0;
+            tw = 0;
+            textMeasure(&th, &tw, (char *) portSheetTitle(), ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+            x = (PORT_SHEET_LABEL_X + tw + 8 > x) ? PORT_SHEET_LABEL_X + tw + 8 : x;
+        }
         y = PORT_SHEET_TITLE_Y;
         DL = frontPrintText(DL, &x, &y, pagetext, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
     }
@@ -9080,8 +9088,10 @@ enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLRO
 extern s32 portCoopMenuClassic(void);   /* video.c: [display] coop_menu */
 extern s32 portInputGlyphStyle(void);   /* input_pc.c: 0 the keyboard */
 static s32 coop_lobby_classic;          /* this tick's layout: 1 the folder (Classic) */
+static s32 coop_lobby_btnshow;          /* the Ready / Start button is up (coopLobbyButton) */
 #define COOP_LOBBY_VISIBLE_MAX 11
-#define COOP_LOBBY_VISIBLE  (coop_lobby_classic ? 9 : COOP_LOBBY_VISIBLE_MAX)  /* rows on show; more scroll (coop_lobby_scroll) */
+/* rows on show; more scroll (coop_lobby_scroll). Classic gives one up to the Ready / Start button. */
+#define COOP_LOBBY_VISIBLE  (coop_lobby_classic ? (coop_lobby_btnshow ? 8 : 9) : COOP_LOBBY_VISIBLE_MAX)
 #define COOP_LOBBY_CHAT_LINES 8
 #define COOP_LOBBY_X        (coop_lobby_classic ? PORT_SHEET_LABEL_X : 0x1C)   /* the list's left edge */
 #define COOP_LOBBY_R        (coop_lobby_classic ? PORT_SHEET_RULE_R : 0x10A)   /* its right edge: the values end here */
@@ -9109,6 +9119,7 @@ static s32 coop_lobby_tabx[CLTAB_COUNT][2];     /* each tab's left and right on 
 static s32 coop_lobby_backx[2];                 /* the BACK prompt, for a click */
 static s32 coop_lobby_hottab = -1;              /* the tab under the crosshair */
 static s32 coop_lobby_arrowx[COOP_LOBBY_VISIBLE_MAX][2];   /* each row on show: its value's left and right arrows (0: none) */
+static s32 coop_lobby_btnhot;                   /* the crosshair is on the Ready / Start button */
 #define COOP_MW_FOOT_Y      0x118   /* the line over the foot: the row's description (two lines), then the prompts */
 #define COOP_MW_HELP_PITCH  0x0E
 #define COOP_MW_HINT_Y      0x13B
@@ -9131,6 +9142,7 @@ static void coopCharselOpen(void);
 static void coopCharselTick(void);
 static void coopCharselHarness(void);
 static void coopLobbyCursorTo(s32 i);
+static const char *coopLobbyHelp(const struct CoopLobbyRow *r);
 #ifdef GE_VIDEO
 extern s32 portInputArrowStepLR(void);      /* input_pc.c: the arrow keys */
 extern s32 portInputTabStep(void);          /* input_pc.c: Tab (+1) and Shift+Tab (-1) */
@@ -9549,6 +9561,35 @@ static void coopVsAfterMatch(void)
         coopVsStep(CLROW_VSARENA, 1);
         portConLogf("ge: versus: after the match, next arena %d\n", coopVsArena());
     }
+}
+
+/* host: the mission can start. Alone too (friends who join later drop in),
+ * but with partners only once all of them are ready; versus needs a partner. */
+static s32 coopLobbyHostCanStart(void)
+{
+    if (!coopLobbyIsHost())
+    {
+        return 0;
+    }
+    return coopLobbyPartnerReady() || (!COOP_VS_ON() && !coopLobbyHasPartner());
+}
+
+/* The button at the bottom right, on every tab, so nobody misses it: a
+ * joiner's Ready (once the host is there), the host's Start. */
+enum { CLBTN_NONE, CLBTN_READY, CLBTN_START };
+static s32 coopLobbyButton(void)
+{
+    const s32 state = coopLobbyState();
+
+    if (state == COOPLOBBY_HOSTING && coopLobbyIsHost())
+    {
+        return CLBTN_START;
+    }
+    if (state == COOPLOBBY_JOINED && !coopLobbyIsHost() && coopLobbyHasPartner())
+    {
+        return CLBTN_READY;
+    }
+    return CLBTN_NONE;
 }
 
 static s32 coopLobbyActionable(const struct CoopLobbyRow *r)
@@ -10063,10 +10104,9 @@ static void coopLobbyBuildRows(void)
             }
         }
         if (!COOP_VS_ON())
-        {
-            r = coopLobbyAdd(CLROW_MISSION, 0, "Select Mission\n",
-                             coopLobbyPartnerReady() ? "" : coopLobbyHasPartner() ? "Not Ready\n" : "No Players\n");
-            if (r != NULL && !coopLobbyPartnerReady())
+        {   /* alone too: friends who join later drop in */
+            r = coopLobbyAdd(CLROW_MISSION, 0, "Select Mission\n", coopLobbyHostCanStart() ? "" : "Not Ready\n");
+            if (r != NULL && !coopLobbyHostCanStart())
             {
                 r->dim = TRUE;
             }
@@ -10356,6 +10396,7 @@ static void coopLobbyBuild(void)
 {
     s32 i, t;
 
+    coop_lobby_btnshow = coopLobbyButton() != CLBTN_NONE;
     coopLobbyBuildRows();
     if (coop_lobby_classic)
     {
@@ -10827,7 +10868,8 @@ static void coopLobbyHarness(void)
         coopLobbyInvite(0);
         coop_lobby_invited[0] = 1;
     }
-    if ((coop_lobby_auto == 'j' || coop_lobby_auto == 'w' || coop_lobby_auto == 'b') && state == COOPLOBBY_JOINED && coopLobbyHasPartner() && !coopLobbySelfReady())
+    if ((coop_lobby_auto == 'j' || coop_lobby_auto == 'w' || coop_lobby_auto == 'b') && state == COOPLOBBY_JOINED && coopLobbyHasPartner() && !coopLobbySelfReady()
+        && getenv("GE_COOP_LOBBY_NOREADY") == NULL)   /* set: the player readies (the button's test) */
     {
         portConLogf("ge: coop lobby: ready\n");
         coopLobbySetReady(TRUE);
@@ -11032,6 +11074,188 @@ static s32 coopLobbyBackAtCursor(void)
         && cursor_h_pos >= (f32) coop_lobby_backx[0] && cursor_h_pos < (f32) coop_lobby_backx[1];
 }
 
+/* ---- the Ready / Start button ------------------------------------------
+ * Bottom right on both looks: Modern's foot, Classic's paper under the rows.
+ * The crosshair and Select press it, and so does the reload bind from any
+ * tab (R, or the pad's left face button). A joiner's pulses until they are
+ * ready; the host's pulses once everyone is, and is grey while anyone is not. */
+#define COOP_BTN_MW_X0      (MW_PANEL_X - 0x10)
+#define COOP_BTN_CL_X0      0xD8
+#define COOP_BTN_CL_Y0      (COOP_STRIP_Y + COOP_STRIP_H + 2 + 8 * COOP_LOBBY_PITCH + 0x10)
+static s32 coop_lobby_btnrect[4];   /* x0 y0 x1 y1 as last drawn; x1 0: not drawn */
+
+/* the row the host's Start does: the campaign's next mission, else Select Mission (or Start Match) */
+static const struct CoopLobbyRow *coopLobbyButtonRow(void)
+{
+    const struct CoopLobbyRow *pick = NULL;
+    s32 i;
+
+    for (i = 0; i < coop_lobby_nrows; i++)
+    {
+        const struct CoopLobbyRow *r = &coop_lobby_rows[i];
+
+        if (r->kind == CLROW_CONTINUE || r->kind == CLROW_VSSTART)
+        {
+            return r;
+        }
+        if (r->kind == CLROW_MISSION && pick == NULL)
+        {
+            pick = r;
+        }
+    }
+    return pick;
+}
+
+/* players here but not ready (the host's count) */
+static s32 coopLobbyNotReadyCount(void)
+{
+    s32 p, n = 0;
+
+    for (p = 1; p < COOP_MAX_PLAYERS; p++)
+    {
+        n += coopLobbyPlayerHere(p) && p != coopLobbySelfPlayer() && !coopLobbyPlayerReady(p);
+    }
+    return n;
+}
+
+/* a joiner: every other joiner is ready, so the party waits on us */
+static s32 coopLobbyOthersReady(void)
+{
+    s32 p;
+
+    for (p = 1; p < COOP_MAX_PLAYERS; p++)
+    {
+        if (p != coopLobbySelfPlayer() && coopLobbyPlayerHere(p) && !coopLobbyPlayerReady(p))
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* what it says: the big word, the line under it; 1 lit, 2 lit and pulsing, 0 grey, -1 done (ready) */
+static s32 coopLobbyButtonText(const char **big, const char **sub)
+{
+    static char line[48];
+    const s32 b = coopLobbyButton();
+
+    if (b == CLBTN_READY)
+    {
+        if (coopLobbySelfReady())
+        {
+            *big = "READY";
+            *sub = "WAITING FOR THE HOST";
+            return -1;
+        }
+        *big = "READY UP";
+        *sub = coopLobbyOthersReady() ? "THE PARTY IS WAITING" : "YOU ARE NOT READY";
+        return 2;
+    }
+    if (b == CLBTN_START)
+    {
+        const s32 waiting = coopLobbyNotReadyCount();
+        const struct CoopLobbyRow *r = coopLobbyButtonRow();
+
+        *big = COOP_VS_ON() ? "START MATCH" : "START";
+        if (!coopLobbyHostCanStart())
+        {
+            if (!coopLobbyHasPartner())
+            {
+                *sub = "NO PLAYERS";
+            }
+            else
+            {
+                snprintf(line, sizeof(line), (waiting == 1) ? portTr("%d PLAYER NOT READY") : portTr("%d PLAYERS NOT READY"), (int) waiting);
+                *sub = line;
+            }
+            return 0;
+        }
+        if (!coopLobbyHasPartner())
+        {
+            *sub = "FRIENDS CAN DROP IN";
+            return 1;
+        }
+        if (r != NULL && r->kind == CLROW_CONTINUE)
+        {   /* "Continue: Runway", in the player's language already */
+            *sub = r->label;
+        }
+        else
+        {
+            *sub = "EVERYONE IS READY";
+        }
+        return 2;
+    }
+    *big = *sub = "";
+    return 0;
+}
+
+/* the line along the foot while the crosshair is on it */
+static const char *coopLobbyButtonHelp(void)
+{
+    const struct CoopLobbyRow *r;
+
+    if (coopLobbyButton() == CLBTN_READY)
+    {
+        return coopLobbySelfReady() ? "You are ready. Select again if you need more time.\n"
+                                    : "Tell the host you are ready. The host starts once everyone is.\n";
+    }
+    if (!coopLobbyHostCanStart())
+    {
+        return COOP_VS_ON() && !coopLobbyHasPartner() ? "A match needs at least one more player.\n"
+                                                      : "Starts once every player is ready.\n";
+    }
+    if (!coopLobbyHasPartner())
+    {
+        return "Play a mission on your own. Friends who join later drop in.\n";
+    }
+    r = coopLobbyButtonRow();
+    return (r != NULL) ? coopLobbyHelp(r) : NULL;
+}
+
+/* the crosshair is on the button */
+static s32 coopLobbyButtonAtCursor(void)
+{
+    return coop_lobby_btnshow && coop_lobby_btnrect[2] > coop_lobby_btnrect[0]
+        && cursor_h_pos >= (f32) coop_lobby_btnrect[0] && cursor_h_pos < (f32) coop_lobby_btnrect[2]
+        && cursor_v_pos >= (f32) coop_lobby_btnrect[1] && cursor_v_pos < (f32) coop_lobby_btnrect[3];
+}
+
+/* pressed: Ready flips; Start does its row (a grey Start only says no) */
+static void coopLobbyButtonPress(void)
+{
+    const struct CoopLobbyRow *r;
+
+    switch (coopLobbyButton())
+    {
+        case CLBTN_READY:
+            coopLobbySetReady(!coopLobbySelfReady());
+            sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE_SFX, 0);
+            portConLogf("ge: coop lobby: %s (button)\n", coopLobbySelfReady() ? "ready" : "not ready");
+            break;
+        case CLBTN_START:
+            r = coopLobbyButtonRow();
+            if (!coopLobbyHostCanStart() || r == NULL || r->dim)
+            {
+                sndPlaySfx(g_musicSfxBufferPtr, OPTION_CLICK2_SFX, 0);
+                break;
+            }
+            sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE_SFX, 0);
+            portConLogf("ge: coop lobby: start (button, %s)\n", coopLobbyHasPartner() ? "everyone ready" : "alone");
+            coopLobbyDo(r);
+            break;
+        default:
+            break;
+    }
+}
+
+/* how bright a pulsing button is this frame, 0..255 */
+static s32 coopLobbyButtonPulse(void)
+{
+    const s32 t = coop_lobby_ticks % 50;
+
+    return (t < 25) ? t * 255 / 25 : (50 - t) * 255 / 25;
+}
+
 /* More rows than the list holds. The wheel scrolls the view (the watch's
  * rule: hover still picks), the crosshair resting above or below the rows
  * scrolls a row at a time, and up / down (the D-pad, a pad's digital Move,
@@ -11073,7 +11297,7 @@ static void coopLobbyScrollTick(s32 dpy)
     else if ((coop_lobby_ticks % 6) == 0 && onrows && step == 0)
     {
         if (cursor_v_pos >= (f32) (COOP_LOBBY_Y0 + COOP_LOBBY_VISIBLE * COOP_LOBBY_PITCH - 3)
-            && cursor_v_pos < (f32) (coop_lobby_classic ? 0x14A : COOP_MW_FOOT_Y))
+            && cursor_v_pos < (f32) (coop_lobby_classic ? (coop_lobby_btnshow ? COOP_BTN_CL_Y0 - 2 : 0x14A) : COOP_MW_FOOT_Y))
         {
             coop_lobby_scroll++;
         }
@@ -11143,7 +11367,7 @@ static void coopLobbyLayoutTick(void)
 
 void interface_menu1D_cooplobby(void)
 {
-    s32 dpx, dpy;
+    s32 dpx, dpy, readykey;
 
     viSetFovY(FOV_Y_F);
     viSetAspect(ASPECT_RATIO_SD);
@@ -11174,6 +11398,11 @@ void interface_menu1D_cooplobby(void)
     if (current_menu != MENU_COOP_LOBBY || maybe_prev_menu > MENU_INVALID || menu_update > MENU_INVALID)
     {
         return;   /* the harness started a mission */
+    }
+    {   /* the Ready / Start key, taken every tick so a press made while typing or in a picker is gone after */
+        extern s32 portJoyPortReadyPressed(void);   /* joy_port.c: the reload bind */
+
+        readykey = portJoyPortReadyPressed();
     }
 
     if (coopScreenErrorInput())
@@ -11215,6 +11444,7 @@ void interface_menu1D_cooplobby(void)
 
     coop_lobby_hot = -1;
     coop_lobby_hottab = -1;
+    coop_lobby_btnhot = coopLobbyButtonAtCursor();
     if (coop_lobby_classic && frontCheckCursorOnPreviousTab())
     {   /* the folder's PREVIOUS tab leaves */
         tab_prev_highlight = TRUE;
@@ -11260,6 +11490,15 @@ void interface_menu1D_cooplobby(void)
         {
             tab_prev_selected = TRUE;
             sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, 0);
+        }
+        else if ((accept && coop_lobby_btnhot && coop_lobby_hot < 0) || (readykey && coop_lobby_btnshow))
+        {
+            coopLobbyButtonPress();
+            if (current_menu != MENU_COOP_LOBBY || menu_update > MENU_INVALID)
+            {
+                coopLobbyClose();
+                return;
+            }
         }
         else if (coop_lobby_hot >= 0 && accept)
         {
@@ -11925,8 +12164,8 @@ static Gfx *coopMwParty(Gfx *DL)
     s32 i, n = 0, y = MW_SEAT_Y, link;
 
     for (i = 0; i < COOP_MAX_PLAYERS && !out; i++)
-    {
-        n += coopLobbyPlayerHere(i);
+    {   /* a host alone is still in its own lobby */
+        n += coopLobbyPlayerHere(i) || (i == coopLobbySelfPlayer() && state == COOPLOBBY_HOSTING);
     }
     DL = coopMwSmall(DL, MW_PANEL_X, MW_SEAT_Y - 0xC, "PARTY", MW_ACCENT, FALSE);
     snprintf(count, sizeof(count), "%d/%d", out ? 1 : n, COOP_MAX_PLAYERS);
@@ -11943,7 +12182,7 @@ static Gfx *coopMwParty(Gfx *DL)
     {
         const s32 self = (i == coopLobbySelfPlayer());
 
-        if (!coopLobbyPlayerHere(i))
+        if (!coopLobbyPlayerHere(i) && !(self && state == COOPLOBBY_HOSTING))
         {   /* a free seat */
             DL = microcode_constructor_related_to_menus(DL, MW_PANEL_X, y, MW_PANEL_R, y + MW_SEAT_H, 0x00000040);
             DL = microcode_constructor(DL);
@@ -12004,6 +12243,93 @@ static Gfx *coopMwPlace(Gfx *DL)
     return DL;
 }
 
+/* a frame one pixel wide */
+static Gfx *coopLobbyFrame(Gfx *DL, s32 x0, s32 y0, s32 x1, s32 y1, s32 t, u32 colour)
+{
+    DL = microcode_constructor_related_to_menus(DL, x0, y0, x1, y0 + t, colour);
+    DL = microcode_constructor_related_to_menus(DL, x0, y1 - t, x1, y1, colour);
+    DL = microcode_constructor_related_to_menus(DL, x0, y0 + t, x0 + t, y1 - t, colour);
+    DL = microcode_constructor_related_to_menus(DL, x1 - t, y0 + t, x1, y1 - t, colour);
+    return DL;
+}
+
+/* the button's prompt, the big word and the line under it, from x */
+static Gfx *coopLobbyButtonFace(Gfx *DL, s32 x0, s32 y0, s32 x1, s32 y1, const char *big, const char *sub,
+                                u32 bigink, u32 subink)
+{
+    char t[48];
+    s32 x = x0 + 6, y;
+
+    if (menuGlyphShown(MENUGLYPH_READY))
+    {
+        DL = menuGlyphDraw(DL, x, y0 + 4, MENUGLYPH_READY, 0xFF);
+        x += menuGlyphWidth(MENUGLYPH_READY) + 6;
+    }
+    DL = microcode_constructor(DL);
+    coopMwUpper(t, sizeof(t), portTr(big));   /* translated whole, before it is cut to fit */
+    y = y0 + 3;
+    DL = frontPrintText(DL, &x, &y, (char *) portSheetFitText(t, x1 - x - 4), ptrFontZurichBoldChars, ptrFontZurichBold,
+                        bigink, viGetX(), viGetY(), 0, 0);
+    x = x0 + 6;     /* under the prompt too: the line is the longer */
+    coopMwUpper(t, sizeof(t), portTr(sub));
+    while (strlen(t) > 2 && coopMwTextW(t, TRUE) > x1 - x - 4)
+    {   /* cut to the box */
+        t[strlen(t) - 2] = '\n';
+        t[strlen(t) - 1] = '\0';
+    }
+    y = y0 + 0x13;
+    return textRender(DL, &x, &y, t, ptrFontBankGothicChars, ptrFontBankGothic, subink, viGetX(), viGetY(), 0, 0);
+}
+
+/* Modern: in the foot, right of what the row does, above the prompts */
+static Gfx *coopMwButton(Gfx *DL)
+{
+    const char *big, *sub;
+    const s32 x0 = COOP_BTN_MW_X0, x1 = MW_PANEL_R, y0 = COOP_MW_FOOT_Y + 3, y1 = COOP_MW_HINT_Y - 2;
+    const s32 lit = coopLobbyButtonText(&big, &sub);
+    const s32 pulse = coopLobbyButtonPulse();
+    u32 fill, edge, bigink, subink;
+
+    coop_lobby_btnrect[0] = x0;
+    coop_lobby_btnrect[1] = y0;
+    coop_lobby_btnrect[2] = x1;
+    coop_lobby_btnrect[3] = y1;
+    if (lit < 0)
+    {   /* ready: a steady green */
+        fill = 0x1E3812FF;
+        edge = MW_GREEN;
+        bigink = MW_GREEN;
+        subink = MW_DIM;
+    }
+    else if (lit == 0)
+    {   /* the host's, while someone is not ready */
+        fill = 0x00000060;
+        edge = MW_EDGE;
+        bigink = MW_FAINT;
+        subink = MW_FAINT;
+    }
+    else
+    {   /* lime; pulsing when someone is waiting on us */
+        fill = (MW_ACCENT_DK & 0xFFFFFF00) | (u32) ((lit == 2) ? 0x50 + pulse * 0x90 / 255 : 0xC0);
+        edge = MW_ACCENT;
+        bigink = MW_TEXT;
+        subink = (lit == 2) ? MW_ACCENT : MW_DIM;
+    }
+    if (coop_lobby_btnhot)
+    {   /* under the crosshair: the rows' highlight, lit right through */
+        fill = (lit == 0) ? 0x2A2E26FF : (lit < 0) ? 0x2E5A1CFF : MW_ACCENT;
+        bigink = (lit == 0) ? MW_DIM : (lit < 0) ? MW_TEXT : 0x141A08FF;
+        subink = (lit == 0) ? MW_DIM : (lit < 0) ? MW_TEXT : 0x2C3A10FF;
+    }
+    if (lit == 2 && !coop_lobby_btnhot)
+    {   /* a glow round it that comes and goes */
+        DL = coopLobbyFrame(DL, x0 - 2, y0 - 2, x1 + 2, y1 + 2, 2, (MW_ACCENT & 0xFFFFFF00) | (u32) (pulse * 0x90 / 255));
+    }
+    DL = microcode_constructor_related_to_menus(DL, x0, y0, x1, y1, fill);
+    DL = coopLobbyFrame(DL, x0, y0, x1, y1, 1, edge);
+    return coopLobbyButtonFace(DL, x0, y0, x1, y1, big, sub, bigink, subink);
+}
+
 /* what the row under the cursor does, for the foot */
 static const char *coopLobbyHelp(const struct CoopLobbyRow *r)
 {
@@ -12017,7 +12343,8 @@ static const char *coopLobbyHelp(const struct CoopLobbyRow *r)
         case CLROW_JOINPUBLIC:  return "Join this public game.\n";
         case CLROW_CANCEL:      return "Stop and go back.\n";
         case CLROW_READY:       return "Tell the host you are ready to start.\n";
-        case CLROW_MISSION:     return "Pick any mission and difficulty. The whole party comes along.\n";
+        case CLROW_MISSION:     return coopLobbyHasPartner() ? "Pick any mission and difficulty. The whole party comes along.\n"
+                                                             : "Pick any mission and difficulty. Friends who join later drop in.\n";
         case CLROW_CONTINUE:    return "Start the next mission of your campaign together.\n";
         case CLROW_VSSTART:     return "Start the match with everyone in the lobby.\n";
         case CLROW_VSNEXT:      return "After each match, stay on this arena or move on to the next one.\n";
@@ -12173,10 +12500,20 @@ static Gfx *coopMwRender(Gfx *DL)
     DL = coopMwParty(DL);
     DL = coopMwPlace(DL);
     DL = microcode_constructor(DL);
+    coop_lobby_btnrect[2] = 0;
+    if (coop_lobby_btnshow)
+    {
+        DL = coopMwButton(DL);
+        DL = microcode_constructor(DL);
+    }
 
     if (coop_lobby_hot >= 0)
     {
         help = coopLobbyHelp(&coop_lobby_rows[coop_lobby_hot]);
+    }
+    if (help == NULL && coop_lobby_btnhot)
+    {
+        help = coopLobbyButtonHelp();
     }
     if (help == NULL && coop_lobby_hottab >= 0)
     {
@@ -12187,21 +12524,22 @@ static Gfx *coopMwRender(Gfx *DL)
         help = "The host sets these for the whole party.\n";
     }
     if (help != NULL)
-    {
+    {   /* left of the button when it is up */
+        const s32 w = (coop_lobby_btnshow ? COOP_BTN_MW_X0 - 8 : MW_PANEL_R) - COOP_LOBBY_X;
         char lines[3][80];
-        s32 i, n = coopLobbyWrap(help, MW_PANEL_R - COOP_LOBBY_X, lines, 3);
+        s32 i, n = coopLobbyWrap(help, w, lines, 3);
 
         if (n == 3)
         {   /* two lines at most: the second runs on and is cut with "..." */
             char rest[160];
 
             snprintf(rest, sizeof(rest), "%.*s %s", (int) strlen(lines[1]) - 1, lines[1], lines[2]);
-            snprintf(lines[1], sizeof(lines[1]), "%s", portSheetFitText(rest, MW_PANEL_R - COOP_LOBBY_X));
+            snprintf(lines[1], sizeof(lines[1]), "%s", portSheetFitText(rest, w));
             n = 2;
         }
         for (i = 0; i < n; i++)
         {
-            DL = coopMwText(DL, COOP_LOBBY_X, COOP_MW_FOOT_Y + 3 + i * COOP_MW_HELP_PITCH, MW_PANEL_R - COOP_LOBBY_X, lines[i], MW_DIM, FALSE);
+            DL = coopMwText(DL, COOP_LOBBY_X, COOP_MW_FOOT_Y + 3 + i * COOP_MW_HELP_PITCH, w, lines[i], MW_DIM, FALSE);
         }
     }
     if (coopChatOnGrid() || coopBrowseOnGrid())
@@ -12729,8 +13067,8 @@ static Gfx *coopClassicStrip(Gfx *DL)
         {
             const s32 self = (i == coopLobbySelfPlayer());
 
-            if (!coopLobbyPlayerHere(i))
-            {
+            if (!coopLobbyPlayerHere(i) && !(self && state == COOPLOBBY_HOSTING))
+            {   /* a free seat (a host alone keeps its own card) */
                 if (coopLobbyIsHost() || coopLobbyHasPartner())
                 {
                     DL = coopClassicOpenCard(DL, x);
@@ -12853,6 +13191,30 @@ static Gfx *coopClassicRows(Gfx *DL)
     return DL;
 }
 
+/* Classic: a box stamped on the paper's bottom right, under the rows */
+static Gfx *coopClassicButton(Gfx *DL)
+{
+    const char *big, *sub;
+    const s32 x0 = COOP_BTN_CL_X0, x1 = PORT_SHEET_RULE_R, y0 = COOP_BTN_CL_Y0, y1 = COOP_BTN_CL_Y0 + 0x1E;
+    const s32 lit = coopLobbyButtonText(&big, &sub);
+    const s32 pulse = coopLobbyButtonPulse();
+    const u32 ink = (lit < 0) ? COOP_LOBBY_COL_OK : (lit == 0) ? 0x707070FF : COOP_INK_RED;
+
+    coop_lobby_btnrect[0] = x0;
+    coop_lobby_btnrect[1] = y0;
+    coop_lobby_btnrect[2] = x1;
+    coop_lobby_btnrect[3] = y1;
+    if (lit == 2)
+    {   /* the ink comes and goes round it while someone waits on us */
+        DL = coopLobbyFrame(DL, x0 - 2, y0 - 2, x1 + 2, y1 + 2, 1, (COOP_INK_RED & 0xFFFFFF00) | (u32) (pulse * 0xA0 / 255));
+    }
+    DL = microcode_constructor_related_to_menus(DL, x0, y0, x1, y1,
+                                                coop_lobby_btnhot ? 0x00000032 : ((ink & 0xFFFFFF00) | (u32) ((lit == 2) ? 0x10 + pulse * 0x28 / 255 : 0x14)));
+    DL = coopLobbyFrame(DL, x0, y0, x1, y1, 2, ink);
+    DL = microcode_constructor(DL);
+    return coopLobbyButtonFace(DL, x0, y0, x1, y1, big, sub, (lit == 0) ? 0x707070FF : ink, (lit == 0) ? 0x707070FF : 0x303030FF);
+}
+
 static Gfx *coopClassicRender(Gfx *DL)
 {
     s32 x = COOP_LOBBY_X, y = PORT_SHEET_TITLE_Y;
@@ -12872,6 +13234,11 @@ static Gfx *coopClassicRender(Gfx *DL)
                         ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
     DL = coopClassicStrip(DL);
     DL = coopClassicRows(DL);
+    coop_lobby_btnrect[2] = 0;
+    if (coop_lobby_btnshow)
+    {
+        DL = coopClassicButton(DL);
+    }
     if (coopChatOnGrid() || coopBrowseOnGrid())
     {   /* a pad player typing the chat line or a password */
         DL = portOskTextRender(DL);
