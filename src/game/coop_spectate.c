@@ -16,6 +16,22 @@
  * A drop-in (coop.c coopDropInTick: joined a mission under way) watches the
  * same way while it waits for a quiet moment, alive and without the wash.
  *
+ * Through a partner's eyes the view is theirs as they see it: their gun in
+ * first person, drawn by our own hands, which are idle while we are down.
+ * Each tick (gunfire.c gunTickGameplay asks coopSpectateHandsTick) the hands
+ * are asked for the guns in the partner's STATE (CoopLook.weapon: switches
+ * play the draw), their trigger is held while the partner's shots come in
+ * (CoopLook.shotseq: an automatic holds it, any other gun is pressed once a
+ * shot; a throw or a stab from their muzzle flash), a reload cue
+ * (CoopLook.cue) plays the reload, and each tracer runs to where their shot
+ * stopped. Their gun points where they aim and their sight is up while they
+ * aim (coopSpectateHandsAim, from CoopLook.aimpitch / aimyaw and
+ * CoopStatePkt.viewaim: the view's own pitch, so the camera no longer tips
+ * with the crosshair). It is only the look of it: no bullet, throw, noise,
+ * sound or ammo of ours goes with it (coopSpectateHandsOn at each place),
+ * and our STATE says our hands are empty. The free camera has no hands, and
+ * neither does a drop-in's watch (it stands with its own gun in them).
+ *
  * bondview2.c asks here before it uses our camera or our room:
  *   - bondviewRenderDebugBondView: coopSpectateCamera
  *   - bondviewGetCurrentPlayersRoom / Position / Position3: coopSpectateRoom,
@@ -34,6 +50,7 @@
 #include <bondgame.h>
 #include "coop.h"
 #include "bondview.h"
+#include "gun.h"
 
 extern void portConLogf(const char *fmt, ...);
 extern f32 sinf(f32);
@@ -45,6 +62,9 @@ extern s32 portJoyPortUseMenuPressed(s32 pad);
 extern char *getenv(const char *);
 extern int atoi(const char *);
 extern s32 portReturnStartThisTick(void); /* video.c: START came from Return alone; weak 0 headless */
+extern f32 g_GlobalTimerDelta;   /* lv.c: 60 Hz frames this tick */
+extern void sub_GAME_7F067AB4(coord3d *aim);    /* gunfire.c: the gun's aim point, in the camera's frame */
+extern s32 get_ammo_type_for_weapon(s32 weapon);
 
 #define COOPSPEC_FADE   30.0f   /* ticks back in from black */
 #define FREE_SPEED      6.0f    /* units a tick at full stick */
@@ -69,6 +89,23 @@ static StandTile *sFTile;
 static f32 sFYaw, sFPitch;
 static f32 sLookDx, sLookDy, sLookYaw, sLookPitch;     /* this tick's look (bondview2.c coopSpectateMouse) */
 static s32 sLookDirect;
+
+/* the watched partner's gun in our hands */
+#define HANDS_HOLD      4.0f    /* frames (60 Hz) an automatic's trigger stays down after its last shot came in */
+#define HANDS_PRESS     2.0f    /* frames a semi-automatic's press lasts, and the gap after it */
+#define HANDS_PULSES    3       /* a semi-automatic's presses still to show, at most */
+#define HANDS_AIM_MAX   0.7f    /* radians: the crosshair's offset at most (a stale or bad one) */
+static s32 sHands;              /* our hands play sHandsFor's gun */
+static s32 sHandsFor = -1;
+static u8 sHandsSeq;            /* their shotseq we have shown */
+static u8 sHandsCue;            /* and their cue */
+static s32 sHandsWant[2];       /* the guns we asked our hands for */
+static f32 sHandsHold[2];       /* frames left with the trigger down */
+static s32 sHandsPulse[2];      /* presses still to show */
+static f32 sHandsPress[2];      /* frames left of this press (> 0), or of the gap after it (< 0) */
+static u8 sHandsFlash;          /* their muzzle flash bits last tick */
+static s32 sHandsAiming;        /* they hold aim */
+static s32 sHandsShots;         /* shown since we came in on them, for the log */
 
 static s32 coopSpectatePick(s32 from, s32 step)
 {
@@ -102,7 +139,7 @@ static s32 coopSpectateFollow(void)
     sPos3 = sPos;
     sPos3.f[1] = bondviewYPositionRelated(v.stan, sPos.f[0], sPos.f[2]);   /* the floor under them */
     sYaw = v.yaw;
-    sPitch = v.pitch;
+    sPitch = v.viewpitch;   /* the view's own pitch: aiming moves their sight, not their head */
     sRoom = v.stan->room;
     return 1;
 }
@@ -372,6 +409,8 @@ void coopSpectateTick(void)
     }
 }
 
+static void coopSpectateHandsEnd(void);
+
 /* coopDeadTick: we are back, or nobody is left standing */
 void coopSpectateStop(void)
 {
@@ -379,6 +418,14 @@ void coopSpectateStop(void)
     sLive = 0;
     sTarget = -1;
     sFree = 0;
+    coopSpectateHandsEnd();
+}
+
+/* coop.c coopStageStart: a new mission sets up our hands itself */
+void coopSpectateStageStart(void)
+{
+    sHands = 0;
+    sHandsFor = -1;
 }
 
 /* coopDropInTick: start (1) or end (0) watching while we drop in */
@@ -475,4 +522,349 @@ coord3d *coopSpectatePos(s32 three)
         return three ? &sFPos3 : &sFPos;
     }
     return three ? &sPos3 : &sPos;
+}
+
+/* ---- the partner's gun in our hands -------------------------------------- */
+
+/* the view's pitch and the aim button in CoopStatePkt.viewaim: bits 0-14 the
+ * pitch in 1/10000 radian from -1.6383, bit 15 aiming; 0 (an older build's
+ * padding) is none */
+u16 coopViewAimPack(f32 pitch, s32 aiming)
+{
+    s32 q;
+
+    if (!(pitch == pitch))
+    {
+        pitch = 0.0f;
+    }
+    q = (s32) (pitch * 10000.0f + (pitch < 0.0f ? -0.5f : 0.5f)) + 16384;
+    q = (q < 1) ? 1 : (q > 32767) ? 32767 : q;
+    return (u16) (q | (aiming ? 0x8000 : 0));
+}
+
+s32 coopViewAimUnpack(u16 v, f32 *pitch, s32 *aiming)
+{
+    if ((v & 0x7FFF) == 0)
+    {
+        return 0;
+    }
+    *pitch = (f32) ((s32) (v & 0x7FFF) - 16384) / 10000.0f;
+    *aiming = (v & 0x8000) != 0;
+    return 1;
+}
+
+s32 coopSpectateHandsOn(void)
+{
+    return sHands;
+}
+
+/* the guns our hands can play: a weapon, not a gadget or a mission item
+ * (using one of those does things: a door decoder opens doors) */
+static s32 coopSpectateHandsItem(s32 item)
+{
+    if (item >= ITEM_FIST && item <= ITEM_REMOTEMINE && item != ITEM_WATCHLASER)
+    {
+        return item;
+    }
+    return ITEM_UNARMED;
+}
+
+/* a gun whose shots are bullets (a CoopShot each); the rest show from the flash */
+static s32 coopSpectateHandsBullets(s32 item)
+{
+    return item >= ITEM_WPPK && item <= ITEM_LASER;
+}
+
+static s32 coopSpectateHandsAuto(s32 item)
+{
+    return (item >= ITEM_SKORPION && item <= ITEM_FNP90) || item == ITEM_AUTOSHOT || item == ITEM_LASER;
+}
+
+/* back to our own empty hands: the partner's guns put away, their rounds not ours */
+static void coopSpectateHandsEnd(void)
+{
+    s32 h;
+
+    if (!sHands)
+    {
+        return;
+    }
+    sHands = 0;
+    sHandsFor = -1;
+    if (g_CurrentPlayer == NULL)
+    {
+        return;
+    }
+    for (h = GUNRIGHT; h <= GUNLEFT; h++)
+    {
+        g_CurrentPlayer->hands[h].weapon_ammo_in_magazine = 0;
+    }
+    currentPlayerEquipWeaponWrapper(GUNLEFT, ITEM_UNARMED);
+    if (g_CurrentPlayer->bonddead)
+    {   /* (back up, the respawn has asked for our own gun already) */
+        currentPlayerEquipWeaponWrapper(GUNRIGHT, ITEM_UNARMED);
+    }
+    if (g_CurrentPlayer->bonddead)
+    {
+        gunSetSightVisible(GUNSIGHTREASON_DAMAGE, FALSE);   /* down: hidden again, as the death left it */
+    }
+    portConLogf("ge: coop: spectate: hands back (%d shots shown)\n", sHandsShots);
+}
+
+static void coopSpectateHandsStart(s32 who, const CoopLook *look)
+{
+    sHands = 1;
+    sHandsFor = who;
+    sHandsSeq = look->shotseq;      /* their shots from now on */
+    sHandsCue = look->cue & 0x1F;
+    sHandsFlash = look->flash;
+    sHandsShots = 0;
+    sHandsWant[GUNRIGHT] = sHandsWant[GUNLEFT] = -1;
+    sHandsHold[GUNRIGHT] = sHandsHold[GUNLEFT] = 0.0f;
+    sHandsPress[GUNRIGHT] = sHandsPress[GUNLEFT] = 0.0f;
+    sHandsPulse[GUNRIGHT] = sHandsPulse[GUNLEFT] = 0;
+    portConLogf("ge: coop: spectate: player %d's guns in our hands (%d, %d)\n", who + 1, (int) look->weapon[GUNRIGHT],
+                (int) look->weapon[GUNLEFT]);
+}
+
+/* a reload state, or one asked for: the magazine is left alone */
+static s32 coopSpectateHandsReloading(struct hand *hand)
+{
+    return hand->weapon_current_animation == 9
+        || (hand->weapon_action_state >= GUN_ANIM_STATE_RELOAD_START && hand->weapon_action_state <= GUN_ANIM_STATE_RELOAD_RAISE);
+}
+
+s32 coopSpectateHandsTick(s32 *trigger, PropRecord **partner)
+{
+    CoopExtView v;
+    const CoopLook *look;
+    s32 who = coopSpectateTarget();
+    s32 h, i, n, reload;
+
+    trigger[GUNRIGHT] = trigger[GUNLEFT] = 0;
+    *partner = NULL;
+    if (who < 0 || g_CurrentPlayer == NULL || !g_CurrentPlayer->bonddead || !coopExtRemoteView(who, &v) || v.look == NULL)
+    {   /* (a drop-in watches standing up, with a gun of its own in its hands: those stay put) */
+        coopSpectateHandsEnd();
+        return 0;
+    }
+    look = v.look;
+    if (!sHands || sHandsFor != who)
+    {
+        coopSpectateHandsStart(who, look);
+    }
+    *partner = v.prop;
+    sHandsAiming = v.aiming;
+    if (g_CurrentPlayer->damageshowtime < 0)
+    {   /* down, the sight is hidden as in a hit: theirs shows */
+        gunSetSightVisible(GUNSIGHTREASON_DAMAGE, TRUE);
+    }
+
+    /* their guns: a change plays the put away and the draw (and if anything
+     * else put a gun in our hands meanwhile, theirs goes back) */
+    for (h = GUNRIGHT; h <= GUNLEFT; h++)
+    {
+        const s32 want = coopSpectateHandsItem(look->weapon[h]);
+        struct hand *hand = &g_CurrentPlayer->hands[h];
+
+        if (want != sHandsWant[h]
+            || (getCurrentPlayerWeaponId(h) != want && hand->weapon_next_weapon != want))
+        {
+            sHandsWant[h] = want;
+            sHandsHold[h] = sHandsPress[h] = 0.0f;
+            sHandsPulse[h] = 0;
+            currentPlayerEquipWeaponWrapper(h, want);
+        }
+    }
+
+    /* their new shots, oldest first: the trigger, and the tracer to where each stopped */
+    n = (u8) (look->shotseq - sHandsSeq);
+    if (n > COOP_SHOTS_KEPT)
+    {
+        n = COOP_SHOTS_KEPT;    /* more came than a STATE keeps: the newest */
+    }
+    for (i = n - 1; i >= 0; i--)
+    {
+        const CoopShot *shot = &look->shot[i];
+        struct hand *hand;
+
+        h = (shot->kind & COOPSHOT_LEFT) ? GUNLEFT : GUNRIGHT;
+        hand = &g_CurrentPlayer->hands[h];
+        hand->item_related.f[0] = shot->pos[0];
+        hand->item_related.f[1] = shot->pos[1];
+        hand->item_related.f[2] = shot->pos[2];
+        if (coopSpectateHandsAuto(getCurrentPlayerWeaponId(h)))
+        {
+            sHandsHold[h] = HANDS_HOLD;
+        }
+        else if (sHandsPulse[h] < HANDS_PULSES)
+        {
+            sHandsPulse[h]++;
+        }
+        sHandsShots++;
+    }
+    sHandsSeq = look->shotseq;
+    for (h = GUNRIGHT; h <= GUNLEFT; h++)
+    {   /* a throw, a stab or a punch has no shot: its flash */
+        if ((look->flash & (1 << h)) && !(sHandsFlash & (1 << h)) && !coopSpectateHandsBullets(getCurrentPlayerWeaponId(h))
+            && getCurrentPlayerWeaponId(h) != ITEM_UNARMED && sHandsPulse[h] < HANDS_PULSES)
+        {
+            sHandsPulse[h]++;
+        }
+    }
+    sHandsFlash = look->flash;
+
+    /* a reload: both hands, as the reload key does */
+    reload = 0;
+    if ((look->cue & 0x1F) != sHandsCue)
+    {
+        sHandsCue = look->cue & 0x1F;
+        reload = ((look->cue >> 5) & 3) == COOPCUE_RELOAD;
+    }
+    for (h = GUNRIGHT; h <= GUNLEFT; h++)
+    {
+        struct hand *hand = &g_CurrentPlayer->hands[h];
+        const s32 item = getCurrentPlayerWeaponId(h);
+        const s32 mag = (item != ITEM_UNARMED && get_ammo_type_for_weapon(item) != 0) ? get_ptr_item_statistics(item)->MagSize : 0;
+
+        if (mag > 0 && reload)
+        {
+            hand->weapon_ammo_in_magazine = (mag > 1) ? mag - 1 : 0;    /* room for the rounds: the reload plays */
+            sHandsHold[h] = sHandsPress[h] = 0.0f;
+            sHandsPulse[h] = 0;
+            attempt_reload_item_in_hand(h);
+        }
+        else if (mag > 0 && !coopSpectateHandsReloading(hand))
+        {
+            hand->weapon_ammo_in_magazine = mag;    /* never runs dry of its own: they reload when they do */
+        }
+
+        if (sHandsHold[h] > 0.0f)
+        {
+            sHandsHold[h] -= g_GlobalTimerDelta;
+            trigger[h] = 1;
+        }
+        else if (sHandsPress[h] > 0.0f)
+        {   /* a press: down for HANDS_PRESS, then up as long */
+            sHandsPress[h] -= g_GlobalTimerDelta;
+            trigger[h] = 1;
+            if (sHandsPress[h] <= 0.0f)
+            {
+                sHandsPress[h] = -HANDS_PRESS;
+            }
+        }
+        else if (sHandsPress[h] < 0.0f)
+        {
+            sHandsPress[h] += g_GlobalTimerDelta;
+            if (sHandsPress[h] > 0.0f)
+            {
+                sHandsPress[h] = 0.0f;
+            }
+        }
+        else if (sHandsPulse[h] > 0)
+        {   /* one press a shot */
+            sHandsPulse[h]--;
+            sHandsPress[h] = HANDS_PRESS;
+            trigger[h] = 1;
+        }
+    }
+    return 1;
+}
+
+/* bondview2.c, each frame before the hands are drawn: their gun points where
+ * they aim (field_FFC, field_A38..A40) and the sight sits there (crosshair_angle) */
+void coopSpectateHandsAim(void)
+{
+    CoopExtView v;
+    coord3d dir, aim;
+    coord2d at;
+    f32 ay, ap, w, h, left, top;
+
+    if (!sHands || g_CurrentPlayer == NULL || !coopExtRemoteView(sHandsFor, &v) || v.look == NULL)
+    {
+        return;
+    }
+    ay = v.look->aimyaw;
+    ap = v.look->aimpitch - v.viewpitch;
+    {   /* GE_COOP_TESTHANDSAIM=<yaw>:<pitch>: degrees added to theirs, right and up (harness only) */
+        static s32 test = -1;
+        static f32 tyaw, tpitch;
+
+        if (test < 0)
+        {
+            const char *e = getenv("GE_COOP_TESTHANDSAIM");
+
+            test = (e != NULL && sscanf(e, "%f:%f", &tyaw, &tpitch) == 2);
+        }
+        if (test)
+        {
+            ay -= tyaw * DEG;
+            ap += tpitch * DEG;
+        }
+    }
+    if (!(ay == ay) || !(ap == ap))
+    {
+        return;
+    }
+    ay = (ay > HANDS_AIM_MAX) ? HANDS_AIM_MAX : (ay < -HANDS_AIM_MAX) ? -HANDS_AIM_MAX : ay;
+    ap = (ap > HANDS_AIM_MAX) ? HANDS_AIM_MAX : (ap < -HANDS_AIM_MAX) ? -HANDS_AIM_MAX : ap;
+    /* their camera's frame (bondview2.c: field_2A0C = atan2(-x, -z), field_2A08 = atan2(y, xz) + pitch) */
+    dir.f[0] = -cosf(ap) * sinf(ay);
+    dir.f[1] = sinf(ap);
+    dir.f[2] = -cosf(ap) * cosf(ay);
+    transform3Dto2DCoords(&dir, &at);
+    at.x = bondviewAimPinX(at.x);
+    w = getPlayer_c_screenwidth();
+    h = getPlayer_c_screenheight();
+    left = getPlayer_c_screenleft();
+    top = getPlayer_c_screentop();
+    at.x = (at.x < left + 3.0f) ? left + 3.0f : (at.x > left + w - 4.0f) ? left + w - 4.0f : at.x;
+    at.y = (at.y < top + 3.0f) ? top + 3.0f : (at.y > top + h - 4.0f) ? top + h - 4.0f : at.y;
+    g_CurrentPlayer->crosshair_angle.f[0] = at.x;
+    g_CurrentPlayer->crosshair_angle.f[1] = at.y;
+    g_CurrentPlayer->field_FFC.x = at.x;
+    g_CurrentPlayer->field_FFC.y = at.y;
+    aim.f[0] = dir.f[0] * 1000.0f;
+    aim.f[1] = dir.f[1] * 1000.0f;
+    aim.f[2] = dir.f[2] * 1000.0f;
+    sub_GAME_7F067AB4(&aim);
+}
+
+/* bondview2.c: the sight is up while they aim */
+s32 coopSpectateHandsAiming(s32 aiming)
+{
+    return sHands ? sHandsAiming : aiming;
+}
+
+/* GE_COOP_TESTAIMHOLD=<s>[:<len>]: from <s> seconds into the mission hold aim
+ * for <len> seconds (6) (harness only: a partner watching sees the sight and
+ * the zoom) */
+void coopSpectateTestAimHold(s8 *stick_x, s8 *stick_y, u16 *buttons)
+{
+    static s32 at = -2, len;
+    s32 t;
+
+    (void) stick_x;
+    (void) stick_y;
+    if (at == -2)
+    {
+        const char *e = getenv("GE_COOP_TESTAIMHOLD");
+
+        at = -1;
+        len = 6;
+        if (e != NULL && sscanf(e, "%d:%d", &at, &len) >= 1)
+        {
+            at *= 60;
+        }
+    }
+    t = (s32) coopExtMissionTicks() - at;
+    if (at < 0 || t < 0 || t >= len * 60)
+    {
+        return;
+    }
+    *buttons |= R_TRIG;
+    if (t == 0)
+    {
+        portConLogf("ge: coop: testaimhold: aiming for %d s\n", len);
+    }
 }

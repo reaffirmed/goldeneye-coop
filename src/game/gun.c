@@ -2652,6 +2652,16 @@ void currentPlayerCreateRocket(GUNHAND hand)
 
     hand_ptr = &g_CurrentPlayer->hands[hand];
 
+#ifndef TARGET_N64
+    {
+        extern s32 coopSpectateHandsOn(void);
+
+        if (coopSpectateHandsOn())
+        {
+            return;     /* a partner's launcher in our hands (coop_spectate.c): no rocket object for it */
+        }
+    }
+#endif
     if ((hand_ptr->rocket == NULL) && (hand_ptr->weapon_ammo_in_magazine > 0))
     {
         rocket = (struct WeaponObjRecord *)create_new_item_instance_of_model(PROP_CHRROCKET, ITEM_ROCKETROUND);

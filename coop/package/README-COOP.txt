@@ -144,11 +144,13 @@ Rules
 - When a partner completes an objective, a note across the middle of the
   screen says who did it: "MOCK COMPLETED OBJECTIVE A" and the objective.
 - While you are down (or out of lives), the screen fades back in through a
-  partner's eyes ("WATCHING <NAME>"); fire switches to the next partner and
-  aim to the one before. Use frees the camera: look around with the mouse
-  and fly with WASD, as in photo mode but without the 8 metre limit; fire
-  or Use goes back to a partner's eyes. Your own view comes back when you
-  are revived or respawn.
+  partner's eyes ("WATCHING <NAME>"), as they see it: their gun in their
+  hands, firing, reloading and switching as they do and pointed where they
+  aim, with their sight and zoom while they hold aim. Fire switches to the
+  next partner and aim to the one before. Use frees the camera: look around
+  with the mouse and fly with WASD, as in photo mode but without the 8 metre
+  limit; fire or Use goes back to a partner's eyes. Your own view comes back
+  when you are revived or respawn.
 - Skipping a cutscene (the mission intro, or an ending that waits for a
   press) is a vote: "SKIP 1/2 - WAITING FOR <NAME>" shows in the corner and
   it skips for everyone once more than half of you have pressed (both of
