@@ -1665,6 +1665,12 @@ void chraiCheckUseHeldItem(s32 hand)
 */
 void chraiCheckUseHeldItems(void)
 {
+#ifndef TARGET_N64
+    if (coopSpectateHandsOn())
+    {
+        return;     /* watching a partner while down: their gun in our hands fires nothing (coop_spectate.c) */
+    }
+#endif
     chraiCheckUseHeldItem(GUNRIGHT);
     chraiCheckUseHeldItem(GUNLEFT);
 }

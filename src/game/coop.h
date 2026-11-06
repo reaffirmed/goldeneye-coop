@@ -460,6 +460,15 @@ s32  coopSpectateCamera(struct coord3d *pos, struct coord3d *look, struct coord3
 s32  coopSpectateRoom(u8 *room);
 struct coord3d *coopSpectatePos(s32 three);
 void coopFreeCamStep(coord3d *pos, coord3d *pos3, StandTile **tile, const coord3d *want);   /* free cameras: through anything */
+/* first person through a partner's eyes: our idle hands play their gun (coop_spectate.c) */
+void coopSpectateStageStart(void);
+s32  coopSpectateHandsOn(void);                 /* our hands are the watched partner's: look only, nothing real */
+s32  coopSpectateHandsTick(s32 *trigger, PropRecord **partner);  /* gunfire.c gunTickGameplay: 1 when it has the hands */
+void coopSpectateHandsAim(void);                /* bondview2.c, before the hands are drawn: where their gun points */
+s32  coopSpectateHandsAiming(s32 ours);         /* bondview2.c: watching, their aim (sight and zoom); else ours */
+void coopSpectateTestAimHold(s8 *stick_x, s8 *stick_y, u16 *buttons);  /* bondview2.c: GE_COOP_TESTAIMHOLD */
+u16  coopViewAimPack(f32 pitch, s32 aiming);    /* CoopStatePkt.viewaim */
+s32  coopViewAimUnpack(u16 v, f32 *pitch, s32 *aiming); /* 0 an older build's 0 */
 
 /* how partners look (coop_look.c): the character they picked in the lobby,
  * the guns in their hands with the multiplayer body animations, and their
@@ -639,6 +648,9 @@ typedef struct
     StandTile *stan;
     s32 weapon;         /* right hand ITEM_IDS */
     f32 health;
+    f32 viewpitch;      /* their view's pitch, radians (the camera, without the crosshair's offset) */
+    s32 aiming;         /* they hold aim: their sight is up */
+    const CoopLook *look;     /* their guns, shots and aim (CoopLook), NULL none */
 } CoopExtView;
 void coopExtSend(s32 kind, s32 to, const void *payload, s32 len);
 s32  coopExtSetupOfs(void *rec);         /* a setup object's byte offset in the prop defs, -1 not one */
