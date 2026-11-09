@@ -29,7 +29,7 @@ This is an unofficial fan project. It contains no game assets: every player need
 - **Talk and point.** Positional voice chat over Steam Voice, text chat, and a ping key that marks a spot or a guard for everyone.
 - **Tuned for more players.** Guard Strength, Player Scaling for 3 and 4 players, and Friendly Fire set to Off, Reduced or Full.
 - **Together after the mission.** A team stats page, then a vote on what's next: replay, next mission or back to the lobby. Skipping a cutscene is a vote too.
-- **Spectate and photo mode.** Watch a partner while you're down, fly a free camera, or take pictures in any mission.
+- **Spectate and photo mode.** Watch a partner through their eyes while you're down (their gun, shots, reloads and aim, first person), fly a free camera, or take pictures in any mission.
 
 ### Versus
 

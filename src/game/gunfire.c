@@ -1372,6 +1372,12 @@ void gunUpdateAndFire(GUNHAND handnum)
     if (hand->weapon_firing_status != 0)
     {
         sub_GAME_7F068508(handnum, bondviewGetPlayerStanHeight(g_CurrentPlayer));
+#ifndef TARGET_N64
+        if (coopSpectateHandsOn())
+        {
+            return;     /* a partner's gun in our hands (coop_spectate.c): only the look of it, nothing leaves it */
+        }
+#endif
 
         if (item == ITEM_GRENADELAUNCH)
         {
@@ -3174,6 +3180,30 @@ static void portHandPosePresent(struct hand *handptr, struct PortHandPose *s)
         }
     }
 }
+#endif
+
+#ifndef TARGET_N64
+/* Watching a partner while we are down (coop_spectate.c): our idle hands play
+ * the partner's gun, without a sound or a rumble of their own. Their shots,
+ * draws and reloads are heard from them (coop_look.c, coop_audio.c). */
+static ALSoundState *gunHandSfx(struct ALBankAlt_s *bank, s16 sfx, ALSoundState *state)
+{
+    if (coopSpectateHandsOn())
+    {
+        return NULL;
+    }
+    return sndPlaySfx(bank, sfx, state);
+}
+
+static void gunHandRumble(s32 controller, f32 duration)
+{
+    if (!coopSpectateHandsOn())
+    {
+        joyRumblePakStart(controller, duration);
+    }
+}
+#define sndPlaySfx gunHandSfx
+#define joyRumblePakStart gunHandRumble
 #endif
 
 void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
@@ -5017,6 +5047,10 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
 #undef WHEN_11_FLD890_1
 #undef WHEN_11_FLD890_2
 #undef WHEN_1E_FLD890
+#ifndef TARGET_N64
+#undef sndPlaySfx
+#undef joyRumblePakStart
+#endif
 
 
 void analyzeGEKey(void)
@@ -5232,6 +5266,50 @@ s32 gunCanUseWeapon(enum GUNHAND hand)
 }
 
 
+#ifndef TARGET_N64
+/* Watching a partner while we are down (coop_spectate.c): our hands, idle
+ * while we are dead, play the partner's gun this tick. coop_spectate.c has
+ * already asked for their guns, reloads and trigger; this runs the hands'
+ * animations with nothing real behind them: no bullet, throw or noise leaves
+ * them (gunUpdateAndFire, chrprop.c chraiCheckUseHeldItems), no sound
+ * (gunHandSfx), and our own ammo is put back as it was after every tick. */
+static void gunTickPuppetHands(const s32 *trigger, PropRecord *partner)
+{
+    s32 held[ARRAYCOUNT(g_CurrentPlayer->ammoheldarr)];
+    struct rgba_u8 weapon_color;
+    s32 h;
+
+    for (h = 0; h < ARRAYCOUNT(held); h++)
+    {
+        held[h] = g_CurrentPlayer->ammoheldarr[h];
+    }
+    for (h = GUNRIGHT; h <= GUNLEFT; h++)
+    {   /* a reload takes its rounds from here: never short of them */
+        const s32 type = get_ammo_type_for_weapon(getCurrentPlayerWeaponId(h));
+
+        if (type > 0 && type < ARRAYCOUNT(held))
+        {
+            g_CurrentPlayer->ammoheldarr[type] = 999;
+        }
+    }
+    g_CurrentPlayer->prev_trigger_down = g_CurrentPlayer->trigger_down;
+    g_CurrentPlayer->trigger_down = trigger[GUNRIGHT] || trigger[GUNLEFT];
+    gunTickHandState(GUNRIGHT, trigger[GUNRIGHT]);
+    gunTickHandState(GUNLEFT, trigger[GUNLEFT]);
+    used_to_load_1st_person_model_on_demand(GUNRIGHT);
+    used_to_load_1st_person_model_on_demand(GUNLEFT);
+    for (h = 0; h < ARRAYCOUNT(held); h++)
+    {
+        g_CurrentPlayer->ammoheldarr[h] = held[h];
+    }
+    if (partner != NULL)
+    {   /* lit as the floor they stand on, not where we fell */
+        set_color_shading_from_tile(partner, &weapon_color);
+        update_color_shading(&g_CurrentPlayer->tileColor, &weapon_color);
+    }
+}
+#endif
+
 /**
  * US address 7F067420.
  * Perfect Dark method bgunTickGameplay.
@@ -5247,6 +5325,16 @@ void gunTickGameplay(s32 triggerOn)
     enum ITEM_IDS weapon_id_left;
     enum GUNHAND hand = GUNLEFT;
     struct rgba_u8 weapon_color;
+#ifndef TARGET_N64
+    s32 puppet[2];
+    PropRecord *partner;
+
+    if (coopSpectateHandsTick(puppet, &partner))
+    {
+        gunTickPuppetHands(puppet, partner);
+        return;
+    }
+#endif
 
     trigger_state = g_ZeroTriggerState;
 

@@ -595,8 +595,18 @@ PROP getPropForHeldItem(ITEM_IDS arg0)
 }
 
 
+#ifndef TARGET_N64
+extern s32 coopSpectateHandsOn(void);
+#endif
+
 void sub_GAME_7F09B368(enum GUNHAND hand)
 {
+#ifndef TARGET_N64
+    if (coopSpectateHandsOn())
+    {
+        return;     /* our hands play a partner's gun while we are down: our body holds nothing */
+    }
+#endif
     chrSetWeaponFlag4(g_CurrentPlayer->prop->chr, hand);
 }
 
@@ -607,6 +617,12 @@ void sub_GAME_7F09B398(enum GUNHAND hand)
     enum PROP prop;
     s32 flags;
 
+#ifndef TARGET_N64
+    if (coopSpectateHandsOn())
+    {
+        return;     /* the same: no gun is put in our fallen body's hand */
+    }
+#endif
     chr = g_CurrentPlayer->prop->chr;
 
     if (chr->weapons_held[hand] == NULL)

@@ -8169,6 +8169,9 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
     gunTickGameplay(moveData.triggerOn);
 
     if (bondviewGetVisibleToGuardsFlag()
+#ifndef TARGET_N64
+        && !coopSpectateHandsOn()   /* a partner's gun in our hands while we are down: they make the noise */
+#endif
         && (get_hands_firing_status(GUNRIGHT)
             || get_hands_firing_status(GUNLEFT)))
     {
@@ -8187,7 +8190,11 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         chrCheckGuardsHeardSound(noiseRadius);
     }
 
+#ifndef TARGET_N64
+    gunSetSightVisible(GUNSIGHTREASON_NOTAIMING, coopSpectateHandsAiming(moveData.aiming)); /* watching: their sight */
+#else
     gunSetSightVisible(GUNSIGHTREASON_NOTAIMING, moveData.aiming);
+#endif
 
     if (moveData.zoomOutFovPersec > 0)
     {
@@ -8203,7 +8210,11 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
     {
         ftemp_nostack_spE0 = GE_DEFAULT_FOV;
 
+#ifndef TARGET_N64
+        if (coopSpectateHandsAiming(moveData.zooming))  /* watching a partner: their aim's zoom */
+#else
         if (moveData.zooming)
+#endif
         {
             ftemp_nostack_spE0 = get_item_in_hand_zoom();
 
@@ -9711,6 +9722,7 @@ void MoveBond(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
     buttons = weapmenuFilterButtons(buttons, oldbuttons);   /* fire picks from an open weapon menu */
     buttons = coopLookTestButtons(buttons);                 /* harness: GE_COOP_TESTFIRE holds fire */
     coopVersusTestInput(&stick_x, &stick_y, &buttons);      /* harness: GE_VS_WANDER walks about */
+    coopSpectateTestAimHold(&stick_x, &stick_y, &buttons);  /* harness: GE_COOP_TESTAIMHOLD aims */
     if (coopChatOnGrid())
     {   /* the pad is typing a chat line on the on-screen keyboard (coop_chat.c) */
         stick_x = stick_y = 0;
@@ -13105,6 +13117,9 @@ Gfx *maybe_mp_interface(Gfx *gdl)
         return bondviewRenderCredits(gdl);
     }
 
+#ifndef TARGET_N64
+    coopSpectateHandsAim();     /* watching a partner: their gun points where they aim (coop_spectate.c) */
+#endif
     gunUpdateAndFireBothHands();
     gunRenderCasings(&gdl);
     gunRenderFirstPersonGunModels(&gdl);

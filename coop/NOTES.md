@@ -4474,3 +4474,83 @@ Rig: Linux i686, two copies on one machine over the mock Steam.
   under the tag at 58, 42, 26 and 20 s left is full, about 70 %, 43 % and 33 %.
 - Not covered: the beep's sound itself (the rig plays no audio), a real gamepad's bind text
   in the hint, 3 or 4 players.
+
+## Spectating in first person: the partner's gun, shots and aim (2026-11-06, COOP_VERSION stays 17)
+
+The owner asked for traditional spectating: seeing everything from the watched
+player's perspective, their gun and their aiming included. The camera already sat
+at their eyes; now the view is theirs as they see it.
+
+- How (coop_spectate.c, "the partner's gun in our hands"): we are down, so our own
+  gun hands are idle (the death put both away). While we look out of a partner's
+  eyes (coopSpectateTarget, not the free camera), gunfire.c gunTickGameplay hands
+  the tick to coopSpectateHandsTick, which drives those hands from the partner's
+  STATE, and gunTickPuppetHands runs Rare's own hand state machine on it. So the
+  draw, put away, fire, recoil, muzzle flash, casings, reload and sway are the
+  stock animations for that gun.
+  - Guns: CoopLook.weapon per hand, asked for with currentPlayerEquipWeaponWrapper
+    (a change plays the switch). Only weapons (ITEM_FIST..ITEM_REMOTEMINE but the
+    watch laser): a gadget in our hands could use itself on the level (the door
+    decoder's propFindForInteract), so a gadget shows empty hands. If something
+    else equips us meanwhile (the harness's TESTFIRE draw did), theirs goes back.
+  - Trigger: each new CoopShot (shotseq, the hand from COOPSHOT_LEFT). An automatic
+    (Skorpion to RC-P90, the auto shotgun, the Moonraker) holds it 4 frames past
+    the last shot; any other gun is pressed once a shot (2 frames down, 2 up, at
+    most 3 queued), timed in 60 Hz frames (g_GlobalTimerDelta) so tickhz 120 is
+    the same. Each shot's tracer runs to where their bullet stopped
+    (hand.item_related). A throw, stab or punch has no CoopShot: a rising muzzle
+    flash bit (CoopLook.flash) presses instead.
+  - Reload: a new COOPCUE_RELOAD cue leaves the magazine one short and calls
+    attempt_reload_item_in_hand. Otherwise the magazine is topped up every tick,
+    so it never runs dry or reloads on its own.
+  - Aim (coopSpectateHandsAim, each frame before the hands are drawn): their
+    crosshair offset from CoopLook.aimyaw and aimpitch less the view's pitch,
+    projected with transform3Dto2DCoords into crosshair_angle and field_FFC, and
+    the gun's aim point (sub_GAME_7F067AB4). While they hold aim our sight shows
+    (GUNSIGHTREASON_NOTAIMING, and the DAMAGE reason the death left is lifted while
+    watching) and the zoom is the gun's aim zoom (bondview2.c's
+    bondviewTriggerWatchZoom), which also places the gun as in their aim.
+  - The camera's pitch was the gun's (aimpitch), so it tipped with the crosshair.
+    STATE now carries the view's own pitch and the aim button in the two padding
+    bytes after carry (CoopStatePkt.viewaim, coopViewAimPack: 15 bits of pitch at
+    1/10000 rad, bit 15 aiming; 0 = none). An older build sends 0: the camera
+    falls back to aimpitch and no sight or zoom shows. The packet is the same size.
+- Nothing real leaves the hands, each place guarded by coopSpectateHandsOn:
+  chrprop.c chraiCheckUseHeldItems (bullets, punches, the tank, the camera,
+  stats), gunfire.c gunUpdateAndFire (grenade, knife, mine, launcher and flare
+  spawns; casings stay), gun.c currentPlayerCreateRocket (the launcher's rocket
+  object), player.c sub_GAME_7F09B398 / 7F09B368 (a gun object in our fallen
+  body's hand), bondview2.c's gunfire noise to guards, and every sound and rumble
+  of gunTickHandState (gunHandSfx / gunHandRumble: the partner's own shots, draws
+  and reloads are already heard from them). Our ammo is saved before each hand
+  tick and put back after (a reload draws on 999 of that type meanwhile).
+  coopLookFill sends empty hands in our STATE and coopBondHasItem (scripts' "Bond
+  has the gun out") counts our hands as empty.
+- Back to our own hands (coopSpectateHandsEnd, from coopSpectateStop and whenever
+  coopSpectateHandsTick finds no partner's eyes): both magazines emptied (their
+  rounds are not ours), the left hand put away, and the right too while still
+  down (back up, coopRespawnPlayerAt has asked for our own gun). The free camera
+  has no hands, and neither has a drop-in's watch: it is alive, with its own gun in
+  them, which a partner's would replace. coopSpectateStageStart clears it for a new
+  mission.
+- Harness: GE_COOP_TESTAIMHOLD=<s>[:<len>] holds aim on that player;
+  GE_COOP_TESTHANDSAIM=<yaw>:<pitch> adds degrees to the watched partner's
+  crosshair on the watcher (the harness's stick doesn't move the port's aim-mode
+  crosshair, which follows the look input).
+
+Rig: Linux i686, two copies on one machine over the mock Steam, Dam, joiner killed at
+7 s (Revive rule unless said), host's gun from GE_COOP_TESTFIRE.
+- KF7 held 8 s (pulsed): the joiner's view shows the KF7 drawn from the PP7, the flash,
+  recoil and casings with the host's, and the reload when the host's magazine ran out.
+  With GE_FIREDBG on both: 27 shots on the host's hands, 27 on the joiner's.
+- PP7: 10 shots on the host, 11 on the joiner (the 1 s windows of the count straddle).
+- Aim held 5 s: the joiner's sight shows, the view zooms with the host's and the gun sits
+  as theirs; with GE_COOP_TESTHANDSAIM=12:6 the sight and the gun's aim move up and right.
+- Grenades (3 thrown): only the host's three throws exist on either side; nothing from
+  player 2 on the host.
+- Free camera at 10 s into watching: hands put away, the host's body drawn; Fire back
+  to the host: their grenade hand again.
+- Timer rule, respawn after 20 s of watching the host's KF7: the joiner is back with
+  its own PP7 and 7 | 93 rounds, as before the death.
+- Not covered: dual guns (the harness gives one), the rocket launcher, 3 or 4 players, a
+  real pad, an older build's partner (by construction: viewaim 0 falls back).

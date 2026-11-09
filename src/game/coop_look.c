@@ -186,6 +186,11 @@ void coopLookFill(CoopLook *out)
     memset(out, 0, sizeof(*out));
     for (h = GUNRIGHT; h <= GUNLEFT; h++)
     {
+        if (coopSpectateHandsOn())
+        {   /* down, our hands play the partner we watch (coop_spectate.c): none of it is ours */
+            out->weapon[h] = ITEM_UNARMED;
+            continue;
+        }
         out->weapon[h] = (s8) getCurrentPlayerWeaponId(h);
         if (g_CurrentPlayer->hands[h].field_87D)
         {

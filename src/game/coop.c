@@ -138,7 +138,8 @@ typedef struct
     u16 calm;       /* ticks since the sender was last in a fight (capped) */
     u8 out;         /* down for good this mission: no lives left, or bled out (COOPOUT_*) */
     u8 carry;       /* the one-each mission items the sender still carries (COOPCARRY_*, coopItemChanceLeft; was padding, 0) */
-    u8 pad[2];
+    u16 viewaim;    /* the view's pitch and the aim button (coopViewAimPack), for a partner who watches through
+                       our eyes (coop_spectate.c; was padding: 0 from an older build) */
     CoopLook look;  /* guns, movement, shots and character (coop_look.c) */
     u32 ms;         /* the sender's clock (coopNowMs) as it sent this: the puppet is drawn by it (coop_interp.c) */
 } CoopStatePkt;
@@ -980,6 +981,7 @@ static void coopSendState(void)
     p.calm = (u16) coopLocalCalm();
     p.out = (u8) sBledOut;
     p.carry = (u8) coopCarryByte();
+    p.viewaim = coopViewAimPack(bondviewGetPlayerPitchRadians(), currentPlayerGetIsAiming());
     p.ms = coopNowMs();
     if (coopNetIsHost())
     {
@@ -2512,6 +2514,7 @@ void coopStageStart(void)
     coopItemsStageStart();
     coopReplStageStart();
     coopCutsceneStageStart();
+    coopSpectateStageStart();
 }
 
 static void coopTickBody(void);
@@ -11425,6 +11428,10 @@ s32 coopBondHasItem(s32 item)
 
     if (p < 0)
     {
+        if (coopSpectateHandsOn())
+        {   /* down, our hands play the partner we watch: ours are empty */
+            return item == ITEM_UNARMED;
+        }
         return item == getCurrentPlayerWeaponId(GUNRIGHT) || item == getCurrentPlayerWeaponId(GUNLEFT);
     }
     return item == sR[p].st.look.weapon[GUNRIGHT] || item == sR[p].st.look.weapon[GUNLEFT];
@@ -12659,6 +12666,12 @@ s32 coopExtRemoteView(s32 p, CoopExtView *out)
     out->stan = (out->prop != NULL) ? out->prop->stan : NULL;
     out->weapon = r->st.look.weapon[0];
     out->health = r->st.health;
+    out->look = &r->st.look;
+    if (!coopViewAimUnpack(r->st.viewaim, &out->viewpitch, &out->aiming))
+    {   /* an older build: the gun's pitch, as before */
+        out->viewpitch = r->st.look.aimpitch;
+        out->aiming = 0;
+    }
     return 1;
 }
 
