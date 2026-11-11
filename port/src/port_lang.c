@@ -72,6 +72,7 @@ static char sPatchFile[128];
 static char sStringsFile[128] = "port.po";
 static uint8_t sGlyphSrc[256];   /* Latin-1 byte -> the patched font's ASCII glyph */
 static uint8_t sRecode[256];     /* a translated bank's byte -> the game encoding */
+static uint8_t sSmallFix[256];   /* small-letter text: a letter the patched font has no small glyph for -> what to draw */
 
 #define LANG_BANKPATCH_MAX 16
 static struct {
@@ -243,6 +244,26 @@ static int langReadIni(const char *code, char *name, size_t namen, int full)
                 } else {
                     portConLogf("ge: lang: %s: glyphs= pair 0x%02X -> U+%04X ignored (ASCII 0x21..0x7E onto Latin-1 only)\n",
                                 code, a, l);
+                }
+            }
+        } else if (strcmp(k, "small") == 0) {
+            /* pairs: a small letter the patched font draws blank, then what to draw instead */
+            const unsigned char *p = (const unsigned char *) v;
+            while (*p != '\0') {
+                unsigned a, l;
+                while (*p == ' ' || *p == '\t') {
+                    p++;
+                }
+                if (*p == '\0') {
+                    break;
+                }
+                a = langUtf8Next(&p);
+                if (*p == '\0') {
+                    break;
+                }
+                l = langUtf8Next(&p);
+                if (a > 0x20 && a <= 0xFF && l > 0x20 && l <= 0xFF) {
+                    sSmallFix[a] = (uint8_t) l;
                 }
             }
         } else if (strncmp(k, "bank.", 5) == 0 && sBankPatchCount < LANG_BANKPATCH_MAX) {
@@ -763,6 +784,9 @@ static void langMakeLower(struct trentry *e)
         if ((c >= 'A' && c <= 'Z') || (c >= 0xC0 && c <= 0xDE && c != 0xD7)) {
             c = (unsigned char) (c + 0x20);
         }
+        if (sSmallFix[c] != 0) {
+            c = sSmallFix[c];   /* language.ini small=: no small glyph for it in this font */
+        }
         buf[i] = (char) c;
     }
     e->lower = langPoolAdd(buf, n, 0);
@@ -968,6 +992,7 @@ void portLangInit(int argc, char **argv)
         sRecode[i] = (uint8_t) i;
     }
     memset(sGlyphSrc, 0, sizeof(sGlyphSrc));
+    memset(sSmallFix, 0, sizeof(sSmallFix));
     langScan();
 
     langReadSetting(code, sizeof(code));
