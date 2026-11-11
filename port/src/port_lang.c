@@ -72,7 +72,7 @@ static char sPatchFile[128];
 static char sStringsFile[128] = "port.po";
 static uint8_t sGlyphSrc[256];   /* Latin-1 byte -> the patched font's ASCII glyph */
 static uint8_t sRecode[256];     /* a translated bank's byte -> the game encoding */
-static uint8_t sSmallFix[256];   /* small-letter text: a letter the patched font has no small glyph for -> what to draw */
+static uint8_t sSmallFix[256];   /* a letter the patched Bank Gothic draws blank -> what to draw (textrelated.c) */
 
 #define LANG_BANKPATCH_MAX 16
 static struct {
@@ -784,9 +784,6 @@ static void langMakeLower(struct trentry *e)
         if ((c >= 'A' && c <= 'Z') || (c >= 0xC0 && c <= 0xDE && c != 0xD7)) {
             c = (unsigned char) (c + 0x20);
         }
-        if (sSmallFix[c] != 0) {
-            c = sSmallFix[c];   /* language.ini small=: no small glyph for it in this font */
-        }
         buf[i] = (char) c;
     }
     e->lower = langPoolAdd(buf, n, 0);
@@ -1308,6 +1305,11 @@ const uint8_t *portLangFontSeg(int which, uint32_t *size)
     }
     *size = sFontSize[which];
     return sFontSeg[which];
+}
+
+uint8_t portLangSmallFix(uint8_t c)
+{
+    return sSmallFix[c];
 }
 
 uint8_t portLangGlyphSource(uint8_t latin1)
