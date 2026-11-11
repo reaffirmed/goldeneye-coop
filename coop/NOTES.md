@@ -4614,8 +4614,12 @@ game; a quick restart and the multiplayer suggestions are feature requests.
 Testers asked for a way to start a mission over without everyone going back to the lobby.
 
 - The host's watch Abort, CONFIRM, now offers three choices: RESTART, END ALL and
-  HAND OVER (options.c, sPortCoopAbortSel; HAND OVER is still the default). Stick
-  left/right or a hover picks one; the help line under them says what it does.
+  HAND OVER (options.c, sPortCoopAbortSel; HAND OVER is still the default). They are
+  shown one at a time as "< RESTART >", because side by side they ran into each other
+  (and in Spanish, REINICIAR / ACABAR PARA TODOS / CEDER, past the watch face). Stick or
+  d-pad left/right steps round them; a mouse click on an arrow steps, a click on the
+  choice confirms it. The help line under it says what it does, translated with portTr,
+  and keeps Latin-1 letters (ANFITRIÓN) instead of turning them into '?'.
 - RESTART (coop.c coopHostRestart) sends COOPEV_ENDALL with u.raw[0] = COOPENDALL_RESTART
   and aborts the host's own mission as END ALL does. Once the host's debrief is up,
   coopRestartTick (from coopFrontTick) calls front.c coopFrontRestart, which starts the

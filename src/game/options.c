@@ -30,6 +30,7 @@ static s32 sPortCoopAbortAsk;   /* co-op host: Abort confirmed once, now hand ov
 static s32 sPortCoopAbortAte;   /* that first confirm press: draw_watch_current_page must not toggle focus off with it */
 static s32 sPortCoopAbortSel = 2;   /* the host's choice: 0 RESTART, 1 END ALL, 2 HAND OVER (D_800409A4 is 1 only on HAND OVER) */
 static s32 sPortCoopAbortStick;     /* the stick was over to one side last frame: one step a push */
+static s32 sPortCoopAbortValX0 = 0x5C, sPortCoopAbortValX1 = 0xA0; /* the drawn choice's left and right x (the mouse layer's arrows) */
 #endif
 /* Defined further down, next to the vanilla page drawer they replace; the
  * watch MOUSE layer needs them a few thousand lines earlier. */
@@ -2022,12 +2023,18 @@ void portWatchMouseTick(void)
              * CANCEL (x 0x88) / CONFIRM (x 0xBD) at y 0x4C - only on mouse
              * activity so a pad user can still steer it; the click itself is
              * the vanilla Z (CONFIRM -> abort, CANCEL -> unfocus). */
-            if (watch_item_is_actively_selected && (moved || click) && sPortCoopAbortAsk
-                && my >= (f32) (0x4C - PORT_WATCH_ROW_ABOVE) && my <= (f32) (0x4C + PORT_WATCH_ROW_BELOW)
-                && mx >= 81.0f && mx <= 252.0f)
-            {   /* the co-op host's three: RESTART (x 0x51), END ALL (0x88), HAND OVER (0xBD) */
-                sPortCoopAbortSel = (mx < 136.0f) ? 0 : (mx < 187.0f) ? 1 : 2;
-                D_800409A4 = (sPortCoopAbortSel == 2);
+            if (watch_item_is_actively_selected && sPortCoopAbortAsk)
+            {   /* the co-op host's choice, one at a time between < > (draw_abort_cancel_confirm):
+                 * a click on an arrow steps it, a click on the choice is the vanilla Z */
+                if (click && my >= (f32) (0x4C - PORT_WATCH_ROW_ABOVE) && my <= (f32) (0x4C + PORT_WATCH_ROW_BELOW)
+                    && mx >= 72.0f && mx <= 252.0f
+                    && (mx < (f32) sPortCoopAbortValX0 - 2.0f || mx > (f32) sPortCoopAbortValX1 + 2.0f))
+                {
+                    sPortCoopAbortSel += (mx < (f32) sPortCoopAbortValX0) ? -1 : 1;
+                    sPortCoopAbortSel = (sPortCoopAbortSel < 0) ? 2 : (sPortCoopAbortSel > 2) ? 0 : sPortCoopAbortSel;
+                    D_800409A4 = (sPortCoopAbortSel == 2);
+                    sPortWatchAteClick = 1;
+                }
             }
             else if (watch_item_is_actively_selected && (moved || click)
                 && my >= (f32) (0x4C - PORT_WATCH_ROW_ABOVE) && my <= (f32) (0x4C + PORT_WATCH_ROW_BELOW)
@@ -3897,17 +3904,25 @@ Gfx *draw_abort_cancel_confirm(Gfx *gdl)
     }
     coopask = sPortCoopAbortAsk;
     if (coopask && watch_item_is_actively_selected != 0)
-    {   /* co-op host: RESTART where the label was, END ALL in the cancel
-         * place, HAND OVER in confirm's; left and right step one a push */
+    {   /* co-op host: one choice at a time, "< RESTART >", "< END ALL >" or
+         * "< HAND OVER >" (they do not fit side by side in every language);
+         * left and right step one a push, round and round, and the line
+         * under it says what the choice does */
         static const char *const labels[3] = { "RESTART\n", "END ALL\n", "HAND OVER\n" };
-        const s32 xs[3] = { 0x51, (j_text_trigger ? 0xA : 0) + 0x88, (j_text_trigger ? 0xF : 0) + 0xBD };
+        const s32 y0 = (j_text_trigger ? 3 : 0) + (PAL ? 0x4E : 0x4C);
         const s32 sx = joyGetStickX(PLAYER_1);
         const s32 side = (sx >= 0x2E) ? 1 : (sx < -0x2D) ? -1 : 0;
+        const char *label;
         s32 dir = 0;
         s32 i;
-        char help[64];
+        s32 x;
+        s32 y;
+        s32 w = 0;
+        s32 h = 0;
+        s32 aw = 0;
+        char help[96];
         s32 hx = 0x51;
-        s32 hy = (j_text_trigger ? 3 : 0) + (PAL ? 0x4E : 0x4C) + 0x0C;
+        s32 hy = y0 + 0x0C;
 
         if (joyGetButtonsPressedThisFrame(PLAYER_1, 0x111))
         {
@@ -3923,41 +3938,46 @@ Gfx *draw_abort_cancel_confirm(Gfx *gdl)
         }
         sPortCoopAbortStick = side;
         sPortCoopAbortSel += dir;
-        sPortCoopAbortSel = (sPortCoopAbortSel < 0) ? 0 : (sPortCoopAbortSel > 2) ? 2 : sPortCoopAbortSel;
+        sPortCoopAbortSel = (sPortCoopAbortSel < 0) ? 2 : (sPortCoopAbortSel > 2) ? 0 : sPortCoopAbortSel;
         D_800409A4 = (sPortCoopAbortSel == 2);
-        for (i = 0; i < 3; i++)
-        {
-            s32 x = xs[i];
-            s32 y = (j_text_trigger ? 3 : 0) + (PAL ? 0x4E : 0x4C);
 
-            if (i == sPortCoopAbortSel)
-            {
-                gdl = textRenderOutlined(gdl, &x, &y, (char *) labels[i], pFontChars, pFontFile, -1, 0x7000A0, viGetX(), viGetY(), 0, 0);
-            }
-            else
-            {
-                gdl = textRender(gdl, &x, &y, (char *) labels[i], pFontChars, pFontFile, 0xFF00B0, viGetX(), viGetY(), 0, 0);
-            }
-        }
+        label = portTr(labels[sPortCoopAbortSel]);
+        textMeasure(&h, &aw, "<\n", pFontChars, pFontFile, 0);
+        textMeasure(&h, &w, (char *) label, pFontChars, pFontFile, 0);
+        x = 0x51;
+        y = y0;
+        gdl = textRender(gdl, &x, &y, "<\n", pFontChars, pFontFile, 0xA0FFA0F0, viGetX(), viGetY(), 0, 0);
+        x = 0x51 + aw + 6;
+        y = y0;
+        sPortCoopAbortValX0 = x;
+        sPortCoopAbortValX1 = x + w;
+        gdl = textRenderOutlined(gdl, &x, &y, (char *) label, pFontChars, pFontFile, -1, 0x7000A0, viGetX(), viGetY(), 0, 0);
+        x = sPortCoopAbortValX1 + 6;
+        y = y0;
+        gdl = textRender(gdl, &x, &y, ">\n", pFontChars, pFontFile, 0xA0FFA0F0, viGetX(), viGetY(), 0, 0);
+
         if (sPortCoopAbortSel == 2)
         {
             snprintf(help, sizeof(help), portTr("%s HOSTS, YOU LEAVE\n"), coopHostAbortNextName());
         }
-        else if (sPortCoopAbortSel == 1)
-        {
-            snprintf(help, sizeof(help), "EVERYONE BACK TO THE LOBBY\n");
-        }
         else
         {
-            snprintf(help, sizeof(help), "EVERYONE STARTS THIS MISSION AGAIN\n");
+            snprintf(help, sizeof(help), "%s", portTr((sPortCoopAbortSel == 1) ? "EVERYONE BACK TO THE LOBBY\n"
+                                                                                 : "EVERYONE STARTS AGAIN\n"));
         }
         for (i = 0; help[i] != '\0'; i++)
-        {
-            if (help[i] >= 'a' && help[i] <= 'z')
+        {   /* the watch font's capitals; Latin-1 letters keep their accents */
+            const u8 c = (u8) help[i];
+
+            if (c >= 'a' && c <= 'z')
             {
-                help[i] -= 'a' - 'A';
+                help[i] = (char) (c - ('a' - 'A'));
             }
-            else if ((u8) help[i] >= 0x80)
+            else if (c >= 0xE0 && c != 0xF7 && c != 0xFF)
+            {
+                help[i] = (char) (c - 0x20);
+            }
+            else if (c >= 0x80 && c < 0xA0)
             {
                 help[i] = '?';
             }
@@ -4015,35 +4035,6 @@ Gfx *draw_abort_cancel_confirm(Gfx *gdl)
                 gdl = textRenderOutlined(gdl, &sp74, &sp68, sp4C, pFontChars, pFontFile, -1, 0x7000A0, viGetX(), viGetY(), 0, 0);
             }
         }
-#ifndef TARGET_N64
-        if (coopask)
-        {   /* what each one does, under them */
-            char help[64];
-            s32 hx = 0x51;
-            s32 hy = (j_text_trigger ? 3 : 0) + (PAL ? 0x4E : 0x4C) + 0x0C;
-
-            if (D_800409A4 != 0)
-            {
-                snprintf(help, sizeof(help), portTr("%s HOSTS, YOU LEAVE\n"), coopHostAbortNextName());
-            }
-            else
-            {
-                snprintf(help, sizeof(help), "EVERYONE BACK TO THE LOBBY\n");
-            }
-            for (sp60 = 0; help[sp60] != '\0'; sp60++)
-            {
-                if (help[sp60] >= 'a' && help[sp60] <= 'z')
-                {
-                    help[sp60] -= 'a' - 'A';
-                }
-                else if ((u8) help[sp60] >= 0x80)
-                {
-                    help[sp60] = '?';
-                }
-            }
-            gdl = textRender(gdl, &hx, &hy, help, pFontChars, pFontFile, 0xA0FFA0F0, viGetX(), viGetY(), 0, 0);
-        }
-#endif
     }
     else
     {
