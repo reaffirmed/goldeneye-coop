@@ -5482,6 +5482,27 @@ placed:
     }
 }
 
+/* joiner: ticks in a row a mirrored chr's spot from the host found no floor
+ * here (coopGuardsInterpTick), so the copy stayed where it was */
+static u16 sInterpNoFloor[COOP_MAX_CHRS];
+
+/* the floor under a spot of the host's: walked to from where ours stands,
+ * else the highest one under it, else the highest one under a point a little
+ * above it (a spot that sits a hair below a sloped or stepped floor here) */
+static StandTile *coopGuardStan(coord3d *pos, PropRecord *prop)
+{
+    StandTile *stan = coopFindStan(pos, prop->stan, &prop->pos);
+
+    if (stan == NULL)
+    {
+        coord3d up = *pos;
+
+        up.f[1] += 100.0f;
+        stan = stanFindTileBelowPos(&up, NULL, NULL);
+    }
+    return stan;
+}
+
 /* Client: each mirrored chr where the host's was a moment ago, between two
  * snapshots (coop_interp.c), so guards move smoothly between packets */
 static void coopGuardsInterpTick(void)
@@ -5504,13 +5525,23 @@ static void coopGuardsInterpTick(void)
         pos.f[0] = at.pos[0];
         pos.f[1] = at.pos[1];
         pos.f[2] = at.pos[2];
-        stan = coopFindStan(&pos, chr->prop->stan, &chr->prop->pos);
+        stan = coopGuardStan(&pos, chr->prop);
         if (stan != NULL)
         {
             chr->prop->stan = stan;
             chr->prop->pos = pos;
             setsuboffset(chr->model, &pos);
             chrDetectRooms(chr);
+            sInterpNoFloor[i] = 0;
+        }
+        else if (sInterpNoFloor[i] < 0xFFFF)
+        {
+            if (++sInterpNoFloor[i] == 60)
+            {   /* Cradle: a guard drawn 13 m from the host's while synced every packet */
+                portConLogf("ge: coop: chr %d: no floor here under the host's spot %.0f %.0f %.0f for 1 s: ours stays at %.0f %.0f %.0f\n",
+                            chr->chrnum, pos.f[0], pos.f[1], pos.f[2],
+                            chr->prop->pos.f[0], chr->prop->pos.f[1], chr->prop->pos.f[2]);
+            }
         }
         setsubroty(chr->model, at.yaw);
     }
@@ -5544,8 +5575,9 @@ static s32 coopGuardLine(char *buf, s32 cap, ChrRecord *chr, s32 i)
         const CoopSample *h = &sGuardTrack[i].s[sGuardTrack[i].n - 1];
         f32 dx = prop->pos.f[0] - h->pos[0], dy = prop->pos.f[1] - h->pos[1], dz = prop->pos.f[2] - h->pos[2];
 
-        n += snprintf(buf + n, cap - n, ", host's %.0f %.0f %.0f (%.0f away), synced %u ticks ago",
-                      h->pos[0], h->pos[1], h->pos[2], sqrtf(dx * dx + dy * dy + dz * dz), (unsigned) (sTick - sChrLastSync[i]));
+        n += snprintf(buf + n, cap - n, ", host's %.0f %.0f %.0f (%.0f away), synced %u ticks ago, no floor %u ticks",
+                      h->pos[0], h->pos[1], h->pos[2], sqrtf(dx * dx + dy * dy + dz * dz), (unsigned) (sTick - sChrLastSync[i]),
+                      (unsigned) sInterpNoFloor[i]);
     }
     else if (n < cap && !coopNetIsHost())
     {
@@ -6015,6 +6047,7 @@ static void coopMirrorSlotFresh(ChrRecord *chr)
     sPred[slot].chrnum = -1;
     coopTrackReset(&sGuardTrack[slot]);
     sGuardTrackNum[slot] = -1;
+    sInterpNoFloor[slot] = 0;
     sChrFade[slot] = 0;
     sChrLastSync[slot] = sTick;
     sChrFiring[slot] = 0;
@@ -11492,8 +11525,9 @@ s32 coopLevelFallCheckOff(f32 y)
 static void coopCradleFallTick(void)
 {
     if (!coopLevelFallCheckOff(COOP_CRADLE_FALL_Y) || !coopInMission()
-        || g_CurrentPlayer->bonddead || g_PlayerInvincible || g_CoopPropOverride != NULL)
-    {
+        || g_CurrentPlayer->bonddead || g_PlayerInvincible || g_CurrentPlayer->cheatBondInvincible
+        || g_CoopPropOverride != NULL)
+    {   /* invincible: the death would not take, and this said so every tick */
         return;
     }
     if (getCurrentPlayerProp()->pos.y < COOP_CRADLE_FALL_Y && check_if_actor_is_at_preset(NULL, COOP_CRADLE_FALL_PAD))

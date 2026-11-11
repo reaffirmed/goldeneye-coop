@@ -4629,3 +4629,21 @@ Testers asked for a way to start a mission over without everyone going back to t
   MISSION / STARTING AGAIN" and no "Mission Ended" screen, then follows the host's new
   mission serial in as it does for any mission. An older build reads the event as END ALL.
 - Spanish for the new strings is in port.po.
+
+## Cradle: a joiner's guard left behind, and the shaft log (2026-11-11, COOP_VERSION stays 17)
+
+From the tester's Cradle hunt (joiner fighting): the joiner's copy of a respawned guard
+stood at 2206 81 -165 while the host's was at 3475 -416 -157, 13 m away and half a floor
+lower, with packets arriving every tick ("watch: host chr 4 is drawn far from the host's
+spot ... synced 0 ticks ago"). coopGuardsInterpTick only moves a copy when it finds a
+floor for the host's spot: walked to from where ours stands, else the highest tile under
+it. Neither found one, so the copy never moved.
+
+- coopGuardStan adds a third try, the highest tile under a point 100 units above the
+  host's spot, for a spot that sits just below a stepped or sloped floor here.
+- A copy that still finds no floor for 1 s logs "chr N: no floor here under the host's
+  spot X Y Z for 1 s: ours stays at ...", and the watch line now ends with "no floor N
+  ticks", so the next report says which case it is.
+- The joiner, invincible (the cheat) at the bottom of the shaft, logged "fell into the
+  Cradle shaft" every tick, because the death never took. coopCradleFallTick now skips an
+  invincible player as it does g_PlayerInvincible.
