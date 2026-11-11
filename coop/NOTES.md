@@ -4658,3 +4658,29 @@ it. Neither found one, so the copy never moved.
   Facility, Dam, joiner on netsim 60:20:2) it never fired, nor on guards walking normally.
 - Capitals drop accents in port text (langUpper, "ANFITRION"), as the translators wrote
   their own capitals; left as is.
+
+## The pause watch, simpler to read (2026-11-11)
+
+Player feedback: the watch "looks very overwhelming". The tester's review (every page, English
+and Spanish) found the Options page the worst: 11 rows each printing every choice side by side,
+dim and bright, a cursor that only turned slightly whiter, and the page buttons drawn as filled
+plates that looked selected all the time.
+
+- Every row shows only its current value, with "<" and ">" beside it on the highlighted row
+  (options.c portWatchDrawValueOne, portWatchValueCentreX). Rare's own rows (look up/down,
+  auto-aim and so on) keep Rare's input (game_option_toggle_input) but are drawn the same way.
+  The value sits where Rare's middle column was, or further right past a long label, sized by
+  the row's widest value so the arrows don't jump. A mouse click left or right of the value
+  steps it that way (round and round on Rare's rows). Rows whose values don't fit still open
+  their drop-down list on A, as before (portWatchValuesFit is unchanged).
+- Only the highlighted row has the filled plate; a row that opens a page ends in ">". The rule
+  between Rare's rows and the page buttons is gone.
+- The watch writes its port rows in small letters (pwWatchCase), and draw-time translation
+  only folded all-capitals text, so "rebind inputs", "gameplay" and the like stayed English in
+  Spanish. port_lang.c now folds all-small-letters text too and returns the translation in
+  small letters.
+- The MUSIC and FX bars start a few pixels past the wider of their two labels (EFECTOS ran
+  under its bar), keeping the right end; options.c portWatchBarFit projects the face to find
+  where that is.
+- Not changed: the random static is Rare's (it can be turned off: Port Options, Watch Static);
+  the "Q WATCH V2.01 BETA" header is the cart's text; the Options page still has its nine rows.
