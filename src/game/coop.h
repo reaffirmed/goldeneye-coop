@@ -54,6 +54,8 @@ s32  coopLostBondBegin(s32 k); /* 1: "Bond" is now the k-th partner whose line w
 void coopLostBondEnd(void);
 PropRecord *coopAutogunTarget(PropRecord *gun, f32 aimdist, f32 rot, f32 arcmin, f32 arcmax); /* propobj.c: who a drone gun aims at */
 s32  coopOwnBondCounts(void);         /* 0: a level script's own-Bond check skips the host's body (down, a partner standing) */
+#define COOPENDALL_RESTART 1    /* COOPEV_ENDALL's first byte: the host restarts the mission (0: back to the lobby) */
+void coopHostRestart(void);    /* the watch's Abort, RESTART: the same mission again for everyone */
 s32  coopScriptRoomHold(ChrRecord *self, s32 pad); /* 1: a level script's "Bond in the room with pad" waits for a player still at the scene */
 s32  coopLevelFallCheckOff(f32 y);   /* 1: a level script's fall check that co-op leaves to each player's own game */
 s32  coopBondHasItem(s32 item);          /* chrai.c: whoever is Bond now holds this item (a partner's from STATE) */

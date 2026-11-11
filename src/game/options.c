@@ -28,6 +28,8 @@
 #include "coop.h"
 static s32 sPortCoopAbortAsk;   /* co-op host: Abort confirmed once, now hand over or end for everyone */
 static s32 sPortCoopAbortAte;   /* that first confirm press: draw_watch_current_page must not toggle focus off with it */
+static s32 sPortCoopAbortSel = 2;   /* the host's choice: 0 RESTART, 1 END ALL, 2 HAND OVER (D_800409A4 is 1 only on HAND OVER) */
+static s32 sPortCoopAbortStick;     /* the stick was over to one side last frame: one step a push */
 #endif
 /* Defined further down, next to the vanilla page drawer they replace; the
  * watch MOUSE layer needs them a few thousand lines earlier. */
@@ -2020,7 +2022,14 @@ void portWatchMouseTick(void)
              * CANCEL (x 0x88) / CONFIRM (x 0xBD) at y 0x4C - only on mouse
              * activity so a pad user can still steer it; the click itself is
              * the vanilla Z (CONFIRM -> abort, CANCEL -> unfocus). */
-            if (watch_item_is_actively_selected && (moved || click)
+            if (watch_item_is_actively_selected && (moved || click) && sPortCoopAbortAsk
+                && my >= (f32) (0x4C - PORT_WATCH_ROW_ABOVE) && my <= (f32) (0x4C + PORT_WATCH_ROW_BELOW)
+                && mx >= 81.0f && mx <= 252.0f)
+            {   /* the co-op host's three: RESTART (x 0x51), END ALL (0x88), HAND OVER (0xBD) */
+                sPortCoopAbortSel = (mx < 136.0f) ? 0 : (mx < 187.0f) ? 1 : 2;
+                D_800409A4 = (sPortCoopAbortSel == 2);
+            }
+            else if (watch_item_is_actively_selected && (moved || click)
                 && my >= (f32) (0x4C - PORT_WATCH_ROW_ABOVE) && my <= (f32) (0x4C + PORT_WATCH_ROW_BELOW)
                 && mx >= 128.0f && mx <= 252.0f)
             {
@@ -2532,7 +2541,14 @@ void watch_screen0_navigation(void)
              )
     {
         sPortCoopAbortAsk = 0;
-        coopHostAbort(0);
+        if (sPortCoopAbortSel == 0)
+        {
+            coopHostRestart();  /* RESTART: everyone, the same mission again (coop.c) */
+        }
+        else
+        {
+            coopHostAbort(0);
+        }
         set_missionstate(MISSION_STATE_0);
         bossRunTitleStage();
         mission_failed_or_aborted = TRUE;
@@ -2551,10 +2567,12 @@ void watch_screen0_navigation(void)
     {
 #ifndef TARGET_N64
         if (!sPortCoopAbortAsk && coopHostAbortAsks())
-        {   /* a co-op host is asked first: hand the mission over, or end it
-             * for everyone (draw_abort_cancel_confirm shows the choice) */
+        {   /* a co-op host is asked first: restart the mission, end it for
+             * everyone, or hand it over (draw_abort_cancel_confirm shows the
+             * choice) */
             sPortCoopAbortAsk = 1;
             sPortCoopAbortAte = 1;
+            sPortCoopAbortSel = 2;      /* HAND OVER, where CONFIRM was */
             return;
         }
         if (sPortCoopAbortAsk)
@@ -3878,12 +3896,76 @@ Gfx *draw_abort_cancel_confirm(Gfx *gdl)
         sPortCoopAbortAsk = 0;  /* unfocused (B) or nobody left to ask about: a plain abort again */
     }
     coopask = sPortCoopAbortAsk;
-    if (coopask)
-    {   /* co-op host: END ALL in the cancel place, HAND OVER in confirm's */
-        sp54 = (s32) "HOST:\n";
-        sp50 = (s32) "HAND OVER\n";
-        sp4C = (s32) "END ALL\n";
+    if (coopask && watch_item_is_actively_selected != 0)
+    {   /* co-op host: RESTART where the label was, END ALL in the cancel
+         * place, HAND OVER in confirm's; left and right step one a push */
+        static const char *const labels[3] = { "RESTART\n", "END ALL\n", "HAND OVER\n" };
+        const s32 xs[3] = { 0x51, (j_text_trigger ? 0xA : 0) + 0x88, (j_text_trigger ? 0xF : 0) + 0xBD };
+        const s32 sx = joyGetStickX(PLAYER_1);
+        const s32 side = (sx >= 0x2E) ? 1 : (sx < -0x2D) ? -1 : 0;
+        s32 dir = 0;
+        s32 i;
+        char help[64];
+        s32 hx = 0x51;
+        s32 hy = (j_text_trigger ? 3 : 0) + (PAL ? 0x4E : 0x4C) + 0x0C;
+
+        if (joyGetButtonsPressedThisFrame(PLAYER_1, 0x111))
+        {
+            dir = 1;
+        }
+        else if (joyGetButtonsPressedThisFrame(PLAYER_1, 0x222))
+        {
+            dir = -1;
+        }
+        else if (side != 0 && side != sPortCoopAbortStick)
+        {
+            dir = side;
+        }
+        sPortCoopAbortStick = side;
+        sPortCoopAbortSel += dir;
+        sPortCoopAbortSel = (sPortCoopAbortSel < 0) ? 0 : (sPortCoopAbortSel > 2) ? 2 : sPortCoopAbortSel;
+        D_800409A4 = (sPortCoopAbortSel == 2);
+        for (i = 0; i < 3; i++)
+        {
+            s32 x = xs[i];
+            s32 y = (j_text_trigger ? 3 : 0) + (PAL ? 0x4E : 0x4C);
+
+            if (i == sPortCoopAbortSel)
+            {
+                gdl = textRenderOutlined(gdl, &x, &y, (char *) labels[i], pFontChars, pFontFile, -1, 0x7000A0, viGetX(), viGetY(), 0, 0);
+            }
+            else
+            {
+                gdl = textRender(gdl, &x, &y, (char *) labels[i], pFontChars, pFontFile, 0xFF00B0, viGetX(), viGetY(), 0, 0);
+            }
+        }
+        if (sPortCoopAbortSel == 2)
+        {
+            snprintf(help, sizeof(help), portTr("%s HOSTS, YOU LEAVE\n"), coopHostAbortNextName());
+        }
+        else if (sPortCoopAbortSel == 1)
+        {
+            snprintf(help, sizeof(help), "EVERYONE BACK TO THE LOBBY\n");
+        }
+        else
+        {
+            snprintf(help, sizeof(help), "EVERYONE STARTS THIS MISSION AGAIN\n");
+        }
+        for (i = 0; help[i] != '\0'; i++)
+        {
+            if (help[i] >= 'a' && help[i] <= 'z')
+            {
+                help[i] -= 'a' - 'A';
+            }
+            else if ((u8) help[i] >= 0x80)
+            {
+                help[i] = '?';
+            }
+        }
+        gdl = textRender(gdl, &hx, &hy, help, pFontChars, pFontFile, 0xA0FFA0F0, viGetX(), viGetY(), 0, 0);
+        return gdl;
     }
+    sPortCoopAbortStick = 0;
 #endif
     sp7C = 0x51;
 

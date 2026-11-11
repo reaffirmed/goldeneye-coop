@@ -3463,3 +3463,15 @@ msgstr "Color predeterminado"
 
 msgid "Colour Blind is on, so you see its colours instead."
 msgstr "Daltonismo está activado, así que ves sus colores en su lugar."
+
+msgid "RESTART"
+msgstr "REINICIAR"
+
+msgid "EVERYONE STARTS THIS MISSION AGAIN"
+msgstr "TODOS EMPIEZAN ESTA MISIÓN DE NUEVO"
+
+msgid "THE HOST RESTARTED THE MISSION"
+msgstr "EL ANFITRIÓN REINICIÓ LA MISIÓN"
+
+msgid "STARTING AGAIN"
+msgstr "EMPEZANDO DE NUEVO"

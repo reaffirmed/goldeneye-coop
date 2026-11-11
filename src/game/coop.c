@@ -622,7 +622,8 @@ static void coopRecvAiSync(CoopAiPkt *p);
 static void coopFollowLeftGun(ChrRecord *chr, s32 slot, s32 item);
 static void coopSendAiSync(void);
 static void coopApplyNote(CoopEvent *ev);
-static void coopApplyEndAll(void);
+static void coopApplyEndAll(s32 restart);
+static void coopRestartTick(void);
 static void coopKeepAlive(void);
 static void coopHoldStart(void);
 static void coopHoldTick(void);
@@ -6678,7 +6679,7 @@ static void coopApplyEvent(CoopEvent *ev)
             coopApplyNote(ev);
             break;
         case COOPEV_ENDALL:
-            coopApplyEndAll();
+            coopApplyEndAll(ev->u.raw[0] == COOPENDALL_RESTART);
             break;
         case COOPEV_PING:
             if (coopInMission())
@@ -9239,6 +9240,7 @@ s32 coopFrontTick(void)
     coopStatsFrontTick();   /* back from a mission: send our stats column */
     coopFlushEvents();
     coopSendHello();
+    coopRestartTick();      /* host: a quick restart's new start */
 
     /* the joiner goes where the host goes, once per host mission */
     if (!coopNetIsHost() && sChan[0].helloSeen && sTick - sChan[0].helloTick < 180
@@ -9955,6 +9957,51 @@ const char *coopHostAbortNextName(void)
     return (p > 0) ? coopPlayerName(p) : "";
 }
 
+/* Quick restart (the watch's Abort, then RESTART): the host ends the
+ * mission for everyone as END ALL does, with COOPENDALL_RESTART in the event,
+ * and starts the same mission again from the debrief as soon as it is up
+ * (coopFrontTick, front.c coopFrontRestart). The joiners end theirs without
+ * the "host ended the mission" screen and follow the host into the new one
+ * as they follow any mission. An older build reads the event as END ALL. */
+static s32 sRestartStage = -1;      /* host: the mission to start again, -1 none */
+
+void coopHostRestart(void)
+{
+    CoopEvent ev;
+
+    if (!coopHostAbortAsks())
+    {
+        return;
+    }
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = COOPEV_ENDALL;
+    ev.u.raw[0] = COOPENDALL_RESTART;
+    coopQueueEvent(&ev);
+    coopFlushEvents();
+    sRestartStage = bossGetStageNum();
+    portConLogf("ge: coop: host restarts the mission (stage %d) for everyone\n", (int) sRestartStage);
+}
+
+/* coopFrontTick, host: the restarted mission, once the debrief is up */
+static void coopRestartTick(void)
+{
+    extern s32 coopFrontRestart(s32 stage);
+
+    if (sRestartStage < 0 || !coopNetIsHost() || coopInMission())
+    {
+        if (sRestartStage >= 0 && !coopNetIsHost())
+        {
+            sRestartStage = -1;     /* no longer the host (it moved on): nothing to start */
+        }
+        return;
+    }
+    if (coopFrontRestart(sRestartStage))
+    {
+        portConLogf("ge: coop: restarting stage %d\n", (int) sRestartStage);
+        sRestartStage = -1;
+    }
+}
+
 /* the answer: handoff 1 gives the mission to the next player and leaves the
  * session; 0 ends it for everyone, who all go back to the lobby. The watch
  * then aborts our own mission as usual. */
@@ -10020,10 +10067,17 @@ static void coopPendingEndTick(void)
     }
 }
 
-static void coopApplyEndAll(void)
+static void coopApplyEndAll(s32 restart)
 {
     if (coopNetIsHost() || !coopInMission())
     {
+        return;
+    }
+    if (restart)
+    {   /* the host starts it again: no error screen, we follow it back in */
+        coopBanner("THE HOST RESTARTED THE MISSION", "STARTING AGAIN");
+        portConLogf("ge: coop: the host restarted the mission\n");
+        sPendingEnd = 1;
         return;
     }
     coopBanner("THE HOST ENDED THE MISSION", "BACK TO THE LOBBY");
