@@ -4647,14 +4647,14 @@ it. Neither found one, so the copy never moved.
 - The joiner, invincible (the cheat) at the bottom of the shaft, logged "fell into the
   Cradle shaft" every tick, because the death never took. coopCradleFallTick now skips an
   invincible player as it does g_PlayerInvincible.
-- Second hunt (202a48a): the floor fallback never fired ("no floor 0 ticks"), so that was
-  not it. A guard the host spawns is mirrored at its spawn spot (3475 -416 -157) and then
-  stood at 3475 -416 318 for about 20 s, while the host's stood at 2673 -543 318, until
-  the host's walked off. The cause isn't pinned down yet. coopGuardsWatch now heals it: a
-  living guard found more than 4 m from the host's newest spot on two checks in a row
-  (a second apart), while synced, has its track logged ("chr N snaps to the host's spot:
-  ... sample k: +ms, x y z"), cut to the newest sample, and is put there with its ground
-  started over (CHRFLAG_INIT). The logged track should show where the stale spot comes
-  from.
+- Second hunt (202a48a): the floor fallback never fired ("no floor 0 ticks"). The guard
+  "standing at 3475 -416 318" turned out to be a misread frame counter: the host's own
+  guard walks pad, then z to 318 (a real corner waypoint), then west to 2673 -543 318, and
+  the joiner's copy was about 3 s at that corner, slightly behind. Not a desync.
+  coopGuardsWatch keeps a safety net anyway: a living guard more than 4 m from the host's
+  newest spot on two checks in a row (a second apart), while synced, has its track logged
+  ("chr N snaps to the host's spot: ... sample k: +ms, x y z"), cut to the newest sample,
+  and is put there with its ground started over (CHRFLAG_INIT). In four runs (Cradle x2,
+  Facility, Dam, joiner on netsim 60:20:2) it never fired, nor on guards walking normally.
 - Capitals drop accents in port text (langUpper, "ANFITRION"), as the translators wrote
   their own capitals; left as is.
