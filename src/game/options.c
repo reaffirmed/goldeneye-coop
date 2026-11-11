@@ -5101,6 +5101,12 @@ Gfx *draw_options_labels(Gfx *gdl, s32 x, s32 y, char *text, u32 colour, s32 out
 
     gDPSetRenderMode(gdl++, G_RM_AA_XLU_SURF, G_RM_AA_XLU_SURF2);
 
+#ifndef TARGET_N64
+    /* the clip box a little taller than the measured line: Q and q reach a
+     * pixel below the other letters and were dropped whole from every row
+     * (Spanish "bloqueo", "izquierda"), while Rare's own labels have no Q */
+    textheight += 2;
+#endif
     if (!outlined)
     {
         gdl = textRender(gdl, &textx, &y, text, chars, font, colour, textwidth, textheight, 0, 10);
