@@ -130,7 +130,7 @@ static s32 sFeedCount;
 
 static struct
 {
-    char text[112];
+    char text[176];
     char key[24];   /* coopFeedToastKeyed: a newer toast with this key takes its place */
     s32 player;     /* -1 a note from the game, COOPTOAST_ALERT session news */
     u32 tick;
@@ -880,7 +880,7 @@ static const char *coopToastWords(const char *in, s32 avail, char *out, s32 cap)
     {
         if (in[n] == ' ' || in[n] == '\0')
         {
-            char try[112];
+            char try[176];
 
             snprintf(try, sizeof(try), "%.*s", (int) n, in);
             coopFeedText(out, cap, try);
@@ -957,7 +957,7 @@ static s32 coopToastFlow(CoopToastPiece *pc, s32 n, s32 *row, s32 *x, const char
  * to maxw; returns the pieces, *rows the rows they take */
 static s32 coopToastLayout(const char *toast, s32 maxw, CoopToastPiece *pc, s32 *rows)
 {
-    char lead[112], rest[112];
+    char lead[176], rest[176];
     const char *bar = strchr(toast, '|');
     s32 row = 0, x = 0;
     s32 n;

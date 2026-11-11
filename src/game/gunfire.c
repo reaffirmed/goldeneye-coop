@@ -171,6 +171,10 @@ extern f32 D_80053DDC;
 /*
 * Address: 0x7F05FB64
 */
+#ifndef TARGET_N64
+static void gunRocketFaceAim(Mtxf *mtx, coord3d *aimdir);
+#endif
+
 void gunFireTankShell(s32 handnum)
 {
     WeaponObjRecord *obj;
@@ -294,6 +298,12 @@ void gunFireTankShell(s32 handnum)
     shellmtx.m[3][0] = 0.0f;
     shellmtx.m[3][1] = 0.0f;
     shellmtx.m[3][2] = 0.0f;
+#ifndef TARGET_N64
+    if (weaponid == ITEM_ROCKETLAUNCH)
+    {
+        gunRocketFaceAim(&shellmtx, &aimdir);   /* the rocket points where it flies */
+    }
+#endif
 
     if (hand->rocket != NULL)
     {
@@ -626,6 +636,84 @@ static f32 gunWeaponFovPlaceWorldClamped(s32 handnum, coord3d *pos)
     pos->y += (to.y - pos->y) * frac;
     pos->z += (to.z - pos->z) * frac;
     return pos->y - oldy;
+}
+
+/**
+ * A rocket takes the launcher's turn in the hand (throw_item_pos_related) but
+ * flies along the aim, and the two part: the launcher is drawn off to the
+ * right of the crosshair, and gunWeaponFovLaunch turns the aim again toward
+ * the drawn gun's line. The rocket flew a little sideways, which the testers
+ * saw as a crooked rocket (and so did everyone it was sent to). Turn the
+ * matrix the least that brings its axis nearest the aim onto the aim. Never
+ * during a demo, which must replay as recorded.
+ */
+static void gunRocketFaceAim(Mtxf *mtx, coord3d *aimdir)
+{
+    extern s32 is_ramrom_flag;
+    extern s32 g_ramromPlayBackFlag;
+    f32 d[3], f[3], v[3], best = 0.0f, len, c, k;
+    s32 i, j, axis = -1;
+
+    if (is_ramrom_flag != 0 || g_ramromPlayBackFlag != 0)
+    {
+        return;
+    }
+    len = sqrtf(aimdir->x * aimdir->x + aimdir->y * aimdir->y + aimdir->z * aimdir->z);
+    if (!(len > 1.0e-4f))
+    {
+        return;
+    }
+    d[0] = aimdir->x / len;
+    d[1] = aimdir->y / len;
+    d[2] = aimdir->z / len;
+    for (i = 0; i < 3; i++)
+    {   /* the model's axis that points most along the aim, either way */
+        f32 l = sqrtf(mtx->m[i][0] * mtx->m[i][0] + mtx->m[i][1] * mtx->m[i][1] + mtx->m[i][2] * mtx->m[i][2]);
+        f32 dot;
+
+        if (!(l > 1.0e-6f))
+        {
+            return;
+        }
+        dot = (mtx->m[i][0] * d[0] + mtx->m[i][1] * d[1] + mtx->m[i][2] * d[2]) / l;
+        if (dot * dot > best * best)
+        {
+            best = dot;
+            axis = i;
+            for (j = 0; j < 3; j++)
+            {
+                f[j] = (dot < 0.0f ? -mtx->m[i][j] : mtx->m[i][j]) / l;
+            }
+        }
+    }
+    if (axis < 0 || (best > -0.7f && best < 0.7f))
+    {
+        return;     /* no axis near the aim: not a hand we know, leave it */
+    }
+    /* Rodrigues: v = f x d, c = f . d; R = I + [v] + [v]^2 / (1 + c) */
+    v[0] = f[1] * d[2] - f[2] * d[1];
+    v[1] = f[2] * d[0] - f[0] * d[2];
+    v[2] = f[0] * d[1] - f[1] * d[0];
+    c = f[0] * d[0] + f[1] * d[1] + f[2] * d[2];
+    k = 1.0f / (1.0f + c);
+    for (i = 0; i < 3; i++)
+    {
+        f32 r[3], vr[3], vvr[3];
+
+        r[0] = mtx->m[i][0];
+        r[1] = mtx->m[i][1];
+        r[2] = mtx->m[i][2];
+        vr[0] = v[1] * r[2] - v[2] * r[1];
+        vr[1] = v[2] * r[0] - v[0] * r[2];
+        vr[2] = v[0] * r[1] - v[1] * r[0];
+        vvr[0] = v[1] * vr[2] - v[2] * vr[1];
+        vvr[1] = v[2] * vr[0] - v[0] * vr[2];
+        vvr[2] = v[0] * vr[1] - v[1] * vr[0];
+        for (j = 0; j < 3; j++)
+        {
+            mtx->m[i][j] = r[j] + vr[j] + vvr[j] * k;
+        }
+    }
 }
 
 /**

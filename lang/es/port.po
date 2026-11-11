@@ -3330,6 +3330,9 @@ msgstr "%s ha visto un enemigo."
 msgid "%s pinged a spot."
 msgstr "%s ha señalado un sitio."
 
+msgid "%s pinged someone."
+msgstr "%s ha señalado a alguien."
+
 msgid "You revived %s."
 msgstr "Has reanimado a %s."
 

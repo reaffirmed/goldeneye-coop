@@ -5,7 +5,11 @@
  * crosshair for every player in the mission: a diamond in the pinger's colour
  * with their name and the distance, and a square on the radar (coop_hud.c).
  * A guard under the crosshair is pinged as an enemy, and the marker follows
- * that guard while it lives. A ping lasts COOP_PING_LIFE ticks; each player
+ * that guard while it lives. A civilian, scientist or ally (unarmed, a
+ * civilian casualty, or Natalya) is pinged as a person instead: followed the
+ * same way, in the pinger's colour, not red. Where the walls and floors give
+ * no hit but the floor tiles do (the open roads of Streets), the ping goes on
+ * the floor where the aim meets it. A ping lasts COOP_PING_LIFE ticks; each player
  * has one at a time, so a new ping moves the old one.
  *
  * The aim is traced like a bullet (chrprop.c chraiDefaultWeaponFireHandler):
@@ -61,13 +65,61 @@ static s32 sTicks;
 
 /* ---- tracing the aim --------------------------------------------------- */
 
+/* Where the aim, going down, meets the floor we can walk on: stepped along
+ * the floor tiles from under our eyes, up to COOPPING_FLOOR_RANGE, until the
+ * line is below the floor (the point between the two steps) or leaves the
+ * floor (a wall or a drop: 0). The walls test alone found nothing on the open
+ * roads of Streets, so no spot could be pinged there (testers' report). */
+#define COOPPING_FLOOR_STEP  25.0f
+#define COOPPING_FLOOR_RANGE 10000.0f   /* 100 m */
+static s32 coopPingTraceFloor(PropRecord *bond, coord3d *from, coord3d *dir, coord3d *hit, s32 *room)
+{
+    StandTile *tile = bond->stan;
+    coord3d prev = *from;
+    f32 prevgap, gap, t;
+
+    if (tile == NULL || dir->y > -0.01f
+        || !walkTilesBetweenPoints_NoCallback(&tile, bond->pos.x, bond->pos.z, from->x, from->z) || tile == NULL)
+    {
+        return 0;
+    }
+    prevgap = from->y - bondviewYPositionRelated(tile, from->x, from->z);
+    for (t = COOPPING_FLOOR_STEP; t <= COOPPING_FLOOR_RANGE; t += COOPPING_FLOOR_STEP)
+    {
+        coord3d p;
+
+        p.x = from->x + dir->x * t;
+        p.y = from->y + dir->y * t;
+        p.z = from->z + dir->z * t;
+        if (!walkTilesBetweenPoints_NoCallback(&tile, prev.x, prev.z, p.x, p.z) || tile == NULL)
+        {
+            return 0;
+        }
+        gap = p.y - bondviewYPositionRelated(tile, p.x, p.z);
+        if (gap <= 0.0f)
+        {
+            f32 k = (prevgap > 0.0f) ? prevgap / (prevgap - gap) : 0.0f;
+
+            hit->x = prev.x + (p.x - prev.x) * k;
+            hit->z = prev.z + (p.z - prev.z) * k;
+            hit->y = bondviewYPositionRelated(tile, hit->x, hit->z);
+            *room = getTileRoom(tile);
+            return 1;
+        }
+        prev = p;
+        prevgap = gap;
+    }
+    return 0;
+}
+
 /* the nearest wall, floor or ceiling along from + dir; 1 and *hitpos, *room when there is one */
 static s32 coopPingTraceBg(PropRecord *bond, coord3d *from, coord3d *dir, coord3d *hitpos, s32 *room)
 {
     StandTile *tile = bond->stan;
-    coord3d dest, end;
+    coord3d dest, end, floorhit;
     s32 rooms[MAXROOMCOUNT];
     s32 n, i, found = 0;
+    s32 floorroom = -1;
     f32 best = 1.0e30f;
     f32 wscale = get_room_data_float2();
 
@@ -115,7 +167,38 @@ static s32 coopPingTraceBg(PropRecord *bond, coord3d *from, coord3d *dir, coord3
             found = 1;
         }
     }
+    if (coopPingTraceFloor(bond, from, dir, &floorhit, &floorroom))
+    {   /* the floor we walk on, where the aim meets it, if nearer */
+        f32 dx = floorhit.x - from->x, dy = floorhit.y - from->y, dz = floorhit.z - from->z;
+        f32 d = dx * dx + dy * dy + dz * dz;
+
+        if (!found || d < best)
+        {
+            if (!found)
+            {
+                portConLogf("ge: coop: ping: on the floor tiles (the walls test found nothing)\n");
+            }
+            *hitpos = floorhit;
+            *room = floorroom;
+            found = 1;
+        }
+    }
     return found;
+}
+
+/* someone not to shoot: a civilian casualty if killed, Natalya, or anyone
+ * with no gun in either hand (scientists, hostages, the civilians on Streets) */
+static s32 coopPingIsPerson(ChrRecord *chr)
+{
+    if (chr->chrflags & CHRFLAG_COUNT_DEATH_AS_CIVILIAN)
+    {
+        return 1;
+    }
+    if (chr->bodynum == BODY_Natalya_Skirt || chr->bodynum == BODY_Natalya_Jungle_Fatigues)
+    {
+        return 1;
+    }
+    return chrGetEquippedWeaponProp(chr, GUNRIGHT) == NULL && chrGetEquippedWeaponProp(chr, GUNLEFT) == NULL;
 }
 
 /* how far along from + dir it passes through a guard's cylinder; -1 if it misses */
@@ -260,7 +343,7 @@ void coopPingPress(void)
     ping.room = (s16) room;
     if (chr != NULL)
     {
-        ping.kind = COOPPING_ENEMY;
+        ping.kind = coopPingIsPerson(chr) ? COOPPING_PERSON : COOPPING_ENEMY;
         ping.chrnum = chr->chrnum;
         ping.pos[0] = chr->prop->pos.x;
         ping.pos[1] = chr->ground + COOPPING_CHR_HEIGHT * 0.5f;
@@ -285,7 +368,7 @@ void coopPingPress(void)
         return;
     }
     portConLogf("ge: coop: ping: %s at %.0f %.0f %.0f (room %d, chr %d), we are at %.0f %.0f %.0f\n",
-                ping.kind == COOPPING_ENEMY ? "enemy" : "spot", ping.pos[0], ping.pos[1], ping.pos[2], ping.room,
+                ping.kind == COOPPING_ENEMY ? "enemy" : ping.kind == COOPPING_PERSON ? "person" : "spot", ping.pos[0], ping.pos[1], ping.pos[2], ping.room,
                 ping.chrnum, bond->pos.x, bond->pos.y, bond->pos.z);
     if (coopVersus())
     {   /* only our side sees it */
@@ -340,7 +423,7 @@ void coopPingReceive(CoopPing *ping, s32 from)
         coopAudioPing(&at, from == coopLobbySelfPlayer());
     }
     portConLogf("ge: coop: ping from player %d: %s at %.0f %.0f %.0f\n", from + 1,
-                ping->kind == COOPPING_ENEMY ? "enemy" : "spot", ping->pos[0], ping->pos[1], ping->pos[2]);
+                ping->kind == COOPPING_ENEMY ? "enemy" : ping->kind == COOPPING_PERSON ? "person" : "spot", ping->pos[0], ping->pos[1], ping->pos[2]);
     if (from == coopLobbySelfPlayer())
     {
         return;
@@ -350,7 +433,8 @@ void coopPingReceive(CoopPing *ping, s32 from)
         name[k++] = ((u8) *n >= 0x80 || (u8) *n < 0x20) ? '?' : *n;
     }
     name[k] = '\0';
-    snprintf(msg, sizeof(msg), (ping->kind == COOPPING_ENEMY) ? portTr("%s spotted an enemy.\n") : portTr("%s pinged a spot.\n"), name);
+    snprintf(msg, sizeof(msg), (ping->kind == COOPPING_ENEMY) ? portTr("%s spotted an enemy.\n")
+             : (ping->kind == COOPPING_PERSON) ? portTr("%s pinged someone.\n") : portTr("%s pinged a spot.\n"), name);
     hudmsgBottomShow(msg);
 }
 
@@ -379,7 +463,7 @@ void coopPingTick(void)
             s->live = 0;
             continue;
         }
-        if (s->ping.kind == COOPPING_ENEMY && s->ping.chrnum >= 0)
+        if ((s->ping.kind == COOPPING_ENEMY || s->ping.kind == COOPPING_PERSON) && s->ping.chrnum >= 0)
         {
             ChrRecord *chr = chrFindByLiteralId(s->ping.chrnum);
 

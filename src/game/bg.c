@@ -6974,6 +6974,45 @@ s32 sub_GAME_7F0B9F14(s32 portalnum, coord3d *pos1, coord3d *pos2)
 }
 
 
+#ifndef TARGET_N64
+/* coop free cameras (coop_spectate.c coopFreeCamStep): the room a point that
+ * moved from..to is in now, from the room it was in, crossing every open
+ * portal the segment goes through in turn (the walk bgRoomVisibilityRelated
+ * does from the feet to the eyes, for any segment) */
+s32 bgRoomAlongSegment(s32 room, coord3d *from, coord3d *to)
+{
+    s32 depth, portalnum, lastportal = -1;
+
+    if (room < 0 || g_BgPortals == NULL
+        || (from->f[0] == to->f[0] && from->f[1] == to->f[1] && from->f[2] == to->f[2]))
+    {
+        return room;
+    }
+    for (depth = 0; depth < 16; depth++)
+    {
+        for (portalnum = 0; g_BgPortals[portalnum].offset_portal != NULL; portalnum++)
+        {
+            if (D_800443C4[portalnum] != 0 || portalnum == lastportal)
+            {
+                continue;
+            }
+            if ((room == g_BgPortals[portalnum].connectedRoom1 || room == g_BgPortals[portalnum].connectedRoom2)
+                && sub_GAME_7F0B9F14(portalnum, from, to))
+            {
+                lastportal = portalnum;
+                room = (room ^ g_BgPortals[portalnum].connectedRoom1) ^ g_BgPortals[portalnum].connectedRoom2;
+                break;
+            }
+        }
+        if (g_BgPortals[portalnum].offset_portal == NULL)
+        {
+            break;
+        }
+    }
+    return room;
+}
+#endif
+
 bool bgIsBboxOverlapping(coord3d *portalbbmin, coord3d *portalbbmax, coord3d *propbbmin, coord3d *propbbmax)
 {
     s32 i;

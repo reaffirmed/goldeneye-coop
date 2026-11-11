@@ -4554,3 +4554,57 @@ Rig: Linux i686, two copies on one machine over the mock Steam, Dam, joiner kill
   its own PP7 and 7 | 93 rounds, as before the death.
 - Not covered: dual guns (the harness gives one), the rocket launcher, 3 or 4 players, a
   real pad, an older build's partner (by construction: viewaim 0 falls back).
+
+## Player test feedback: free camera, spectating, voice, Spanish objectives, pings, Egyptian, rockets (2026-11-11, COOP_VERSION stays 17)
+
+Fixes from a tester group's report (Goldeneye COOP Bugtest.docx, in Spanish).
+
+- Free camera stopped drawing the level after a while (coop_spectate.c coopFreeCamStep,
+  photo mode too). It reported the room of the floor tile it last had: flown up a storey,
+  the room stayed the one below, and out past the walls it stayed the last room left
+  however far it flew, so the portals showed nothing until the view went back to a player.
+  Now: over a floor, that floor's room walked up through the portals to the camera
+  (bg.c bgRoomAlongSegment, the walk bgRoomVisibilityRelated does from the feet to the
+  eyes); over the void, the room it was in walked along each step through any portal it
+  crossed. pos3 is the camera itself, so the draw's own walk adds nothing.
+- Spectating in first person drew each of the partner's shots twice: our hands' tracer
+  and one from their hidden body's gun just above the camera (top of the screen).
+  coop_look.c coopLookPlayShot gives a hidden body (CHRFLAG_HIDDEN) no tracer.
+- A partner who is down talked from their body. coop_voice.c plays a down partner's voice
+  in the middle at full volume, as in the lobby.
+- Spanish objectives were cut off: the patch keeps them on two lines and the co-op text
+  stopped at the first break ("A. NEUTRALIZAR TODAS LAS"). coopFlattenLines joins the lines
+  for the objective list, the "completed" toast and the results screen. The list also
+  translates its "- DONE" / "- FAILED", wraps to 6 lines (was 3) and its buffers grew;
+  toasts hold 176 characters (was 112).
+- Character lines (Rare's top message bar, Classic captions) sat over the partner rows,
+  the TALK marker, the radar and the objectives. bondview2.c hudmsgTopBarBottom gives the
+  bar's bottom on screen, and coop_hud.c moves those down below it while it shows
+  (coopHudTopMsgPush, eased over 120 ms), each in its own scale (Text Size, HUD Scale).
+- Name tags far away: the dim behind a wall now changes only after 3 looks in a row agree
+  (300 ms; long lines past railings came and went and the tag flickered), and the tag's
+  scale pivot is placed to a quarter pixel (a small far tag shook by whole pixels).
+- The remote mines' detonator (ITEM_TRIGGER) is on the weapon menu's explosives slot.
+  It was left off, so with the menu on it was only taken when the last mine went down.
+- Pings: Streets' open roads gave the walls test no hit, so no spot could be pinged there.
+  coop_ping.c coopPingTraceFloor also steps along the floor tiles from under our eyes (25
+  cm steps, up to 100 m) to where the aim, going down, meets the floor; the nearer of the
+  two wins. A chr that is a civilian casualty if killed, Natalya, or has no gun in either
+  hand is pinged as COOPPING_PERSON: followed like an enemy, drawn in the pinger's colour,
+  "X pinged someone." (Spanish in port.po). An older build shows it as a spot.
+- Egyptian's gold gun glass stuck with the players apart: global list 0x1001 starts over
+  once "Bond" is in the room with pad 0x45, and at its start shuts the glass again as soon
+  as "Bond" is in the puzzle room (pad 0x97). Either player counts for both, so with one
+  player at the case and the other out by pad 0x45 the list went round every tick (the
+  glass's sound, then shut again). coop.c coopScriptRoomHold: on the host in Egyptian, that
+  pad 0x45 check waits while any player is still in the puzzle room. Log: "egyptian: a
+  player is still at the gold gun case".
+- Rockets looked crooked (gunfire.c gunRocketFaceAim): a rocket took the launcher's turn in
+  the hand but flew along the aim, which gunWeaponFovLaunch turns toward the drawn gun's
+  line. The matrix is turned the least that brings its axis nearest the aim onto the aim
+  (not in demos). Partners and opponents get the turned matrix in the launch message.
+
+Not changed: Cradle (guards out of place for the joiner) and Aztec (a guard that couldn't
+die and did no harm) need logs or a repro; Statue's ending with Valentin as the character
+needs a closer look; Aztec's guards circling before a corner is believed to be the original
+game; a quick restart and the multiplayer suggestions are feature requests.

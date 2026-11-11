@@ -178,7 +178,12 @@ static Gfx *scrMissionCard(Gfx *gdl, u8 arrived, s32 secs, s32 a)
         {
             continue;
         }
-        scrText(body, sizeof(body), (const char *) get_text_for_objective(i));
+        {
+            char flat[192];
+
+            coopFlattenLines(flat, sizeof(flat), (const char *) get_text_for_objective(i));   /* a translation's on two lines */
+            scrText(body, sizeof(body), flat);
+        }
         body[strlen(body) - 1] = '\0';
         snprintf(line, sizeof(line), "%c. %s\n", 'A' + letter, body);
         while (scrWidth(line) > colw && strlen(body) > 4)

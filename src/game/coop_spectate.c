@@ -47,6 +47,7 @@
 #include "player.h"
 #include "joy.h"
 #include "stan.h"
+#include "bg.h"
 #include <bondgame.h>
 #include "coop.h"
 #include "bondview.h"
@@ -85,7 +86,7 @@ static s32 sEndAsk;            /* ticks left to press Start again and end the mi
 /* the free camera: the same yaw convention as a partner's view */
 static s32 sFree;
 static coord3d sFPos, sFPos3;
-static StandTile *sFTile;
+static s32 sFRoom;
 static f32 sFYaw, sFPitch;
 static f32 sLookDx, sLookDy, sLookYaw, sLookPitch;     /* this tick's look (bondview2.c coopSpectateMouse) */
 static s32 sLookDirect;
@@ -155,40 +156,50 @@ static void coopSpectateFreeStart(void)
     sFree = 1;
     sFPos = sPos;
     sFPos3 = sPos3;
-    sFTile = v.stan;
+    coopFreeCamStart(&sFPos, &sFPos3, &sFRoom, v.stan->room);
     sFYaw = sYaw;
     sFPitch = sPitch;
     portConLogf("ge: coop: spectate: free camera at %.0f %.0f %.0f\n", sFPos.f[0], sFPos.f[1], sFPos.f[2]);
 }
 
 /* A free camera's step, through walls, floors and ceilings (photo mode's too).
- * Nothing stops it; the floor tile under it is only followed for the room the
- * level is drawn from: along the floor while the floor goes on, else whatever
- * floor is below the new spot, else (over the void, out past the walls) the
- * last one, until it comes back over floor. *pos3 is that floor under it, for
- * the portal walk. The camera used to slide only over floor it could walk to
- * and stay 15 cm to 4 m above it, so it caught on every wall and ledge. */
-void coopFreeCamStep(coord3d *pos, coord3d *pos3, StandTile **tile, const coord3d *want)
+ * Nothing stops it. *room is the room it is in, which the level is drawn
+ * from: over a floor, the floor's room walked up through the portals to the
+ * camera (as a player's own view walks from the feet to the eyes); over the
+ * void (out past the walls, under the level), the room it was in walked along
+ * the step through any portal it crossed. *pos3 is the camera itself, so the
+ * draw's own walk from the feet adds nothing.
+ * It used to follow the floor tile it had and report that tile's room: flown
+ * up a storey, the room stayed the one below, and out past the walls it stayed
+ * the last room it left however far it flew. Seen from the wrong room the
+ * portals showed nothing, so after a while the level stopped drawing until the
+ * camera went back to a player (the testers' report). */
+void coopFreeCamStep(coord3d *pos, coord3d *pos3, s32 *room, const coord3d *want)
 {
-    StandTile *t = *tile;
+    coord3d probe = *want;
+    coord3d from = *pos;
+    StandTile *t = stanFindTileBelowPos(&probe, NULL, NULL);
 
-    if (t == NULL || !walkTilesBetweenPoints_NoCallback(&t, pos->f[0], pos->f[2], want->f[0], want->f[2]) || t == NULL
-        || want->f[1] < bondviewYPositionRelated(t, want->f[0], want->f[2]))
-    {   /* off this floor, or gone down through it */
-        coord3d probe = *want;
-
-        t = stanFindTileBelowPos(&probe, NULL, NULL);
-    }
-    if (t != NULL)
-    {
-        *tile = t;
-    }
     *pos = *want;
     *pos3 = *want;
-    if (*tile != NULL)
+    if (t != NULL)
     {
-        pos3->f[1] = bondviewYPositionRelated(*tile, want->f[0], want->f[2]);
+        coord3d floor = *want;
+
+        floor.f[1] = bondviewYPositionRelated(t, want->f[0], want->f[2]);
+        *room = bgRoomAlongSegment(t->room, &floor, pos);
     }
+    else
+    {
+        *room = bgRoomAlongSegment(*room, &from, pos);
+    }
+}
+
+/* where a free camera starts: at a view whose feet are on a floor in room */
+void coopFreeCamStart(coord3d *pos, coord3d *pos3, s32 *room, s32 feetroom)
+{
+    *room = bgRoomAlongSegment(feetroom, pos3, pos);
+    *pos3 = *pos;
 }
 
 /* the free camera flies the way it looks, through anything (coopFreeCamStep) */
@@ -203,7 +214,7 @@ static void coopSpectateFreeMove(f32 fwd, f32 side)
     want.f[0] += (sy * cp * fwd - cy * side) * FREE_SPEED;
     want.f[1] += sp * fwd * FREE_SPEED;
     want.f[2] += (cy * cp * fwd + sy * side) * FREE_SPEED;
-    coopFreeCamStep(&sFPos, &sFPos3, &sFTile, &want);
+    coopFreeCamStep(&sFPos, &sFPos3, &sFRoom, &want);
 }
 
 /* GE_COOP_TESTFREECAM=<s>: <s> seconds into watching, free the camera, back
@@ -507,7 +518,7 @@ s32 coopSpectateRoom(u8 *room)
     {
         return 0;
     }
-    *room = (sFree && sFTile != NULL) ? sFTile->room : sRoom;
+    *room = sFree ? (u8) sFRoom : sRoom;
     return 1;
 }
 

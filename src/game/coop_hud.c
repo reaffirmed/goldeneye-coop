@@ -93,7 +93,7 @@ static void coopHudText(char *out, s32 cap, const char *in)
 /* cut a line (ending in '\n') with "..." so it is no wider than maxw */
 static void coopHudFit(char *text, s32 maxw)
 {
-    char orig[128];
+    char orig[224];
     s32 th = 0, tw = 0;
     s32 k;
 
@@ -179,6 +179,55 @@ static u32 coopHudNowMs(void)
     return (u32) (osGetTime() / 46875ull);
 }
 
+/* Rare's top message (a character's line with Classic captions) is a dark bar
+ * across the top of the screen. The partner rows, our TALK marker, the radar
+ * and the objectives sat under its text (testers' report): while it shows,
+ * they move down below it, easing over COOP_TOPMSG_MS. */
+#define COOP_TOPMSG_MS 120.0f
+extern s32 hudmsgTopBarBottom(void);    /* bondview2.c: the bar's bottom on screen, 0 none */
+static f32 sTopMsgB;        /* eased: pixels below the view's top that are the bar's */
+static u32 sTopMsgMs;
+
+/* once a frame, before the top elements */
+static void coopHudTopMsgTick(void)
+{
+    const u32 now = coopHudNowMs();
+    const s32 b = hudmsgTopBarBottom();
+    const f32 want = (b > 0) ? (f32) (b - viGetViewTop() + 2) : 0.0f;
+    f32 t = (f32) (now - sTopMsgMs) / COOP_TOPMSG_MS;
+
+    if (sTopMsgMs == 0 || now - sTopMsgMs > 500u)
+    {
+        t = 1.0f;   /* the first frame, or back after a while: no slide */
+    }
+    sTopMsgMs = now;
+    sTopMsgB += (want - sTopMsgB) * ((t > 1.0f) ? 1.0f : t);
+    if (want == 0.0f && sTopMsgB < 0.5f)
+    {
+        sTopMsgB = 0.0f;
+    }
+}
+
+/* how far an element whose top is o below the view's top, drawn scaled by s
+ * about the view's top, moves down (in its own units) to clear the bar */
+static s32 coopHudTopMsgPush(s32 o, f32 s)
+{
+    f32 need;
+
+    if (sTopMsgB <= 0.0f || s <= 0.0f)
+    {
+        return 0;
+    }
+    need = sTopMsgB / s - (f32) o;
+    return (need > 0.0f) ? (s32) (need + 0.999f) : 0;
+}
+
+/* HUD Scale's half size, which portHudScaleBegin draws at */
+static f32 coopHudScaleNow(void)
+{
+    return portHudScaleOn() ? 0.5f : 1.0f;
+}
+
 /* A partner behind a wall: their tag goes darker and fainter, so it reads as
  * "over there, out of sight". Looked up every COOP_TAG_LOOK_MS per partner:
  * hidden when their room wasn't drawn this frame (a wall or a shut door
@@ -195,8 +244,12 @@ static struct
     u32 looked;     /* wall clock of the last look */
     u32 ms;         /* of the last ease */
     s32 hidden;
+    s32 flips;      /* looks in a row that disagreed with `hidden` */
     f32 dim;        /* 0 in sight .. 1 hidden, eased */
 } sTagSight[COOP_MAX_PLAYERS];
+#define COOP_TAG_FLIPS 3    /* looks in a row it takes to dim or brighten a tag: far away,
+                             * the lines past railings and beams came and went, and
+                             * the tag flickered (testers' report) */
 
 /* 1 when the level's walls cut the line from `from` to `to` in a room on screen
  * (or ours). The test can report a wall past `to` along the same line, so a
@@ -275,6 +328,23 @@ static f32 coopHudTagDim(CoopHudPartner *p)
         if (now - sTagSight[k].ms > 500u)
         {
             sTagSight[k].dim = hidden ? 1.0f : 0.0f;   /* not drawn for a while: no easing from stale */
+            sTagSight[k].flips = COOP_TAG_FLIPS;
+        }
+        else if (hidden != sTagSight[k].hidden)
+        {
+            sTagSight[k].flips++;
+        }
+        else
+        {
+            sTagSight[k].flips = 0;
+        }
+        if (sTagSight[k].flips < COOP_TAG_FLIPS)
+        {
+            hidden = sTagSight[k].hidden;   /* not for long enough yet */
+        }
+        else
+        {
+            sTagSight[k].flips = 0;
         }
         if (hidden != sTagSight[k].hidden)
         {
@@ -514,7 +584,9 @@ static Gfx *coopHudNameTag(Gfx *gdl, CoopHudPartner *p)
     }
     gdl = microcode_constructor(gdl);
     {
-        s32 x4 = px * 4, y4 = py * 4;
+        /* the pivot to a quarter pixel: a far tag is drawn small, and its
+         * whole-pixel steps showed as a shake */
+        s32 x4 = (s32) (s.f[0] * 4.0f + 0.5f), y4 = (s32) (s.f[1] * 4.0f + 0.5f);
 
         x4 = (x4 < 0) ? 0 : (x4 > 0xFFE) ? 0xFFE : x4;
         y4 = (y4 < 0) ? 0 : (y4 > 0xFFE) ? 0xFFE : y4;
@@ -703,7 +775,7 @@ static Gfx *coopHudRadar(Gfx *gdl)
     s32 i;
     PropRecord *self = g_CurrentPlayer->prop;
     s32 left = (viGetViewLeft() + viGetViewWidth()) - COOP_RADAR_RIGHT;
-    s32 top = viGetViewTop() + COOP_RADAR_TOP;
+    s32 top = viGetViewTop() + COOP_RADAR_TOP + coopHudTopMsgPush(COOP_RADAR_TOP - 0x11, coopHudScaleNow());
     f32 dx, dz, ang, r;
     s32 colour;
     s32 px, py;
@@ -866,6 +938,7 @@ static Gfx *coopHudPartnerStatus(Gfx *gdl, CoopHudPartner *p, s32 row)
     {
         y += 0x0A;  /* below the FPS counter (bondview2.c), which sits over the name's first letters */
     }
+    y += coopHudTopMsgPush(0x0E + (portVideoShowFps() ? 0x0A : 0), coopTextScaleNow());   /* below a character's line */
 
     if (hudAnchorsToEdges())
     {
@@ -970,7 +1043,7 @@ static Gfx *coopHudSelfVoice(Gfx *gdl)
 
     textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
     x = viGetViewLeft() + viGetViewWidth() / 2 - (tw + 14) / 2;
-    y = viGetViewTop() + 0x0E;
+    y = viGetViewTop() + 0x0E + coopHudTopMsgPush(0x0E, coopHudScaleNow());
     gdl = portHudScaleBegin(gdl, (f32) viGetViewLeft(), (f32) viGetViewTop());
     gdl = microcode_constructor(gdl);
     gdl = coopHudSpeaker(gdl, x, y + 1, coopHudPlayerColour(coopExtSelf()), coopVoiceSelfTalking(), 0);
@@ -1202,7 +1275,7 @@ static Gfx *coopHudSpectating(Gfx *gdl, s32 mode, s32 who)
     }
     textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
     x = viGetViewLeft() + (viGetViewWidth() - tw) / 2;
-    y = viGetViewTop() + 0x18;
+    y = viGetViewTop() + 0x18 + coopHudTopMsgPush(0x18, 1.0f);
     gdl = microcode_constructor(gdl);
     gdl = coopHudPrint(gdl, x, y, text, (mode == 2) ? COOP_HUD_COL_TEXT : coopHudPlayerColour(who));
     textMeasure(&th, &tw, keys, ptrFontBankGothicChars, ptrFontBankGothic, 0);
@@ -1212,6 +1285,7 @@ static Gfx *coopHudSpectating(Gfx *gdl, s32 mode, s32 who)
 }
 
 /* the mission's objectives, right-aligned in the top-right corner */
+#define OBJ_LINES 6
 static Gfx *coopHudObjectives(Gfx *gdl, s32 below)
 {
     const s32 right = viGetViewLeft() + viGetViewWidth() - 0x10;
@@ -1233,9 +1307,10 @@ static Gfx *coopHudObjectives(Gfx *gdl, s32 below)
     for (i = 0; i < objectiveGetCount() && i < OBJECTIVES_MAX; i++)
     {
         const char *raw;
-        char body[80];
-        char text[112];
+        char body[160];
+        char text[224];
         const char *mark;
+        char markbuf[32];
         u32 colour = COOP_HUD_COL_TEXT;
         s32 th = 0, tw = 0;
         OBJECTIVESTATUS st;
@@ -1246,28 +1321,36 @@ static Gfx *coopHudObjectives(Gfx *gdl, s32 below)
         }
         st = get_status_of_objective(i);
         raw = (const char *) get_text_for_objective(i);
-        coopHudText(body, sizeof(body), raw);
+        {
+            char flat[192];
+
+            coopFlattenLines(flat, sizeof(flat), raw);   /* a translation's objective on two lines */
+            coopHudText(body, sizeof(body), flat);
+        }
         body[strlen(body) - 1] = '\0';
         mark = "";
         if (st == OBJECTIVESTATUS_COMPLETE)
         {
-            mark = " - DONE";
+            snprintf(markbuf, sizeof(markbuf), " %s", portTr("- DONE"));
+            mark = markbuf;
             colour = COOP_HUD_COL_DONE;
         }
         else if (st == OBJECTIVESTATUS_FAILED)
         {
-            mark = " - FAILED";
+            snprintf(markbuf, sizeof(markbuf), " %s", portTr("- FAILED"));
+            mark = markbuf;
             colour = COOP_HUD_COL_FAIL;
         }
         snprintf(text, sizeof(text), "%c. %s%s", 'A' + letter, body, mark);
         letter++;
-        {   /* word-wrapped, right-aligned, at most three lines */
+        {   /* word-wrapped, right-aligned, at most OBJ_LINES lines: Spanish
+             * objectives ran past three and lost their end ("- HECHO") */
             const char *w = text;
             s32 lines = 0;
 
-            while (*w != '\0' && lines < 3)
+            while (*w != '\0' && lines < OBJ_LINES)
             {
-                char line[96];
+                char line[224];
                 s32 n = 0;
                 s32 lastspace = -1;
 
@@ -1294,7 +1377,7 @@ static Gfx *coopHudObjectives(Gfx *gdl, s32 below)
                 memcpy(line, w, (size_t) n);
                 line[n] = '\n';
                 line[n + 1] = '\0';
-                if (lines == 2 && w[n] != '\0')
+                if (lines == OBJ_LINES - 1 && w[n] != '\0')
                 {
                     coopHudFit(line, maxw - 12);
                 }
@@ -1417,6 +1500,7 @@ Gfx *coopHudRender(Gfx *gdl)
             gdl = coopHudBark(gdl, &m);
         }
     }
+    coopHudTopMsgTick();
     memset(&p, 0, sizeof(p));
     partner = coopHudPartner(&p);
     if (partner)
@@ -1473,7 +1557,17 @@ Gfx *coopHudRender(Gfx *gdl)
     }
     if (portObjectivesHudShown() && !g_CurrentPlayer->bonddead && !weapmenuIsOpen())
     {
-        gdl = coopHudObjectives(gdl, partner ? COOP_RADAR_TOP + 0x16 : 0x10);
+        s32 below = partner ? COOP_RADAR_TOP + 0x16 : 0x10;
+        s32 push = coopHudTopMsgPush(below, coopTextScaleNow());
+
+        if (partner)
+        {   /* and below the radar, wherever it moved */
+            const f32 st = coopTextScaleNow();
+            s32 r = (s32) ((f32) coopHudTopMsgPush(COOP_RADAR_TOP - 0x11, coopHudScaleNow()) * coopHudScaleNow() / st + 0.999f);
+
+            push = (r > push) ? r : push;
+        }
+        gdl = coopHudObjectives(gdl, below + push);
     }
     coopCaptionHarness();
     coopFadeHarness();

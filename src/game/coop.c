@@ -11256,6 +11256,45 @@ void coopAltBondEnd(void)
     g_CoopPropOverride = NULL;
 }
 
+/* host: a "Bond in the room with this pad" check that must not pass while a
+ * player is still where the scene is. Egyptian's Golden Gun case (global list
+ * 0x1001): once "Bond" is in the room with pad 0x45 the list starts over, and
+ * at its start it shuts the glass again as soon as "Bond" is in the room with
+ * the puzzle (pad 0x97). Either player counts for both, so with one player at
+ * the case and the other out by pad 0x45 the list went round every tick: the
+ * glass began to come down (its sound) and was shut at once, stuck, until both
+ * stood by the case (testers' report). It now starts over only once nobody is
+ * left in the puzzle room. */
+#define COOP_EGYPT_EXIT_PAD   0x45
+#define COOP_EGYPT_PUZZLE_PAD 0x97
+s32 coopScriptRoomHold(ChrRecord *self, s32 pad)
+{
+    s32 k, in;
+
+    if (!coopSessionActive() || !coopNetIsHost() || coopVersus() || pad != COOP_EGYPT_EXIT_PAD
+        || lvlGetCurrentStageToLoad() != LEVELID_EGYPT)
+    {
+        return 0;
+    }
+    in = coopOwnBondCounts() && check_if_actor_is_at_preset(self, COOP_EGYPT_PUZZLE_PAD);
+    for (k = 0; !in && coopAltBondBegin(k); k++)
+    {
+        in = check_if_actor_is_at_preset(self, COOP_EGYPT_PUZZLE_PAD);
+        coopAltBondEnd();
+    }
+    if (in)
+    {
+        static u32 logged;
+
+        if (g_GlobalTimer - logged > 300)
+        {
+            logged = g_GlobalTimer;
+            portConLogf("ge: coop: egyptian: a player is still at the gold gun case: the glass list waits\n");
+        }
+    }
+    return in;
+}
+
 /* host: a partner whose line has gone quiet (lost, not yet dropped) still
  * stands where it was last seen. Guards and "is Bond here" checks leave it
  * be (coopRemoteAliveHere), but the checks that ask whether every player has
@@ -12740,6 +12779,39 @@ static const char sLatin1[] =       /* U+00C0..U+00FF */
 static const char sLatinA[] =       /* U+0100..U+017F */
     "AaAaAaCcCcCcCcDd" "DdEeEeEeEeEeGgGg" "GgGgHhHhIiIiIiIi" "IiJjJjKkkLlLlLlL"
     "lLlNnNnNnnNnOoOo" "OoOoRrRrRrSsSsSs" "SsTtTtTtUuUuUuUu" "UuUuWwYyYZzZzZzs";
+
+/* The game's own text kept on several lines (a translation's objective
+ * "NEUTRALIZAR TODAS LAS\nALARMAS"): one line, each break a space. The co-op
+ * HUD, toasts and results screen stop a line at its first break, and the
+ * Spanish objectives lost everything after it (testers' report). */
+void coopFlattenLines(char *out, s32 cap, const char *in)
+{
+    s32 n = 0;
+
+    if (out == NULL || cap <= 0)
+    {
+        return;
+    }
+    while (in != NULL && *in != '\0' && n < cap - 1)
+    {
+        char c = *in++;
+
+        if (c == '\n' || c == '\r')
+        {
+            if (n > 0 && out[n - 1] != ' ')
+            {
+                out[n++] = ' ';
+            }
+            continue;
+        }
+        out[n++] = c;
+    }
+    while (n > 0 && out[n - 1] == ' ')
+    {
+        n--;
+    }
+    out[n] = '\0';
+}
 
 void coopAsciiName(char *out, s32 cap, const char *in, s32 upper)
 {
