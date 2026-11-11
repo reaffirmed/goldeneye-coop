@@ -5586,6 +5586,46 @@ static s32 coopGuardLine(char *buf, s32 cap, ChrRecord *chr, s32 i)
     return n < cap ? n : cap - 1;
 }
 
+/* joiner: a living guard drawn far from where the host has it although the
+ * host's snapshots of it keep coming (Cradle: a new guard stood at its spawn
+ * pad for 20 s on the joiner while the host's stood 8 m off, until the host's
+ * walked away). Its track is said in the log, then cut to the newest spot and
+ * the copy put there, standing on the floor found under it. */
+static void coopGuardSnapToHost(ChrRecord *chr, s32 i)
+{
+    CoopTrack *t = &sGuardTrack[i];
+    const u32 rt = coopClockRenderMs(&sClock[0], coopNowMs());
+    CoopSample newest = t->s[t->n - 1];
+    coord3d pos;
+    StandTile *stan;
+    s32 k;
+
+    portConLogf("ge: coop: chr %d snaps to the host's spot: drawn at %.0f %.0f %.0f, track of %d (render at %u):\n",
+                chr->chrnum, chr->prop->pos.f[0], chr->prop->pos.f[1], chr->prop->pos.f[2], (int) t->n, (unsigned) rt);
+    for (k = 0; k < t->n; k++)
+    {
+        portConLogf("ge: coop:   sample %d: %+d ms, %.0f %.0f %.0f\n", (int) k, (int) (s32) (t->s[k].ms - rt),
+                    t->s[k].pos[0], t->s[k].pos[1], t->s[k].pos[2]);
+    }
+    pos.f[0] = newest.pos[0];
+    pos.f[1] = newest.pos[1];
+    pos.f[2] = newest.pos[2];
+    stan = coopGuardStan(&pos, chr->prop);
+    if (stan == NULL)
+    {
+        portConLogf("ge: coop: chr %d: no floor under the host's spot either\n", chr->chrnum);
+        return;
+    }
+    coopTrackReset(t);
+    coopTrackPush(t, &newest);
+    chr->prop->stan = stan;
+    chr->prop->pos = pos;
+    setsuboffset(chr->model, &pos);
+    chrDetectRooms(chr);
+    setsubroty(chr->model, newest.yaw);
+    chr->chrflags |= CHRFLAG_INIT;  /* its ground starts over from this floor (chr.c sub_GAME_7F01FC10) */
+}
+
 /* joiner: every second, a living guard of the host's near us that this game
  * would not show (off the floor, in no room being drawn while it should be,
  * faded, hidden, or far from the host's spot) is said in the log, so the next
@@ -5593,6 +5633,7 @@ static s32 coopGuardLine(char *buf, s32 cap, ChrRecord *chr, s32 i)
 static void coopGuardsWatch(void)
 {
     static u32 said[COOP_MAX_CHRS];
+    static s16 sFarSeen[COOP_MAX_CHRS];     /* 1 + the chr found far from the host's spot at the last check */
     PropRecord *bond = getCurrentPlayerProp();
     s32 i;
 
@@ -5627,6 +5668,10 @@ static void coopGuardsWatch(void)
             const CoopSample *h = &sGuardTrack[i].s[sGuardTrack[i].n - 1];
             f32 hx = chr->prop->pos.f[0] - h->pos[0], hy = chr->prop->pos.f[1] - h->pos[1], hz = chr->prop->pos.f[2] - h->pos[2];
 
+            if (hx * hx + hy * hy + hz * hz <= 400.0f * 400.0f)
+            {
+                sFarSeen[i] = 0;
+            }
             if (chr->prop->stan == NULL)
             {
                 why = "stands on no floor";
@@ -5634,6 +5679,16 @@ static void coopGuardsWatch(void)
             else if (hx * hx + hy * hy + hz * hz > 400.0f * 400.0f)
             {
                 why = "is drawn far from the host's spot";
+                if (sTick - sChrLastSync[i] < 30 && sFarSeen[i] == chr->chrnum + 1)
+                {   /* a second check in a row, still synced: put it right */
+                    coopGuardLine(line, sizeof(line), chr, i);
+                    portConLogf("ge: coop: watch: host chr %d %s: %s\n", chr->chrnum, why, line);
+                    coopGuardSnapToHost(chr, i);
+                    sFarSeen[i] = 0;
+                    said[i] = sTick;
+                    continue;
+                }
+                sFarSeen[i] = (s16) (chr->chrnum + 1);
             }
             else if (chr->fadealpha != 0xFF)
             {
