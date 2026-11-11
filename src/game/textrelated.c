@@ -118,11 +118,6 @@ static struct fontchar *portFontGlyph(struct fontchar *chars, u8 c)
 {
     s32 which;
 
-    if (chars == ptrFontBankGothicChars && portLangSmallFix(c) != 0)
-    {
-        c = portLangSmallFix(c);    /* a small letter this language's Bank Gothic draws blank (the watch's rows) */
-    }
-
     if (c >= 0x21 && c <= 0x7E)
     {
         return &chars[c - 0x21];

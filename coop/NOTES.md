@@ -4682,5 +4682,8 @@ plates that looked selected all the time.
 - The MUSIC and FX bars start a few pixels past the wider of their two labels (EFECTOS ran
   under its bar), keeping the right end; options.c portWatchBarFit projects the face to find
   where that is.
+- Bank Gothic's Q and q reach a pixel below the other letters, and draw_options_labels clipped
+  to exactly one measured line, so they were dropped whole from every row (Spanish "BLO UEO DE
+  RATÓN", and í, drawn from the '$' glyph, the same). The clip now has two pixels of room.
 - Not changed: the random static is Rare's (it can be turned off: Port Options, Watch Static);
   the "Q WATCH V2.01 BETA" header is the cart's text; the Options page still has its nine rows.

@@ -53,9 +53,6 @@ const char *portTrCtx(const char *ctx, const char *en);
  * catalogue entry in any case and comes back in capitals. */
 const char *portLangDraw(const char *s);
 
-/* textrelated.c: the letter Bank Gothic draws in place of c, because this
- * language's patched font has none for it (language.ini small=), or 0 */
-uint8_t portLangSmallFix(uint8_t c);
 /* text banks: the translated copy of a bank by its ROM name (NULL = the cart's
  * own). The bytes are the patched cart's, still 1172-compressed if they were. */
 const uint8_t *portLangBank(const char *name, uint32_t *size);

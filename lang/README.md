@@ -29,7 +29,6 @@ Each language is a folder `lang/<code>/` next to the game:
 | `patch` | The `.xdelta` file. |
 | `strings` | The `.po` file. |
 | `glyphs` | Pairs of an ASCII character and the letter the patch draws over it (see below). |
-| `small` | Pairs of a small letter the patch's font draws blank and what to draw instead (`qQ` draws q as Q), for text the watch writes in small letters. |
 | `bank.<Bank>.<slot>` | A port relabel of one of the patch's strings (the English game has a few: the watch's "HUD" and widescreen values). |
 
 ## The game's text: the translation patch
