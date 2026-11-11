@@ -18,7 +18,8 @@
  * stereo_pan option covers it) and quieter with distance on the curve guards'
  * sounds use (sub_GAME_7F0537B8, 5000 to 6000 units), but never below
  * COOP_VOICE_FAR_GAIN so a partner across the map can still be heard. In the
- * lobby, or for a partner in no mission with us, it plays in the middle.
+ * lobby, for a partner in no mission with us, or for one who is down (and
+ * spectating), it plays in the middle.
  * [display] voice_volume (percent, up to 200) scales every voice.
  *
  * Each player can be muted on this game alone (the lobby's Voice row under
@@ -247,7 +248,10 @@ static void coopVoiceGains(s32 p, s32 inmission, f32 *left, f32 *right)
     f32 gain = 1.0f;
     f32 l = 1.0f, r = 1.0f;
 
-    if (inmission && g_CurrentPlayer != NULL && coopExtRemoteView(p, &v))
+    /* a partner who is down watches from someone else's eyes: their voice
+     * stayed with their body, so it plays in the middle at full volume, as
+     * in the lobby (testers' report) */
+    if (inmission && g_CurrentPlayer != NULL && coopExtRemoteView(p, &v) && !v.dead)
     {
         coord3d *ear = bondviewGetCurrentPlayersPosition();
         f32 dx = v.pos.f[0] - ear->f[0];

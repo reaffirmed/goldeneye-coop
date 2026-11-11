@@ -280,11 +280,10 @@ void coopObjNoteSelf(void)
 
 static void coopObjToast(s32 index, s32 letter, s32 player)
 {
-    char body[64];
-    char text[100];
+    char body[144];
+    char text[176];
     const char *name = coopPlayerName(player);
     const u8 *raw = get_text_for_objective(index);
-    s32 n;
 
     if (index < 0 || index >= OBJECTIVES_MAX || sShown[index])
     {
@@ -295,15 +294,7 @@ static void coopObjToast(s32 index, s32 letter, s32 player)
     {
         return;     /* the game's own line says it */
     }
-    snprintf(body, sizeof(body), "%s", (raw != NULL) ? (const char *) raw : "");
-    for (n = 0; body[n] != '\0'; n++)
-    {
-        if (body[n] == '\n')
-        {
-            body[n] = '\0';
-            break;
-        }
-    }
+    coopFlattenLines(body, sizeof(body), (raw != NULL) ? (const char *) raw : "");   /* a translation's on two lines */
     snprintf(text, sizeof(text), portTr("%s COMPLETED %c|%s"), (name != NULL && name[0] != '\0') ? name : portTr("PARTNER"),
              'A' + letter, body);
     coopFeedToast(text, player);

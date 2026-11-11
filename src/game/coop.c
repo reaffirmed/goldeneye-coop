@@ -622,7 +622,8 @@ static void coopRecvAiSync(CoopAiPkt *p);
 static void coopFollowLeftGun(ChrRecord *chr, s32 slot, s32 item);
 static void coopSendAiSync(void);
 static void coopApplyNote(CoopEvent *ev);
-static void coopApplyEndAll(void);
+static void coopApplyEndAll(s32 restart);
+static void coopRestartTick(void);
 static void coopKeepAlive(void);
 static void coopHoldStart(void);
 static void coopHoldTick(void);
@@ -5481,6 +5482,27 @@ placed:
     }
 }
 
+/* joiner: ticks in a row a mirrored chr's spot from the host found no floor
+ * here (coopGuardsInterpTick), so the copy stayed where it was */
+static u16 sInterpNoFloor[COOP_MAX_CHRS];
+
+/* the floor under a spot of the host's: walked to from where ours stands,
+ * else the highest one under it, else the highest one under a point a little
+ * above it (a spot that sits a hair below a sloped or stepped floor here) */
+static StandTile *coopGuardStan(coord3d *pos, PropRecord *prop)
+{
+    StandTile *stan = coopFindStan(pos, prop->stan, &prop->pos);
+
+    if (stan == NULL)
+    {
+        coord3d up = *pos;
+
+        up.f[1] += 100.0f;
+        stan = stanFindTileBelowPos(&up, NULL, NULL);
+    }
+    return stan;
+}
+
 /* Client: each mirrored chr where the host's was a moment ago, between two
  * snapshots (coop_interp.c), so guards move smoothly between packets */
 static void coopGuardsInterpTick(void)
@@ -5503,13 +5525,23 @@ static void coopGuardsInterpTick(void)
         pos.f[0] = at.pos[0];
         pos.f[1] = at.pos[1];
         pos.f[2] = at.pos[2];
-        stan = coopFindStan(&pos, chr->prop->stan, &chr->prop->pos);
+        stan = coopGuardStan(&pos, chr->prop);
         if (stan != NULL)
         {
             chr->prop->stan = stan;
             chr->prop->pos = pos;
             setsuboffset(chr->model, &pos);
             chrDetectRooms(chr);
+            sInterpNoFloor[i] = 0;
+        }
+        else if (sInterpNoFloor[i] < 0xFFFF)
+        {
+            if (++sInterpNoFloor[i] == 60)
+            {   /* Cradle: a guard drawn 13 m from the host's while synced every packet */
+                portConLogf("ge: coop: chr %d: no floor here under the host's spot %.0f %.0f %.0f for 1 s: ours stays at %.0f %.0f %.0f\n",
+                            chr->chrnum, pos.f[0], pos.f[1], pos.f[2],
+                            chr->prop->pos.f[0], chr->prop->pos.f[1], chr->prop->pos.f[2]);
+            }
         }
         setsubroty(chr->model, at.yaw);
     }
@@ -5543,14 +5575,55 @@ static s32 coopGuardLine(char *buf, s32 cap, ChrRecord *chr, s32 i)
         const CoopSample *h = &sGuardTrack[i].s[sGuardTrack[i].n - 1];
         f32 dx = prop->pos.f[0] - h->pos[0], dy = prop->pos.f[1] - h->pos[1], dz = prop->pos.f[2] - h->pos[2];
 
-        n += snprintf(buf + n, cap - n, ", host's %.0f %.0f %.0f (%.0f away), synced %u ticks ago",
-                      h->pos[0], h->pos[1], h->pos[2], sqrtf(dx * dx + dy * dy + dz * dz), (unsigned) (sTick - sChrLastSync[i]));
+        n += snprintf(buf + n, cap - n, ", host's %.0f %.0f %.0f (%.0f away), synced %u ticks ago, no floor %u ticks",
+                      h->pos[0], h->pos[1], h->pos[2], sqrtf(dx * dx + dy * dy + dz * dz), (unsigned) (sTick - sChrLastSync[i]),
+                      (unsigned) sInterpNoFloor[i]);
     }
     else if (n < cap && !coopNetIsHost())
     {
         n += snprintf(buf + n, cap - n, ", no host track");
     }
     return n < cap ? n : cap - 1;
+}
+
+/* joiner: a living guard drawn far from where the host has it although the
+ * host's snapshots of it keep coming (Cradle: a new guard stood at its spawn
+ * pad for 20 s on the joiner while the host's stood 8 m off, until the host's
+ * walked away). Its track is said in the log, then cut to the newest spot and
+ * the copy put there, standing on the floor found under it. */
+static void coopGuardSnapToHost(ChrRecord *chr, s32 i)
+{
+    CoopTrack *t = &sGuardTrack[i];
+    const u32 rt = coopClockRenderMs(&sClock[0], coopNowMs());
+    CoopSample newest = t->s[t->n - 1];
+    coord3d pos;
+    StandTile *stan;
+    s32 k;
+
+    portConLogf("ge: coop: chr %d snaps to the host's spot: drawn at %.0f %.0f %.0f, track of %d (render at %u):\n",
+                chr->chrnum, chr->prop->pos.f[0], chr->prop->pos.f[1], chr->prop->pos.f[2], (int) t->n, (unsigned) rt);
+    for (k = 0; k < t->n; k++)
+    {
+        portConLogf("ge: coop:   sample %d: %+d ms, %.0f %.0f %.0f\n", (int) k, (int) (s32) (t->s[k].ms - rt),
+                    t->s[k].pos[0], t->s[k].pos[1], t->s[k].pos[2]);
+    }
+    pos.f[0] = newest.pos[0];
+    pos.f[1] = newest.pos[1];
+    pos.f[2] = newest.pos[2];
+    stan = coopGuardStan(&pos, chr->prop);
+    if (stan == NULL)
+    {
+        portConLogf("ge: coop: chr %d: no floor under the host's spot either\n", chr->chrnum);
+        return;
+    }
+    coopTrackReset(t);
+    coopTrackPush(t, &newest);
+    chr->prop->stan = stan;
+    chr->prop->pos = pos;
+    setsuboffset(chr->model, &pos);
+    chrDetectRooms(chr);
+    setsubroty(chr->model, newest.yaw);
+    chr->chrflags |= CHRFLAG_INIT;  /* its ground starts over from this floor (chr.c sub_GAME_7F01FC10) */
 }
 
 /* joiner: every second, a living guard of the host's near us that this game
@@ -5560,6 +5633,7 @@ static s32 coopGuardLine(char *buf, s32 cap, ChrRecord *chr, s32 i)
 static void coopGuardsWatch(void)
 {
     static u32 said[COOP_MAX_CHRS];
+    static s16 sFarSeen[COOP_MAX_CHRS];     /* 1 + the chr found far from the host's spot at the last check */
     PropRecord *bond = getCurrentPlayerProp();
     s32 i;
 
@@ -5594,6 +5668,10 @@ static void coopGuardsWatch(void)
             const CoopSample *h = &sGuardTrack[i].s[sGuardTrack[i].n - 1];
             f32 hx = chr->prop->pos.f[0] - h->pos[0], hy = chr->prop->pos.f[1] - h->pos[1], hz = chr->prop->pos.f[2] - h->pos[2];
 
+            if (hx * hx + hy * hy + hz * hz <= 400.0f * 400.0f)
+            {
+                sFarSeen[i] = 0;
+            }
             if (chr->prop->stan == NULL)
             {
                 why = "stands on no floor";
@@ -5601,6 +5679,16 @@ static void coopGuardsWatch(void)
             else if (hx * hx + hy * hy + hz * hz > 400.0f * 400.0f)
             {
                 why = "is drawn far from the host's spot";
+                if (sTick - sChrLastSync[i] < 30 && sFarSeen[i] == chr->chrnum + 1)
+                {   /* a second check in a row, still synced: put it right */
+                    coopGuardLine(line, sizeof(line), chr, i);
+                    portConLogf("ge: coop: watch: host chr %d %s: %s\n", chr->chrnum, why, line);
+                    coopGuardSnapToHost(chr, i);
+                    sFarSeen[i] = 0;
+                    said[i] = sTick;
+                    continue;
+                }
+                sFarSeen[i] = (s16) (chr->chrnum + 1);
             }
             else if (chr->fadealpha != 0xFF)
             {
@@ -6014,6 +6102,7 @@ static void coopMirrorSlotFresh(ChrRecord *chr)
     sPred[slot].chrnum = -1;
     coopTrackReset(&sGuardTrack[slot]);
     sGuardTrackNum[slot] = -1;
+    sInterpNoFloor[slot] = 0;
     sChrFade[slot] = 0;
     sChrLastSync[slot] = sTick;
     sChrFiring[slot] = 0;
@@ -6678,7 +6767,7 @@ static void coopApplyEvent(CoopEvent *ev)
             coopApplyNote(ev);
             break;
         case COOPEV_ENDALL:
-            coopApplyEndAll();
+            coopApplyEndAll(ev->u.raw[0] == COOPENDALL_RESTART);
             break;
         case COOPEV_PING:
             if (coopInMission())
@@ -9239,6 +9328,7 @@ s32 coopFrontTick(void)
     coopStatsFrontTick();   /* back from a mission: send our stats column */
     coopFlushEvents();
     coopSendHello();
+    coopRestartTick();      /* host: a quick restart's new start */
 
     /* the joiner goes where the host goes, once per host mission */
     if (!coopNetIsHost() && sChan[0].helloSeen && sTick - sChan[0].helloTick < 180
@@ -9955,6 +10045,51 @@ const char *coopHostAbortNextName(void)
     return (p > 0) ? coopPlayerName(p) : "";
 }
 
+/* Quick restart (the watch's Abort, then RESTART): the host ends the
+ * mission for everyone as END ALL does, with COOPENDALL_RESTART in the event,
+ * and starts the same mission again from the debrief as soon as it is up
+ * (coopFrontTick, front.c coopFrontRestart). The joiners end theirs without
+ * the "host ended the mission" screen and follow the host into the new one
+ * as they follow any mission. An older build reads the event as END ALL. */
+static s32 sRestartStage = -1;      /* host: the mission to start again, -1 none */
+
+void coopHostRestart(void)
+{
+    CoopEvent ev;
+
+    if (!coopHostAbortAsks())
+    {
+        return;
+    }
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = COOPEV_ENDALL;
+    ev.u.raw[0] = COOPENDALL_RESTART;
+    coopQueueEvent(&ev);
+    coopFlushEvents();
+    sRestartStage = bossGetStageNum();
+    portConLogf("ge: coop: host restarts the mission (stage %d) for everyone\n", (int) sRestartStage);
+}
+
+/* coopFrontTick, host: the restarted mission, once the debrief is up */
+static void coopRestartTick(void)
+{
+    extern s32 coopFrontRestart(s32 stage);
+
+    if (sRestartStage < 0 || !coopNetIsHost() || coopInMission())
+    {
+        if (sRestartStage >= 0 && !coopNetIsHost())
+        {
+            sRestartStage = -1;     /* no longer the host (it moved on): nothing to start */
+        }
+        return;
+    }
+    if (coopFrontRestart(sRestartStage))
+    {
+        portConLogf("ge: coop: restarting stage %d\n", (int) sRestartStage);
+        sRestartStage = -1;
+    }
+}
+
 /* the answer: handoff 1 gives the mission to the next player and leaves the
  * session; 0 ends it for everyone, who all go back to the lobby. The watch
  * then aborts our own mission as usual. */
@@ -10020,10 +10155,17 @@ static void coopPendingEndTick(void)
     }
 }
 
-static void coopApplyEndAll(void)
+static void coopApplyEndAll(s32 restart)
 {
     if (coopNetIsHost() || !coopInMission())
     {
+        return;
+    }
+    if (restart)
+    {   /* the host starts it again: no error screen, we follow it back in */
+        coopBanner("THE HOST RESTARTED THE MISSION", "STARTING AGAIN");
+        portConLogf("ge: coop: the host restarted the mission\n");
+        sPendingEnd = 1;
         return;
     }
     coopBanner("THE HOST ENDED THE MISSION", "BACK TO THE LOBBY");
@@ -11256,6 +11398,45 @@ void coopAltBondEnd(void)
     g_CoopPropOverride = NULL;
 }
 
+/* host: a "Bond in the room with this pad" check that must not pass while a
+ * player is still where the scene is. Egyptian's Golden Gun case (global list
+ * 0x1001): once "Bond" is in the room with pad 0x45 the list starts over, and
+ * at its start it shuts the glass again as soon as "Bond" is in the room with
+ * the puzzle (pad 0x97). Either player counts for both, so with one player at
+ * the case and the other out by pad 0x45 the list went round every tick: the
+ * glass began to come down (its sound) and was shut at once, stuck, until both
+ * stood by the case (testers' report). It now starts over only once nobody is
+ * left in the puzzle room. */
+#define COOP_EGYPT_EXIT_PAD   0x45
+#define COOP_EGYPT_PUZZLE_PAD 0x97
+s32 coopScriptRoomHold(ChrRecord *self, s32 pad)
+{
+    s32 k, in;
+
+    if (!coopSessionActive() || !coopNetIsHost() || coopVersus() || pad != COOP_EGYPT_EXIT_PAD
+        || lvlGetCurrentStageToLoad() != LEVELID_EGYPT)
+    {
+        return 0;
+    }
+    in = coopOwnBondCounts() && check_if_actor_is_at_preset(self, COOP_EGYPT_PUZZLE_PAD);
+    for (k = 0; !in && coopAltBondBegin(k); k++)
+    {
+        in = check_if_actor_is_at_preset(self, COOP_EGYPT_PUZZLE_PAD);
+        coopAltBondEnd();
+    }
+    if (in)
+    {
+        static u32 logged;
+
+        if (g_GlobalTimer - logged > 300)
+        {
+            logged = g_GlobalTimer;
+            portConLogf("ge: coop: egyptian: a player is still at the gold gun case: the glass list waits\n");
+        }
+    }
+    return in;
+}
+
 /* host: a partner whose line has gone quiet (lost, not yet dropped) still
  * stands where it was last seen. Guards and "is Bond here" checks leave it
  * be (coopRemoteAliveHere), but the checks that ask whether every player has
@@ -11399,8 +11580,9 @@ s32 coopLevelFallCheckOff(f32 y)
 static void coopCradleFallTick(void)
 {
     if (!coopLevelFallCheckOff(COOP_CRADLE_FALL_Y) || !coopInMission()
-        || g_CurrentPlayer->bonddead || g_PlayerInvincible || g_CoopPropOverride != NULL)
-    {
+        || g_CurrentPlayer->bonddead || g_PlayerInvincible || g_CurrentPlayer->cheatBondInvincible
+        || g_CoopPropOverride != NULL)
+    {   /* invincible: the death would not take, and this said so every tick */
         return;
     }
     if (getCurrentPlayerProp()->pos.y < COOP_CRADLE_FALL_Y && check_if_actor_is_at_preset(NULL, COOP_CRADLE_FALL_PAD))
@@ -12740,6 +12922,39 @@ static const char sLatin1[] =       /* U+00C0..U+00FF */
 static const char sLatinA[] =       /* U+0100..U+017F */
     "AaAaAaCcCcCcCcDd" "DdEeEeEeEeEeGgGg" "GgGgHhHhIiIiIiIi" "IiJjJjKkkLlLlLlL"
     "lLlNnNnNnnNnOoOo" "OoOoRrRrRrSsSsSs" "SsTtTtTtUuUuUuUu" "UuUuWwYyYZzZzZzs";
+
+/* The game's own text kept on several lines (a translation's objective
+ * "NEUTRALIZAR TODAS LAS\nALARMAS"): one line, each break a space. The co-op
+ * HUD, toasts and results screen stop a line at its first break, and the
+ * Spanish objectives lost everything after it (testers' report). */
+void coopFlattenLines(char *out, s32 cap, const char *in)
+{
+    s32 n = 0;
+
+    if (out == NULL || cap <= 0)
+    {
+        return;
+    }
+    while (in != NULL && *in != '\0' && n < cap - 1)
+    {
+        char c = *in++;
+
+        if (c == '\n' || c == '\r')
+        {
+            if (n > 0 && out[n - 1] != ' ')
+            {
+                out[n++] = ' ';
+            }
+            continue;
+        }
+        out[n++] = c;
+    }
+    while (n > 0 && out[n - 1] == ' ')
+    {
+        n--;
+    }
+    out[n] = '\0';
+}
 
 void coopAsciiName(char *out, s32 cap, const char *in, s32 upper)
 {

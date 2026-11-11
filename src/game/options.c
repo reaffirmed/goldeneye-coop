@@ -28,6 +28,9 @@
 #include "coop.h"
 static s32 sPortCoopAbortAsk;   /* co-op host: Abort confirmed once, now hand over or end for everyone */
 static s32 sPortCoopAbortAte;   /* that first confirm press: draw_watch_current_page must not toggle focus off with it */
+static s32 sPortCoopAbortSel = 2;   /* the host's choice: 0 RESTART, 1 END ALL, 2 HAND OVER (D_800409A4 is 1 only on HAND OVER) */
+static s32 sPortCoopAbortStick;     /* the stick was over to one side last frame: one step a push */
+static s32 sPortCoopAbortValX0 = 0x5C, sPortCoopAbortValX1 = 0xA0; /* the drawn choice's left and right x (the mouse layer's arrows) */
 #endif
 /* Defined further down, next to the vanilla page drawer they replace; the
  * watch MOUSE layer needs them a few thousand lines earlier. */
@@ -52,7 +55,7 @@ extern s32 portReturnStartThisTick(void); /* video.c: START came from Return alo
 static void portWatchDropAnchor(s32 row);   /* park the list window at open */
 static s32  portWatchDropVisible(void);
 static void portWatchDropBox(s32 rowy, s32 *x0, s32 *y0, s32 *w, s32 *vis);
-s32  portWatchValueColumnHit(s32 page, s32 row, s32 count, f32 mx);
+s32  portWatchValueCentreX(s32 page, s32 row);
 f32  portWatchValueSplitX(s32 page, s32 row);
 s32  portWatchRowY0(void);
 s32  portWatchRowSlots(void);
@@ -67,6 +70,12 @@ s32  portWatchRowSlots(void);
  * text. The right edge stays where Rare had it (-167 + 468 = 301). */
 #define PORTWATCH_BAR_X       (-167.0f)
 #define PORTWATCH_BAR_W       468.0f
+/* The bars start further right when a label is wider than Rare's MUSIC and FX
+ * (Spanish EFECTOS ran under its bar), the right edge staying put: drawers,
+ * mouse and fill maths all take the bar's x and width from here. */
+static f32 sPortWatchBarShift;   /* model units the bars' left end moved right */
+#define PORTWATCH_BAR_XL (PORTWATCH_BAR_X + sPortWatchBarShift)
+#define PORTWATCH_BAR_WL (PORTWATCH_BAR_W - sPortWatchBarShift)
 s32  portWatchVisibleRows(void);
 s32  portWatchScrollOffset(void);
 void portWatchScrollFollow(void);
@@ -1236,7 +1245,7 @@ static void portWatchTabBox(s32 n, f32 *l, f32 *t, f32 *r, f32 *b)
 static void portWatchSliderBox(s32 row, f32 *l, f32 *t, f32 *r, f32 *b)
 {
     f32 z0 = row ? PORTWATCH_BAR_FX_Z : PORTWATCH_BAR_MUSIC_Z;
-    portWatchFaceBox(PORTWATCH_BAR_X, z0, PORTWATCH_BAR_X + PORTWATCH_BAR_W, z0 + PORTWATCH_BAR_H, l, t, r, b);
+    portWatchFaceBox(PORTWATCH_BAR_XL, z0, PORTWATCH_BAR_XL + PORTWATCH_BAR_WL, z0 + PORTWATCH_BAR_H, l, t, r, b);
     *t -= 3.0f;   /* a little slack above/below the 20-unit bar */
     *b += 3.0f;
 }
@@ -1249,8 +1258,8 @@ static void portWatchSliderTrack(s32 row, f32 *x0, f32 *x1)
     f32 z = (row ? PORTWATCH_BAR_FX_Z : PORTWATCH_BAR_MUSIC_Z) + PORTWATCH_BAR_H * 0.5f;
     f32 y0, y1;
 
-    portWatchProjectFace(PORTWATCH_BAR_X, z, x0, &y0);
-    portWatchProjectFace(PORTWATCH_BAR_X + PORTWATCH_BAR_W, z, x1, &y1);
+    portWatchProjectFace(PORTWATCH_BAR_XL, z, x0, &y0);
+    portWatchProjectFace(PORTWATCH_BAR_XL + PORTWATCH_BAR_WL, z, x1, &y1);
 }
 
 /**
@@ -1270,8 +1279,8 @@ static void portWatchSliderTrack(s32 row, f32 *x0, f32 *x1)
 static f32 portWatchBarFill(f32 t)
 {
     const f32 a = 30.0f;                        /* the transition's own scale */
-    const f32 b = PORTWATCH_BAR_W + 36.0f;      /* 30 * 1.2 */
-    const f32 c = PORTWATCH_BAR_W + 6.0f;       /* C(1) */
+    const f32 b = PORTWATCH_BAR_WL + 36.0f;      /* 30 * 1.2 */
+    const f32 c = PORTWATCH_BAR_WL + 6.0f;       /* C(1) */
     f32 disc;
 
     if (t <= 0.0f)
@@ -1959,47 +1968,27 @@ void portWatchMouseTick(void)
                 }
                 else if (click && row >= 2 && mx >= portWatchValueSplitX(g_portWatchPage, row - 2))
                 {
-                    /* Clicking a value column sets it directly, using the same
-                     * columns portWatchDrawRowValue draws. Rows with 2-3 values
-                     * pick the clicked one; wider or ranged rows and the preset
-                     * step toward the clicked arrow. */
+                    /* A click on a value steps it toward the side of the
+                     * value it landed on, split at the value's centre
+                     * (portWatchValueCentreX, where the drawer put it), so
+                     * a click on the back arrow never steps forward. */
                     const s32 prow = row - 2;
-                    const s32 count = portWatchRowValueCount(g_portWatchPage, prow);
                     const s32 playeropt = portWatchRowPlayerOption(g_portWatchPage, prow);
+                    const s32 dir = (mx < (f32) portWatchValueCentreX(g_portWatchPage, prow)) ? -1 : 1;
 
                     reset_watch_item_is_actively_selected();
                     game_options_index = row;
                     if (playeropt >= 0)
                     {
-                        /* Rare's own row: its value lives in its own table */
+                        /* Rare's own row: its value lives in its own table; round and round */
                         struct game_options *entry = &game_options_entries[playeropt];
-                        u32 col = entry->text[3] ? ((mx < 202.0f) ? 0 : (mx < 247.0f) ? 1 : 2)
-                                                 : ((mx < 225.0f) ? 0 : 1);
-                        if (entry->current_value != col)
-                        {
-                            game_option_select_value(&entry->current_value, col);
-                        }
-                    }
-                    else if (portWatchValueColumnHit(g_portWatchPage, prow, count, mx) >= 0)
-                    {
-                        /* Beep on a real change, as Rare's rows do via
-                         * game_option_select_value, so port rows don't answer a
-                         * click silently. */
-                        const s32 pick = portWatchValueColumnHit(g_portWatchPage, prow, count, mx);
+                        const s32 n = entry->text[3] ? 3 : 2;
 
-                        if (pick != portWatchRowValueIndex(g_portWatchPage, prow))
-                        {
-                            portWatchRowSetIndex(g_portWatchPage, prow, pick);
-                            set_controlstick_lr_disabled();
-                            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
-                        }
+                        game_option_select_value(&entry->current_value, (u32) (((s32) entry->current_value + dir + n) % n));
                     }
                     else
                     {
-                        /* A row drawn as one value between < > arrows splits
-                         * its click halves at the value's centre, so a click on
-                         * the back arrow never steps forward. */
-                        portWatchStepRow(prow, (mx < (f32) PORTWATCH_VAL3_X2) ? -1 : 1);
+                        portWatchStepRow(prow, dir);
                     }
                     sPortWatchAteClick = 1;
                 }
@@ -2020,7 +2009,20 @@ void portWatchMouseTick(void)
              * CANCEL (x 0x88) / CONFIRM (x 0xBD) at y 0x4C - only on mouse
              * activity so a pad user can still steer it; the click itself is
              * the vanilla Z (CONFIRM -> abort, CANCEL -> unfocus). */
-            if (watch_item_is_actively_selected && (moved || click)
+            if (watch_item_is_actively_selected && sPortCoopAbortAsk)
+            {   /* the co-op host's choice, one at a time between < > (draw_abort_cancel_confirm):
+                 * a click on an arrow steps it, a click on the choice is the vanilla Z */
+                if (click && my >= (f32) (0x4C - PORT_WATCH_ROW_ABOVE) && my <= (f32) (0x4C + PORT_WATCH_ROW_BELOW)
+                    && mx >= 72.0f && mx <= 252.0f
+                    && (mx < (f32) sPortCoopAbortValX0 - 2.0f || mx > (f32) sPortCoopAbortValX1 + 2.0f))
+                {
+                    sPortCoopAbortSel += (mx < (f32) sPortCoopAbortValX0) ? -1 : 1;
+                    sPortCoopAbortSel = (sPortCoopAbortSel < 0) ? 2 : (sPortCoopAbortSel > 2) ? 0 : sPortCoopAbortSel;
+                    D_800409A4 = (sPortCoopAbortSel == 2);
+                    sPortWatchAteClick = 1;
+                }
+            }
+            else if (watch_item_is_actively_selected && (moved || click)
                 && my >= (f32) (0x4C - PORT_WATCH_ROW_ABOVE) && my <= (f32) (0x4C + PORT_WATCH_ROW_BELOW)
                 && mx >= 128.0f && mx <= 252.0f)
             {
@@ -2532,7 +2534,14 @@ void watch_screen0_navigation(void)
              )
     {
         sPortCoopAbortAsk = 0;
-        coopHostAbort(0);
+        if (sPortCoopAbortSel == 0)
+        {
+            coopHostRestart();  /* RESTART: everyone, the same mission again (coop.c) */
+        }
+        else
+        {
+            coopHostAbort(0);
+        }
         set_missionstate(MISSION_STATE_0);
         bossRunTitleStage();
         mission_failed_or_aborted = TRUE;
@@ -2551,10 +2560,12 @@ void watch_screen0_navigation(void)
     {
 #ifndef TARGET_N64
         if (!sPortCoopAbortAsk && coopHostAbortAsks())
-        {   /* a co-op host is asked first: hand the mission over, or end it
-             * for everyone (draw_abort_cancel_confirm shows the choice) */
+        {   /* a co-op host is asked first: restart the mission, end it for
+             * everyone, or hand it over (draw_abort_cancel_confirm shows the
+             * choice) */
             sPortCoopAbortAsk = 1;
             sPortCoopAbortAte = 1;
+            sPortCoopAbortSel = 2;      /* HAND OVER, where CONFIRM was */
             return;
         }
         if (sPortCoopAbortAsk)
@@ -3878,12 +3889,89 @@ Gfx *draw_abort_cancel_confirm(Gfx *gdl)
         sPortCoopAbortAsk = 0;  /* unfocused (B) or nobody left to ask about: a plain abort again */
     }
     coopask = sPortCoopAbortAsk;
-    if (coopask)
-    {   /* co-op host: END ALL in the cancel place, HAND OVER in confirm's */
-        sp54 = (s32) "HOST:\n";
-        sp50 = (s32) "HAND OVER\n";
-        sp4C = (s32) "END ALL\n";
+    if (coopask && watch_item_is_actively_selected != 0)
+    {   /* co-op host: one choice at a time, "< RESTART >", "< END ALL >" or
+         * "< HAND OVER >" (they do not fit side by side in every language);
+         * left and right step one a push, round and round, and the line
+         * under it says what the choice does */
+        static const char *const labels[3] = { "RESTART\n", "END ALL\n", "HAND OVER\n" };
+        const s32 y0 = (j_text_trigger ? 3 : 0) + (PAL ? 0x4E : 0x4C);
+        const s32 sx = joyGetStickX(PLAYER_1);
+        const s32 side = (sx >= 0x2E) ? 1 : (sx < -0x2D) ? -1 : 0;
+        const char *label;
+        s32 dir = 0;
+        s32 i;
+        s32 x;
+        s32 y;
+        s32 w = 0;
+        s32 h = 0;
+        s32 aw = 0;
+        char help[96];
+        s32 hx = 0x51;
+        s32 hy = y0 + 0x0C;
+
+        if (joyGetButtonsPressedThisFrame(PLAYER_1, 0x111))
+        {
+            dir = 1;
+        }
+        else if (joyGetButtonsPressedThisFrame(PLAYER_1, 0x222))
+        {
+            dir = -1;
+        }
+        else if (side != 0 && side != sPortCoopAbortStick)
+        {
+            dir = side;
+        }
+        sPortCoopAbortStick = side;
+        sPortCoopAbortSel += dir;
+        sPortCoopAbortSel = (sPortCoopAbortSel < 0) ? 2 : (sPortCoopAbortSel > 2) ? 0 : sPortCoopAbortSel;
+        D_800409A4 = (sPortCoopAbortSel == 2);
+
+        label = portTr(labels[sPortCoopAbortSel]);
+        textMeasure(&h, &aw, "<\n", pFontChars, pFontFile, 0);
+        textMeasure(&h, &w, (char *) label, pFontChars, pFontFile, 0);
+        x = 0x51;
+        y = y0;
+        gdl = textRender(gdl, &x, &y, "<\n", pFontChars, pFontFile, 0xA0FFA0F0, viGetX(), viGetY(), 0, 0);
+        x = 0x51 + aw + 6;
+        y = y0;
+        sPortCoopAbortValX0 = x;
+        sPortCoopAbortValX1 = x + w;
+        gdl = textRenderOutlined(gdl, &x, &y, (char *) label, pFontChars, pFontFile, -1, 0x7000A0, viGetX(), viGetY(), 0, 0);
+        x = sPortCoopAbortValX1 + 6;
+        y = y0;
+        gdl = textRender(gdl, &x, &y, ">\n", pFontChars, pFontFile, 0xA0FFA0F0, viGetX(), viGetY(), 0, 0);
+
+        if (sPortCoopAbortSel == 2)
+        {
+            snprintf(help, sizeof(help), portTr("%s HOSTS, YOU LEAVE\n"), coopHostAbortNextName());
+        }
+        else
+        {
+            snprintf(help, sizeof(help), "%s", portTr((sPortCoopAbortSel == 1) ? "EVERYONE BACK TO THE LOBBY\n"
+                                                                                 : "EVERYONE STARTS AGAIN\n"));
+        }
+        for (i = 0; help[i] != '\0'; i++)
+        {   /* the watch font's capitals; Latin-1 letters keep their accents */
+            const u8 c = (u8) help[i];
+
+            if (c >= 'a' && c <= 'z')
+            {
+                help[i] = (char) (c - ('a' - 'A'));
+            }
+            else if (c >= 0xE0 && c != 0xF7 && c != 0xFF)
+            {
+                help[i] = (char) (c - 0x20);
+            }
+            else if (c >= 0x80 && c < 0xA0)
+            {
+                help[i] = '?';
+            }
+        }
+        gdl = textRender(gdl, &hx, &hy, help, pFontChars, pFontFile, 0xA0FFA0F0, viGetX(), viGetY(), 0, 0);
+        return gdl;
     }
+    sPortCoopAbortStick = 0;
 #endif
     sp7C = 0x51;
 
@@ -3933,35 +4021,6 @@ Gfx *draw_abort_cancel_confirm(Gfx *gdl)
                 gdl = textRenderOutlined(gdl, &sp74, &sp68, sp4C, pFontChars, pFontFile, -1, 0x7000A0, viGetX(), viGetY(), 0, 0);
             }
         }
-#ifndef TARGET_N64
-        if (coopask)
-        {   /* what each one does, under them */
-            char help[64];
-            s32 hx = 0x51;
-            s32 hy = (j_text_trigger ? 3 : 0) + (PAL ? 0x4E : 0x4C) + 0x0C;
-
-            if (D_800409A4 != 0)
-            {
-                snprintf(help, sizeof(help), portTr("%s HOSTS, YOU LEAVE\n"), coopHostAbortNextName());
-            }
-            else
-            {
-                snprintf(help, sizeof(help), "EVERYONE BACK TO THE LOBBY\n");
-            }
-            for (sp60 = 0; help[sp60] != '\0'; sp60++)
-            {
-                if (help[sp60] >= 'a' && help[sp60] <= 'z')
-                {
-                    help[sp60] -= 'a' - 'A';
-                }
-                else if ((u8) help[sp60] >= 0x80)
-                {
-                    help[sp60] = '?';
-                }
-            }
-            gdl = textRender(gdl, &hx, &hy, help, pFontChars, pFontFile, 0xA0FFA0F0, viGetX(), viGetY(), 0, 0);
-        }
-#endif
     }
     else
     {
@@ -4701,6 +4760,40 @@ void watch_adjust_volume_slider(u16* outVolume) {
 /**
  * Address: 7F0A8FEC
  */
+#ifndef TARGET_N64
+extern void portWatchProjectFace(f32 mx, f32 mz, f32 *nx, f32 *ny);   /* bondview2.c */
+#endif
+
+/* where the bars start this frame: clear of the wider of the MUSIC and FX
+ * labels by a few pixels (both bars alike, so they stay lined up). The face is
+ * projected through last frame's hand matrix; before there is one, the last
+ * shift stands. */
+static void portWatchBarFit(void)
+{
+#ifndef TARGET_N64
+    s32 h = 0, wm = 0, wf = 0;
+    f32 x0, x1, y;
+    const f32 z = PORTWATCH_BAR_MUSIC_Z + PORTWATCH_BAR_H * 0.5f;
+    f32 right, shift;
+
+    textMeasure(&h, &wm, langGet(getStringID(LOPTIONS, OPTION_STR_35_MUSIC_LF)), ptrFontBankGothicChars, ptrFontBankGothic, 0);
+    textMeasure(&h, &wf, langGet(getStringID(LOPTIONS, OPTION_STR_36_FX_LF)), ptrFontBankGothicChars, ptrFontBankGothic, 0);
+    right = (f32) (XOFFSET_1 + ((wm > wf) ? wm : wf) + 5);
+    portWatchProjectFace(PORTWATCH_BAR_X, z, &x0, &y);
+    portWatchProjectFace(PORTWATCH_BAR_X + PORTWATCH_BAR_W, z, &x1, &y);
+    if (!(x1 - x0 > 20.0f) || x1 - x0 > 400.0f)
+    {
+        return;     /* no hand matrix yet, or nonsense: keep the last */
+    }
+    shift = (right > x0) ? (right - x0) * PORTWATCH_BAR_W / (x1 - x0) : 0.0f;
+    if (shift > PORTWATCH_BAR_W * 0.4f)
+    {
+        shift = PORTWATCH_BAR_W * 0.4f;
+    }
+    sPortWatchBarShift = (f32) (s32) shift;     /* whole units: the rectangles take s32 */
+#endif
+}
+
 Gfx *draw_fx_volume_slider(Gfx *gdl)
 {
     u16 volume;
@@ -4728,13 +4821,13 @@ Gfx *draw_fx_volume_slider(Gfx *gdl)
     gDPSetRenderMode(cmd, G_RM_XLU_SURF, G_RM_XLU_SURF2);
 
     gdl = sub_GAME_7F0A3B40(gdl, OS_K0_TO_PHYSICAL(vtx1));
-    vtx = setup_watch_rectangles(vtx1, 0, 0, (s32) PORTWATCH_BAR_W, (s32) PORTWATCH_BAR_H, (s32) PORTWATCH_BAR_X, (s32) PORTWATCH_BAR_FX_Z);
+    vtx = setup_watch_rectangles(vtx1, 0, 0, (s32) PORTWATCH_BAR_WL, (s32) PORTWATCH_BAR_H, (s32) PORTWATCH_BAR_XL, (s32) PORTWATCH_BAR_FX_Z);
 
     gdl = sub_GAME_7F0A3B40(gdl, OS_K0_TO_PHYSICAL(vtx));
-    vtx = setup_watch_rectangles(vtx, 0, 0, (s32) PORTWATCH_BAR_W, (s32) PORTWATCH_BAR_H, (s32) PORTWATCH_BAR_X, (s32) PORTWATCH_BAR_FX_Z);
+    vtx = setup_watch_rectangles(vtx, 0, 0, (s32) PORTWATCH_BAR_WL, (s32) PORTWATCH_BAR_H, (s32) PORTWATCH_BAR_XL, (s32) PORTWATCH_BAR_FX_Z);
 
     gdl = sub_GAME_7F0A3B40(gdl, OS_K0_TO_PHYSICAL(vtx));
-    setup_watch_rectangles(vtx, 0, 0, (s32) PORTWATCH_BAR_W, (s32) PORTWATCH_BAR_H, (s32) PORTWATCH_BAR_X, (s32) PORTWATCH_BAR_FX_Z);
+    setup_watch_rectangles(vtx, 0, 0, (s32) PORTWATCH_BAR_WL, (s32) PORTWATCH_BAR_H, (s32) PORTWATCH_BAR_XL, (s32) PORTWATCH_BAR_FX_Z);
 
     update_volume_slider_verts(vtx1, fvolume, 30);
 
@@ -4765,6 +4858,7 @@ Gfx *draw_music_volume_slider(Gfx *gdl)
 
     vtx1 = (struct WatchVertex *)dynAllocateVertices(12);
     volume = get_mTrack2Vol();
+    portWatchBarFit();      /* drawn first of the two: both bars start clear of their labels */
 
     if (watch_item_is_actively_selected && game_options_index == 0) {
         watch_adjust_volume_slider(&volume);
@@ -4779,14 +4873,14 @@ Gfx *draw_music_volume_slider(Gfx *gdl)
     gDPSetRenderMode(cmd, G_RM_XLU_SURF, G_RM_XLU_SURF2);
 
     gdl = sub_GAME_7F0A3B40(gdl, OS_K0_TO_PHYSICAL(vtx1));
-    vtx = setup_watch_rectangles(vtx1, 0, 0, (s32) PORTWATCH_BAR_W, (s32) PORTWATCH_BAR_H, (s32) PORTWATCH_BAR_X, (s32) PORTWATCH_BAR_MUSIC_Z);
+    vtx = setup_watch_rectangles(vtx1, 0, 0, (s32) PORTWATCH_BAR_WL, (s32) PORTWATCH_BAR_H, (s32) PORTWATCH_BAR_XL, (s32) PORTWATCH_BAR_MUSIC_Z);
 
 
     gdl = sub_GAME_7F0A3B40(gdl, OS_K0_TO_PHYSICAL(vtx));
-    vtx = setup_watch_rectangles(vtx, 0, 0, (s32) PORTWATCH_BAR_W, (s32) PORTWATCH_BAR_H, (s32) PORTWATCH_BAR_X, (s32) PORTWATCH_BAR_MUSIC_Z);
+    vtx = setup_watch_rectangles(vtx, 0, 0, (s32) PORTWATCH_BAR_WL, (s32) PORTWATCH_BAR_H, (s32) PORTWATCH_BAR_XL, (s32) PORTWATCH_BAR_MUSIC_Z);
 
     gdl = sub_GAME_7F0A3B40(gdl, OS_K0_TO_PHYSICAL(vtx));
-    setup_watch_rectangles(vtx, 0, 0, (s32) PORTWATCH_BAR_W, (s32) PORTWATCH_BAR_H, (s32) PORTWATCH_BAR_X, (s32) PORTWATCH_BAR_MUSIC_Z);
+    setup_watch_rectangles(vtx, 0, 0, (s32) PORTWATCH_BAR_WL, (s32) PORTWATCH_BAR_H, (s32) PORTWATCH_BAR_XL, (s32) PORTWATCH_BAR_MUSIC_Z);
 
     update_volume_slider_verts(vtx1, fvolume, 30);
 
@@ -5007,6 +5101,12 @@ Gfx *draw_options_labels(Gfx *gdl, s32 x, s32 y, char *text, u32 colour, s32 out
 
     gDPSetRenderMode(gdl++, G_RM_AA_XLU_SURF, G_RM_AA_XLU_SURF2);
 
+#ifndef TARGET_N64
+    /* the clip box a little taller than the measured line: Q and q reach a
+     * pixel below the other letters and were dropped whole from every row
+     * (Spanish "bloqueo", "izquierda"), while Rare's own labels have no Q */
+    textheight += 2;
+#endif
     if (!outlined)
     {
         gdl = textRender(gdl, &textx, &y, text, chars, font, colour, textwidth, textheight, 0, 10);
@@ -6790,29 +6890,64 @@ s32 portWatchValuesFitPublic(s32 page, s32 row, s32 count)
     return portWatchValuesFit(page, row, count);
 }
 
-/**
- * Which value column a click at `mx` landed on, or -1 if this row is not
- * drawn as columns. Splits on the MIDPOINTS of the columns the drawer
- * actually used, so a row whose columns slid right is still clickable.
- */
-s32 portWatchValueColumnHit(s32 page, s32 row, s32 count, f32 mx)
+/** A row's value text by index: a port row's own, or Rare's for its rows */
+static const char *portWatchValueTextIdx(s32 page, s32 row, s32 i)
 {
-    s32 col[3];
-    s32 cols = portWatchValueColumns(page, row, count, col);
-    s32 i;
+    const s32 playeropt = portWatchRowPlayerOption(page, row);
 
-    if (cols <= 0)
+    if (playeropt >= 0)
     {
-        return -1;
+        const struct game_options *e = &game_options_entries[playeropt];
+        const s32 n = e->text[3] ? 3 : 2;
+
+        return (const char *) langGet(e->text[1 + ((i < 0) ? 0 : (i >= n) ? n - 1 : i)]);
     }
-    for (i = 0; i < cols - 1; i++)
+    return portWatchRowValueTextAt(page, row, i);
+}
+
+/**
+ * Where a row's one value is centred. Every row shows only its current value
+ * (the dim side-by-side columns made the face a wall of text): centred where
+ * Rare's middle column was, or further right when the label is long, sized by
+ * the row's widest value so the arrows don't jump as it steps. The drawer and
+ * the mouse both ask here.
+ */
+s32 portWatchValueCentreX(s32 page, s32 row)
+{
+    const s32 playeropt = portWatchRowPlayerOption(page, row);
+    const char *label = portWatchRowLabel(page, row);
+    s32 count = portWatchRowValueCount(page, row);
+    s32 widest = 0;
+    s32 i;
+    s32 x;
+
+    if (playeropt >= 0)
     {
-        if (mx < (f32) ((col[i] + col[i + 1]) / 2))
+        label = (const char *) langGet(game_options_entries[playeropt].text[0]);
+        count = game_options_entries[playeropt].text[3] ? 3 : 2;
+    }
+    if (count >= 2 && count <= 12)
+    {
+        for (i = 0; i < count; i++)
         {
-            return i;
+            const s32 w = portWatchTextWidth(portWatchValueTextIdx(page, row, i));
+            widest = (w > widest) ? w : widest;
         }
     }
-    return cols - 1;
+    else
+    {
+        widest = portWatchTextWidth(portWatchRowValueText(page, row));
+    }
+    x = PORTWATCH_VAL3_X2;
+    if (label != NULL && XOFFSET_1 + portWatchTextWidth(label) + 18 + widest / 2 > x)
+    {
+        x = XOFFSET_1 + portWatchTextWidth(label) + 18 + widest / 2;   /* clear of the label, the < between */
+    }
+    if (x + widest / 2 + 12 > PORT_WATCH_ROW_RIGHT)
+    {
+        x = PORT_WATCH_ROW_RIGHT - 12 - widest / 2;
+    }
+    return x;
 }
 
 /** Where a row's value half starts, for the mouse: Rare's rows split at x 165,
@@ -6824,67 +6959,65 @@ f32 portWatchValueSplitX(s32 page, s32 row)
     const char *label = portWatchRowLabel(page, row);
     s32 x;
 
+    if (label == NULL && portWatchRowPlayerOption(page, row) >= 0)
+    {
+        label = (const char *) langGet(game_options_entries[portWatchRowPlayerOption(page, row)].text[0]);
+    }
     if (label == NULL)
     {
-        return 165.0f;   /* PWROW_PLAYEROPT: Rare's fixed columns */
+        return 165.0f;
     }
     x = XOFFSET_1 + portWatchTextWidth(label) + 4;
     return (f32) ((x > 165) ? x : 165);
 }
 
+/** One value at x (its centre), lit by state, with < > beside it on the
+ * highlighted row (bright while the row has focus). */
+static Gfx *portWatchDrawValueOne(Gfx *gdl, s32 x, s32 y, const char *text, s32 state)
+{
+    const s32 half = portWatchTextWidth(text) / 2;
+
+    gdl = portWatchDrawValueAt(gdl, x, y, text, (state == 2) ? PORTWATCH_COL_SELECTED : PORTWATCH_COL_VALUE_ON);
+    if (state != 0)
+    {
+        /* NOT the dim value colour: it is the same green as the watch face
+         * and the arrows simply vanished into it. TRAP: the trailing newline
+         * is load-bearing, because textMeasure only counts height on '\n' and
+         * a zero-height clip box makes the glyph vanish. */
+        const u32 arrow = (state == 2) ? PORTWATCH_COL_SELECTED : PORTWATCH_COL_VALUE_ON;
+
+        gdl = portWatchDrawValueAt(gdl, x - half - 8, y, "<\n", arrow);
+        gdl = portWatchDrawValueAt(gdl, x + half + 8, y, ">\n", arrow);
+    }
+    return gdl;
+}
+
 /** Draws the value half of a row (state 0 = plain, 1 = highlighted, 2 =
- * highlighted and selected). Rows with two or three values show every value
- * with the live one lit; wider or ranged rows show the live value alone between
- * arrows. */
+ * highlighted and selected): the live value alone, between arrows when
+ * highlighted. */
 static Gfx *portWatchDrawRowValue(Gfx *gdl, s32 y, s32 row, s32 state)
 {
     const s32 page = g_portWatchPage;
     const s32 kind = portWatchRowKind(page, row);
     const s32 count = portWatchRowValueCount(page, row);
     const s32 live = portWatchRowValueIndex(page, row);
-    const u32 activeColour = (state == 2) ? PORTWATCH_COL_SELECTED : PORTWATCH_COL_VALUE_ON;
 
     if (kind == PWROW_SUBSCREEN || PWROW_BACK == kind || kind == PWROW_ACTION)
     {
         return gdl; /* buttons carry no value; the label is the whole row */
     }
-
-    {
-        s32 col[3];
-        s32 cols = portWatchValueColumns(page, row, count, col);
-        s32 i;
-
-        for (i = 0; i < cols; i++)
-        {
-            const u32 colour = (i == live) ? activeColour : PORTWATCH_COL_VALUE_OFF;
-
-            gdl = portWatchDrawValueAt(gdl, col[i], y, portWatchRowValueTextAt(page, row, i), colour);
-        }
-        if (cols > 0)
-        {
-            return gdl;
-        }
+    if (kind == PWROW_BIND || kind == PWROW_DEVICE || kind == PWROW_HINT)
+    {   /* keys and devices: left/right does nothing here, so no arrows until focused (as before) */
+        return portWatchDrawValueOne(gdl, PORTWATCH_VAL3_X2, y, portWatchRowValueText(page, row), (state == 2) ? 2 : 0);
     }
 
-    /* one value, centred on the middle column, with arrows hugging it while
-     * the row is selected so it is obvious that left/right does something */
+    /* one value, with arrows hugging it on the highlighted row so it is
+     * obvious that left/right does something */
     {
         const char *text = (count >= 2 && live >= 0) ? portWatchRowValueTextAt(page, row, live)
                                                      : portWatchRowValueText(page, row);
-        const s32 half = portWatchTextWidth(text) / 2;
 
-        gdl = portWatchDrawValueAt(gdl, PORTWATCH_VAL3_X2, y, text, activeColour);
-        if (state == 2)
-        {
-            /* NOT the dim value colour: it is the same green as the watch
-             * face and the arrows simply vanished into it */
-            /* TRAP: the trailing newline is load-bearing, because textMeasure
-             * only counts height on '\n' and a zero-height clip box makes the
-             * glyph vanish. The colour matters too, since the dim value green
-             * matches the watch face and hid the arrows. */
-            gdl = portWatchDrawValueAt(gdl, PORTWATCH_VAL3_X2 - half - 8, y, "<\n", PORTWATCH_COL_VALUE_ON);
-            gdl = portWatchDrawValueAt(gdl, PORTWATCH_VAL3_X2 + half + 8, y, ">\n", PORTWATCH_COL_VALUE_ON);
-        }
+        gdl = portWatchDrawValueOne(gdl, portWatchValueCentreX(page, row), y, text, state);
     }
     return gdl;
 }
@@ -6969,14 +7102,14 @@ Gfx *portWatchDrawRows(Gfx *gdl)
                 f32 tx0, tx1, ppu;
                 s32 k;
                 portWatchSliderTrack(0, &tx0, &tx1);
-                ppu = (tx1 - tx0) / PORTWATCH_BAR_W;
+                ppu = (tx1 - tx0) / PORTWATCH_BAR_WL;
                 for (k = 1; k <= 3; k++)
                 {
                     const f32 t = 0.25f * (f32) k;
                     const f32 cur = tx0 + t * (tx1 - tx0);   /* the crosshair */
                     const f32 f = portWatchBarFill(t);
                     const f32 tw = 30.0f * (1.2f - f);
-                    const f32 cen = tx0 + ((PORTWATCH_BAR_W + tw) * f) * ppu;
+                    const f32 cen = tx0 + ((PORTWATCH_BAR_WL + tw) * f) * ppu;
 
                     fprintf(stderr, "ge: watchbar fill t=%.2f: f=%.4f band %.2f..%.2f (%.2f px left of the cursor, %.2f right) centre err %+.2f px\n",
                             (double) t, (double) f,
@@ -7010,24 +7143,26 @@ Gfx *portWatchDrawRows(Gfx *gdl)
 
         if (kind == PWROW_PLAYEROPT)
         {
-            /* Rare's row, Rare's drawer: label, values AND the left/right
-             * handling (draw_toggle_option_values calls game_option_toggle_input
-             * for the selected row). Do not reimplement it here. */
+            /* Rare's row: Rare's label and left/right handling
+             * (game_option_toggle_input, as draw_toggle_option_values called
+             * it for the focused row), but only the live value is drawn, like
+             * every other row, instead of all of them side by side */
+            const struct game_options *entry = &game_options_entries[playeropt];
+
             if (state == 2)
             {
-                gdl = draw_toggle_option_values(
-                    draw_options_labels(gdl, XOFFSET_1, y, (char *) langGet(game_options_entries[playeropt].text[0]),
-                                        -1, 1, PORTWATCH_COL_OUTLINE, 0, 0, PORTWATCH_COL_BG, 0),
-                    y, playeropt, 2);
+                gdl = draw_options_labels(gdl, XOFFSET_1, y, (char *) langGet(entry->text[0]),
+                                          -1, 1, PORTWATCH_COL_OUTLINE, 0, 0, PORTWATCH_COL_BG, 0);
+                game_option_toggle_input(playeropt);
             }
             else
             {
-                gdl = draw_toggle_option_values(
-                    draw_options_labels(gdl, XOFFSET_1, y, (char *) langGet(game_options_entries[playeropt].text[0]),
-                                        (state == 1) ? PORTWATCH_COL_SELECTED : PORTWATCH_COL_LABEL,
-                                        0, -1, 0, 0, PORTWATCH_COL_BG, 0),
-                    y, playeropt, state);
+                gdl = draw_options_labels(gdl, XOFFSET_1, y, (char *) langGet(entry->text[0]),
+                                          (state == 1) ? PORTWATCH_COL_SELECTED : PORTWATCH_COL_LABEL,
+                                          0, -1, 0, (state == 1), (state == 1) ? PORTWATCH_COL_BUTTON : PORTWATCH_COL_BG, 0);
             }
+            gdl = portWatchDrawValueOne(gdl, portWatchValueCentreX(page, i), y,
+                                        portWatchValueTextIdx(page, i, (s32) entry->current_value), state);
             continue;
         }
 
@@ -7040,11 +7175,20 @@ Gfx *portWatchDrawRows(Gfx *gdl)
 
         if (button)
         {
-            /* Draws these rows as visible buttons (a filled plate behind the
-             * label), left-aligned with every other row's label. */
+            /* A row like any other: only the highlighted row has the filled
+             * plate (every button plated looked selected all the time), and a
+             * row that opens a page ends in ">" */
             gdl = draw_options_labels(gdl, XOFFSET_1, y, text,
                                       (state == 0) ? PORTWATCH_COL_LABEL : PORTWATCH_COL_SELECTED,
-                                      (state == 2), PORTWATCH_COL_OUTLINE, 0, 1, PORTWATCH_COL_BUTTON, 0);
+                                      (state == 2), PORTWATCH_COL_OUTLINE, 0, (state != 0),
+                                      (state != 0) ? PORTWATCH_COL_BUTTON : PORTWATCH_COL_BG, 0);
+            if (kind == PWROW_SUBSCREEN)
+            {
+                s32 ax = XOFFSET_1 + portWatchTextWidth(text) + 8;
+
+                gdl = draw_options_labels(gdl, ax, y, ">\n", (state == 0) ? PORTWATCH_COL_LABEL : PORTWATCH_COL_SELECTED,
+                                          0, -1, 0, 0, PORTWATCH_COL_BG, 0);
+            }
             continue;
         }
 
@@ -7087,7 +7231,7 @@ Gfx *portWatchDrawRows(Gfx *gdl)
         {
             gdl = draw_options_labels(gdl, XOFFSET_1, y, text,
                                       (state == 1) ? PORTWATCH_COL_SELECTED : PORTWATCH_COL_LABEL,
-                                      0, -1, 0, 0, PORTWATCH_COL_BG, 0);
+                                      0, -1, 0, (state == 1), (state == 1) ? PORTWATCH_COL_BUTTON : PORTWATCH_COL_BG, 0);
         }
 
         gdl = portWatchDrawRowValue(gdl, y, i, state);
@@ -7112,26 +7256,6 @@ Gfx *portWatchDrawRows(Gfx *gdl)
             }
         }
     }
-    if (page == PORTWATCH_GENERAL)
-    {   /* A RULE BETWEEN RARE'S ROWS AND THE PORT'S PICKERS (below Screen,
-         * above Gameplay): above the first sub-page button
-         * that follows a player-option row */
-        s32 v;
-
-        for (v = 0; v < vis; v++)
-        {
-            const s32 i = sPortWatchScroll + v;
-
-            if (i > 0 && portWatchRowKind(page, i) == PWROW_SUBSCREEN && portWatchRowKind(page, i - 1) == PWROW_PLAYEROPT)
-            {
-                const s32 ry = portWatchRowY0() + YINC * v - 3;
-
-                gdl = microcode_constructor_related_to_menus(gdl, XOFFSET_1 - 2, ry,
-                        XOFFSET_1 + PORTWATCH_HINT_MAXW, ry + 1, PORTWATCH_RULE_COL);
-            }
-        }
-    }
-
     {   /* More above / more below markers: three stacked bars in the gutter
          * left of the labels, the same mark the frontend sheets use on scrolled
          * drop-downs. Drawn only when rows are hidden, so a page that fits

@@ -73,7 +73,7 @@ extern char ge_shot_path[512];
 static s32 sOn;
 static s32 sLocked;             /* we locked the controls (and unlock them) */
 static coord3d sPos, sPos3;
-static StandTile *sTile;
+static s32 sRoom;
 static f32 sTheta, sPitch;      /* degrees; theta as Bond's vv_theta, pitch up-positive */
 static f32 sPitchSign = 1.0f;   /* Bond's vv_verta against up */
 static s32 sShot;               /* ticks into a shot, 0 none */
@@ -99,10 +99,14 @@ static void coopPhotoStart(void)
     sShot = 0;
     sPos = g_CurrentPlayer->field_488.pos;
     sPos3 = g_CurrentPlayer->field_488.pos3;
-    sTile = g_CurrentPlayer->field_488.current_tile_ptr_for_portals;
-    if (sTile == NULL)
     {
-        sTile = g_CurrentPlayer->prop->stan;
+        StandTile *tile = g_CurrentPlayer->field_488.current_tile_ptr_for_portals;
+
+        if (tile == NULL)
+        {
+            tile = g_CurrentPlayer->prop->stan;
+        }
+        coopFreeCamStart(&sPos, &sPos3, &sRoom, (tile != NULL) ? tile->room : bondviewGetCurrentPlayersRoom());
     }
     sTheta = g_CurrentPlayer->vv_theta;
     sPitch = (len > 0.01f) ? asinf(v->f[1] / len) / DEG : 0.0f;
@@ -189,7 +193,7 @@ static void coopPhotoMove(f32 fwd, f32 side)
     {
         return;
     }
-    coopFreeCamStep(&sPos, &sPos3, &sTile, &want);
+    coopFreeCamStep(&sPos, &sPos3, &sRoom, &want);
 }
 
 /* GE_PHOTO_TEST=<s>: <s> seconds into a mission, photo mode on; turn and fly
@@ -337,11 +341,11 @@ s32 coopPhotoCamera(coord3d *pos, coord3d *look, coord3d *up)
 
 s32 coopPhotoRoom(u8 *room)
 {
-    if (!coopPhotoActive() || sTile == NULL)
+    if (!coopPhotoActive() || sRoom < 0)
     {
         return 0;
     }
-    *room = sTile->room;
+    *room = (u8) sRoom;
     return 1;
 }
 

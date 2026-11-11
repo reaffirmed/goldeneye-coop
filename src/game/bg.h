@@ -249,6 +249,9 @@ void sub_GAME_7F0BA2D4(coord3d *, coord3d *, s32 *, s32 *, s32);
 f32 bgGetLevelFloorY(void);
 #endif
 void bgFindRoomsAlongSegment(coord3d *pos1, coord3d *pos2, u8 *initialRooms, u8 *outRoomSet, s32 *outRoomNums, s32 *outRoomNumsCount, s32 outRoomNumsMax);
+#ifndef TARGET_N64
+s32 bgRoomAlongSegment(s32 room, coord3d *from, coord3d *to);   /* coop free cameras */
+#endif
 s32 sub_GAME_7F0B9E04(coord3d *arg0, coord3d *arg1);
 void bgRoomCalcBB(s32 room);
 

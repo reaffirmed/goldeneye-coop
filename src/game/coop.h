@@ -54,6 +54,9 @@ s32  coopLostBondBegin(s32 k); /* 1: "Bond" is now the k-th partner whose line w
 void coopLostBondEnd(void);
 PropRecord *coopAutogunTarget(PropRecord *gun, f32 aimdist, f32 rot, f32 arcmin, f32 arcmax); /* propobj.c: who a drone gun aims at */
 s32  coopOwnBondCounts(void);         /* 0: a level script's own-Bond check skips the host's body (down, a partner standing) */
+#define COOPENDALL_RESTART 1    /* COOPEV_ENDALL's first byte: the host restarts the mission (0: back to the lobby) */
+void coopHostRestart(void);    /* the watch's Abort, RESTART: the same mission again for everyone */
+s32  coopScriptRoomHold(ChrRecord *self, s32 pad); /* 1: a level script's "Bond in the room with pad" waits for a player still at the scene */
 s32  coopLevelFallCheckOff(f32 y);   /* 1: a level script's fall check that co-op leaves to each player's own game */
 s32  coopBondHasItem(s32 item);          /* chrai.c: whoever is Bond now holds this item (a partner's from STATE) */
 f32  coopBondHealth(void);               /* and their health, 0..1 */
@@ -303,12 +306,12 @@ void coopGiveTestPress(void);
  * ticks. One ping per player; a new one replaces it. Rides the reliable
  * events (COOPEV_PING) to everyone. */
 #define COOP_PING_LIFE 600   /* 10 s */
-enum { COOPPING_SPOT, COOPPING_ENEMY };
+enum { COOPPING_SPOT, COOPPING_ENEMY, COOPPING_PERSON /* a civilian, scientist or ally: followed, not red (an older build shows a spot) */ };
 typedef struct
 {
     f32 pos[3];     /* where the aim met a wall, floor or the guard */
     s16 room;
-    s16 chrnum;     /* COOPPING_ENEMY: the guard, followed while alive; else -1 */
+    s16 chrnum;     /* COOPPING_ENEMY / PERSON: the chr, followed while alive; else -1 */
     s32 stage;      /* the pinger's stage: a ping from another one is dropped */
     u8 kind;        /* COOPPING_* */
     u8 pad[3];
@@ -459,7 +462,8 @@ void coopSpectateMouse(f32 *dx, f32 *dy, s32 *direct, f32 *yawdeg, f32 *pitchdeg
 s32  coopSpectateCamera(struct coord3d *pos, struct coord3d *look, struct coord3d *up);
 s32  coopSpectateRoom(u8 *room);
 struct coord3d *coopSpectatePos(s32 three);
-void coopFreeCamStep(coord3d *pos, coord3d *pos3, StandTile **tile, const coord3d *want);   /* free cameras: through anything */
+void coopFreeCamStep(coord3d *pos, coord3d *pos3, s32 *room, const coord3d *want);   /* free cameras: through anything */
+void coopFreeCamStart(coord3d *pos, coord3d *pos3, s32 *room, s32 feetroom);
 /* first person through a partner's eyes: our idle hands play their gun (coop_spectate.c) */
 void coopSpectateStageStart(void);
 s32  coopSpectateHandsOn(void);                 /* our hands are the watched partner's: look only, nothing real */
@@ -753,6 +757,7 @@ void coopObjGadgetUsed(ObjectRecord *obj, s32 item);       /* gunfire.c: a gadge
 void coopGadgetCheck(ObjectRecord *obj, void *script);      /* chrai.c AI_IFBondUsedGadgetOnObject passed */
 s32  coopGadgetItem(void *script);                           /* chrai.c AI_IFBondHasItemEquipped: a partner's gadget, -1 ours */
 void coopAsciiName(char *out, s32 cap, const char *in, s32 upper);   /* a Steam name for the game's fonts */
+void coopFlattenLines(char *out, s32 cap, const char *in);   /* the game's text on several lines as one */
 
 /* voice chat (coop_voice.c): Steam Voice in COOPPKT_VOICE packets, heard from
  * where the talker stands; push to talk (V) or an open mic ([display]

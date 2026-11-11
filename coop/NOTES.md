@@ -4554,3 +4554,136 @@ Rig: Linux i686, two copies on one machine over the mock Steam, Dam, joiner kill
   its own PP7 and 7 | 93 rounds, as before the death.
 - Not covered: dual guns (the harness gives one), the rocket launcher, 3 or 4 players, a
   real pad, an older build's partner (by construction: viewaim 0 falls back).
+
+## Player test feedback: free camera, spectating, voice, Spanish objectives, pings, Egyptian, rockets (2026-11-11, COOP_VERSION stays 17)
+
+Fixes from a tester group's report (Goldeneye COOP Bugtest.docx, in Spanish).
+
+- Free camera stopped drawing the level after a while (coop_spectate.c coopFreeCamStep,
+  photo mode too). It reported the room of the floor tile it last had: flown up a storey,
+  the room stayed the one below, and out past the walls it stayed the last room left
+  however far it flew, so the portals showed nothing until the view went back to a player.
+  Now: over a floor, that floor's room walked up through the portals to the camera
+  (bg.c bgRoomAlongSegment, the walk bgRoomVisibilityRelated does from the feet to the
+  eyes); over the void, the room it was in walked along each step through any portal it
+  crossed. pos3 is the camera itself, so the draw's own walk adds nothing.
+- Spectating in first person drew each of the partner's shots twice: our hands' tracer
+  and one from their hidden body's gun just above the camera (top of the screen).
+  coop_look.c coopLookPlayShot gives a hidden body (CHRFLAG_HIDDEN) no tracer.
+- A partner who is down talked from their body. coop_voice.c plays a down partner's voice
+  in the middle at full volume, as in the lobby.
+- Spanish objectives were cut off: the patch keeps them on two lines and the co-op text
+  stopped at the first break ("A. NEUTRALIZAR TODAS LAS"). coopFlattenLines joins the lines
+  for the objective list, the "completed" toast and the results screen. The list also
+  translates its "- DONE" / "- FAILED", wraps to 6 lines (was 3) and its buffers grew;
+  toasts hold 176 characters (was 112).
+- Character lines (Rare's top message bar, Classic captions) sat over the partner rows,
+  the TALK marker, the radar and the objectives. bondview2.c hudmsgTopBarBottom gives the
+  bar's bottom on screen, and coop_hud.c moves those down below it while it shows
+  (coopHudTopMsgPush, eased over 120 ms), each in its own scale (Text Size, HUD Scale).
+- Name tags far away: the dim behind a wall now changes only after 3 looks in a row agree
+  (300 ms; long lines past railings came and went and the tag flickered), and the tag's
+  scale pivot is placed to a quarter pixel (a small far tag shook by whole pixels).
+- The remote mines' detonator (ITEM_TRIGGER) is on the weapon menu's explosives slot.
+  It was left off, so with the menu on it was only taken when the last mine went down.
+- Pings: Streets' open roads gave the walls test no hit, so no spot could be pinged there.
+  coop_ping.c coopPingTraceFloor also steps along the floor tiles from under our eyes (25
+  cm steps, up to 100 m) to where the aim, going down, meets the floor; the nearer of the
+  two wins. A chr that is a civilian casualty if killed, Natalya, or has no gun in either
+  hand is pinged as COOPPING_PERSON: followed like an enemy, drawn in the pinger's colour,
+  "X pinged someone." (Spanish in port.po). An older build shows it as a spot.
+- Egyptian's gold gun glass stuck with the players apart: global list 0x1001 starts over
+  once "Bond" is in the room with pad 0x45, and at its start shuts the glass again as soon
+  as "Bond" is in the puzzle room (pad 0x97). Either player counts for both, so with one
+  player at the case and the other out by pad 0x45 the list went round every tick (the
+  glass's sound, then shut again). coop.c coopScriptRoomHold: on the host in Egyptian, that
+  pad 0x45 check waits while any player is still in the puzzle room. Log: "egyptian: a
+  player is still at the gold gun case".
+- Rockets looked crooked (gunfire.c gunRocketFaceAim): a rocket took the launcher's turn in
+  the hand but flew along the aim, which gunWeaponFovLaunch turns toward the drawn gun's
+  line. The matrix is turned the least that brings its axis nearest the aim onto the aim
+  (not in demos). Partners and opponents get the turned matrix in the launch message.
+
+Not changed: Cradle (guards out of place for the joiner) and Aztec (a guard that couldn't
+die and did no harm) need logs or a repro; Statue's ending with Valentin as the character
+needs a closer look; Aztec's guards circling before a corner is believed to be the original
+game; a quick restart and the multiplayer suggestions are feature requests.
+
+## Quick mission restart from the host's watch (2026-11-11, COOP_VERSION stays 17)
+
+Testers asked for a way to start a mission over without everyone going back to the lobby.
+
+- The host's watch Abort, CONFIRM, now offers three choices: RESTART, END ALL and
+  HAND OVER (options.c, sPortCoopAbortSel; HAND OVER is still the default). They are
+  shown one at a time as "< RESTART >", because side by side they ran into each other
+  (and in Spanish, REINICIAR / ACABAR PARA TODOS / CEDER, past the watch face). Stick or
+  d-pad left/right steps round them; a mouse click on an arrow steps, a click on the
+  choice confirms it. The help line under it says what it does, translated with portTr,
+  and keeps Latin-1 letters (ANFITRIÓN) instead of turning them into '?'.
+- RESTART (coop.c coopHostRestart) sends COOPEV_ENDALL with u.raw[0] = COOPENDALL_RESTART
+  and aborts the host's own mission as END ALL does. Once the host's debrief is up,
+  coopRestartTick (from coopFrontTick) calls front.c coopFrontRestart, which starts the
+  debrief's mission again through coopVoteStartMission, the same path as WHAT NEXT's
+  Replay. Log: "host restarts the mission (stage N) for everyone", then "restarting stage N".
+- A joiner (coopApplyEndAll(1)) ends its mission with the banner "THE HOST RESTARTED THE
+  MISSION / STARTING AGAIN" and no "Mission Ended" screen, then follows the host's new
+  mission serial in as it does for any mission. An older build reads the event as END ALL.
+- Spanish for the new strings is in port.po.
+
+## Cradle: a joiner's guard left behind, and the shaft log (2026-11-11, COOP_VERSION stays 17)
+
+From the tester's Cradle hunt (joiner fighting): the joiner's copy of a respawned guard
+stood at 2206 81 -165 while the host's was at 3475 -416 -157, 13 m away and half a floor
+lower, with packets arriving every tick ("watch: host chr 4 is drawn far from the host's
+spot ... synced 0 ticks ago"). coopGuardsInterpTick only moves a copy when it finds a
+floor for the host's spot: walked to from where ours stands, else the highest tile under
+it. Neither found one, so the copy never moved.
+
+- coopGuardStan adds a third try, the highest tile under a point 100 units above the
+  host's spot, for a spot that sits just below a stepped or sloped floor here.
+- A copy that still finds no floor for 1 s logs "chr N: no floor here under the host's
+  spot X Y Z for 1 s: ours stays at ...", and the watch line now ends with "no floor N
+  ticks", so the next report says which case it is.
+- The joiner, invincible (the cheat) at the bottom of the shaft, logged "fell into the
+  Cradle shaft" every tick, because the death never took. coopCradleFallTick now skips an
+  invincible player as it does g_PlayerInvincible.
+- Second hunt (202a48a): the floor fallback never fired ("no floor 0 ticks"). The guard
+  "standing at 3475 -416 318" turned out to be a misread frame counter: the host's own
+  guard walks pad, then z to 318 (a real corner waypoint), then west to 2673 -543 318, and
+  the joiner's copy was about 3 s at that corner, slightly behind. Not a desync.
+  coopGuardsWatch keeps a safety net anyway: a living guard more than 4 m from the host's
+  newest spot on two checks in a row (a second apart), while synced, has its track logged
+  ("chr N snaps to the host's spot: ... sample k: +ms, x y z"), cut to the newest sample,
+  and is put there with its ground started over (CHRFLAG_INIT). In four runs (Cradle x2,
+  Facility, Dam, joiner on netsim 60:20:2) it never fired, nor on guards walking normally.
+- Capitals drop accents in port text (langUpper, "ANFITRION"), as the translators wrote
+  their own capitals; left as is.
+
+## The pause watch, simpler to read (2026-11-11)
+
+Player feedback: the watch "looks very overwhelming". The tester's review (every page, English
+and Spanish) found the Options page the worst: 11 rows each printing every choice side by side,
+dim and bright, a cursor that only turned slightly whiter, and the page buttons drawn as filled
+plates that looked selected all the time.
+
+- Every row shows only its current value, with "<" and ">" beside it on the highlighted row
+  (options.c portWatchDrawValueOne, portWatchValueCentreX). Rare's own rows (look up/down,
+  auto-aim and so on) keep Rare's input (game_option_toggle_input) but are drawn the same way.
+  The value sits where Rare's middle column was, or further right past a long label, sized by
+  the row's widest value so the arrows don't jump. A mouse click left or right of the value
+  steps it that way (round and round on Rare's rows). Rows whose values don't fit still open
+  their drop-down list on A, as before (portWatchValuesFit is unchanged).
+- Only the highlighted row has the filled plate; a row that opens a page ends in ">". The rule
+  between Rare's rows and the page buttons is gone.
+- The watch writes its port rows in small letters (pwWatchCase), and draw-time translation
+  only folded all-capitals text, so "rebind inputs", "gameplay" and the like stayed English in
+  Spanish. port_lang.c now folds all-small-letters text too and returns the translation in
+  small letters.
+- The MUSIC and FX bars start a few pixels past the wider of their two labels (EFECTOS ran
+  under its bar), keeping the right end; options.c portWatchBarFit projects the face to find
+  where that is.
+- Bank Gothic's Q and q reach a pixel below the other letters, and draw_options_labels clipped
+  to exactly one measured line, so they were dropped whole from every row (Spanish "BLO UEO DE
+  RATÓN", and í, drawn from the '$' glyph, the same). The clip now has two pixels of room.
+- Not changed: the random static is Rare's (it can be turned off: Port Options, Watch Static);
+  the "Q WATCH V2.01 BETA" header is the cart's text; the Options page still has its nine rows.

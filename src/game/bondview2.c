@@ -14457,6 +14457,49 @@ void bondviewUpperTextWindowTimerTick(void)
 }
 
 
+#ifndef TARGET_N64
+/* coop_hud.c: where the top message's bar (a character's line in Classic
+ * captions) ends on the screen, 0 while none shows, so the co-op names, the
+ * voice marker and the radar can sit below it instead of under its text.
+ * The same test and layout as sub_GAME_7F08AAE8 below. */
+s32 hudmsgTopBarBottom(void)
+{
+    s32 th = 0, tw = 0;
+    s32 y, bottom;
+    const s32 vt = viGetViewTop();
+#if defined(LEFTOVERDEBUG)
+    char *text = stringbuffer_top[upper_text_buffer_index];
+#else
+    char *text = dword_CODE_bss_80079DC8[upper_text_buffer_index];
+#endif
+
+    if (g_UpperTextDisplayFlag != 0 || upper_text_window_timer < 0 || text[0] == '\0' || g_CurrentPlayer == NULL
+        || g_CurrentPlayer->mpmenuon != 0)
+    {
+        return 0;
+    }
+    textMeasure(&th, &tw, text, ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+    if (cameraBufferToggle != 0)
+    {
+        y = ((vt + 0x10 + 0x10) / 11) * 11 - 2;
+    }
+    else
+    {
+#ifdef VERSION_EU
+        y = vt + 0x10;
+#else
+        y = vt + 0xd;
+#endif
+    }
+    bottom = y + th;
+    if (portHudScaleOn())
+    {
+        bottom = vt + (bottom - vt + 1) / 2;
+    }
+    return bottom;
+}
+#endif
+
 Gfx *sub_GAME_7F08AAE8(Gfx *gdl)
 {
     TopMessageLocals msg;

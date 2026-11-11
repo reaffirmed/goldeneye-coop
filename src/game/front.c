@@ -13473,6 +13473,21 @@ void coopVoteStartMission(s32 stage)
     frontChangeMenu(MENU_RUN_STAGE, TRUE);
 }
 
+/* coop.c coopRestartTick: the host's quick restart, from the aborted
+ * mission's debrief (as WHAT NEXT's Replay starts it); 0 not there yet */
+s32 coopFrontRestart(s32 stage)
+{
+    s32 here;
+
+    if (current_menu != MENU_MISSION_FAILED && current_menu != MENU_MISSION_COMPLETE)
+    {
+        return 0;
+    }
+    here = coopVoteThisStage();     /* the debrief's own mission, as Replay takes it */
+    coopVoteStartMission((here >= 0) ? here : stage);
+    return 1;
+}
+
 void coopVoteToLobby(void)
 {
     if (current_menu == MENU_MISSION_COMPLETE || current_menu == MENU_MISSION_FAILED)

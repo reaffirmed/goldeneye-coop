@@ -2317,6 +2317,10 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                         inroom = check_if_actor_is_at_preset(ChrEntityp, pad_id);
                         coopAltBondEnd();
                     }
+                    if (inroom && coopScriptRoomHold(ChrEntityp, pad_id))
+                    {
+                        inroom = 0;     /* co-op: Egyptian's gold gun case, a player still at it */
+                    }
                     if (inroom)
                     {
                         coopAltBondCredit(Entityp, coopk);  /* whose check it was (coop.c, objective credit) */

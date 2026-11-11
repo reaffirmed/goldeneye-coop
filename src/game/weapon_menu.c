@@ -127,6 +127,8 @@ static s32 wmSlotOf(s32 item)
         case ITEM_GRENADELAUNCH: case ITEM_ROCKETLAUNCH:
             return 3;
         case ITEM_GRENADE: case ITEM_TIMEDMINE: case ITEM_PROXIMITYMINE: case ITEM_REMOTEMINE:
+        case ITEM_TRIGGER:  /* the remote mines' detonator, beside them: it was only ever
+                             * taken by hand when the last mine went down (testers' report) */
         case ITEM_WATCHLASER:
             return 4;
         default:
@@ -134,7 +136,7 @@ static s32 wmSlotOf(s32 item)
             {
                 return WM_ITEMS;
             }
-            return -1;   /* the tank's shells, the detonator: not on the menu */
+            return -1;   /* the tank's shells: not on the menu */
     }
 }
 

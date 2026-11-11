@@ -389,6 +389,8 @@ struct trentry {
     const char *utf8;    /* as written, no trailing '\n' */
     const char *upper;   /* tr in capitals (lazily), and + '\n' */
     const char *uppernl;
+    const char *lower;   /* tr in small letters (lazily), and + '\n' */
+    const char *lowernl;
     uint32_t hash;
     uint32_t chash;      /* of the key folded to lower case */
 };
@@ -599,8 +601,8 @@ static void langLoadCatalogue(const char *code)
         }
     }
     sEntries = (struct trentry *) calloc((size_t) maxentries + 1, sizeof(*sEntries));
-    /* key + utf8 + tr + trnl + upper + uppernl: each at most the file's bytes, x6 */
-    sPoolCap = (size_t) len * 6 + 64;
+    /* key + utf8 + tr + trnl + upper + uppernl + lower + lowernl: each at most the file's bytes, x8 */
+    sPoolCap = (size_t) len * 8 + 64;
     sPool = (char *) malloc(sPoolCap);
     if (sEntries == NULL || sPool == NULL) {
         free(text);
@@ -747,6 +749,30 @@ static void langMakeUpper(struct trentry *e)
     }
 }
 
+/* Latin-1 small letters: the watch writes its port rows in small letters
+ * (port_watchpages.c pwWatchCase), which its font draws as small capitals */
+static void langMakeLower(struct trentry *e)
+{
+    char buf[LANG_STR_MAX];
+    size_t i, n = strlen(e->tr);
+    if (n >= sizeof(buf)) {
+        n = sizeof(buf) - 1;
+    }
+    for (i = 0; i < n; i++) {
+        unsigned char c = (unsigned char) e->tr[i];
+        if ((c >= 'A' && c <= 'Z') || (c >= 0xC0 && c <= 0xDE && c != 0xD7)) {
+            c = (unsigned char) (c + 0x20);
+        }
+        buf[i] = (char) c;
+    }
+    e->lower = langPoolAdd(buf, n, 0);
+    e->lowernl = langPoolAdd(buf, n, 1);
+    if (e->lower == NULL || e->lowernl == NULL) {
+        e->lower = e->tr;
+        e->lowernl = e->trnl;
+    }
+}
+
 /* a missed string, once (GE_LANG_MISSING=1) */
 static int sMissingOn = -1;
 static void langNoteMissing(const char *s, size_t n)
@@ -841,6 +867,16 @@ static const char *langTranslate(const char *en, int draw, int utf8)
                     langMakeUpper(ce);
                 }
                 return nl ? ce->uppernl : ce->upper;
+            }
+        }
+        /* an all-small-letters rendering ("rebind inputs", the watch's rows) */
+        if (lower > 0 && upper == 0) {
+            struct trentry *ce = (struct trentry *) langLookup(en, n, 1);
+            if (ce != NULL) {
+                if (ce->lower == NULL) {
+                    langMakeLower(ce);
+                }
+                return nl ? ce->lowernl : ce->lower;
             }
         }
     }

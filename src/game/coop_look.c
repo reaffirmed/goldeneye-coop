@@ -616,7 +616,13 @@ static void coopLookPlayShot(ChrRecord *chr, const CoopShot *s, s32 self)
     coopPartnerShotNearMiss(chr, &from, &end);  /* host: guards it went past heard it whizz by (coop.c) */
 
     sub_GAME_7F02BFE4(chr, hand, 1);        /* the gun's sound, as a guard's */
-    CapBeamLengthAndDecideIfRendered(&chr->beams[hand], s->weapon, &from, &end);
+    if (!(chr->chrflags & CHRFLAG_HIDDEN))
+    {   /* a body not drawn has no tracer: watching them from their eyes, our
+         * hands draw theirs (coop_spectate.c), and this one ran from their
+         * body's gun just above the camera, a second shot from the top of
+         * the screen (testers' report) */
+        CapBeamLengthAndDecideIfRendered(&chr->beams[hand], s->weapon, &from, &end);
+    }
 
     dir.f[0] = end.f[0] - from.f[0];
     dir.f[1] = end.f[1] - from.f[1];
