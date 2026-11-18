@@ -51,6 +51,7 @@ extern void portConLogf(const char *fmt, ...);
 static SOCKET sSock = INVALID_SOCKET;
 static int sSteam; /* the Steam backend is in use */
 static int sIsHost;
+static int sLocalOnly; /* "local": split screen with nobody online, hosting for ourselves */
 static int sHasPeer[COOP_NET_MAX_PEERS];
 static struct sockaddr_in sPeer[COOP_NET_MAX_PEERS];
 
@@ -69,6 +70,13 @@ int coopNetStart(const char *e)
     if (e == NULL || e[0] == '\0')
     {
         return 0;
+    }
+    if (strcmp(e, "local") == 0)
+    {   /* no transport: the session's players are all on this screen */
+        sLocalOnly = 1;
+        sIsHost = 1;
+        portConLogf("ge: coop: local session (split screen only)\n");
+        return 1;
     }
     if (strncmp(e, "steam", 5) == 0)
     {
@@ -588,6 +596,7 @@ void coopNetShutdown(void)
     }
     memset(sHasPeer, 0, sizeof(sHasPeer));
     sIsHost = 0;
+    sLocalOnly = 0;
 }
 
 /* see coop_net.h; a UDP peer id is its address << 16 | its port */
@@ -661,5 +670,10 @@ int coopNetIsSteam(void)
 
 int coopNetIsOpen(void)
 {
-    return sSteam || sSock != INVALID_SOCKET;
+    return sSteam || sSock != INVALID_SOCKET || sLocalOnly;
+}
+
+int coopNetIsLocalOnly(void)
+{
+    return sLocalOnly;
 }

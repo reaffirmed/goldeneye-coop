@@ -501,6 +501,8 @@ typedef struct
     u8 noiseSeq;        /* the shotseq coopPuppetNoise last saw */
     u8 noiseSeqValid;
     u32 noiseTick;      /* the STATE (its tick) whose shots were last counted */
+    s32 local;          /* split screen: a player on this screen, filled from its own player (coopLocalsFill); no puppet */
+    PropRecord *localProp;  /* ...and its Bond */
 } CoopRemote;
 /* each level script's last "either player" check passer (coopAltBondCredit) */
 #define COOP_SCRIPTPASS 32
@@ -743,19 +745,102 @@ static s32 coopRespawnEta(void);
 
 /* ---- players ------------------------------------------------------------- */
 
-/* our player number: the host is 0, a joiner learns its own from the host */
-static s32 coopSelf(void)
+/* Players on this screen (split screen, g_CoopLocalCount): local li is
+ * player coopPlayerOfLocal(li). The host's are players 0..L-1 and its
+ * joiners follow them; a joiner learns its own numbers from the host. */
+static s32 coopLocalsN(void)
 {
-    if (coopNetIsHost())
+    s32 n = g_CoopLocalCount;
+
+    if (splitStoryActive())
     {
-        return 0;
+        n = getPlayerCount();
     }
-    return (sHostHello.youare >= 1 && sHostHello.youare < COOP_MAX_PLAYERS) ? sHostHello.youare : 1;
+    return (n < 1) ? 1 : (n > COOP_MAX_LOCAL) ? COOP_MAX_LOCAL : n;
 }
 
+/* host: the players each joiner's channel carries, from base[c] (contiguous:
+ * a joiner's locals are youare, youare + 1, ...) */
+static s8 sChanBase[COOP_NET_MAX_PEERS] = { -1, -1, -1 };
+static u8 sChanLocals[COOP_NET_MAX_PEERS] = { 1, 1, 1 };
+static u8 sHostLocals = 1;  /* joiner: the host's players on its screen (its hello) */
+
+static s32 coopHostChanBase(s32 c)
+{
+    if (c < 0 || c >= COOP_NET_MAX_PEERS)
+    {
+        return -1;
+    }
+    return (sChanBase[c] >= 0) ? sChanBase[c] : c + coopLocalsN();
+}
+
+static s32 coopHostChanOf(s32 p)
+{
+    s32 c;
+
+    for (c = 0; c < COOP_NET_MAX_PEERS; c++)
+    {
+        const s32 b = coopHostChanBase(c);
+
+        if (p >= b && p < b + sChanLocals[c] && p < COOP_MAX_PLAYERS)
+        {
+            return c;
+        }
+    }
+    return -1;
+}
+
+static s32 coopJoinerLocalPlayer(s32 li)
+{
+    const s32 first = (sHostHello.youare >= 1 && sHostHello.youare < COOP_MAX_PLAYERS) ? sHostHello.youare : 1;
+
+    return first + li;
+}
+
+static s32 coopPlayerOfLocal(s32 li)
+{
+    if (coopNetIsHost() || sEnabled <= 0)
+    {
+        return li;
+    }
+    if (li == 0)
+    {
+        return (sHostHello.youare >= 1 && sHostHello.youare < COOP_MAX_PLAYERS) ? sHostHello.youare : 1;
+    }
+    {
+        s32 p = coopJoinerLocalPlayer(li);
+
+        return (p >= 1 && p < COOP_MAX_PLAYERS) ? p : -1;
+    }
+}
+
+/* the local player that is player p, -1 when p plays elsewhere */
+static s32 coopLocalOfPlayer(s32 p)
+{
+    s32 li, n = coopLocalsN();
+
+    for (li = 0; li < n; li++)
+    {
+        if (coopPlayerOfLocal(li) == p)
+        {
+            return li;
+        }
+    }
+    return -1;
+}
+
+/* our player number: the local player whose turn it is (coopCurLocal) */
+static s32 coopSelf(void)
+{
+    const s32 p = coopPlayerOfLocal(coopCurLocal());
+
+    return (p >= 0) ? p : 0;
+}
+
+/* host: the first player a joiner's channel c reaches (its joiner's first local) */
 static s32 coopPlayerOfChan(s32 c)
 {
-    return coopNetIsHost() ? c + 1 : 0;
+    return coopNetIsHost() ? coopHostChanBase(c) : 0;
 }
 
 /* the channel that reaches player p, -1 if none does directly */
@@ -763,9 +848,9 @@ static s32 coopChanOfPlayer(s32 p)
 {
     if (coopNetIsHost())
     {
-        return (p >= 1 && p <= COOP_NET_MAX_PEERS) ? p - 1 : -1;
+        return coopHostChanOf(p);
     }
-    return (p == 0) ? 0 : -1;
+    return (p >= 0 && p < sHostLocals) ? 0 : -1;   /* the host's screen; the other joiners through it */
 }
 
 /* player p (another one) is in this mission with us */
@@ -774,10 +859,27 @@ static s32 coopRemoteHere(s32 p)
     return p >= 0 && p < COOP_MAX_PLAYERS && p != coopSelf() && sR[p].valid && sR[p].st.stage == bossGetStageNum();
 }
 
+/* player p's Bond here: its puppet, or a split-screen partner's own */
+static PropRecord *coopPProp(s32 p)
+{
+    if (p < 0 || p >= COOP_MAX_PLAYERS)
+    {
+        return NULL;
+    }
+    return sR[p].local ? sR[p].localProp : sR[p].puppet;
+}
+
 static s32 coopRemoteAliveHere(s32 p)
 {
-    return coopRemoteHere(p) && !sR[p].st.dead && !sR[p].lost && sR[p].puppet != NULL && sR[p].puppet->chr != NULL
-        && sR[p].puppet->stan != NULL;
+    PropRecord *pp = coopPProp(p);
+
+    return coopRemoteHere(p) && !sR[p].st.dead && !sR[p].lost && pp != NULL && pp->chr != NULL && pp->stan != NULL;
+}
+
+/* a partner to play with: online, or beside us in split screen */
+static s32 coopHasPartner(void)
+{
+    return coopNetHasPeer() || (splitStoryActive() && coopLocalsN() > 1);
 }
 
 /* somebody else is in this mission */
@@ -802,12 +904,35 @@ static s32 coopPlayerOfProp(PropRecord *prop)
 
     for (p = 0; prop != NULL && p < COOP_MAX_PLAYERS; p++)
     {
-        if (sR[p].puppet == prop)
+        if (sR[p].puppet == prop && !sR[p].local)
         {
             return p;
         }
     }
     return -1;
+}
+
+/* a split-screen player's Bond on this screen: the local player (0..), else -1 */
+static s32 coopLocalOfProp(PropRecord *prop)
+{
+    s32 li, n = getPlayerCount();
+
+    for (li = 0; prop != NULL && splitStoryActive() && li < n; li++)
+    {
+        if (g_playerPointers[li] != NULL && g_playerPointers[li]->prop == prop)
+        {
+            return li;
+        }
+    }
+    return -1;
+}
+
+/* the player whose Bond (a puppet, or a split-screen player's) prop is, -1 none */
+static s32 coopPlayerOfAnyProp(PropRecord *prop)
+{
+    const s32 li = coopLocalOfProp(prop);
+
+    return (li >= 0) ? coopPlayerOfLocal(li) : coopPlayerOfProp(prop);
 }
 
 static s32 coopIsPuppet(PropRecord *prop)
@@ -820,7 +945,8 @@ static s32 coopIsPuppet(PropRecord *prop)
  * mirror, send or remove */
 static s32 coopIsPlayerChr(ChrRecord *chr)
 {
-    return coopIsPuppet(chr->prop) || (g_CurrentPlayer != NULL && chr->prop == g_CurrentPlayer->prop) || coopPropIsCorpse(chr->prop);
+    return coopIsPuppet(chr->prop) || (g_CurrentPlayer != NULL && chr->prop == g_CurrentPlayer->prop) || coopLocalOfProp(chr->prop) >= 0
+        || coopPropIsCorpse(chr->prop);
 }
 
 static s32 coopRespawnEta(void);
@@ -999,7 +1125,7 @@ s32 coopItemChanceLeft(s32 item, s32 flying)
     return who != 0 || flying;
 }
 
-static void coopSendState(void)
+static void coopBuildState(CoopStatePkt *out)
 {
     CoopStatePkt p;
     PropRecord *bond = getCurrentPlayerProp();
@@ -1030,6 +1156,54 @@ static void coopSendState(void)
     p.carry = (u8) coopCarryByte();
     p.viewaim = coopViewAimPack(bondviewGetPlayerPitchRadians(), currentPlayerGetIsAiming());
     p.ms = coopNowMs();
+    *out = p;
+}
+
+/* Split screen: every other player on this screen in sR[], as a partner
+ * whose STATE came this tick (no puppet: its Bond is drawn as it is). */
+static void coopLocalsFill(void)
+{
+    const s32 n = coopLocalsN(), cur = get_cur_playernum();
+    s32 li;
+
+    if (!splitStoryActive())
+    {
+        return;
+    }
+    for (li = 0; li < n; li++)
+    {
+        const s32 p = coopPlayerOfLocal(li);
+        CoopRemote *r;
+
+        if (p < 0 || p >= COOP_MAX_PLAYERS || g_playerPointers[li] == NULL || g_playerPointers[li]->prop == NULL)
+        {
+            continue;
+        }
+        r = &sR[p];
+        set_cur_player(li);
+        if (r->puppet != NULL && !r->local)
+        {
+            coopPuppetRemove(r);
+        }
+        r->local = 1;
+        r->localProp = g_CurrentPlayer->prop;
+        r->puppet = NULL;
+        coopBuildState(&r->st);
+        r->valid = 1;
+        r->lost = 0;
+        r->seenTick = sTick;
+        r->seenMs = coopNowMs();
+        r->calmTick = sTick;
+        r->aimStan = NULL;
+    }
+    set_cur_player(cur);
+}
+
+static void coopSendStateOne(void)
+{
+    CoopStatePkt p;
+
+    coopBuildState(&p);
     if (coopNetIsHost())
     {
         s32 c;
@@ -1054,6 +1228,30 @@ static void coopSendState(void)
         portConLogf("ge: coop: local pos %.0f %.0f %.0f yaw %.2f room %d\n", p.pos[0], p.pos[1], p.pos[2], p.yaw,
                     (bond != NULL && bond->stan != NULL) ? (int) bond->stan->room : -1);
     }
+}
+
+/* our STATE, one per player on this screen */
+static void coopSendState(void)
+{
+    const s32 cur = get_cur_playernum();
+    s32 li, n;
+
+    if (!splitStoryActive())
+    {
+        coopSendStateOne();
+        return;
+    }
+    if (!coopNetHasPeer())
+    {
+        return;     /* nobody online: coopLocalsFill has it */
+    }
+    n = coopLocalsN();
+    for (li = 0; li < n; li++)
+    {
+        set_cur_player(li);
+        coopSendStateOne();
+    }
+    set_cur_player(cur);
 }
 
 static u32 coopSelfSession(void)
@@ -2273,9 +2471,10 @@ s32 coopChrNearPartner(ChrRecord *chr)
     {
         if (coopRemoteAliveHere(p))
         {
-            f32 dx = sR[p].puppet->pos.f[0] - chr->prop->pos.f[0];
-            f32 dy = sR[p].puppet->pos.f[1] - chr->prop->pos.f[1];
-            f32 dz = sR[p].puppet->pos.f[2] - chr->prop->pos.f[2];
+            PropRecord *pp = coopPProp(p);
+            f32 dx = pp->pos.f[0] - chr->prop->pos.f[0];
+            f32 dy = pp->pos.f[1] - chr->prop->pos.f[1];
+            f32 dz = pp->pos.f[2] - chr->prop->pos.f[2];
 
             if (dx * dx + dy * dy + dz * dz < COOP_PARTNER_SIGHT * COOP_PARTNER_SIGHT)
             {
@@ -2431,6 +2630,27 @@ s32 coopCollideSkip(PropRecord *prop)
 s32 coopPropIsGhost(PropRecord *prop)
 {
     s32 p = coopPlayerOfProp(prop);
+    const s32 li = coopLocalOfProp(prop);
+
+    if (li >= 0)
+    {   /* a split-screen partner: no collision while down, or overlapping the
+         * player moving now (a respawn beside them, both on one pad) */
+        struct player *pl = g_playerPointers[li];
+        PropRecord *me = g_CurrentPlayer->prop;
+        f32 dx, dz;
+
+        if (prop == me || pl == NULL)
+        {
+            return 0;
+        }
+        if (pl->bonddead)
+        {
+            return 1;
+        }
+        dx = prop->pos.f[0] - me->pos.f[0];
+        dz = prop->pos.f[2] - me->pos.f[2];
+        return dx * dx + dz * dz < 50.0f * 50.0f;
+    }
 
     return p >= 0 && sR[p].puppetGhost;
 }
@@ -2553,6 +2773,8 @@ void coopStageStart(void)
         sR[i].puppetGhost = 0;
         sR[i].puppetAnim = -1;
         sR[i].valid = 0;
+        sR[i].local = 0;
+        sR[i].localProp = NULL;
         sR[i].lost = 0;
         coopTrackReset(&sR[i].track);
         sR[i].aimStan = NULL;
@@ -2573,8 +2795,9 @@ static void coopTickBody(void);
 void coopTick(void)
 {
     coopPresenceGameTick(1);    /* Steam / Discord status, invites (coop_presence.c) */
-    if (coopVersus())
-    {   /* in a versus match the multiplayer loop leaves the last player current: we are player 0 */
+    if (coopVersus() || splitStoryActive())
+    {   /* in a versus match the multiplayer loop leaves the last player current: we are player 0
+         * (split screen: the first local player; coopTickBody takes each one's turn) */
         const s32 cur = get_cur_playernum();
 
         set_cur_player(0);
@@ -2621,6 +2844,7 @@ static void coopTickBody(void)
     sTick++;
     sInCinema = coopCutsceneTick();     /* before the packets: they ask coopInStage */
     coopPollNet();
+    coopLocalsFill();   /* split screen: the players beside us, as partners */
     coopPendingCinemaTick();
     coopTimeTick();
     coopSessionTick();
@@ -2656,8 +2880,25 @@ static void coopTickBody(void)
     }
     coopStatsMissionTick(coopPartnerHere());
     coopAudioTick();        /* the downed and revived stings (coop_audio.c) */
-    coopReviveFallTick();   /* down and still falling: a partner's hold counts already */
-    coopReviveTick((s32) sMissionTicks);   /* hold Use over a downed partner (coop_revive.c) */
+    {
+        const s32 n = splitStoryActive() ? coopLocalsN() : 1;
+        s32 li;
+
+        for (li = 0; li < n; li++)
+        {   /* each player on this screen in turn */
+            if (n > 1)
+            {
+                set_cur_player(li);
+            }
+            coopReviveFallTick();   /* down and still falling: a partner's hold counts already */
+            coopReviveTick((s32) sMissionTicks);   /* hold Use over a downed partner (coop_revive.c) */
+        }
+        if (n > 1)
+        {
+            set_cur_player(0);
+            coopLocalsFill();   /* their revive holds, for each other's coopDeadTick */
+        }
+    }
     if (!sLateJoin)
     {   /* dropping in: nothing of ours until we arrive (coopDropInTick) */
         coopSendState();
@@ -2965,9 +3206,9 @@ static void coopRemotesTick(void)
     {
         CoopRemote *r = &sR[p];
 
-        if (p == coopSelf())
+        if (p == coopSelf() || r->local)
         {
-            continue;
+            continue;   /* (a split-screen partner is drawn as itself) */
         }
         coopRemoteWatch(p);     /* lost, back or gone (host migration section) */
         if (r->puppet != NULL && !coopRemoteHere(p))
@@ -3127,11 +3368,36 @@ static void coopHarnessTick(void)
             testdie = (e == NULL) ? 0 : (atoi(e) > 1) ? atoi(e) : 900;
             again = (a != NULL) ? atoi(a) : 0;
         }
-        if (testdie && sMissionTicks >= (u32) testdie && coopPartnerHere() && !g_CurrentPlayer->bonddead)
-        {
-            testdie = (again > 0) ? (s32) sMissionTicks + again : 0;
-            portConLogf("ge: coop: testdie\n");
-            bondviewCallRecordDamageKills(10.0f, 0.0f, -1, 1);
+        {   /* GE_COOP_TESTDIEWHO=<n>: split screen, local player n (from 0) dies, all with "a" */
+            const char *w = getenv("GE_COOP_TESTDIEWHO");
+            const s32 cur = get_cur_playernum();
+            s32 li, from = 0, to = 0;
+
+            if (w != NULL && splitStoryActive())
+            {
+                from = to = (w[0] == 'a') ? 0 : atoi(w);
+                if (w[0] == 'a')
+                {
+                    to = coopLocalsN() - 1;
+                }
+            }
+            if (testdie && sMissionTicks >= (u32) testdie && coopPartnerHere())
+            {
+                testdie = (again > 0) ? (s32) sMissionTicks + again : 0;
+                for (li = from; li <= to && li < (splitStoryActive() ? getPlayerCount() : 1); li++)
+                {
+                    if (splitStoryActive())
+                    {
+                        set_cur_player(li);
+                    }
+                    if (!g_CurrentPlayer->bonddead)
+                    {
+                        portConLogf("ge: coop: testdie (local %d)\n", li);
+                        bondviewCallRecordDamageKills(10.0f, 0.0f, -1, 1);
+                    }
+                }
+                set_cur_player(cur);
+            }
         }
     }
     {   /* GE_COOP_TESTEND=<ticks>: complete the mission that far in, 1200 if not given (harness only) */
@@ -4152,24 +4418,137 @@ static void coopHarnessTick(void)
 
 /* ---- host guard targeting ---------------------------------------------- */
 
+/* the player struct of player t when it plays on this screen, else NULL */
+static struct player *coopLocalPlayerStruct(s32 t)
+{
+    const s32 li = coopLocalOfPlayer(t);
+
+    if (li < 0)
+    {
+        return NULL;
+    }
+    if (!splitStoryActive())
+    {
+        return g_CurrentPlayer;
+    }
+    return (li < getPlayerCount()) ? g_playerPointers[li] : NULL;
+}
+
 static s32 coopTargetable(s32 t)
 {
-    if (t == COOPTGT_LOCAL)
+    struct player *pl;
+
+    if (t < 0 || t >= COOP_MAX_PLAYERS)
     {
-        return !g_CurrentPlayer->bonddead;
+        return 0;
+    }
+    if (coopLocalOfPlayer(t) >= 0)
+    {
+        pl = coopLocalPlayerStruct(t);
+        return pl != NULL && pl->prop != NULL && !pl->bonddead;
     }
     return coopRemoteAliveHere(t);
 }
 
 static PropRecord *coopTargetProp(s32 t)
 {
-    return (t == COOPTGT_LOCAL) ? g_CurrentPlayer->prop : sR[t].puppet;
+    if (coopLocalOfPlayer(t) >= 0)
+    {
+        struct player *pl = coopLocalPlayerStruct(t);
+
+        return (pl != NULL) ? pl->prop : g_CurrentPlayer->prop;
+    }
+    return sR[t].puppet;
 }
 
 /* where player t is for the guards: a partner's lag-compensated spot when there is one */
 static coord3d *coopTargetPos(s32 t)
 {
-    return (t != COOPTGT_LOCAL && sR[t].aimStan != NULL) ? &sR[t].aimPos : &coopTargetProp(t)->pos;
+    return (coopLocalOfPlayer(t) < 0 && sR[t].aimStan != NULL) ? &sR[t].aimPos : &coopTargetProp(t)->pos;
+}
+
+/* Split screen: a guard's tick runs as one local player; "Bond as" another
+ * makes that one the current player for the rest of it (coopBondAs), and
+ * coopBondAsEnd puts the first back. */
+static s32 sBondAsSaved = -1;   /* the current player before coopBondAs, -1 none */
+typedef struct
+{
+    s32 cur;
+    PropRecord *override;
+} CoopAsSave;
+
+static void coopBondAsEnd(void)
+{
+    if (sBondAsSaved >= 0)
+    {
+        set_cur_player(sBondAsSaved);
+        sBondAsSaved = -1;
+    }
+}
+
+/* 1 when player p plays on this screen (and is now the current player) */
+static s32 coopBondAs(s32 p)
+{
+    const s32 li = coopLocalOfPlayer(p);
+
+    if (li < 0)
+    {
+        return 0;
+    }
+    if (splitStoryActive() && li != get_cur_playernum() && li < getPlayerCount())
+    {
+        if (sBondAsSaved < 0)
+        {
+            sBondAsSaved = get_cur_playernum();
+        }
+        set_cur_player(li);
+    }
+    return 1;
+}
+
+/* the player a guard's tick began as: the current player's, before any coopBondAs */
+static s32 coopBaseTarget(void)
+{
+    const s32 li = (sBondAsSaved >= 0) ? sBondAsSaved : coopCurLocal();
+    const s32 p = coopPlayerOfLocal(splitStoryActive() ? li : 0);
+
+    return (p >= 0) ? p : 0;
+}
+
+/* whoever is "Bond" right now: a partner's puppet, or the current player */
+static s32 coopBondNowPlayer(void)
+{
+    return (g_CoopPropOverride != NULL) ? coopPlayerOfProp(g_CoopPropOverride) : coopSelf();
+}
+
+/* "Bond" is player p until coopAsEnd: a split-screen partner as the current
+ * player, a remote one through its puppet. Nests: the end puts back exactly
+ * what the begin found. */
+static void coopAsBegin(s32 p, CoopAsSave *sv)
+{
+    const s32 li = coopLocalOfPlayer(p);
+
+    sv->cur = get_cur_playernum();
+    sv->override = g_CoopPropOverride;
+    if (li >= 0)
+    {
+        g_CoopPropOverride = NULL;
+        if (splitStoryActive() && li != sv->cur && li < getPlayerCount())
+        {
+            set_cur_player(li);
+        }
+        return;
+    }
+    g_CoopPropOverride = (p >= 0 && p < COOP_MAX_PLAYERS) ? sR[p].puppet : NULL;
+}
+
+static void coopAsEnd(const CoopAsSave *sv)
+{
+    if (get_cur_playernum() != sv->cur)
+    {
+        set_cur_player(sv->cur);
+    }
+    g_CoopPropOverride = sv->override;
 }
 
 static f32 coopChrDist2To(ChrRecord *chr, s32 t)
@@ -4185,10 +4564,11 @@ static f32 coopChrDist2To(ChrRecord *chr, s32 t)
 static s32 coopAnyRemoteTargetable(void)
 {
     s32 t;
+    const s32 base = coopBaseTarget();
 
-    for (t = 1; t < COOPTGT_COUNT; t++)
+    for (t = 0; t < COOPTGT_COUNT; t++)
     {
-        if (coopTargetable(t))
+        if (t != base && coopTargetable(t))
         {
             return 1;
         }
@@ -4339,7 +4719,7 @@ static s32 coopChrTarget(ChrRecord *chr)
 
     if (st == NULL || !coopAnyRemoteTargetable())
     {
-        return COOPTGT_LOCAL;
+        return coopBaseTarget();
     }
 
     if (st->target >= 0 && coopTargetable(st->target))
@@ -4383,7 +4763,7 @@ static s32 coopChrTarget(ChrRecord *chr)
     next = coopNearestTarget(chr);
     if (next < 0)
     {
-        next = COOPTGT_LOCAL;
+        next = coopBaseTarget();
     }
     st->target = next;
     st->lastupdate60 = g_GlobalTimer;
@@ -4407,9 +4787,19 @@ static void coopChrUseTarget(ChrRecord *chr, s32 t)
         sAimSwapped->stan = sAimSavedStan;
         sAimSwapped = NULL;
     }
+    coopBondAsEnd();
     sTickChr = NULL;
     g_CoopPropOverride = NULL;
-    if (chr == NULL || t == COOPTGT_LOCAL || sR[t].puppet == NULL)
+    if (chr == NULL || t < 0 || t >= COOP_MAX_PLAYERS)
+    {
+        return;
+    }
+    if (coopBondAs(t))
+    {   /* a player on this screen: theirs is the current player now */
+        sTickChr = (sBondAsSaved >= 0) ? chr : NULL;
+        return;
+    }
+    if (sR[t].puppet == NULL)
     {
         return;
     }
@@ -4445,7 +4835,7 @@ s32 coopChrTickBegin(ChrRecord *chr)
         return 1;
     }
     t = coopChrTarget(chr);
-    if (t != COOPTGT_LOCAL)
+    if (t != coopBaseTarget())
     {
         static ChrRecord *logged[8];
         s32 k;
@@ -4465,7 +4855,7 @@ s32 coopChrTickBegin(ChrRecord *chr)
 
 void coopChrTickEnd(void)
 {
-    coopChrUseTarget(NULL, COOPTGT_LOCAL);
+    coopChrUseTarget(NULL, -1);
     sAltChr = NULL;
 }
 
@@ -4487,7 +4877,7 @@ s32 coopChrAltBegin(ChrRecord *chr, s32 k)
     if (k == 0)
     {
         sAltChr = chr;
-        sAltFrom = (g_CoopPropOverride != NULL) ? coopPlayerOfProp(g_CoopPropOverride) : COOPTGT_LOCAL;
+        sAltFrom = coopBondNowPlayer();
         if (sAltFrom < 0)
         {   /* a level script's partner check (coopAltBondBegin) is running */
             sAltChr = NULL;
@@ -4535,7 +4925,7 @@ void coopChrAltEnd(ChrRecord *chr)
 void coopChrAltKeep(ChrRecord *chr, s32 stimulus)
 {
     CoopChrTarget *st = coopChrState(chr);
-    s32 t = (g_CoopPropOverride != NULL) ? coopPlayerOfProp(g_CoopPropOverride) : COOPTGT_LOCAL;
+    s32 t = coopBondNowPlayer();
 
     if (st == NULL || t < 0)
     {
@@ -4587,9 +4977,9 @@ s32 coopSeenBondCap(void)
  * (coop_ai.c counts the guards on each player) */
 s32 coopChrCurrentTarget(void)
 {
-    s32 t = (g_CoopPropOverride != NULL) ? coopPlayerOfProp(g_CoopPropOverride) : COOPTGT_LOCAL;
+    s32 t = coopBondNowPlayer();
 
-    return (t < 0) ? COOPTGT_LOCAL : t;
+    return (t < 0) ? coopBaseTarget() : t;
 }
 
 s32 coopTargetablePlayer(s32 t)
@@ -4610,21 +5000,36 @@ PropRecord *coopTargetablePlayerProp(s32 t)
 s32 coopAiPlayerView(s32 t, CoopAiPlayerView *out)
 {
     memset(out, 0, sizeof(*out));
-    if (t == COOPTGT_LOCAL && (sEnabled <= 0 || coopNetIsHost()))
+    if ((sEnabled <= 0) ? t == 0 : (coopNetIsHost() && coopLocalOfPlayer(t) >= 0))
     {
+        const s32 cur = get_cur_playernum();
+        const s32 li = (sEnabled <= 0) ? 0 : coopLocalOfPlayer(t);
+        s32 ok = 1;
+
+        if (splitStoryActive() && li != cur)
+        {
+            set_cur_player(li);
+        }
         if (g_CurrentPlayer == NULL || g_CurrentPlayer->prop == NULL || g_CurrentPlayer->bonddead)
         {
-            return 0;
+            ok = 0;
         }
-        out->prop = g_CurrentPlayer->prop;
-        out->shotseq = coopLookShotSeq();
-        out->flash = (g_CurrentPlayer->hands[GUNRIGHT].field_87D ? 1 : 0) | (g_CurrentPlayer->hands[GUNLEFT].field_87D ? 2 : 0);
-        out->cue = coopAudioCueByte();
-        out->reviving = sEnabled > 0 && coopReviveTarget() != 0;
-        out->yaw = bondviewGetPlayerYawRadians();
-        return 1;
+        else
+        {
+            out->prop = g_CurrentPlayer->prop;
+            out->shotseq = coopLookShotSeq();
+            out->flash = (g_CurrentPlayer->hands[GUNRIGHT].field_87D ? 1 : 0) | (g_CurrentPlayer->hands[GUNLEFT].field_87D ? 2 : 0);
+            out->cue = coopAudioCueByte();
+            out->reviving = sEnabled > 0 && coopReviveTarget() != 0;
+            out->yaw = bondviewGetPlayerYawRadians();
+        }
+        if (get_cur_playernum() != cur)
+        {
+            set_cur_player(cur);
+        }
+        return ok;
     }
-    if (sEnabled <= 0 || !coopNetIsHost() || coopVersus() || t <= COOPTGT_LOCAL || t >= COOPTGT_COUNT
+    if (sEnabled <= 0 || !coopNetIsHost() || coopVersus() || t < 0 || t >= COOPTGT_COUNT
         || !coopRemoteAliveHere(t))
     {
         return 0;
@@ -4643,11 +5048,11 @@ s32 coopAiPlayerView(s32 t, CoopAiPlayerView *out)
  * is their facing against the chr's body, with the same line of sight. */
 s32 coopChrAimedAtByBond(ChrRecord *chr)
 {
-    s32 p = (g_CoopPropOverride != NULL) ? coopPlayerOfProp(g_CoopPropOverride) : COOPTGT_LOCAL;
+    s32 p = coopBondNowPlayer();
     PropRecord *from;
     f32 dx, dz, d, want, diff, half;
 
-    if (p <= COOPTGT_LOCAL || !coopNetIsHost())
+    if (p < 0 || g_CoopPropOverride == NULL || !coopNetIsHost())
     {
         return sub_GAME_7F0333F8(chr);
     }
@@ -4703,10 +5108,24 @@ s32 coopChrOnPartnerScreen(ChrRecord *chr)
     {
         return 0;
     }
-    for (p = 1; p < COOP_MAX_PLAYERS && !seen; p++)
+    for (p = 0; p < COOP_MAX_PLAYERS && !seen; p++)
     {
-        if (!coopRemoteAliveHere(p))
+        if (p == coopSelf() || !coopRemoteAliveHere(p))
         {
+            continue;
+        }
+        if (sR[p].local)
+        {   /* a split-screen partner: their own view's test */
+            const s32 cur = get_cur_playernum(), li = coopLocalOfPlayer(p);
+
+            if (li >= 0 && li < getPlayerCount())
+            {
+                g_CoopPropOverride = NULL;
+                set_cur_player(li);
+                seen = chrlvCurrentPlayerCall7F0B0E24(chr);
+                set_cur_player(cur);
+                g_CoopPropOverride = saved;
+            }
             continue;
         }
         from = sR[p].puppet;
@@ -4756,7 +5175,7 @@ s32 coopChrOnPartnerScreen(ChrRecord *chr)
 void coopChrStimulus(ChrRecord *chr)
 {
     CoopChrTarget *st;
-    s32 t = (g_CoopPropOverride != NULL) ? coopPlayerOfProp(g_CoopPropOverride) : COOPTGT_LOCAL;
+    s32 t = coopBondNowPlayer();
 
     if (!sEnabled || !coopNetIsHost() || chr == NULL || coopIsPuppet(chr->prop))
     {
@@ -6621,17 +7040,15 @@ static void coopQueueEventTo(CoopEvent *ev, s32 to)
     ev->to = (u8) to;
     if (!coopNetIsHost())
     {
-        if (to != coopSelf())
-        {
+        if (to == COOP_ALL || coopLocalOfPlayer(to) < 0)
+        {   /* (not one of ours: a split-screen partner shares our world) */
             coopChanQueue(0, ev);
         }
         return;
     }
     for (c = 0; c < COOP_NET_MAX_PEERS; c++)
-    {
-        s32 p = coopPlayerOfChan(c);
-
-        if ((to == COOP_ALL || to == p) && p != ev->from)
+    {   /* a channel carries all of its game's players */
+        if ((to == COOP_ALL || coopHostChanOf(to) == c) && coopHostChanOf(ev->from) != c)
         {
             coopChanQueue(c, ev);
         }
@@ -7700,13 +8117,15 @@ s32 coopLeashBroken(ChrRecord *self, s32 pad, f32 radius)
     {
         f32 d;
 
-        if (p == 0 ? !coopOwnBondCounts() : !coopRemoteStandsHere(p))
+        CoopAsSave sv;
+
+        if (p == coopSelf() ? !coopOwnBondCounts() : !coopRemoteStandsHere(p))
         {
             continue;   /* down or gone: not on the leash (a lost line still stands where it was) */
         }
-        g_CoopPropOverride = (p == 0) ? NULL : sR[p].puppet;
+        coopAsBegin(p, &sv);
         d = chrGetDistanceFromBondToPad(self, pad);
-        g_CoopPropOverride = NULL;
+        coopAsEnd(&sv);
         if (d <= radius)
         {
             near |= 1 << p;
@@ -7744,18 +8163,8 @@ s32 coopLeashIgnores(u8 *list)
     {
         return 0;
     }
-    if (g_CoopPropOverride == NULL)
-    {
-        return !(sLeashNear & 1);
-    }
-    for (p = 1; p < COOP_MAX_PLAYERS; p++)
-    {
-        if (sR[p].puppet == g_CoopPropOverride)
-        {
-            return !(sLeashNear & (1 << p));
-        }
-    }
-    return 0;
+    p = coopBondNowPlayer();
+    return p >= 0 && !(sLeashNear & (1 << p));
 }
 
 /* objective_status.c, a fail condition's stage flag: a joiner shows the
@@ -8102,7 +8511,7 @@ static void coopTeamKiaRule(void)
     CoopHudPartner p;
     s32 i, standing;
 
-    if (!g_isBondKIA || sEnabled <= 0 || !coopNetHasPeer() || coopVersus())
+    if (!g_isBondKIA || sEnabled <= 0 || !coopHasPartner() || coopVersus())
     {
         return;
     }
@@ -8536,8 +8945,8 @@ static void coopCorpseTick(void)
     ChrRecord *chr;
     s32 who;
 
-    if (g_CurrentPlayer == NULL || !g_CurrentPlayer->bonddead || coopVersus())
-    {
+    if (g_CurrentPlayer == NULL || !g_CurrentPlayer->bonddead || coopVersus() || splitStoryActive())
+    {   /* (split screen keeps every player's own body, down ones too) */
         coopCorpseRemove();
         return;
     }
@@ -8717,6 +9126,48 @@ void coopSetDownRule(s32 rule)
     }
 }
 
+/* Back in at partner p: inside a remote partner's puppet (it ghosts until we
+ * step apart), a step beside a split-screen one, whose Bond is solid. */
+static void coopRespawnBy(s32 p, s32 weapon)
+{
+    CoopRemote *r = &sR[p];
+    PropRecord *pp = coopPProp(p);
+    coord3d pos;
+    StandTile *stan;
+    s32 k;
+
+    if (pp == NULL)
+    {
+        return;
+    }
+    pos = pp->pos;
+    stan = pp->stan;
+    if (r->local)
+    {
+        for (k = 0; k < 8; k++)
+        {   /* beside them, then behind, wherever the floor walks clear */
+            static const f32 dirs[8][2] = { { 1, 0 }, { -1, 0 }, { 0, -1 }, { 0, 1 }, { 1, -1 }, { -1, -1 }, { 1, 1 }, { -1, 1 } };
+            const f32 lx = sinf(r->st.yaw), lz = cosf(r->st.yaw);
+            const f32 x = pp->pos.f[0] + (lz * dirs[k][0] + lx * dirs[k][1]) * 70.0f;
+            const f32 z = pp->pos.f[2] + (-lx * dirs[k][0] + lz * dirs[k][1]) * 70.0f;
+            StandTile *tile = pp->stan;
+
+            if (tile != NULL && walkTilesBetweenPoints_NoCallback(&tile, pp->pos.f[0], pp->pos.f[2], x, z) && tile != NULL)
+            {
+                pos.f[0] = x;
+                pos.f[2] = z;
+                stan = tile;
+                break;
+            }
+        }
+    }
+    else
+    {
+        r->puppetGhost = 1; /* we arrive inside the partner */
+    }
+    coopRespawnPlayerAt(&pos, stan, 6.2831855f - r->st.yaw, weapon); /* view yaw runs the other way */
+}
+
 /* The partner to come back beside: alive in this mission, and the calmest
  * (out of a fight longest). -1 when nobody is left standing. */
 static s32 coopRespawnPartner(u32 *calmout)
@@ -8774,6 +9225,36 @@ static s32 coopReviveOver(const coord3d *spot)
     return -1;
 }
 
+/* Split screen with nobody left standing here or online: the mission fails,
+ * as solo's death camera would end it, once every view has faded out. */
+static void coopSplitTeamDown(void)
+{
+    static u32 since, mission;
+    s32 li, n = getPlayerCount();
+
+    for (li = 0; li < n; li++)
+    {
+        struct player *pl = g_playerPointers[li];
+
+        if (pl != NULL && !(pl->bonddead && pl->deathanimfinished))
+        {
+            return;     /* still falling: wait for every fade */
+        }
+    }
+    if (mission != sMissionSerial || since == 0)
+    {
+        mission = sMissionSerial;
+        since = sTick;
+        portConLogf("ge: coop: split screen: the whole team is down, the mission fails\n");
+    }
+    if (sTick - since >= 90)
+    {
+        since = 0;
+        mission = 0;
+        bossRunTitleStage();
+    }
+}
+
 s32 coopDeadTick(void)
 {
     u32 dead, calm;
@@ -8781,7 +9262,15 @@ s32 coopDeadTick(void)
 
     coopStatsDown();
     partner = coopRespawnPartner(&calm);
-    if (sEnabled <= 0 || !coopNetHasPeer() || partner < 0)
+    if (splitStoryActive())
+    {   /* split screen: never the solo death camera (one for all the views) */
+        if (sEnabled <= 0 || partner < 0)
+        {
+            coopSplitTeamDown();
+            return 1;
+        }
+    }
+    else if (sEnabled <= 0 || !coopHasPartner() || partner < 0)
     {
         coopSpectateStop();
         return 0; /* nobody left standing: the mission fails as usual */
@@ -8891,8 +9380,7 @@ s32 coopDeadTick(void)
 
         portConLogf("ge: coop: respawning by player %d after %.1f s (calm %.1f s)\n",
                     partner + 1, dead / 60.0f, calm / 60.0f);
-        r->puppetGhost = 1; /* we arrive inside the partner */
-        coopRespawnPlayerAt(&r->puppet->pos, r->puppet->stan, 6.2831855f - r->st.yaw, sLastWeapon); /* view yaw runs the other way */
+        coopRespawnBy(partner, sLastWeapon);
         coopStatsNote(COOPSTAT_RESPAWNS);
         sLastHealth = g_CurrentPlayer->bondhealth;
         sDeadSince = 0;
@@ -8936,7 +9424,7 @@ static void coopReviveFallTick(void)
         return;     /* coopDeadTick has it: it counts the hold */
     }
     if (sDownRule == COOPDOWN_TIMER || sArriveOut || sLivesLeft == 1 || bond == NULL || bond->stan == NULL
-        || !coopNetHasPeer() || coopRespawnPartner(NULL) < 0)
+        || !coopHasPartner() || coopRespawnPartner(NULL) < 0)
     {   /* no revive for this down (a timer, out on arrival, the last life) */
         sReviveHold = 0;
         sReviveFirst = 0;
@@ -9078,8 +9566,8 @@ static void coopDropInTick(void)
     r = &sR[partner];
     sLateJoin = 0;
     coopSpectateDropIn(0);
-    r->puppetGhost = 1; /* we arrive inside the partner */
-    coopRespawnPlayerAt(&r->puppet->pos, r->puppet->stan, 6.2831855f - r->st.yaw, sLastWeapon); /* view yaw runs the other way */
+    (void) r;
+    coopRespawnBy(partner, sLastWeapon);
     sLastHealth = g_CurrentPlayer->bondhealth;
     {
         char text[48];
@@ -9872,7 +10360,8 @@ void coopLobbyInviteOverlay(void)
 /* a co-op game is going: after a mission the menus come back to the lobby */
 s32 coopSessionActive(void)
 {   /* after a migration that left us alone we still host the lobby */
-    return sEnabled > 0 && coopNetIsOpen() && (coopNetHasPeer() || (sMigrated && coopNetIsHost()));
+    return sEnabled > 0 && coopNetIsOpen()
+        && (coopNetHasPeer() || (sMigrated && coopNetIsHost()) || (coopNetIsHost() && coopLocalsN() > 1));
 }
 
 
@@ -11421,19 +11910,23 @@ const char *coopHostLeavesName(s32 rule)
  * Bond, so either player can trigger an exit or an event. */
 
 /* k from 0: the k-th living partner as Bond; 0 when there are no more */
+static s32 sAltBondOn;      /* coopAltBondBegin has a partner as Bond */
+static CoopAsSave sAltBondSave;
+
 s32 coopAltBondBegin(s32 k)
 {
     s32 p;
 
-    if (g_CoopPropOverride != NULL || !coopNetIsHost())
+    if (g_CoopPropOverride != NULL || sAltBondOn || !coopNetIsHost())
     {
         return 0;
     }
-    for (p = 1; p < COOP_MAX_PLAYERS; p++)
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
     {
-        if (coopRemoteAliveHere(p) && k-- == 0)
+        if (p != coopSelf() && coopRemoteAliveHere(p) && k-- == 0)
         {
-            g_CoopPropOverride = sR[p].puppet;
+            coopAsBegin(p, &sAltBondSave);
+            sAltBondOn = 1;
             return 1;
         }
     }
@@ -11442,6 +11935,11 @@ s32 coopAltBondBegin(s32 k)
 
 void coopAltBondEnd(void)
 {
+    if (sAltBondOn)
+    {
+        sAltBondOn = 0;
+        coopAsEnd(&sAltBondSave);
+    }
     g_CoopPropOverride = NULL;
 }
 
@@ -11496,8 +11994,9 @@ static PropRecord *sLostSavedOverride;
 
 static s32 coopRemoteStandsHere(s32 p)
 {
-    return coopRemoteHere(p) && !sR[p].st.dead && sR[p].puppet != NULL && sR[p].puppet->chr != NULL
-        && sR[p].puppet->stan != NULL;
+    PropRecord *pp = coopPProp(p);
+
+    return coopRemoteHere(p) && !sR[p].st.dead && pp != NULL && pp->chr != NULL && pp->stan != NULL;
 }
 
 s32 coopLostBondBegin(s32 k)
@@ -11549,7 +12048,7 @@ PropRecord *coopAutogunTarget(PropRecord *gun, f32 aimdist, f32 rot, f32 arcmin,
     {
         if (p != coopSelf() && coopRemoteAliveHere(p))
         {
-            cand[n++] = sR[p].puppet;
+            cand[n++] = coopPProp(p);
         }
     }
     for (i = 0; i < n; i++)
@@ -11599,9 +12098,9 @@ s32 coopOwnBondCounts(void)
     {
         return 1;
     }
-    for (p = 1; p < COOP_MAX_PLAYERS; p++)
+    for (p = 0; p < COOP_MAX_PLAYERS; p++)
     {
-        if (coopRemoteAliveHere(p))
+        if (p != coopSelf() && coopRemoteAliveHere(p))
         {
             return 0;
         }

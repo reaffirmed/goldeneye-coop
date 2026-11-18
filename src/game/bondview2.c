@@ -855,7 +855,39 @@ s32 pickDeathCameraAngles(PropRecord *prop1, coord3d *pos, PropRecord *prop2, co
 
 
 // Address 0x7F07A9B8 NTSC.
+#ifndef TARGET_N64
+static void bondviewSetCameraModeOne(s32 arg0);
+
+/* The camera mode is one for every view; split-screen story gives each
+ * player its part of a change (the fade, the gun the FP camera equips, the
+ * swirl's body). */
 void bondviewSetCameraMode(s32 arg0)
+{
+    static s32 looping;
+
+    if (splitStoryActive() && !looping)
+    {
+        const s32 cur = get_cur_playernum();
+        const s32 n = getPlayerCount();
+        s32 i;
+
+        looping = 1;
+        for (i = 0; i < n; i++)
+        {
+            set_cur_player(i);
+            bondviewSetCameraModeOne(arg0);
+        }
+        set_cur_player(cur);
+        looping = 0;
+        return;
+    }
+    bondviewSetCameraModeOne(arg0);
+}
+
+static void bondviewSetCameraModeOne(s32 arg0)
+#else
+void bondviewSetCameraMode(s32 arg0)
+#endif
 {
     s32 padding;
     s32 padding2;
@@ -12519,8 +12551,9 @@ void coopTeleportPlayerTo(coord3d *pos, StandTile *stan, f32 yaw)
     g_CurrentPlayer->bondshotspeed.x = 0.0f;
     g_CurrentPlayer->bondshotspeed.y = 0.0f;
     g_CurrentPlayer->bondshotspeed.z = 0.0f;
-    if (g_CurrentPlayer->prop->chr != NULL && g_CurrentPlayer->prop->chr->model != NULL)
-    {   /* in a cinema Bond is a chr (solo_char_load): move its body too, as AI_TRYTeleportingChrToPad does */
+    if (g_CurrentPlayer->prop->chr != NULL && g_CurrentPlayer->prop->chr->model != NULL && !splitStoryActive())
+    {   /* in a cinema Bond is a chr (solo_char_load): move its body too, as AI_TRYTeleportingChrToPad does
+         * (split screen: every Bond has its body, which follows the player as in multiplayer) */
         ChrRecord *chr = g_CurrentPlayer->prop->chr;
         coord3d at = *pos;
 
@@ -13628,7 +13661,7 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
 
                     g_CurrentPlayer->bondhealth = g_CurrentPlayer->bondhealth - (damage_dealt / g_CurrentPlayer->actual_health);
 #ifndef TARGET_N64
-                    if (getPlayerCount() >= 2)
+                    if (isMpMatch())
                     {   /* MP stats: what came off - the armour that was left plus the health,
                          * never past empty (overkill on the last hit is not damage) */
                         extern void portMpStatsDamage(s32 victim, s32 attacker, f32 bars);
@@ -13639,7 +13672,7 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
 
                     if (g_CurrentPlayer->bondhealth <= 0.0f)
                     {
-                        if (getPlayerCount() >= 2)
+                        if (isMpMatch())
                         {
                             sp2C = get_cur_playernum();
                             sp28 = 0;

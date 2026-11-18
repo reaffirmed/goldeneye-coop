@@ -2738,6 +2738,12 @@ s32 propIsOfCdType(PropRecord* prop, s32 cdtypes) {
         if (!(cdtypes & CDTYPE_PLAYERS)) {
             ret = 0;
         }
+#ifndef TARGET_N64
+        /* split-screen story: a partner down, or overlapping us */
+        if (coopPropIsGhost(prop)) {
+            ret = 0;
+        }
+#endif
     } else if (prop->type == PROP_TYPE_CHR) {
         if (!(cdtypes & CDTYPE_CHRS)) {
             ret = 0;

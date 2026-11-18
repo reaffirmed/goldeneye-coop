@@ -24081,6 +24081,11 @@ static void portDirectLaunchTick(void)
                 const char *sp = getenv("GE_SPLIT");
 
                 g_SplitStory = (sp[0] >= '2' && sp[0] <= '4') ? sp[0] - '0' : 0;
+                {
+                    extern s32 g_CoopLocalCount;
+
+                    g_CoopLocalCount = (g_SplitStory >= 2) ? g_SplitStory : 1;
+                }
                 printf("ge: GE_SPLIT: %d local players\n", g_SplitStory);
             }
         }
