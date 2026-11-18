@@ -122,6 +122,16 @@ s32 splitWatchPlayer(void)
     {
         return -1;
     }
+    switch (g_CameraMode)
+    {   /* the intro's cameras, Bond's swirl and the mission's end play once, full screen */
+    case CAMERAMODE_INTRO:
+    case CAMERAMODE_FADESWIRL:
+    case CAMERAMODE_SWIRL:
+    case CAMERAMODE_POSEND:
+        return 0;
+    default:
+        break;
+    }
     for (i = 0; i < getPlayerCount(); i++)
     {
         if (g_playerPointers[i] != NULL

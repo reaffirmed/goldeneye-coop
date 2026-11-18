@@ -162,6 +162,15 @@ void bondviewLoadSetupIntroSection(void)
     stop_time_flag = 0;
     camera_transition_timer = FLOAT_INIT;
     intro_camera_index = CAMERAMODE_INTRO;
+#ifndef TARGET_N64
+    /* split-screen story: the intro is player 1's, read once. The others'
+     * reads would convert the swirl's points again in place and drop the
+     * intro's cameras (only player 1 links them), so they keep player 1's. */
+    const s32 splitkeep = splitStoryActive() && get_cur_playernum() != 0;
+    struct SetupIntroSwirl *keepswirl = g_IntroSwirl;
+    struct SetupIntroCamera *keepcam = ptr_random06cam_entry, *keepcur = g_CurrentSetupIntroCamera;
+    s32 keepcount = g_SetupIntroCameraCount;
+#endif
     g_IntroSwirl = NULL;
     ptr_random06cam_entry = NULL;
     g_CurrentSetupIntroCamera = NULL;
@@ -272,6 +281,13 @@ void bondviewLoadSetupIntroSection(void)
                         g_IntroSwirl = intro_swirl;
                     }
 
+#ifndef TARGET_N64
+                    if (splitkeep)
+                    {
+                        intro_record = (struct SetupIntroEmpty*)((s32)intro_record + sizeof(struct SetupIntroSwirl));
+                        break;
+                    }
+#endif
                     intro_swirl->unk08.fval = intro_swirl->unk08.ival / M_U16_MAX_VALUE_F;
                     intro_swirl->unk0C.fval = intro_swirl->unk0C.ival / M_U16_MAX_VALUE_F;
                     intro_swirl->unk10.fval = intro_swirl->unk10.ival / M_U16_MAX_VALUE_F;
@@ -404,6 +420,14 @@ void bondviewLoadSetupIntroSection(void)
         }
     }
 
+#ifndef TARGET_N64
+    if (splitkeep)
+    {
+        g_IntroSwirl = keepswirl;
+        ptr_random06cam_entry = keepcam;
+        g_CurrentSetupIntroCamera = NULL;   /* (skips the pick below) */
+    }
+#endif
     if (g_CurrentSetupIntroCamera != NULL)
     {
         ptr_random06cam_entry = g_CurrentSetupIntroCamera;
@@ -415,6 +439,13 @@ void bondviewLoadSetupIntroSection(void)
         }
     }
 
+#ifndef TARGET_N64
+    if (splitkeep)
+    {
+        g_CurrentSetupIntroCamera = keepcur;
+        g_SetupIntroCameraCount = keepcount;
+    }
+#endif
     bondinvAddInvItem(ITEM_FIST);
 
     if (set_starting_weapon == 0)

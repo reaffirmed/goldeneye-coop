@@ -11229,6 +11229,15 @@ void bondviewFrozenMoveBond(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         return;
     }
 
+#ifndef TARGET_N64
+    if (splitStoryActive() && get_cur_playernum() != 0)
+    {   /* split screen: the intro and the ending play once, through player 1's
+         * eyes on the whole screen (splitWatchPlayer); the cameras' clocks are
+         * shared, so the others' ticks would run them at N times the speed */
+        currentPlayerSetCameraMode(1);
+        return;
+    }
+#endif
     bondviewFrozenCameraTick(buttons, oldbuttons, &property_pos, &property_pos2, &property_offset, &room_pointer_tile, &stan_walk_start);
     currentPlayerSetCameraMode(1);
     bondviewSetCurrentPlayerPosition(&property_pos, &property_pos2, &property_offset, room_pointer_tile, &stan_walk_start);
