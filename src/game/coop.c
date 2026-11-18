@@ -630,6 +630,8 @@ static void coopApplyPickup(CoopEvent *ev);
 static void coopApplyMissionEnd(CoopEvent *ev);
 static void coopSendHello(void);
 static void coopSendHelloNow(void);
+static void coopLobbyLoad(void);
+static void coopLobbySave(void);
 static void coopApplyExplosion(CoopEvent *ev);
 static void coopApplyAiCommand(CoopEvent *ev);
 static s32 sPendingCinemaList = -1;
@@ -956,6 +958,13 @@ static s32 coopSelf(void)
     return (p >= 0) ? p : 0;
 }
 
+/* boss.c, loading a story mission: the players on our screen when the
+ * co-op session has more than one (the lobby's Local Players), else 0 */
+s32 coopSplitWanted(void)
+{
+    return (g_CoopLocalCount >= 2 && coopSessionActive() && !(coopSetting(COOPSET_VSMODE) & 1)) ? coopLocalsN() : 0;
+}
+
 /* the first player on player p's screen (split screen: they act together,
  * as in a vote), p itself when it plays alone */
 s32 coopScreenFirst(s32 p)
@@ -998,7 +1007,9 @@ void coopSetLocalCharacter(s32 li, s32 c)
         coopSetCharacter(c);
         return;
     }
+    coopLobbyLoad();
     sLocalChar[li] = (u8) ((c < 0 || c >= coopCharacterCount()) ? 0 : c);
+    coopLobbySave();
 }
 
 /* local li's own colour, 0xRRGGBB, -1 its number's */
@@ -9324,6 +9335,14 @@ static void coopLobbyLoad(void)
         {
             sDownRule = v;
         }
+        if (strcmp(key, "locals") == 0 && v >= 1 && v <= COOP_MAX_LOCAL && getenv("GE_SPLIT") == NULL)
+        {   /* the lobby's Local Players (split screen) */
+            g_CoopLocalCount = v;
+        }
+        if (strncmp(key, "localchar", 9) == 0 && key[9] >= '1' && key[9] < '0' + COOP_MAX_LOCAL && key[10] == '\0' && v >= 0 && v < 256)
+        {
+            sLocalChar[key[9] - '0'] = (u8) v;
+        }
         for (i = 0; i < COOPSET_MAX; i++)
         {
             if (sLobbyKeys[i] != NULL && strcmp(key, sLobbyKeys[i]) == 0 && v >= 0 && v < 256)
@@ -9346,6 +9365,11 @@ static void coopLobbySave(void)
         return;
     }
     fprintf(f, "downrule=%d\n", (int) sDownRule);
+    fprintf(f, "locals=%d\n", (int) g_CoopLocalCount);
+    for (i = 1; i < COOP_MAX_LOCAL; i++)
+    {
+        fprintf(f, "localchar%d=%d\n", (int) i, (int) sLocalChar[i]);
+    }
     for (i = 0; i < COOPSET_MAX; i++)
     {
         if (sLobbyKeys[i] != NULL)
@@ -10128,6 +10152,11 @@ s32 coopFrontTick(void)
             const char *s = getenv("GE_COOP_SCALING");
             testdiff = 0;
             coopLobbyLoad();
+            if (getenv("GE_COOP_LOCALS") != NULL)
+            {   /* GE_COOP_LOCALS=<1..4>: the lobby's Local Players (harness) */
+                g_CoopLocalCount = atoi(getenv("GE_COOP_LOCALS"));
+                g_CoopLocalCount = (g_CoopLocalCount < 1) ? 1 : (g_CoopLocalCount > COOP_MAX_LOCAL) ? COOP_MAX_LOCAL : g_CoopLocalCount;
+            }
             if (getenv("GE_COOP_DOWNRULE") != NULL)
             {   /* GE_COOP_DOWNRULE=<COOPDOWN_*>: the lobby's When Down (a joiner takes the host's from its hello) */
                 s32 rule = atoi(getenv("GE_COOP_DOWNRULE"));
@@ -10678,11 +10707,34 @@ void coopLobbyJoinFriend(s32 i)
     coopLobbyStart(spec);
 }
 
+/* the lobby's Local Players: how many play on this screen (1-4). Saved
+ * with the lobby's other picks; a session hears it at the next hello */
+void coopSetLocalCount(s32 n)
+{
+    coopLobbyLoad();
+    g_CoopLocalCount = (n < 1) ? 1 : (n > COOP_MAX_LOCAL) ? COOP_MAX_LOCAL : n;
+    coopLobbySave();
+    portConLogf("ge: coop: %d local player(s)\n", (int) g_CoopLocalCount);
+    if (sEnabled > 0 && (coopNetIsHost() || coopNetHasPeer()))
+    {
+        coopSendHelloNow();
+    }
+}
+
+static u8 sLocalFromSteam;   /* Play on This Screen was picked with Steam up: Leave goes back to it */
+
+/* Play on This Screen: a session with nobody online, for split screen */
+void coopLobbyLocal(void)
+{
+    sLocalFromSteam = (u8) coopLobbyIsSteam();
+    coopLobbyStart("local");
+}
+
 /* back to Host / Join; Steam stays up for the friend list */
 void coopLobbyLeave(void)
 {
     coopSayBye();   /* the others hear it now; a host hands the lobby to the next player */
-    coopLobbyStart(coopLobbyIsSteam() ? "steam:idle" : NULL);
+    coopLobbyStart((coopLobbyIsSteam() || (coopNetIsLocalOnly() && sLocalFromSteam)) ? "steam:idle" : NULL);
 }
 
 s32 coopLobbyFriends(void)

@@ -572,6 +572,8 @@ void coopSetLocalCharacter(s32 li, s32 c);
 s32  coopLocalColour(s32 li);               /* and their colour, 0xRRGGBB, -1 their number's */
 void coopSetLocalColour(s32 li, s32 rgb);
 s32  coopSelfCharacter(void);               /* the pick of whichever of our players is current */
+void coopSetLocalCount(s32 n);              /* the lobby's Local Players (g_CoopLocalCount) */
+void coopLobbyLocal(void);                  /* Play on This Screen: a split-screen session with nobody online */
 s32  coopScreenFirst(s32 p);                /* the first player on p's screen (split screen), p alone */
 
 /* the picks as 3D figures for the lobby (coop_charsel.c) */

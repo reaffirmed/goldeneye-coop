@@ -499,11 +499,13 @@ void bossMainloop(void)
         { /* split-screen story (player.h): a solo mission with the co-op
            * session's local players, viewports as in multiplayer */
             extern s32 g_SplitStory, g_SplitStoryLoaded;
+            extern s32 coopSplitWanted(void);
+            const s32 want = (g_SplitStory >= 2) ? g_SplitStory : coopSplitWanted();
 
             g_SplitStoryLoaded = 0;
-            if (g_StageNum != LEVELID_TITLE && localSelectedNumPlayers == 1 && g_SplitStory >= 2)
+            if (g_StageNum != LEVELID_TITLE && localSelectedNumPlayers == 1 && want >= 2)
             {
-                localSelectedNumPlayers = (g_SplitStory > 4) ? 4 : g_SplitStory;
+                localSelectedNumPlayers = (want > 4) ? 4 : want;
                 g_SplitStoryLoaded = 1;
             }
         }
