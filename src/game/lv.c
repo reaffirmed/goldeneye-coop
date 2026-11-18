@@ -961,6 +961,13 @@ void lvlStageLoad(s32 stage)
         init_path_table_links();
         init_ejected_cartridges();
 
+#ifndef TARGET_N64
+        {
+            extern s32 g_SplitCamOnePlayer;
+
+            g_SplitCamOnePlayer = 1;    /* each player's own camera mode as it is set up */
+        }
+#endif
         for (s0 = 0; s0 < getPlayerCount(); s0++)
         {
             set_cur_player(s0);
@@ -974,6 +981,13 @@ void lvlStageLoad(s32 stage)
         }
 
         set_cur_player(0);
+#ifndef TARGET_N64
+        {
+            extern s32 g_SplitCamOnePlayer;
+
+            g_SplitCamOnePlayer = 0;
+        }
+#endif
     }
 
     /**
@@ -1174,6 +1188,10 @@ Gfx* lvlRender(Gfx* DL)
             if (coopVsRemote(get_nth_player_from_shuffled(i)))
             {
                 continue;   /* online versus: another PC's player, no view here (coop_versus.c) */
+            }
+            if (splitWatchPlayer() >= 0 && get_nth_player_from_shuffled(i) != splitWatchPlayer())
+            {
+                continue;   /* split-screen story: a watch menu has the whole screen */
             }
 #endif
             set_cur_player(get_nth_player_from_shuffled(i));

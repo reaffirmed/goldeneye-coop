@@ -101,7 +101,8 @@ s32 getPlayerCount(void);
  * viewports split as in multiplayer, but the mission plays by solo rules, so
  * "is this a multiplayer match" is isMpMatch(), not getPlayerCount() >= 2. */
 extern s32 g_SplitStory;        /* local players for the next story mission, 0 or 1 for none (front end) */
-s32 splitStoryActive(void);     /* this stage is a story mission with more than one local player */
+s32 splitStoryActive(void);
+s32 splitWatchPlayer(void);     /* the split-screen player whose watch menu fills the screen, -1 none */     /* this stage is a story mission with more than one local player */
 #define isMpMatch() (getPlayerCount() >= 2 && !splitStoryActive())
 #else
 #define isMpMatch() (getPlayerCount() >= 2)

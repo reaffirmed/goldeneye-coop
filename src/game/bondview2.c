@@ -861,11 +861,13 @@ static void bondviewSetCameraModeOne(s32 arg0);
 /* The camera mode is one for every view; split-screen story gives each
  * player its part of a change (the fade, the gun the FP camera equips, the
  * swirl's body). */
+s32 g_SplitCamOnePlayer;   /* lv.c: the stage load sets each player up in turn */
+
 void bondviewSetCameraMode(s32 arg0)
 {
     static s32 looping;
 
-    if (splitStoryActive() && !looping)
+    if (splitStoryActive() && !looping && !g_SplitCamOnePlayer)
     {
         const s32 cur = get_cur_playernum();
         const s32 n = getPlayerCount();

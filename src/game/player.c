@@ -110,6 +110,29 @@ s32 splitStoryActive(void)
 {
     return g_SplitStoryLoaded && getPlayerCount() >= 2;
 }
+
+/* split-screen story: the player whose watch menu is open takes the whole
+ * screen while it is (the menu is drawn for a full screen; the game is
+ * paused for everyone meanwhile), -1 none */
+s32 splitWatchPlayer(void)
+{
+    s32 i;
+
+    if (!splitStoryActive())
+    {
+        return -1;
+    }
+    for (i = 0; i < getPlayerCount(); i++)
+    {
+        if (g_playerPointers[i] != NULL
+            && (g_playerPointers[i]->watch_animation_state == WATCH_ANIMATION_0x5
+                || g_playerPointers[i]->watch_animation_state == WATCH_ANIMATION_0xc))
+        {
+            return i;
+        }
+    }
+    return -1;
+}
 #endif
 
 s32 getPlayerCount(void)

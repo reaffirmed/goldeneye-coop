@@ -114,10 +114,44 @@ static void coopHudFit(char *text, s32 maxw)
     }
 }
 
+static s32 sHudUnclipped;   /* inside a split screen's scale bracket: lay out past the screen's edge */
+
 static Gfx *coopHudPrint(Gfx *gdl, s32 x, s32 y, char *text, u32 colour)
 {
     return textRenderOutlined(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic, colour, COOP_HUD_COL_SHADOW,
-                              (s32) viGetX(), viGetY(), 0, 0);
+                              sHudUnclipped ? 4096 : (s32) viGetX(), sHudUnclipped ? 4096 : viGetY(), 0, 0);
+}
+
+/* Split screen: the down and revive panels at half size in their view. The
+ * bracket scales about the view's left edge (text left of the screen would be
+ * cut before it is scaled), so x is laid out over the view's width / k. */
+static s32 coopHudSplitRight(void)
+{   /* a view on the right half: scale about its right edge instead, which keeps the text on the screen too */
+    return viGetViewLeft() > 0;
+}
+
+static Gfx *coopHudSplitBegin(Gfx *gdl, s32 y)
+{
+    sHudUnclipped = 1;
+    return coopTextScaleBegin(gdl, (f32) (coopHudSplitRight() ? viGetViewLeft() + viGetViewWidth() : viGetViewLeft()), (f32) y);
+}
+
+static s32 coopHudSplitX(s32 w)
+{
+    const f32 k = coopTextScaleNow();
+    const f32 span = (f32) viGetViewWidth() / ((k > 0.05f) ? k : 1.0f);
+
+    if (coopHudSplitRight())
+    {
+        return viGetViewLeft() + viGetViewWidth() - (s32) ((span + (f32) w) / 2.0f);
+    }
+    return viGetViewLeft() + (s32) ((span - (f32) w) / 2.0f);
+}
+
+static Gfx *coopHudSplitEnd(Gfx *gdl)
+{
+    sHudUnclipped = 0;
+    return coopTextScaleEnd(gdl);
 }
 
 static Gfx *coopHudBar(Gfx *gdl, s32 x, s32 y, s32 w, f32 frac, u32 colour)
@@ -225,7 +259,7 @@ static s32 coopHudTopMsgPush(s32 o, f32 s)
 /* HUD Scale's half size, which portHudScaleBegin draws at */
 static f32 coopHudScaleNow(void)
 {
-    return portHudScaleOn() ? 0.5f : 1.0f;
+    return (portHudScaleOn() || splitStoryActive()) ? 0.5f : 1.0f;   /* (split screen: the views are small) */
 }
 
 /* A partner behind a wall: their tag goes darker and fainter, so it reads as
@@ -944,7 +978,20 @@ static Gfx *coopHudPartnerStatus(Gfx *gdl, CoopHudPartner *p, s32 row)
     {
         PORT_HUD_ANCHOR(gdl, PORT_HUD_ANCHOR_LEFT);
     }
-    gdl = coopTextScaleBegin(gdl, (f32) viGetViewLeft(), (f32) viGetViewTop());   /* HUD Scale and Text Size */
+    if (splitStoryActive() && coopHudSplitRight())
+    {   /* a view on the right half: laid out from the left edge the row would run off the screen
+         * before it is scaled, so scale about the view's right edge and lay x out from there */
+        const f32 k = coopTextScaleNow();
+        const s32 r = viGetViewLeft() + viGetViewWidth();
+
+        x = r - (s32) (((f32) viGetViewWidth() - 0x14 * k) / ((k > 0.05f) ? k : 1.0f));
+        gdl = coopTextScaleBegin(gdl, (f32) r, (f32) viGetViewTop());
+    }
+    else
+    {
+        gdl = coopTextScaleBegin(gdl, (f32) viGetViewLeft(), (f32) viGetViewTop());   /* HUD Scale and Text Size */
+    }
+    sHudUnclipped = splitStoryActive();    /* a half-size row is laid out past its view's edge */
     gdl = microcode_constructor(gdl);
     coopHudText(name, sizeof(name), p->name);
     coopHudFit(name, 0x70);
@@ -1025,6 +1072,7 @@ static Gfx *coopHudPartnerStatus(Gfx *gdl, CoopHudPartner *p, s32 row)
         }
     }
     gdl = combiner_bayer_lod_perspective(gdl);
+    sHudUnclipped = 0;
     gdl = coopTextScaleEnd(gdl);
     if (hudAnchorsToEdges())
     {
@@ -1057,7 +1105,7 @@ static Gfx *coopHudRespawn(Gfx *gdl, s32 eta)
 {
     char text[56];
     s32 th = 0, tw = 0;
-    s32 x, y;
+    s32 x, y, bx;
     s32 hold = coopHudReviveHold();
     s32 secs = (eta + 59) / 60;
 
@@ -1093,16 +1141,21 @@ static Gfx *coopHudRespawn(Gfx *gdl, s32 eta)
     x = viGetViewLeft() + (viGetViewWidth() - tw) / 2;
     y = viGetViewTop() + viGetViewHeight() * 2 / 3;
     gdl = microcode_constructor(gdl);
+    bx = viGetViewLeft() + (viGetViewWidth() - 0x50) / 2;
+    if (splitStoryActive())
+    {   /* a split screen's view: half size */
+        gdl = coopHudSplitBegin(gdl, y);
+        x = coopHudSplitX(tw);
+        bx = coopHudSplitX(0x50);
+    }
     gdl = coopHudPrint(gdl, x, y, text, coopHudBledOut() ? COOP_HUD_COL_FAIL : COOP_HUD_COL_TEXT);
     if (hold > 0)
     {
-        gdl = coopHudBar(gdl, viGetViewLeft() + (viGetViewWidth() - 0x50) / 2, y + th + 3, 0x50,
-                         (f32) hold / (f32) COOP_REVIVE_HOLD, COOP_HUD_COL_DONE);
+        gdl = coopHudBar(gdl, bx, y + th + 3, 0x50, (f32) hold / (f32) COOP_REVIVE_HOLD, COOP_HUD_COL_DONE);
     }
     else if (coopHudBleedOut() >= 0)
     {   /* the time left to be revived in, draining */
-        gdl = coopHudBar(gdl, viGetViewLeft() + (viGetViewWidth() - 0x50) / 2, y + th + 3, 0x50,
-                         (f32) coopHudBleedOut() / (f32) coopBleedOutTicks(), 0xD02020E0);
+        gdl = coopHudBar(gdl, bx, y + th + 3, 0x50, (f32) coopHudBleedOut() / (f32) coopBleedOutTicks(), 0xD02020E0);
     }
     if (!coopHudBledOut() && coopHudLives() > 0)
     {   /* the lobby's Lives: what is left after this down */
@@ -1115,7 +1168,12 @@ static Gfx *coopHudRespawn(Gfx *gdl, s32 eta)
             snprintf(text, sizeof(text), portTr("%d LIVES LEFT\n"), (int) coopHudLives());
         }
         textMeasure(&th, &tw, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
-        gdl = coopHudPrint(gdl, viGetViewLeft() + (viGetViewWidth() - tw) / 2, y + th + 12, text, COOP_HUD_COL_DIM);
+        gdl = coopHudPrint(gdl, splitStoryActive() ? coopHudSplitX(tw) : viGetViewLeft() + (viGetViewWidth() - tw) / 2,
+                           y + th + 12, text, COOP_HUD_COL_DIM);
+    }
+    if (splitStoryActive())
+    {
+        gdl = coopHudSplitEnd(gdl);
     }
     return combiner_bayer_lod_perspective(gdl);
 }
@@ -1128,7 +1186,7 @@ static Gfx *coopHudReviving(Gfx *gdl)
     char name[40];
     char text[64];
     s32 th = 0, tw = 0;
-    s32 x, y, hold;
+    s32 x, y, hold, bx;
 
     if (!coopReviveHud(&p, &hold))
     {
@@ -1142,11 +1200,21 @@ static Gfx *coopHudReviving(Gfx *gdl)
     x = viGetViewLeft() + (viGetViewWidth() - tw) / 2;
     y = viGetViewTop() + viGetViewHeight() * 2 / 3;
     gdl = microcode_constructor(gdl);
+    bx = viGetViewLeft() + (viGetViewWidth() - 0x50) / 2;
+    if (splitStoryActive())
+    {   /* a split screen's view: half size */
+        gdl = coopHudSplitBegin(gdl, y);
+        x = coopHudSplitX(tw);
+        bx = coopHudSplitX(0x50);
+    }
     gdl = coopHudPrint(gdl, x, y, text, (hold >= 0) ? COOP_HUD_COL_DONE : COOP_HUD_COL_TEXT);
     if (hold >= 0)
     {
-        gdl = coopHudBar(gdl, viGetViewLeft() + (viGetViewWidth() - 0x50) / 2, y + th + 3, 0x50,
-                         (f32) hold / (f32) COOP_REVIVE_HOLD, COOP_HUD_COL_DONE);
+        gdl = coopHudBar(gdl, bx, y + th + 3, 0x50, (f32) hold / (f32) COOP_REVIVE_HOLD, COOP_HUD_COL_DONE);
+    }
+    if (splitStoryActive())
+    {
+        gdl = coopHudSplitEnd(gdl);
     }
     return combiner_bayer_lod_perspective(gdl);
 }
@@ -1484,7 +1552,7 @@ Gfx *coopHudRender(Gfx *gdl)
     {
         return coopHudVersus(gdl);   /* one player per PC: the parts that aren't about partners */
     }
-    if (getPlayerCount() != 1 || g_CurrentPlayer->watch_animation_state != 0)
+    if (isMpMatch() || g_CurrentPlayer->watch_animation_state != 0)
     {
         return gdl;   /* solo missions only, and not over the watch */
     }
@@ -1553,7 +1621,8 @@ Gfx *coopHudRender(Gfx *gdl)
         s32 reviving = coopReviveHud(&rp, &rh);   /* the revive prompt has that spot */
 
         gdl = coopHudReviving(gdl);
-        givehint = partner && !reviving && !weapmenuIsOpen() && !coopChatTyping() && coopSpectateHud(&who) == 0;
+        givehint = partner && !reviving && !weapmenuIsOpen() && !coopChatTyping() && coopSpectateHud(&who) == 0
+                   && !splitStoryActive();   /* (side by side all the time on one screen: the hint would never go) */
     }
     if (portObjectivesHudShown() && !g_CurrentPlayer->bonddead && !weapmenuIsOpen())
     {

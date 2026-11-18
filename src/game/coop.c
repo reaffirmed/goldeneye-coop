@@ -2890,6 +2890,7 @@ static void coopTickBody(void)
             {
                 set_cur_player(li);
             }
+            coopTrackCombat();      /* hurt, the gun in hand, out of the fight */
             coopReviveFallTick();   /* down and still falling: a partner's hold counts already */
             coopReviveTick((s32) sMissionTicks);   /* hold Use over a downed partner (coop_revive.c) */
         }
@@ -2903,7 +2904,6 @@ static void coopTickBody(void)
     {   /* dropping in: nothing of ours until we arrive (coopDropInTick) */
         coopSendState();
     }
-    coopTrackCombat();
     coopPingTick();
     coopLivesTick();
     coopSeenTick();
@@ -3307,6 +3307,35 @@ static void coopHarnessTick(void)
 {
     coopChecklistTick();
     coopHostileTick();
+    {   /* GE_SPLIT_TESTSTART=<s>:<pad>[:<s2>]: press Start on that pad at <s> seconds (and <s2>) (harness only) */
+        static s32 at = -2, pad, at2;
+        if (at == -2)
+        {
+            const char *e = getenv("GE_SPLIT_TESTSTART");
+            at = -1;
+            if (e != NULL)
+            {
+                at = atoi(e) * 60;
+                pad = (strchr(e, ':') != NULL) ? atoi(strchr(e, ':') + 1) : 0;
+                at2 = (strchr(e, ':') != NULL && strchr(strchr(e, ':') + 1, ':') != NULL) ? atoi(strchr(strchr(e, ':') + 1, ':') + 1) * 60 : -1;
+            }
+        }
+        if (at >= 0 && sMissionTicks >= (u32) at)
+        {
+            extern void trigger_solo_watch_menu(s32 arg0);
+            const s32 cur = get_cur_playernum();
+
+            portConLogf("ge: coop: teststart: the watch for player %d\n", pad + 1);
+            if (pad < getPlayerCount())
+            {
+                set_cur_player(pad);
+                trigger_solo_watch_menu(0);
+                set_cur_player(cur);
+            }
+            at = at2;
+            at2 = -1;
+        }
+    }
     if (coopNetIsHost() && coopPartnerHere())
     {   /* GE_COOP_TESTFADE=1: the host's "script" fades to black at 15 s and back at 18 s (harness only) */
         static s32 testfade = -1;
@@ -7038,6 +7067,17 @@ static void coopQueueEventTo(CoopEvent *ev, s32 to)
         ev->from = (u8) coopSelf();
     }
     ev->to = (u8) to;
+    if (to != COOP_ALL && to != coopSelf() && coopLocalOfPlayer(to) >= 0 && splitStoryActive()
+        && (ev->kind == COOPEV_GIVE || ev->kind == COOPEV_GIVEBACK))
+    {   /* to a split-screen partner: theirs at once, as them */
+        CoopAsSave sv;
+        CoopEvent copy = *ev;
+
+        coopAsBegin(to, &sv);
+        coopApplyEvent(&copy);
+        coopAsEnd(&sv);
+        return;
+    }
     if (!coopNetIsHost())
     {
         if (to == COOP_ALL || coopLocalOfPlayer(to) < 0)
@@ -9281,6 +9321,10 @@ s32 coopDeadTick(void)
 
         sDeadSince = sTick;   /* sReviveHold and sReviveFirst: a hold during the fall carries on (coopReviveFallTick) */
         sBledOut = 0;
+        if (splitStoryActive())
+        {   /* no partner's eyes to watch through: back from black to where we lie, the down panel over it */
+            currentPlayerSetFadeFrac(45.0f, 0.0f);
+        }
         sDeathStan = (bond != NULL) ? bond->stan : NULL;
         if (bond != NULL)
         {
@@ -9306,7 +9350,9 @@ s32 coopDeadTick(void)
         {
             char text[96];
             s32 n = snprintf(text, sizeof(text), "%s",
-                             sDownRule == COOPDOWN_TIMER ? portTr("Waiting for your partners to get clear...") : portTr("Down! A partner can hold Use by you to revive you."));
+                             sDownRule == COOPDOWN_TIMER ? portTr("Waiting for your partners to get clear...")
+                             : splitStoryActive() ? portTr("Down! A partner can revive you.")    /* (a narrow view) */
+                                                  : portTr("Down! A partner can hold Use by you to revive you."));
 
             if (sLivesLeft == 1)
             {

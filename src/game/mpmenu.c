@@ -802,6 +802,12 @@ void mpwatchMenuTick(void)
 
     player_num = get_cur_playernum();
     player_count = getPlayerCount();
+#ifndef TARGET_N64
+    if (!isMpMatch())
+    {
+        return;     /* split-screen story: Start is solo's watch */
+    }
+#endif
     x_centered = joyGetStickXInRange(player_num, -2, 1);
 
 #ifndef TARGET_N64
@@ -1441,7 +1447,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
     player_count = getPlayerCount();
     self_paused = 0;
  
-    if (player_count == 1)
+    if (!isMpMatch())   /* (split-screen story: solo's watch, co-op's down screen) */
     {
         return gdl;
     }
