@@ -6931,9 +6931,16 @@ s32 coopShotPuppet(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, s
     s32 p;
     f32 damage;
 
-    if (!sEnabled || chr == NULL || chr->prop == NULL || (p = coopPlayerOfProp(chr->prop)) < 0)
+    if (!sEnabled || chr == NULL || chr->prop == NULL)
     {
         return 0;
+    }
+    if ((p = coopPlayerOfProp(chr->prop)) < 0)
+    {   /* a split-screen partner's own Bond: the same, applied here as them (coopQueueEventTo) */
+        if (!isPlayer || coopLocalOfProp(chr->prop) < 0 || (p = coopPlayerOfAnyProp(chr->prop)) < 0)
+        {
+            return 0;
+        }
     }
     if (!isPlayer || coopFriendlyFireScale() <= 0.0f || !coopRemoteAliveHere(p) || !coopInMission())
     {
@@ -7068,7 +7075,7 @@ static void coopQueueEventTo(CoopEvent *ev, s32 to)
     }
     ev->to = (u8) to;
     if (to != COOP_ALL && to != coopSelf() && coopLocalOfPlayer(to) >= 0 && splitStoryActive()
-        && (ev->kind == COOPEV_GIVE || ev->kind == COOPEV_GIVEBACK))
+        && (ev->kind == COOPEV_GIVE || ev->kind == COOPEV_GIVEBACK || ev->kind == COOPEV_HIT))
     {   /* to a split-screen partner: theirs at once, as them */
         CoopAsSave sv;
         CoopEvent copy = *ev;

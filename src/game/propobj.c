@@ -4772,6 +4772,74 @@ static PropRecord *cctvSeesAnyPlayer(ObjectRecord *obj, PropRecord *prop, struct
 }
 #endif
 
+#ifndef TARGET_N64
+/* split-screen story: an autogun aims at whichever player it picked
+ * (coopAutogunTarget) and its shots land on that player, as that player */
+#define SPLIT_AG_SLOTS 16
+static struct { void *gun; s8 player; } sSplitAgTarget[SPLIT_AG_SLOTS];
+
+static s32 splitAutogunSlot(void *gun, s32 add)
+{
+    s32 i, free = -1;
+
+    for (i = 0; i < SPLIT_AG_SLOTS; i++)
+    {
+        if (sSplitAgTarget[i].gun == gun)
+        {
+            return i;
+        }
+        if (free < 0 && sSplitAgTarget[i].gun == NULL)
+        {
+            free = i;
+        }
+    }
+    if (add && free < 0)
+    {
+        free = (s32) (((uintptr_t) gun >> 4) % SPLIT_AG_SLOTS);
+    }
+    if (add && free >= 0)
+    {
+        sSplitAgTarget[free].gun = gun;
+        sSplitAgTarget[free].player = 0;
+        return free;
+    }
+    return -1;
+}
+
+static s32 splitAutogunAim(void *gun, PropRecord *target)
+{
+    s32 li, slot;
+
+    if (!splitStoryActive() || target == NULL)
+    {
+        return 0;
+    }
+    for (li = 0; li < getPlayerCount(); li++)
+    {
+        if (g_playerPointers[li] != NULL && g_playerPointers[li]->prop == target)
+        {
+            if ((slot = splitAutogunSlot(gun, 1)) >= 0)
+            {
+                sSplitAgTarget[slot].player = (s8) li;
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void splitAutogunBegin(void *gun)
+{
+    s32 slot;
+
+    if (splitStoryActive() && (slot = splitAutogunSlot(gun, 0)) >= 0
+        && sSplitAgTarget[slot].player < getPlayerCount() && g_playerPointers[(s32) sSplitAgTarget[slot].player] != NULL)
+    {
+        set_cur_player(sSplitAgTarget[slot].player);
+    }
+}
+#endif
+
 s32 objTick(struct PropRecord *prop)
 {
 	Mtxf *mtxs;
@@ -6072,7 +6140,7 @@ s32 objTick(struct PropRecord *prop)
 						{
 							poAGun->unkB8 = (s32) g_GlobalTimer;
 #ifndef TARGET_N64
-							if (playerProp2 == getCurrentPlayerProp()) /* co-op: a partner's game hurts the partner */
+							if (splitAutogunAim(poAGun, playerProp2) || playerProp2 == getCurrentPlayerProp()) /* co-op: a partner's game hurts the partner */
 #endif
 							poAGun->unkBC = (s32) g_GlobalTimer;
 						}
@@ -6999,6 +7067,9 @@ s32 objTick(struct PropRecord *prop)
 		else if ((obj->type == PROPDEF_AUTOGUN) && (lvlGetControlsLockedFlag() == 0))
 		{
 			struct AutogunRecord *autogun = (struct AutogunRecord *) prop->obj;
+#ifndef TARGET_N64
+			s32 splitcur = 0;
+#endif
 			f32 beam_xdiff;
 			f32 dist_local;
 			struct beam *beam_local;
@@ -7117,6 +7188,10 @@ s32 objTick(struct PropRecord *prop)
 					sp10C = NULL;
 					sp108 = prop->stan;
 					sp104 = (autogun->unkAC & 3) == 0;
+#ifndef TARGET_N64
+					splitcur = get_cur_playernum();
+					splitAutogunBegin(autogun);   /* split screen: as the player it shoots at */
+#endif
 					sp100 = getCurrentPlayerProp();
 					var_a0_6 = 5;
 
@@ -7217,6 +7292,9 @@ s32 objTick(struct PropRecord *prop)
 						sp110.f[2] = sp100->pos.f[2];
 						recall_joy2_hits_edit_detail_edit_flag(14, sp100, -1);
 					}
+#ifndef TARGET_N64
+					set_cur_player(splitcur);
+#endif
 
 					if (sp104 != 0)
 					{
