@@ -875,7 +875,7 @@ void lvlStageLoad(s32 stage)
             s32 s3;
             player_data = (struct player_data *)&g_playerPlayerData[i];
 
-            if (getPlayerCount() == 1)
+            if (!isMpMatch())
             {
                 // s4 variable
                 player_data->autoaim = 0;
@@ -1594,7 +1594,7 @@ void lvlTick(void)
          * solo cheat menu, and solo never reads the sheet. This pass runs even
          * when no solo cheat is on; stage end still clears them all
          * (cheatDisableAllCheats). */
-        if (g_AppendCheatSinglePlayer != 0 || getPlayerCount() >= 2)
+        if (g_AppendCheatSinglePlayer != 0 || isMpMatch())
         {
             extern s32 portMpCheatSetting(s32 which);
             extern s32 portTrueEnemyRocketsEnabled(void);
@@ -1611,7 +1611,7 @@ void lvlTick(void)
                 {
                     on = FALSE;     /* online versus: no cheat menu picks, the host's rules only (coop_versus.c) */
                 }
-                if (getPlayerCount() >= 2)
+                if (isMpMatch())
                 {
                     s32 w;
 
@@ -1628,12 +1628,12 @@ void lvlTick(void)
                 {
                     extern s32 g_PortHudMsgQuiet; /* bondview2.c hudmsgBottomShow */
 
-                    g_PortHudMsgQuiet = getPlayerCount() >= 2;   /* no "PAINTBALL MODE ON" popup at an MP start */
+                    g_PortHudMsgQuiet = isMpMatch();   /* no "PAINTBALL MODE ON" popup at an MP start */
                     cheatButtonTurnOnCheatForPlayers(i);
                     g_PortHudMsgQuiet = 0;
                 }
             }
-            if (getPlayerCount() >= 2)
+            if (isMpMatch())
             {   /* log which are on, once per MP stage, so they show up
                  * in a user's log */
                 extern int printf(const char *, ...);
@@ -1675,7 +1675,7 @@ void lvlTick(void)
 #endif
     }
 
-    if ((getPlayerCount() >= 2) && (g_CurrentStageToLoad != LEVELID_TITLE))
+    if ((isMpMatch()) && (g_CurrentStageToLoad != LEVELID_TITLE))
     {
         if (get_mission_state() == MISSION_STATE_6)
         {

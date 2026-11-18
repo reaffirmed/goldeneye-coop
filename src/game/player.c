@@ -102,6 +102,16 @@ void init_player_data_ptrs_construct_viewports(s32 playercount)
     set_cur_player_viewport_size(viGetViewLeft(), viGetViewTop());
 }
 
+#ifndef TARGET_N64
+s32 g_SplitStory;
+s32 g_SplitStoryLoaded;     /* boss.c: this stage was loaded as a split-screen story mission */
+
+s32 splitStoryActive(void)
+{
+    return g_SplitStoryLoaded && getPlayerCount() >= 2;
+}
+#endif
+
 s32 getPlayerCount(void)
 {
     s32 count = 0;

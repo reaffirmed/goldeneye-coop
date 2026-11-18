@@ -404,16 +404,63 @@ static s32 sHostWaitFar;        /* joiner: the host's silence began on a poor li
 static s32 sHostHiccups;        /* joiner: times the host went quiet and came back this mission */
 static void coopDropInTick(void);
 static s32 sOnLobbyScreen;      /* front.c: the lobby screen is up */
-static u32 sLastHurtTick;   /* local Bond lost health */
 static u32 sLastFightTick;  /* host: a guard was attacking someone */
-static f32 sLastHealth;
-static s32 sLastWeapon = ITEM_UNARMED;
-static u32 sDeadSince;      /* sTick our Bond's death fade finished, 0 alive */
-static s32 sReviveHold;     /* while down: ticks a partner has held Use over us */
-static u32 sReviveFirst;    /* while down: the tick a partner first held Use over us, 0 none */
-static s32 sBledOut;        /* out until the mission ends: COOPOUT_BLEDOUT (revive only, down too long) or COOPOUT_LIVES */
-static s32 sLivesLeft = -1; /* this mission's lives left (COOPSET_LIVES), -1 unlimited */
-static s32 sArriveOut;      /* joiner: back in a mission we were out of (COOPOUT_*): out again on arrival */
+
+/* ---- players on this screen (split-screen story) ---------------------------
+ * A session can have 2-4 players on one PC (g_CoopLocalCount, the lobby's
+ * Local Players). In a mission they are the engine's own split-screen
+ * players, g_playerPointers[li] (player.h splitStoryActive), and "we" is
+ * whichever of them is current (set_cur_player): every piece of co-op state
+ * about our own Bond (lives, down, the revive hold, ...) is kept per local
+ * player, below, and read through the same names as before. The other local
+ * players appear in sR[] like any partner, filled from their own player
+ * each tick (coopLocalsFill), with their player's prop as the "puppet"
+ * (sR[p].local): partner code (revives, guards' targets, the HUD, scripts'
+ * "either player" checks) needs no second path for them. */
+s32 g_CoopLocalCount = 1;   /* players on this screen, 1 without split screen */
+
+typedef struct
+{
+    u32 lastHurtTick;       /* our Bond lost health */
+    f32 lastHealth;
+    s32 lastWeapon;
+    u32 deadSince;          /* sTick our Bond's death fade finished, 0 alive */
+    s32 reviveHold;         /* while down: ticks a partner has held Use over us */
+    u32 reviveFirst;        /* while down: the tick a partner first held Use over us, 0 none */
+    s32 bledOut;            /* out until the mission ends: COOPOUT_BLEDOUT (revive only, down too long) or COOPOUT_LIVES */
+    s32 livesLeft;          /* this mission's lives left (COOPSET_LIVES), -1 unlimited */
+    s32 arriveOut;          /* joiner: back in a mission we were out of (COOPOUT_*): out again on arrival */
+    u32 carryMs[2];         /* when our Bond last carried each (COOPCARRY_BUG, COOPCARRY_REMOTEMINE) */
+    coord3d deathPos;       /* where we fell (coopDeadTick) */
+    StandTile *deathStan;
+    f32 deathYaw;
+} CoopLocalSelf;
+static CoopLocalSelf sLocalSelf[COOP_MAX_LOCAL] = {
+    [0 ... COOP_MAX_LOCAL - 1] = { .lastHealth = 1.0f, .lastWeapon = ITEM_UNARMED, .livesLeft = -1 }
+};
+
+/* the local player whose turn it is: the current player in a split-screen
+ * mission, else the only one */
+s32 coopCurLocal(void)
+{
+    const s32 li = splitStoryActive() ? get_cur_playernum() : 0;
+
+    return (li >= 0 && li < COOP_MAX_LOCAL) ? li : 0;
+}
+
+#define sLastHurtTick   (sLocalSelf[coopCurLocal()].lastHurtTick)
+#define sLastHealth     (sLocalSelf[coopCurLocal()].lastHealth)
+#define sLastWeapon     (sLocalSelf[coopCurLocal()].lastWeapon)
+#define sDeadSince      (sLocalSelf[coopCurLocal()].deadSince)
+#define sReviveHold     (sLocalSelf[coopCurLocal()].reviveHold)
+#define sReviveFirst    (sLocalSelf[coopCurLocal()].reviveFirst)
+#define sBledOut        (sLocalSelf[coopCurLocal()].bledOut)
+#define sLivesLeft      (sLocalSelf[coopCurLocal()].livesLeft)
+#define sArriveOut      (sLocalSelf[coopCurLocal()].arriveOut)
+#define sCarryMs        (sLocalSelf[coopCurLocal()].carryMs)
+#define sDeathPos       (sLocalSelf[coopCurLocal()].deathPos)
+#define sDeathStan      (sLocalSelf[coopCurLocal()].deathStan)
+#define sDeathYaw       (sLocalSelf[coopCurLocal()].deathYaw)
 static s32 coopLivesStart(void);
 static void coopLivesTick(void);
 static void coopReviveFallTick(void);
@@ -828,7 +875,6 @@ enum
 extern s32 get_ammo_type_for_weapon(ITEM_IDS weapon);
 extern int bondinvHasInvItem(ITEM_IDS item);
 
-static u32 sCarryMs[2];     /* when our Bond last carried each (COOPCARRY_BUG, COOPCARRY_REMOTEMINE) */
 
 static s32 coopCarryBit(s32 item)
 {
@@ -2487,12 +2533,16 @@ void coopStageStart(void)
     sClockPending = 0;
     sClockWantRunning = -1;
     sClockWantValue = -1.0f;
-    sLastHurtTick = sLastFightTick = sDeadSince = 0;
-    sBledOut = 0;
-    sLivesLeft = coopLivesStart();
-    sArriveOut = 0;
-    sLastHealth = 1.0f;
-    sLastWeapon = ITEM_UNARMED;
+    sLastFightTick = 0;
+    for (i = 0; i < COOP_MAX_LOCAL; i++)
+    {   /* every local player's own (coopCurLocal) */
+        CoopLocalSelf *ls = &sLocalSelf[i];
+
+        memset(ls, 0, sizeof(*ls));
+        ls->livesLeft = coopLivesStart();
+        ls->lastHealth = 1.0f;
+        ls->lastWeapon = ITEM_UNARMED;
+    }
     sTickChr = NULL;
     sCorpse = NULL;     /* the last stage's chrs are gone */
     sLeashNear = 0;
@@ -8458,9 +8508,6 @@ static s32 coopLocalCalm(void)
     return (calm > COOP_CALM_CAP) ? COOP_CALM_CAP : (s32) calm;
 }
 
-static coord3d sDeathPos;
-static StandTile *sDeathStan;
-static f32 sDeathYaw;
 
 /* Our own body where we fell, while we are down and watching: the partners
  * see our puppet lie there, and now we do too. Only on our game, a body

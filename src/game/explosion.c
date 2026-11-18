@@ -725,7 +725,7 @@ void explosionInflictDamage(PropRecord *arg0, f32 horiz_range, f32 vert_range)
                             sp90 = get_cur_playernum();
                             set_cur_player(getPlayerPointerIndex(temp_s0));
 
-                            if (getPlayerCount() == 1)
+                            if (!isMpMatch())
                             {
                                 minfrac *= g_SpExplosionDamageMult;
                             }

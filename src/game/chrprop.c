@@ -2496,7 +2496,7 @@ f32 chrpropScoreAutoAimTarget(PropRecord *targetprop, coord3d *aimpos, f32 *worl
             {
                 horizontal_tolerance = (screen_right_edge[0] - screen_left_edge[0]) * 1.5f;
 
-                if (getPlayerCount() == 1)
+                if (!isMpMatch())
                 {
                     horizontal_tolerance = horizontal_tolerance * difficulty;
                 }

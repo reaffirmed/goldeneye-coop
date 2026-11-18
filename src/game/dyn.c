@@ -1,5 +1,6 @@
 #include <ultra64.h>
 #include "dyn.h"
+#include "player.h"
 #include <token.h>
 #include <str.h>
 #include <memp.h>
@@ -65,6 +66,16 @@ void dynInitMemory(void) {
     // and crashed the game (coop_chat.c also checks for room before drawing).
     g_GfxSizesByPlayerCount[getPlayerCount() - 1] *= 4;
     g_VtxSizesByPlayerCount[getPlayerCount() - 1] *= 2;
+    if (splitStoryActive())
+    {   /* split-screen story: the stage's own solo sizes (its tokens are the
+         * solo ones), once per view; worked out afresh, since without a token
+         * the slot would keep this stage's multiplied size into the next */
+        const s32 gfx = tokenFind(1, "-mgfx") ? strtol(tokenFind(1, "-mgfx"), NULL, 0) * 1024 : 0x10000;
+        const s32 vtx = tokenFind(1, "-mvtx") ? strtol(tokenFind(1, "-mvtx"), NULL, 0) * 1024 : 0x10000;
+
+        g_GfxSizesByPlayerCount[getPlayerCount() - 1] = gfx * 4 * getPlayerCount();
+        g_VtxSizesByPlayerCount[getPlayerCount() - 1] = vtx * 2 * getPlayerCount();
+    }
     {   /* the menus' stage asks for 20 KB of vertices and matrices; the co-op
          * lobby draws up to fifteen characters a frame (coop_charsel.c) */
         extern s32 g_StageNum;

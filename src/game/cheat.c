@@ -825,7 +825,7 @@ void cheatTryActivateFromInputBuffer(void)
     }
     else
     {
-        applicableMask = (getPlayerCount() == 1) ? CHEAT_MASK_SPGAME : CHEAT_MASK_MPGAME;
+        applicableMask = (!isMpMatch()) ? CHEAT_MASK_SPGAME : CHEAT_MASK_MPGAME;
 #ifndef TARGET_N64
         if (coopVersus())
         {

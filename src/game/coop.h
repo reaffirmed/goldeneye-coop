@@ -82,6 +82,9 @@ s32  coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 wea
 s32  coopShotPuppet(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, s32 isPlayer);
 
 #define COOP_MAX_PLAYERS 4   /* the host and up to three joiners */
+#define COOP_MAX_LOCAL   4   /* players on one screen (split-screen story, player.h) */
+extern s32 g_CoopLocalCount; /* players on this PC's screen, 1 without split screen (coop.c) */
+s32  coopCurLocal(void);     /* the local player whose turn it is: the current player in a split-screen mission, else 0 */
 
 /* the HUD (coop_hud.c) */
 typedef struct

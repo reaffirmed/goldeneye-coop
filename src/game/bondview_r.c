@@ -440,7 +440,7 @@ void bondviewLoadSetupIntroSection(void)
 
     if (startpadcount > 0)
     {
-        if ((getPlayerCount() >= 2) && (startpadcount > 0))
+        if (isMpMatch() && (startpadcount > 0))
         {
             rand_pad_index = bondviewGetRandomSpawnPadIndex();
         }
@@ -468,6 +468,38 @@ void bondviewLoadSetupIntroSection(void)
                     (start_stan != 0) ? getTileRoom((StandTile *) start_stan) : -1,
                     start_pos.f[0], start_pos.f[2]);
             fflush(stderr);
+        }
+#endif
+
+#ifndef TARGET_N64
+        if (splitStoryActive() && get_cur_playernum() > 0)
+        {   /* split-screen story: Bond's start is player 1's; the others
+             * stand beside it, a step apart to the side or behind, wherever
+             * the floor walks clear from the pad */
+            extern s32 walkTilesBetweenPoints_NoCallback(StandTile **tile, f32 x1, f32 z1, f32 x2, f32 z2);
+            static const f32 side[6] = { 1.0f, -1.0f, 0.0f, 2.0f, -2.0f, 0.0f };
+            static const f32 back[6] = { 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 2.0f };
+            const f32 lx = g_Startpad[rand_pad_index]->look.f[0];
+            const f32 lz = g_Startpad[rand_pad_index]->look.f[2];
+            const s32 n = get_cur_playernum();
+            s32 t;
+
+            for (t = 0; t < 6; t++)
+            {
+                const s32 k = ((n - 1) + t) % 6;
+                const f32 step = 70.0f;
+                const f32 x = start_pos.f[0] + (-lz * side[k] - lx * back[k]) * step;
+                const f32 z = start_pos.f[2] + (lx * side[k] - lz * back[k]) * step;
+                StandTile *tile = (StandTile *) start_stan;
+
+                if (walkTilesBetweenPoints_NoCallback(&tile, start_pos.f[0], start_pos.f[2], x, z) && tile != NULL)
+                {
+                    start_pos.f[0] = x;
+                    start_pos.f[2] = z;
+                    start_stan = (void *) tile;
+                    break;
+                }
+            }
         }
 #endif
 
@@ -712,7 +744,7 @@ void bondviewLoadSetupIntroSection(void)
     g_CurrentPlayer->field_3B8.f[1] = (g_CurrentPlayer->field_488.pos.f[1] / FIELD_3B8_FACTOR);
     g_CurrentPlayer->field_3B8.f[2] = (g_CurrentPlayer->field_488.pos.f[2] / FIELD_3B8_FACTOR);
 
-    if (getPlayerCount() == 1)
+    if (!isMpMatch())
     {
         bondviewSetCameraMode(CAMERAMODE_INTRO);
     }

@@ -1287,7 +1287,7 @@ void portStartpadVisibilityUpdate(void)
     const s32 p = get_cur_playernum();
     s32 j;
 
-    if (p < 0 || p >= 4 || getPlayerCount() < 2)
+    if (p < 0 || p >= 4 || !isMpMatch())
     {
         return;
     }
@@ -1719,7 +1719,7 @@ void bondviewPlayerBeginLife(void)
 
     bondinvAddInvItem(ITEM_FIST);
 
-    if (getPlayerCount() >= 2)
+    if (isMpMatch())
     {
         currentPlayerEquipWeaponWrapper(GUNLEFT, starting_weapon[GUNLEFT]);
         currentPlayerEquipWeaponWrapper(GUNRIGHT, starting_weapon[GUNRIGHT]);
@@ -1729,6 +1729,14 @@ void bondviewPlayerBeginLife(void)
             solo_char_load();
         }
     }
+#ifndef TARGET_N64
+    else if (splitStoryActive() && g_CurrentPlayer->bodyModel == NULL)
+    {   /* split-screen story: every player keeps a body from the start, as
+         * in multiplayer, for the others' views (bondviewRemovePlayerBody
+         * leaves it with more than one player) */
+        solo_char_load();
+    }
+#endif
 }
 
 

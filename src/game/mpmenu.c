@@ -328,7 +328,7 @@ void pauseAndLockControls(void)
 
 bool disablePlayerActionsWhenPausedOrInMpMenu(void)
 {
-    if (getPlayerCount() == 1)
+    if (!isMpMatch())
     {
         return TRUE;
     }

@@ -24075,6 +24075,14 @@ static void portDirectLaunchTick(void)
             {
                 printf("ge: GE_STAGE=%s not recognized\n", e);
             }
+            else if (getenv("GE_SPLIT") != NULL)
+            {   /* GE_SPLIT=<2..4>: the mission as split-screen story (player.h) */
+                extern s32 g_SplitStory;
+                const char *sp = getenv("GE_SPLIT");
+
+                g_SplitStory = (sp[0] >= '2' && sp[0] <= '4') ? sp[0] - '0' : 0;
+                printf("ge: GE_SPLIT: %d local players\n", g_SplitStory);
+            }
         }
         return;
     }

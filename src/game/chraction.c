@@ -2450,7 +2450,7 @@ void play_sound_for_shot_actor(ChrRecord *self)
 
     if (self->prop->type == PROP_TYPE_VIEWER)
     {
-        if (getPlayerCount() == 1)
+        if (!isMpMatch())
         {
             if (c_item_entries[self->bodynum].isMale != FALSE)
             {
@@ -2628,7 +2628,7 @@ bool handles_shot_actors(ChrRecord *self, s32 hitpart, coord3d *vector, s32 weap
 
         damageToCause = gunItemGetDestructionAmount(weaponid);
 
-        if (isPlayer && (getPlayerCount() == 1))
+        if (isPlayer && (!isMpMatch()))
         {
             damageToCause *= g_AiHealthModifier;
         }
