@@ -71,7 +71,7 @@ int coopNetStart(const char *e)
     {
         return 0;
     }
-    if (strcmp(e, "local") == 0)
+    if (strncmp(e, "local", 6) == 0)
     {   /* no transport: the session's players are all on this screen */
         sLocalOnly = 1;
         sIsHost = 1;

@@ -90,6 +90,8 @@ void set_missionstate(MISSION_STATE_ID state);
 void play_sound_for_shot_actor(ChrRecord *self);
 u32 randomGetNext(void);
 extern void portConLogf(const char *fmt, ...);
+extern int strcmp(const char *, const char *);     /* (the game's string.h has none) */
+extern int strncmp(const char *, const char *, size_t);
 
 #define COOP_MAGIC   0x50434547u /* "GECP" */
 #define COOP_VERSION 18 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
@@ -3554,9 +3556,12 @@ static void coopHarnessTick(void)
             at = -1;
             if (e != NULL)
             {
-                at = atoi(e) * 60;
-                pad = (strchr(e, ':') != NULL) ? atoi(strchr(e, ':') + 1) : 0;
-                at2 = (strchr(e, ':') != NULL && strchr(strchr(e, ':') + 1, ':') != NULL) ? atoi(strchr(strchr(e, ':') + 1, ':') + 1) * 60 : -1;
+                int s1 = 0, pd = 0, s2 = -1;
+
+                sscanf(e, "%d:%d:%d", &s1, &pd, &s2);
+                at = s1 * 60;
+                pad = pd;
+                at2 = (s2 >= 0) ? s2 * 60 : -1;
             }
         }
         if (at >= 0 && sMissionTicks >= (u32) at)
@@ -9698,8 +9703,6 @@ s32 coopDeadTick(void)
     if (coopRespawnFixed() > 0 ? dead >= (u32) coopRespawnFixed()
                                : ((dead >= COOP_RESPAWN_MIN && calm >= COOP_RESPAWN_CALM) || dead >= COOP_RESPAWN_MAX))
     {
-        CoopRemote *r = &sR[partner];
-
         portConLogf("ge: coop: respawning by player %d after %.1f s (calm %.1f s)\n",
                     partner + 1, dead / 60.0f, calm / 60.0f);
         coopRespawnBy(partner, sLastWeapon);

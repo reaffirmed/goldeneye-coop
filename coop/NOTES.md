@@ -4687,3 +4687,66 @@ plates that looked selected all the time.
   RATÓN", and í, drawn from the '$' glyph, the same). The clip now has two pixels of room.
 - Not changed: the random static is Rare's (it can be turned off: Port Options, Watch Static);
   the "Q WATCH V2.01 BETA" header is the cart's text; the Options page still has its nine rows.
+
+## Split screen in story missions, offline and online (2026-11-18, COOP_VERSION 18)
+
+Asked for: split screen for the story that works locally and online, done natively rather than
+as a quick hack. 2-4 players share one PC's screen (the engine's own multiplayer viewports), and
+such a PC can host or join an online session, up to 4 players in all.
+
+How it is built:
+- **The engine's split screen in a solo mission.** boss.c loads a story mission with N players
+  when `g_SplitStory` (GE_SPLIT) or the co-op session's Local Players (`coopSplitWanted`) says so,
+  and sets `g_SplitStoryLoaded`; `splitStoryActive()` (player.c) is that flag with 2+ players.
+  `isMpMatch()` is false then, so every "multiplayer?" test in the game keeps the story's rules
+  (objectives, guards, solo debrief, the mission's own sky and fog: bgfog.c). Each player keeps
+  a body from the start (bondview.c), the camera mode is set for every player (bondview2.c
+  `bondviewSetCameraMode` wraps `bondviewSetCameraModeOne`; stage load sets them one at a time,
+  `g_SplitCamOnePlayer`), and guards' AI runs once per tick (chr.c, the viewonly gating).
+- **The intro and the ending play once, full screen, through player 1** (player.c
+  `splitWatchPlayer` returns 0 in the cinematic camera modes; the others' frozen ticks skip the
+  shared camera clock, bondview2.c). The intro section is read once: the other players' reads
+  used to convert the swirl points again in place and drop the intro cameras (bondview_r.c).
+- **The pause watch** of whoever opens it takes the whole screen (the solo watch pauses the
+  game for everyone); the multiplayer pause menu and "PRESS START" are off (mpmenu.c).
+- **Local partners in the co-op layer.** "We" is whichever local player is current
+  (`coopCurLocal`, `set_cur_player`): every piece of state about our own Bond (lives, down, the
+  revive hold, shots in STATE) is kept per local player (`sLocalSelf`, coop_revive.c, coop_look.c)
+  under the same names. The other local players are in `sR[]` like any partner
+  (`coopLocalsFill`, `sR[p].local`, their own prop as the "puppet"), so guards' targets
+  (`coopBondAs`, `coopAsBegin`), revives, respawns beside a partner, autoguns, friendly fire, the
+  radar and the partner rows work for them with no second path. Everyone down at once fails the
+  mission to the solo debrief (`coopSplitTeamDown`); a downed player's view fades back to where
+  they lie with the down panel over it.
+- **The co-op HUD per view:** half size, laid out so text never crosses the screen edge before
+  it is scaled (anchored on the view's outer edge, or its middle for full-width views).
+- **Online (protocol 18).** HELLO carries `locals` (players on the sender's screen) and their
+  characters and colours. The host numbers each joiner's players as a run (`coopHostAssign`:
+  youare, youare + 1, ...; a one-player game keeps its old number), says `full` when there is no
+  room (the joiner shows "Session Full" and leaves), and passes on each player's STATE. A game
+  sends a STATE per local player and speaks for each of them; an event for one of them is
+  applied as that player (`coopApplyEventAs`). The roster's `screen` byte tells which players
+  share a screen: they vote together (coop_vote.c) and a host migration drops the old host's
+  other players and waits only for each screen's first player. The mission card's hold counts
+  a screen's own players as loaded in.
+- **Lobby:** Local Players (1-4) and a character per extra player (saved in the lobby file),
+  and "Play on This Screen", which opens a session with nobody online (GE_COOP=local,
+  coop_net.c `sLocalOnly`) and works without Steam.
+
+Tests (Linux, headless, `GE_SPLIT=2..4 GE_COOP=local` and two copies over UDP):
+- Offline 2 and 4 players: guards target each player, hold-Use revives, timer respawns beside a
+  partner, everyone down fails to the debrief, the watch, the intro played in full, mission end.
+- Online 2+1, 1+2, 2+2: everyone sees everyone, the intro skip vote counts a screen's players,
+  a host's split-screen player going down shows as down with a revive prompt on the joiner;
+  2+3 is turned away with "Session Full".
+- From the lobby: Local Players 2, Play on This Screen, into Dam in split screen.
+
+Harness: GE_SPLIT, GE_COOP=local, GE_COOP_LOCALS=<n> (lobby), GE_COOP_LOBBY=local,
+GE_COOP_TESTDIEWHO=<local|a>, GE_SPLIT_TESTSTART=<s>:<player>[:<s2>] (opens that player's watch).
+
+Not done / known:
+- Each player needs their own controller (P1 can be keyboard and mouse); the port's existing
+  multiplayer controller mapping is used unchanged.
+- Only player 1 can skip the intro on a split-screen PC; a host's watch Abort ends it for all.
+- Local players share one Ready, one vote, and stats are kept for the first player only.
+- Versus stays one player per PC.
