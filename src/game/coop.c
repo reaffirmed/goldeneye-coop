@@ -11161,6 +11161,10 @@ static void coopHoldStart(void)
     sHold = 0;
     sHoldExpect = 0;
     sHoldArrived = 1;
+    for (p = 0; p < coopLocalsN(); p++)
+    {   /* (every player on our screen is in already) */
+        sHoldArrived |= (u8) (1 << (coopPlayerOfLocal(p) & 7));
+    }
     if (sEnabled <= 0 || !coopNetHasPeer() || coopVersus() || bossGetStageNum() == LEVELID_TITLE
         || getenv("GE_COOP_NOHOLD") != NULL)
     {
@@ -11170,7 +11174,7 @@ static void coopHoldStart(void)
     {
         for (p = 1; p < COOP_MAX_PLAYERS; p++)
         {
-            if (coopLobbyPlayerHere(p))
+            if (coopLobbyPlayerHere(p) && coopLocalOfPlayer(p) < 0)
             {
                 sHoldExpect |= (u8) (1 << p);
             }

@@ -130,9 +130,19 @@ static s32 coopHudSplitRight(void)
     return viGetViewLeft() > 0;
 }
 
+static s32 coopHudSplitWide(void)
+{   /* a view the screen's width (two players, one above the other): scale about its middle, where
+     * the text sits; laid out from an edge at full size it would run past the screen's (and be cut) */
+    return viGetViewWidth() * 3 > (s32) viGetX() * 2;
+}
+
 static Gfx *coopHudSplitBegin(Gfx *gdl, s32 y)
 {
     sHudUnclipped = 1;
+    if (coopHudSplitWide())
+    {
+        return coopTextScaleBegin(gdl, (f32) viGetViewLeft() + (f32) viGetViewWidth() / 2.0f, (f32) y);
+    }
     return coopTextScaleBegin(gdl, (f32) (coopHudSplitRight() ? viGetViewLeft() + viGetViewWidth() : viGetViewLeft()), (f32) y);
 }
 
@@ -141,6 +151,10 @@ static s32 coopHudSplitX(s32 w)
     const f32 k = coopTextScaleNow();
     const f32 span = (f32) viGetViewWidth() / ((k > 0.05f) ? k : 1.0f);
 
+    if (coopHudSplitWide())
+    {
+        return viGetViewLeft() + viGetViewWidth() / 2 - w / 2;
+    }
     if (coopHudSplitRight())
     {
         return viGetViewLeft() + viGetViewWidth() - (s32) ((span + (f32) w) / 2.0f);
