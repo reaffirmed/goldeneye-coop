@@ -544,7 +544,7 @@ void solo_char_load(void)
         if (!isMpMatch() && coopSessionActive())
         {
             s32 pickhead;
-            s32 pickbody = coopCharacterBody(coopCharacter(), &pickhead);
+            s32 pickbody = coopCharacterBody(coopSelfCharacter(), &pickhead);
 
             if (pickbody >= 0)
             {

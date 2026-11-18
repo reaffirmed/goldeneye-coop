@@ -144,7 +144,17 @@ static void coopVoteTake(s32 player, s32 choice)
     {
         sFirstTick = sTick;
     }
-    sVotes[player] = (u8) choice;
+    {
+        s32 q;
+
+        for (q = 0; q < COOP_MAX_PLAYERS; q++)
+        {   /* a split screen's players vote together */
+            if (q == player || coopScreenFirst(q) == coopScreenFirst(player))
+            {
+                sVotes[q] = (u8) choice;
+            }
+        }
+    }
     portConLogf("ge: coop: vote: player %d votes %s\n", player + 1, coopVoteName(choice));
 }
 
@@ -403,7 +413,17 @@ static void coopSkipTake(s32 player, s32 kind, s32 stage)
     {
         return;
     }
-    sSkipVotes[player] = 1;
+    {
+        s32 q;
+
+        for (q = 0; q < COOP_MAX_PLAYERS; q++)
+        {   /* a split screen's players vote together */
+            if (q == player || coopScreenFirst(q) == coopScreenFirst(player))
+            {
+                sSkipVotes[q] = 1;
+            }
+        }
+    }
     n = coopSkipCount();
     portConLogf("ge: coop: skip vote: player %d, %d of %d needed%s\n", player + 1, n, sSkipNeed, sSkipPassed ? ": skipping" : "");
     coopSkipSendTally();

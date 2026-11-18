@@ -92,7 +92,7 @@ u32 randomGetNext(void);
 extern void portConLogf(const char *fmt, ...);
 
 #define COOP_MAGIC   0x50434547u /* "GECP" */
-#define COOP_VERSION 17 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
+#define COOP_VERSION 18 /* 2: lobby fields in HELLO, health in STATE; 3: session ids; 4: up to four players; 5: guns, shots and characters;
                           6: host migration (AI sync, bye, addresses in the roster);
                           7: pings, chat, objective credit, team times, cross-save (COOPEV 16, 20..31, COOPPKT 10);
                           8: versus (COOPEV 32..36, COOPPKT 16);
@@ -110,7 +110,9 @@ extern void portConLogf(const char *fmt, ...);
                           16: versus: the host's rules (COOPSET 13) instead of each PC's Multiplayer Options, a
                               player who quits leaves alone (COOPEV_VSLEFT);
                           17: two hosts that meet settle on one (HELLO hold bit 2 and hostgen, BYE STEPDOWN and
-                              tohost, coopTwoHosts) */
+                              tohost, coopTwoHosts);
+                          18: split screen: a game's players on its screen (HELLO locals, their characters and
+                              colours, full), a game sends a STATE for each and speaks for each */
 
 enum { COOPPKT_STATE = 1, COOPPKT_GUARDS = 3, COOPPKT_EVENTS = 5, COOPPKT_WORLD = 6, COOPPKT_HELLO = 7, COOPPKT_AISYNC = 8, COOPPKT_BYE = 9 };
 /* 10 and 11 (COOPPKT_EXT_FIRST..LAST in coop.h) are coop_ext.c's features' own packets;
@@ -155,6 +157,7 @@ typedef struct
     u8 ready;
     u8 inlobby;
     u8 character;   /* the lobby's character pick (coopCharacter) */
+    u8 screen;      /* 1 + the first player on the same screen (split screen, version 18), 0 not known */
 } CoopRosterEnt;
 
 /* Where each game is, both ways once a second, menus included: the joiner
@@ -192,6 +195,13 @@ typedef struct
      * these zero, and an older build reads only what it knows. */
     u8 owncolour[4];                    /* the sender's */
     u8 colour[COOP_MAX_PLAYERS][4];     /* host: every player's, by number */
+    /* split screen (version 18): the players on the sender's screen; theirs
+     * after its first, whose are character and owncolour above. A host
+     * numbers a joiner's players youare, youare + 1, ... */
+    u8 locals;                          /* 0 (never sent) counts as 1 */
+    u8 full;                            /* host: no room in the session for all of this game's players */
+    u8 localchar[COOP_MAX_LOCAL];
+    u8 localcolour[COOP_MAX_LOCAL][4];
 } CoopHelloPkt;
 #define COOP_HELLO_V020 ((s32) (size_t) &((CoopHelloPkt *) 0)->linkrtt)   /* what a v0.2.0 build sends */
 
@@ -607,6 +617,7 @@ static u32 sLastSnapTick;
 static s32 coopInMission(void);
 static void coopApplyGuard(CoopGuardEnt *e);
 static void coopApplyEvent(CoopEvent *ev);
+static void coopApplyEventAs(CoopEvent *ev);
 static void coopQueueEvent(CoopEvent *ev);
 static void coopFlushEvents(void);
 static void coopDoorFlush(void);
@@ -706,7 +717,7 @@ static s32 coopLobbyStart(const char *spec);
 static s32 coopLocalBody(void)
 {
     s32 head;
-    s32 body = coopCharacterBody(coopCharacter(), &head);
+    s32 body = coopCharacterBody(coopSelfCharacter(), &head);
 
     if (body >= 0)
     {
@@ -763,15 +774,125 @@ static s32 coopLocalsN(void)
  * a joiner's locals are youare, youare + 1, ...) */
 static s8 sChanBase[COOP_NET_MAX_PEERS] = { -1, -1, -1 };
 static u8 sChanLocals[COOP_NET_MAX_PEERS] = { 1, 1, 1 };
+static u8 sChanFull[COOP_NET_MAX_PEERS];   /* host: no room for that game's players (its hello says so) */
 static u8 sHostLocals = 1;  /* joiner: the host's players on its screen (its hello) */
+static u8 sLeaveFull;       /* joiner: the host said it has no room for our players */
+static u8 sLocalChar[COOP_MAX_LOCAL];       /* our other split-screen players' character picks (coopCharacter for the first) */
+static s32 sLocalColour[COOP_MAX_LOCAL] = { -1, -1, -1, -1 };   /* and colours, 0xRRGGBB, -1 their number's */
 
+/* host: the players a joiner's game has on its screen, as its hello says */
+static s32 coopChanWants(s32 c)
+{
+    const s32 n = sChan[c].hello.locals;
+
+    return (n < 1) ? 1 : (n > COOP_MAX_LOCAL) ? COOP_MAX_LOCAL : n;
+}
+
+/* host: number the joiners' players. Ours are 0..L-1; each joiner's game
+ * gets a run of numbers for its players, kept while it stays (a number is a
+ * colour, a roster seat and sR[]). A game with one player keeps the number
+ * it always had, its channel's + L, when that is free. Run every tick. */
+static void coopHostAssign(void)
+{
+    const s32 L = coopLocalsN();
+    u8 used[COOP_MAX_PLAYERS];
+    s32 c, b, k;
+
+    memset(used, 0, sizeof(used));
+    for (k = 0; k < L && k < COOP_MAX_PLAYERS; k++)
+    {
+        used[k] = 1;
+    }
+    for (c = 0; c < COOP_NET_MAX_PEERS; c++)
+    {   /* first those already numbered, while their run still fits */
+        const s32 want = coopChanWants(c);
+        s32 ok = coopNetPeerConnected(c) && sChanBase[c] >= 0 && sChanLocals[c] == want && sChanBase[c] + want <= COOP_MAX_PLAYERS;
+
+        if (!coopNetPeerConnected(c))
+        {
+            sChanFull[c] = 0;
+        }
+        for (k = 0; ok && k < want; k++)
+        {
+            ok = !used[sChanBase[c] + k];
+        }
+        if (!ok)
+        {
+            sChanBase[c] = -1;
+            continue;
+        }
+        for (k = 0; k < want; k++)
+        {
+            used[sChanBase[c] + k] = 1;
+        }
+    }
+    for (c = 0; c < COOP_NET_MAX_PEERS; c++)
+    {
+        const s32 want = coopChanWants(c);
+        s32 best = -1;
+
+        if (sChanBase[c] >= 0 || !coopNetPeerConnected(c))
+        {
+            continue;
+        }
+        for (b = 0; b <= COOP_MAX_PLAYERS && best < 0; b++)
+        {   /* the number it had before split screen (its channel's + L) first, then the first run free */
+            const s32 at = (b == 0) ? c + L : b;
+            s32 fits = at >= 1 && at + want <= COOP_MAX_PLAYERS;
+
+            for (k = 0; k < want && fits; k++)
+            {
+                fits = !used[at + k];
+            }
+            if (fits)
+            {
+                best = at;
+            }
+        }
+        if (best < 0)
+        {
+            if (!sChanFull[c])
+            {
+                portConLogf("ge: coop: no room for channel %d's %d player(s)\n", c, want);
+            }
+            sChanFull[c] = 1;
+            continue;
+        }
+        if (want > 1)
+        {
+            portConLogf("ge: coop: channel %d's game plays as players %d to %d\n", c, best + 1, best + want);
+        }
+        sChanFull[c] = 0;
+        sChanBase[c] = (s8) best;
+        sChanLocals[c] = (u8) want;
+        for (k = 0; k < want; k++)
+        {
+            used[best + k] = 1;
+        }
+    }
+}
+
+/* host: the first player channel c carries, -1 while it has no numbers yet
+ * (or no room) */
 static s32 coopHostChanBase(s32 c)
 {
     if (c < 0 || c >= COOP_NET_MAX_PEERS)
     {
         return -1;
     }
-    return (sChanBase[c] >= 0) ? sChanBase[c] : c + coopLocalsN();
+    if (sChanBase[c] < 0 && !sChanFull[c] && coopNetPeerConnected(c))
+    {
+        coopHostAssign();
+    }
+    return sChanBase[c];
+}
+
+/* host: channel c carries player p */
+static s32 coopChanCarries(s32 c, s32 p)
+{
+    const s32 b = coopHostChanBase(c);
+
+    return b >= 0 && p >= b && p < b + sChanLocals[c] && p < COOP_MAX_PLAYERS;
 }
 
 static s32 coopHostChanOf(s32 p)
@@ -780,9 +901,7 @@ static s32 coopHostChanOf(s32 p)
 
     for (c = 0; c < COOP_NET_MAX_PEERS; c++)
     {
-        const s32 b = coopHostChanBase(c);
-
-        if (p >= b && p < b + sChanLocals[c] && p < COOP_MAX_PLAYERS)
+        if (sChanBase[c] >= 0 && p >= sChanBase[c] && p < sChanBase[c] + sChanLocals[c] && p < COOP_MAX_PLAYERS)
         {
             return c;
         }
@@ -835,6 +954,75 @@ static s32 coopSelf(void)
     const s32 p = coopPlayerOfLocal(coopCurLocal());
 
     return (p >= 0) ? p : 0;
+}
+
+/* the first player on player p's screen (split screen: they act together,
+ * as in a vote), p itself when it plays alone */
+s32 coopScreenFirst(s32 p)
+{
+    if (p < 0 || p >= COOP_MAX_PLAYERS || sEnabled <= 0)
+    {
+        return p;
+    }
+    if (coopLocalOfPlayer(p) >= 0)
+    {
+        return coopPlayerOfLocal(0);
+    }
+    if (coopNetIsHost())
+    {
+        const s32 c = coopHostChanOf(p);
+
+        return (c >= 0) ? sChanBase[c] : p;
+    }
+    if (p < sHostLocals)
+    {
+        return 0;
+    }
+    return (sHostHello.roster[p].screen >= 1 && sHostHello.roster[p].screen <= p + 1) ? sHostHello.roster[p].screen - 1 : p;
+}
+
+/* split screen: local li's character pick (the lobby's, per player on our screen) */
+s32 coopLocalCharacter(s32 li)
+{
+    if (li <= 0 || li >= COOP_MAX_LOCAL)
+    {
+        return coopCharacter();
+    }
+    return sLocalChar[li];
+}
+
+void coopSetLocalCharacter(s32 li, s32 c)
+{
+    if (li <= 0 || li >= COOP_MAX_LOCAL)
+    {
+        coopSetCharacter(c);
+        return;
+    }
+    sLocalChar[li] = (u8) ((c < 0 || c >= coopCharacterCount()) ? 0 : c);
+}
+
+/* local li's own colour, 0xRRGGBB, -1 its number's */
+s32 coopLocalColour(s32 li)
+{
+    if (li <= 0 || li >= COOP_MAX_LOCAL)
+    {
+        return portCoopColor();
+    }
+    return sLocalColour[li];
+}
+
+void coopSetLocalColour(s32 li, s32 rgb)
+{
+    if (li > 0 && li < COOP_MAX_LOCAL)
+    {
+        sLocalColour[li] = rgb;
+    }
+}
+
+/* the character of whichever of our players is current (their own Bond's body) */
+s32 coopSelfCharacter(void)
+{
+    return coopLocalCharacter(coopCurLocal());
 }
 
 /* host: the first player a joiner's channel c reaches (its joiner's first local) */
@@ -1142,7 +1330,7 @@ static void coopBuildState(CoopStatePkt *out)
     p.yaw = bondviewGetPlayerYawRadians();
     p.bodynum = coopLocalBody();
     p.headnum = HEAD_Male_Brosnan_Default;
-    coopCharacterBody(coopCharacter(), &p.headnum);
+    coopCharacterBody(coopSelfCharacter(), &p.headnum);
     coopLookFill(&p.look);
     p.dead = g_CurrentPlayer->bonddead;
     p.health = g_CurrentPlayer->bondhealth;
@@ -1316,7 +1504,15 @@ static void coopChanRestart(s32 c)
     sNumPeerHeld = 0;   /* its pickups start again too */
     if (coopNetIsHost())
     {
-        sR[coopPlayerOfChan(c)].resync = 1;   /* once it is back in this mission */
+        s32 p;
+
+        for (p = 0; p < COOP_MAX_PLAYERS; p++)
+        {
+            if (coopChanCarries(c, p))
+            {
+                sR[p].resync = 1;   /* once it is back in this mission */
+            }
+        }
     }
 }
 
@@ -1512,27 +1708,34 @@ static void coopRecvEvents(s32 c, CoopEventsPkt *e)
         ev = ch->in[ch->inDone % COOP_EVENT_RING];
         if (coopNetIsHost())
         {
-            ev.from = (u8) coopPlayerOfChan(c);   /* a joiner can only speak for itself */
+            if (!coopChanCarries(c, ev.from))
+            {   /* a joiner can only speak for itself (for one of its split-screen players) */
+                ev.from = (u8) coopPlayerOfChan(c);
+            }
+            if (coopPlayerOfChan(c) < 0)
+            {
+                continue;   /* (no numbers for it yet) */
+            }
             if (!coopEventFromJoinerOk(&ev))
             {
                 continue;
             }
-            if (ev.to != 0)
+            if (ev.to == COOP_ALL || coopLocalOfPlayer(ev.to) < 0)
             {   /* for another joiner, or everyone: pass it on */
                 sEvForwarding = 1;
                 coopQueueEventTo(&ev, ev.to);
                 sEvForwarding = 0;
             }
-            if (ev.to != 0 && ev.to != COOP_ALL)
+            if (ev.to != COOP_ALL && coopLocalOfPlayer(ev.to) < 0)
             {
                 continue;
             }
         }
-        else if ((ev.to != COOP_ALL && ev.to != coopSelf()) || !coopEventFromHostOk(&ev))
+        else if ((ev.to != COOP_ALL && coopLocalOfPlayer(ev.to) < 0) || !coopEventFromHostOk(&ev))
         {
             continue;
         }
-        coopApplyEvent(&ev);
+        coopApplyEventAs(&ev);
     }
     if (e->count > 0)
     {   /* a bare ack needs none back */
@@ -1578,20 +1781,27 @@ static void coopRecvState(s32 c, CoopStatePkt *p)
     }
     if (coopNetIsHost())
     {
-        static u8 relayed[COOP_NET_MAX_PEERS][COOP_NET_MAX_PEERS];
+        static u8 relayed[COOP_NET_MAX_PEERS][COOP_MAX_PLAYERS];
 
-        p->player = (u8) coopPlayerOfChan(c);
+        if (coopPlayerOfChan(c) < 0)
+        {
+            return;     /* (no numbers for its game yet) */
+        }
+        if (!coopChanCarries(c, p->player))
+        {   /* a joiner speaks for its own players only */
+            p->player = (u8) coopPlayerOfChan(c);
+        }
         for (q = 0; q < COOP_NET_MAX_PEERS; q++)
         {   /* every joiner sees every other one (every other STATE where coopStateThin) */
-            if (q != c && ((++relayed[q][c] & 1) != 0 || !coopStateThin(q)))
+            if (q != c && ((++relayed[q][p->player] & 1) != 0 || !coopStateThin(q)))
             {
                 coopNetSendTo(q, p, sizeof(*p));
             }
         }
     }
-    if (p->player >= COOP_MAX_PLAYERS || p->player == coopSelf())
+    if (p->player >= COOP_MAX_PLAYERS || coopLocalOfPlayer(p->player) >= 0)
     {
-        return;
+        return;     /* (ours: a split-screen player's own state is coopLocalsFill's) */
     }
     r = &sR[p->player];
     if (p->stage == bossGetStageNum())
@@ -1952,7 +2162,7 @@ s32 coopNetLink(s32 p, CoopLink *out)
     {
         return 0;
     }
-    if (coopNetIsHost() ? (p != 0) : (p == 0 || p == coopSelf()))
+    if (coopNetIsHost() ? (coopLocalOfPlayer(p) < 0) : (p < sHostLocals || coopLocalOfPlayer(p) >= 0))
     {
         c = coopNetIsHost() ? coopChanOfPlayer(p) : 0;
         if (c < 0 || c >= COOP_NET_MAX_PEERS || !coopNetPeerConnected(c) || sRtt[c] == 0.0f)
@@ -1994,9 +2204,9 @@ s32 coopNetRttMs(s32 p)
 {
     s32 c;
 
-    if (sEnabled <= 0 || p < 0 || p >= COOP_MAX_PLAYERS || p == coopSelf())
+    if (sEnabled <= 0 || p < 0 || p >= COOP_MAX_PLAYERS || coopLocalOfPlayer(p) >= 0)
     {
-        return 0;
+        return 0;   /* (a split-screen partner shares our screen) */
     }
     if (coopNetIsHost())
     {
@@ -2004,7 +2214,7 @@ s32 coopNetRttMs(s32 p)
         return (c >= 0 && c < COOP_NET_MAX_PEERS) ? (s32) (sRtt[c] + 0.5f) : 0;
     }
     /* a joiner only talks to the host: another joiner is two of those away (about) */
-    return (s32) (sRtt[0] * (p == 0 ? 1.0f : 2.0f) + 0.5f);
+    return (s32) (sRtt[0] * (p < sHostLocals ? 1.0f : 2.0f) + 0.5f);
 }
 
 static void coopPollNet(void)
@@ -2012,6 +2222,11 @@ static void coopPollNet(void)
     u8 buf[1500];
     s32 n;
     s32 c;
+
+    if (coopNetIsHost())
+    {
+        coopHostAssign();   /* who plays as which numbers, as games come and go */
+    }
 
     while ((n = coopNetRecvFrom(buf, sizeof(buf), &c)) > 0)
     {
@@ -2102,6 +2317,13 @@ static void coopPollNet(void)
             ch->hello = *(CoopHelloPkt *) buf;
             if (!coopNetIsHost())
             {
+                if (ch->hello.full && !sHostHello.full)
+                {   /* the session has no room for all of our split-screen players */
+                    portConLogf("ge: coop: the host has no room for our %d players\n", coopLocalsN());
+                    coopScreenError("Session Full", "The host's game has no room\nfor all of your players.\nTry fewer Local Players.");
+                    sLeaveFull = 1;     /* coopFrontTick leaves, out of this loop */
+                }
+                sHostLocals = (u8) ((ch->hello.locals >= 1 && ch->hello.locals <= COOP_MAX_LOCAL) ? ch->hello.locals : 1);
                 sHostHello = ch->hello;
                 if (sHostHello.downrule <= COOPDOWN_REVIVE)
                 {
@@ -2144,7 +2366,10 @@ static void coopPollNet(void)
         }
         if (p->type >= COOPPKT_EXT_FIRST && p->type <= COOPPKT_EXT_LAST)
         {
-            coopExtPacket(buf, n, coopPlayerOfChan(c));
+            if (coopPlayerOfChan(c) >= 0)
+            {
+                coopExtPacket(buf, n, coopPlayerOfChan(c));
+            }
         }
         if (p->type == COOPPKT_TIME && n >= (s32) sizeof(CoopTimePkt))
         {
@@ -2153,7 +2378,10 @@ static void coopPollNet(void)
         }
         if (p->type >= COOPPKT_REPL && p->type <= COOPPKT_REPLREQ)
         {
-            coopReplPacket(buf, n, coopPlayerOfChan(c));
+            if (coopPlayerOfChan(c) >= 0)
+            {
+                coopReplPacket(buf, n, coopPlayerOfChan(c));
+            }
         }
     }
 }
@@ -7211,6 +7439,23 @@ static void coopFlushEvents(void)
     }
 }
 
+static void coopApplyEvent(CoopEvent *ev);
+
+/* an event for one of our players: applied as that player (split screen) */
+static void coopApplyEventAs(CoopEvent *ev)
+{
+    CoopAsSave sv;
+
+    if (ev->to == COOP_ALL || !splitStoryActive() || coopLocalOfPlayer(ev->to) < 0 || ev->to == coopSelf())
+    {
+        coopApplyEvent(ev);
+        return;
+    }
+    coopAsBegin(ev->to, &sv);
+    coopApplyEvent(ev);
+    coopAsEnd(&sv);
+}
+
 static void coopApplyEvent(CoopEvent *ev)
 {
     switch (ev->kind)
@@ -9008,7 +9253,7 @@ static void coopCorpseTick(void)
         {
             return; /* not watching yet: our own death's view is still up */
         }
-        coopCharacterBody(coopCharacter(), &head);
+        coopCharacterBody(coopSelfCharacter(), &head);
         header = retrieve_header_for_body_and_head(body, head, 0);
         prop = (header != NULL) ? chrAllocate(header, &sDeathPos, 6.2831855f - sDeathYaw, sDeathStan, (s32) ailistFindById(GAILIST_DEAD_AI)) : NULL;
         if (prop == NULL)
@@ -9794,6 +10039,12 @@ static void coopSendHello(void)
     p.downrule = (u8) sDownRule;
     p.character = (u8) coopCharacter();
     coopColourBytes(portCoopColor(), p.owncolour);
+    p.locals = (u8) coopLocalsN();
+    for (i = 1; i < COOP_MAX_LOCAL; i++)
+    {   /* our other split-screen players' picks */
+        p.localchar[i] = (u8) coopLocalCharacter(i);
+        coopColourBytes(coopLocalColour(i), p.localcolour[i]);
+    }
     if (coopNetIsHost())
     {   /* Guard AI is the host's Port Option; the slot only shows it to the joiner */
         sSettings[COOPSET_GUARDAI] = (u8) coopAiSmarterOption();
@@ -9817,19 +10068,25 @@ static void coopSendHello(void)
     for (i = 0; i < COOP_MAX_PLAYERS; i++)
     {   /* the roster: who is here, as the host sees it */
         CoopRosterEnt *e = &p.roster[i];
+        const s32 li = coopLocalOfPlayer(i);
+        const s32 ch = (li >= 0) ? -1 : coopHostChanOf(i);
+        const s32 j = (ch >= 0) ? i - sChanBase[ch] : li;   /* which of its game's players */
 
-        e->present = (i == 0) || coopLobbyPlayerHere(i);
-        if (!e->present)
+        e->present = (li >= 0) || coopLobbyPlayerHere(i);
+        if (!e->present || (li < 0 && ch < 0))
         {
+            e->present = 0;
             continue;
         }
-        e->id = (i == 0) ? coopPlayerId(0) : coopNetPeerId(i - 1);   /* where to reach them if we go (coopMigrate) */
+        e->id = (j > 0) ? 0 : (li >= 0) ? coopPlayerId(i) : coopNetPeerId(ch);   /* where to reach them if we go (coopMigrate); a second
+                                                                             * player on a screen is reached through its first */
         snprintf(e->name, sizeof(e->name), "%s", coopPlayerName(i));
-        e->ready = (i == 0) ? (u8) sLobbyReady : sChan[i - 1].hello.ready;
-        e->inlobby = (i == 0) ? (u8) sOnLobbyScreen : sChan[i - 1].hello.inlobby;
-        e->character = (i == 0) ? (u8) coopCharacter() : sChan[i - 1].hello.character;
-        memcpy(p.colour[i], (i == 0) ? p.owncolour : sChan[i - 1].hello.owncolour, sizeof(p.colour[i]));
-        if (i > 0)
+        e->ready = (li >= 0) ? (u8) sLobbyReady : sChan[ch].hello.ready;
+        e->inlobby = (li >= 0) ? (u8) sOnLobbyScreen : sChan[ch].hello.inlobby;
+        e->character = (u8) coopPlayerCharacter(i);
+        e->screen = (u8) (1 + ((li >= 0) ? 0 : sChanBase[ch]));
+        coopColourBytes(coopPlayerOwnColour(i), p.colour[i]);
+        if (li < 0)
         {
             CoopLink l;
 
@@ -9842,7 +10099,10 @@ static void coopSendHello(void)
     sSentHello = p;     /* coopTwoHosts */
     for (c = 0; c < COOP_NET_MAX_PEERS; c++)
     {
-        p.youare = (u8) coopPlayerOfChan(c);
+        const s32 b = coopPlayerOfChan(c);
+
+        p.youare = (u8) ((b >= 1) ? b : 0);
+        p.full = sChanFull[c];
         coopNetSendTo(c, &p, sizeof(p));
     }
 }
@@ -9850,6 +10110,11 @@ static void coopSendHello(void)
 /* Called every frontend tick (front.c). Returns 1 when it started a mission. */
 s32 coopFrontTick(void)
 {
+    if (sLeaveFull)
+    {
+        sLeaveFull = 0;
+        coopLobbyLeave();
+    }
     {   /* GE_COOP_DIFFICULTY=<mode>: once, at startup, the lobby's co-op difficulty (harness only; the joiner takes the host's from HELLO) */
         static s32 testdiff = -1;
         if (testdiff == -1)
@@ -10069,13 +10334,17 @@ s32 coopLobbyPlayerHere(s32 p)
 {
     s32 c;
 
-    if (sEnabled <= 0 || !coopNetHasPeer() || p < 0 || p >= COOP_MAX_PLAYERS)
+    if (sEnabled <= 0 || p < 0 || p >= COOP_MAX_PLAYERS)
     {
         return 0;
     }
-    if (p == coopSelf())
+    if (coopLocalOfPlayer(p) >= 0)
+    {   /* one of ours (split screen: each player on our screen) */
+        return coopNetHasPeer() || coopLocalsN() > 1;
+    }
+    if (!coopNetHasPeer())
     {
-        return 1;
+        return 0;
     }
     if (!coopNetIsHost() && !(sChan[0].helloSeen && sTick - sChan[0].helloTick < 180))
     {
@@ -10095,15 +10364,15 @@ s32 coopLobbyPlayerReady(s32 p)
     {
         return 0;
     }
-    if (p == coopSelf())
+    if (coopLocalOfPlayer(p) >= 0)
     {
-        return sLobbyReady;
+        return coopNetIsHost() ? 1 : sLobbyReady;     /* (a screen's players are ready together; the host's always) */
     }
     if (coopNetIsHost())
     {
-        return sChan[p - 1].hello.ready;
+        return (coopHostChanOf(p) >= 0) ? sChan[coopHostChanOf(p)].hello.ready : 0;
     }
-    return (p == 0) ? 1 : sHostHello.roster[p].ready;   /* the host starts it: always "ready" */
+    return (p < sHostLocals) ? 1 : sHostHello.roster[p].ready;   /* the host starts it: always "ready" */
 }
 
 /* the other games are talking to us */
@@ -10113,7 +10382,7 @@ s32 coopLobbyHasPartner(void)
 
     for (p = 0; p < COOP_MAX_PLAYERS; p++)
     {
-        if (p != coopSelf() && coopLobbyPlayerHere(p))
+        if (coopLocalOfPlayer(p) < 0 && coopLobbyPlayerHere(p))
         {
             return 1;
         }
@@ -10121,27 +10390,32 @@ s32 coopLobbyHasPartner(void)
     return 0;
 }
 
-/* players in the session, us included (1 alone). By connection, not by a
- * fresh HELLO: a game loading the stage goes quiet for a few seconds. */
+/* players in the session, us included (1 alone; each player on a split
+ * screen counts). By connection, not by a fresh HELLO: a game loading the
+ * stage goes quiet for a few seconds. */
 s32 coopLobbyPlayerCount(void)
 {
-    s32 c, p, n = 1;
+    s32 c, p, n = coopLocalsN();
 
-    if (sEnabled <= 0 || !coopNetHasPeer())
+    if (sEnabled <= 0)
     {
         return 1;
+    }
+    if (!coopNetHasPeer())
+    {
+        return n;
     }
     if (coopNetIsHost())
     {
         for (c = 0; c < COOP_NET_MAX_PEERS; c++)
         {
-            n += coopNetPeerConnected(c) && sChan[c].helloSeen;
+            n += (coopNetPeerConnected(c) && sChan[c].helloSeen && sChanBase[c] >= 0) ? sChanLocals[c] : 0;
         }
         return n;
     }
     for (p = 0; p < COOP_MAX_PLAYERS; p++)
     {
-        n += p != coopSelf() && sHostHello.roster[p].present;
+        n += coopLocalOfPlayer(p) < 0 && sHostHello.roster[p].present;
     }
     return n;
 }
@@ -10157,7 +10431,7 @@ s32 coopLobbyPartnerReady(void)
     }
     for (p = 1; p < COOP_MAX_PLAYERS; p++)
     {
-        if (coopLobbyPlayerHere(p) && p != coopSelf() && !coopLobbyPlayerReady(p))
+        if (coopLobbyPlayerHere(p) && coopLocalOfPlayer(p) < 0 && !coopLobbyPlayerReady(p))
         {
             return 0;
         }
@@ -10169,7 +10443,7 @@ s32 coopLobbyPlayerOnLobbyScreen(s32 p)
 {
     s32 c;
 
-    if (p == coopSelf() || !coopLobbyPlayerHere(p))
+    if (coopLocalOfPlayer(p) >= 0 || !coopLobbyPlayerHere(p))
     {
         return 0;
     }
@@ -10183,7 +10457,7 @@ s32 coopLobbyPartnerOnScreen(void)
 
     for (p = 0; p < COOP_MAX_PLAYERS; p++)
     {
-        if (p != coopSelf() && coopLobbyPlayerHere(p))
+        if (coopLocalOfPlayer(p) < 0 && coopLobbyPlayerHere(p))
         {
             s32 c = coopChanOfPlayer(p);
             if ((c >= 0) ? sChan[c].hello.inlobby : sHostHello.roster[p].inlobby)
@@ -10226,17 +10500,35 @@ const char *coopPlayerName(s32 p)
     {
         return "";
     }
-    if (p == coopSelf())
-    {
-        return coopLobbySelfName();
+    if (coopLocalOfPlayer(p) >= 0)
+    {   /* ours: our name, and a number after it for the second player on our screen on */
+        const s32 li = coopLocalOfPlayer(p);
+
+        if (!coopLobbyIsSteam() && coopLocalsN() > 1)
+        {   /* off Steam we are "You": a split screen's players go by their numbers */
+            snprintf(fallback[p], sizeof(fallback[p]), portTr("Player %d"), p + 1);
+            return fallback[p];
+        }
+        if (li == 0)
+        {
+            return coopLobbySelfName();
+        }
+        snprintf(fallback[p], sizeof(fallback[p]), "%.10s %d", coopLobbySelfName(), (int) li + 1);
+        return fallback[p];
     }
     c = coopChanOfPlayer(p);
-    if (c >= 0 && coopLobbyIsSteam())
+    if (c >= 0 && coopNetIsHost() && coopLobbyIsSteam() && p != sChanBase[c])
+    {   /* a joiner's second player on: its name and number, as for ours */
+        n = coopNetPeerName(c);
+        snprintf(fallback[p], sizeof(fallback[p]), "%.10s %d", (n != NULL && n[0] != '\0') ? n : "Player", (int) (p - sChanBase[c]) + 1);
+        return fallback[p];
+    }
+    if (c >= 0 && coopLobbyIsSteam() && (coopNetIsHost() || p == 0))
     {
         n = coopNetPeerName(c);
     }
-    else if (c < 0)
-    {
+    else if (c < 0 || coopLobbyIsSteam())
+    {   /* (off Steam a host calls itself "You": its own players are numbers here) */
         n = sHostHello.roster[p].name;
     }
     if (n != NULL && n[0] != '\0')
@@ -10257,12 +10549,18 @@ s32 coopPlayerCharacter(s32 p)
     {
         return 0;
     }
-    if (p == coopSelf())
+    if (coopLocalOfPlayer(p) >= 0)
     {
-        return coopCharacter();
+        return coopLocalCharacter(coopLocalOfPlayer(p));
     }
     c = coopChanOfPlayer(p);
-    return (c >= 0 && coopNetIsHost()) ? sChan[c].hello.character : sHostHello.roster[p].character;
+    if (c >= 0 && coopNetIsHost())
+    {   /* a joiner's: its first player's, or the one its hello gives that player */
+        const s32 j = p - sChanBase[c];
+
+        return (j <= 0 || j >= COOP_MAX_LOCAL) ? sChan[c].hello.character : sChan[c].hello.localchar[j];
+    }
+    return sHostHello.roster[p].character;
 }
 
 /* the colour player p picked for themselves (the lobby's Colour row),
@@ -10278,16 +10576,23 @@ s32 coopPlayerOwnColour(s32 p)
     {
         return -1;
     }
-    if (p == (insession ? coopSelf() : 0))
+    if (insession ? coopLocalOfPlayer(p) >= 0 : p < coopLocalsN())
     {
-        return portCoopColor();
+        return coopLocalColour(insession ? coopLocalOfPlayer(p) : p);
     }
     if (!insession)
     {
         return -1;
     }
     c = coopChanOfPlayer(p);
-    b = (c >= 0 && coopNetIsHost()) ? sChan[c].hello.owncolour : sHostHello.colour[p];
+    if (c >= 0 && coopNetIsHost() && p - sChanBase[c] > 0 && p - sChanBase[c] < COOP_MAX_LOCAL)
+    {
+        b = sChan[c].hello.localcolour[p - sChanBase[c]];
+    }
+    else
+    {
+        b = (c >= 0 && coopNetIsHost()) ? sChan[c].hello.owncolour : sHostHello.colour[p];
+    }
     return b[3] ? (s32) (((u32) b[0] << 16) | ((u32) b[1] << 8) | b[2]) : -1;
 }
 
@@ -10322,12 +10627,12 @@ unsigned long long coopPlayerId(s32 p)
     {
         return 0;
     }
-    if (p == coopSelf())
+    if (coopLocalOfPlayer(p) >= 0)
     {
         return coopSteamSelfId();
     }
     c = coopChanOfPlayer(p);
-    return (c >= 0) ? coopNetPeerId(c) : sHostHello.roster[p].id;
+    return (c >= 0 && (coopNetIsHost() || p == 0)) ? coopNetPeerId(c) : sHostHello.roster[p].id;
 }
 
 /* the first partner's name (the lobby's two-player wording) */
@@ -10922,7 +11227,15 @@ s32 coopHoldInfo(u8 *arrived, s32 *secs)
         return 0;
     }
     left = (s32) (COOP_HOLD_MS - (coopNowMs() - sHoldMs) + 999) / 1000;
-    *arrived = (u8) (sHoldArrived | (1 << coopSelf()));
+    *arrived = sHoldArrived;
+    {
+        s32 li;
+
+        for (li = 0; li < coopLocalsN(); li++)
+        {   /* every player on our screen is here */
+            *arrived |= (u8) (1 << (coopPlayerOfLocal(li) & 7));
+        }
+    }
     *secs = (left < 0) ? 0 : left;
     return 1;
 }
@@ -11275,6 +11588,14 @@ static void coopRenumber(const s32 *newof)
     coopVoteRenumber(newof);
 }
 
+/* migrating: the first player on p's screen, by the old host's roster */
+static s32 coopScreenFirstOf(s32 p)
+{
+    const s32 sc = sMigRoster[p].screen;
+
+    return (sc >= 1 && sc <= p + 1) ? sc - 1 : p;
+}
+
 /* The host is gone: pick the next one and go over to it. */
 static void coopMigrate(void)
 {
@@ -11284,8 +11605,8 @@ static void coopMigrate(void)
     char line[56];
 
     for (p = 1; p < COOP_MAX_PLAYERS; p++)
-    {
-        if (sMigRoster[p].present || p == sMigSelf)
+    {   /* (the old host's other split-screen players went with it; a screen's players stay in a row) */
+        if ((sMigRoster[p].present && sMigRoster[p].screen != 1) || p == sMigSelf)
         {
             list[n++] = p;
         }
@@ -11309,13 +11630,18 @@ static void coopMigrate(void)
 
     if (list[0] == sMigSelf)
     {
-        for (i = 1; i < n && i <= COOP_NET_MAX_PEERS; i++)
-        {
-            ids[i - 1] = sMigRoster[list[i]].id;
+        s32 m = 0;
+
+        for (i = 1; i < n; i++)
+        {   /* a game to wait for: each screen's first player (a second one has no address of its own) */
+            if (list[i] != sMigSelf && m < COOP_NET_MAX_PEERS && coopScreenFirstOf(list[i]) == list[i])
+            {
+                ids[m++] = sMigRoster[list[i]].id;
+            }
         }
         sMissionSerial = sHostHello.mission;    /* the joiners have followed this one already */
         sHostGen = (u8) (sHostHello.hostgen + 1 > 255 ? 255 : sHostHello.hostgen + 1);  /* coopTwoHosts: the older game wins a tie */
-        coopNetMigrate(1, ids, n - 1);
+        coopNetMigrate(1, ids, m);
         coopLinkStatsReset();
         coopRenumber(newof);
         if (coopInMission())
@@ -11358,7 +11684,8 @@ static void coopMigrate(void)
 static void coopMigrateFromRoster(void)
 {
     memcpy(sMigRoster, sHostHello.roster, sizeof(sMigRoster));
-    sMigSelf = coopSelf();
+    sMigSelf = coopPlayerOfLocal(0);
+    sMigSelf = (sMigSelf >= 0) ? sMigSelf : coopSelf();
     sMigRoster[sMigSelf].present = 1;
     coopMigrate();
 }
@@ -11405,15 +11732,25 @@ static void coopRecvBye(s32 c, CoopByePkt *b)
     }
     if (coopNetIsHost())
     {
-        if (sR[p].valid || coopLobbyPlayerHere(p))
-        {
-            portConLogf("ge: coop: player %d left the session\n", p + 1);
-            coopNote(p, COOPNOTE_LEFT);
+        s32 q;
+
+        for (q = 0; q < COOP_MAX_PLAYERS; q++)
+        {   /* all of its game's players (split screen) */
+            if (!coopChanCarries(c, q))
+            {
+                continue;
+            }
+            if (sR[q].valid || coopLobbyPlayerHere(q))
+            {
+                portConLogf("ge: coop: player %d left the session\n", q + 1);
+                coopNote(q, COOPNOTE_LEFT);
+            }
+            sR[q].valid = 0;
+            sR[q].lost = 0;
         }
-        sR[p].valid = 0;
-        sR[p].lost = 0;
         sChan[c].helloSeen = 0;
         coopNetDropPeer(c);
+        coopHostAssign();
         return;
     }
     if (c == 0 && b->reason == COOPBYE_STEPDOWN && b->tohost != 0)
@@ -11793,7 +12130,7 @@ static void coopSessionTick(void)
                 }
             }
             if (coopNetPeerConnected(c) && sChan[c].heardMs != 0 && now - sChan[c].heardMs > COOP_LOST_MS + COOP_DROP_MS
-                && !sR[coopPlayerOfChan(c)].valid)
+                && (coopPlayerOfChan(c) < 0 || !sR[coopPlayerOfChan(c)].valid))
             {
                 portConLogf("ge: coop: freeing slot %d (silent)\n", c);
                 sChan[c].helloSeen = 0;
@@ -13477,7 +13814,7 @@ void coopExtSendPacket(void *pkt, s32 len, s32 to)
     ((u16 *) pkt)[2] = COOP_VERSION;
     for (c = 0; c < COOP_NET_MAX_PEERS; c++)
     {
-        if (coopNetPeerConnected(c) && (to == COOP_ALL || coopPlayerOfChan(c) == to))
+        if (coopNetPeerConnected(c) && (to == COOP_ALL || (coopNetIsHost() ? coopChanCarries(c, to) : to < sHostLocals)))
         {
             coopNetSendTo(c, pkt, len);
         }

@@ -567,6 +567,12 @@ s32  coopCharacterCount(void);
 void coopCharacterName(s32 c, char *out, s32 cap);  /* with "\n" */
 s32  coopCharacterBody(s32 c, s32 *head);   /* the body and head, -1 for the mission's Bond */
 s32  coopPlayerCharacter(s32 p);            /* player p's pick, as the lobby knows it */
+s32  coopLocalCharacter(s32 li);            /* split screen: the pick of the player li on our screen (0: coopCharacter) */
+void coopSetLocalCharacter(s32 li, s32 c);
+s32  coopLocalColour(s32 li);               /* and their colour, 0xRRGGBB, -1 their number's */
+void coopSetLocalColour(s32 li, s32 rgb);
+s32  coopSelfCharacter(void);               /* the pick of whichever of our players is current */
+s32  coopScreenFirst(s32 p);                /* the first player on p's screen (split screen), p alone */
 
 /* the picks as 3D figures for the lobby (coop_charsel.c) */
 void coopFigureBeginFrame(void);
