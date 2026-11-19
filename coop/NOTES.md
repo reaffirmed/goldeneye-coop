@@ -4756,3 +4756,12 @@ players is a third of the way into the quadrant, over the gun hand. `generate_am
 (gunfire.c) now uses leftx/rightx 35 (2 players) or 33 (quadrants) in split story, so it sits in
 the view's bottom corners under the objective list, and in quadrants it is edge-anchored like the
 two-player HUD under a wide window. Checked with dual ZMGs (3-digit reserve) in 2 and 4 players.
+
+Follow-up (2026-11-19): in split the objective list covered the radar. The list is laid out at
+text scale (half size in split) but the radar at full size, so `below` (the radar's bottom) was
+halved; it is now converted from HUD scale to text scale (coop_hud.c `coopHudScaleNow` no longer
+claims half size in split, since `portHudScaleBegin` doesn't scale there). Offline split also
+puts the list under radar.c's radar, which now draws the co-op radar's dark square (the MP disc
+texture isn't loaded in a story mission) and skips itself when the co-op radar shows (online).
+Both radars sit at `COOP_RADAR_RIGHT_SPLIT` in split, in line with the list. The list is scaled
+about its own top, so a lower view's list is no longer cut off past the screen's bottom.

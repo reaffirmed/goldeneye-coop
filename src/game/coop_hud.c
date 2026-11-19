@@ -78,6 +78,7 @@ u32 coopHudColour(s32 player)
 /* the radar's centre, as radar.c lays it out for one player */
 #define COOP_RADAR_TOP   0x1a
 #define COOP_RADAR_RIGHT 0x29
+#define COOP_RADAR_RIGHT_SPLIT 0x19   /* split story: its edge in line with the objectives' under it (radar.c too) */
 
 /* the small font in capitals, ASCII only (a byte >= 0x80 starts a two-byte glyph) */
 static void coopHudText(char *out, s32 cap, const char *in)
@@ -273,7 +274,7 @@ static s32 coopHudTopMsgPush(s32 o, f32 s)
 /* HUD Scale's half size, which portHudScaleBegin draws at */
 static f32 coopHudScaleNow(void)
 {
-    return (portHudScaleOn() || splitStoryActive()) ? 0.5f : 1.0f;   /* (split screen: the views are small) */
+    return portHudScaleOn() ? 0.5f : 1.0f;   /* (split screen draws these full size: only the text halves) */
 }
 
 /* A partner behind a wall: their tag goes darker and fainter, so it reads as
@@ -822,7 +823,7 @@ static Gfx *coopHudRadar(Gfx *gdl)
     CoopHudPartner *p = &pp;
     s32 i;
     PropRecord *self = g_CurrentPlayer->prop;
-    s32 left = (viGetViewLeft() + viGetViewWidth()) - COOP_RADAR_RIGHT;
+    s32 left = (viGetViewLeft() + viGetViewWidth()) - (splitStoryActive() ? COOP_RADAR_RIGHT_SPLIT : COOP_RADAR_RIGHT);
     s32 top = viGetViewTop() + COOP_RADAR_TOP + coopHudTopMsgPush(COOP_RADAR_TOP - 0x11, coopHudScaleNow());
     f32 dx, dz, ang, r;
     s32 colour;
@@ -1372,7 +1373,10 @@ static Gfx *coopHudObjectives(Gfx *gdl, s32 below)
 {
     const s32 right = viGetViewLeft() + viGetViewWidth() - 0x10;
     const s32 maxw = viGetViewWidth() * 2 / 5;
-    s32 y = viGetViewTop() + below;
+    /* scaled about the list's own top: about the view's top a lower view's
+     * list was laid out past the screen's bottom, and lines there were lost */
+    const s32 top = viGetViewTop() + (s32) ((f32) below * coopTextScaleNow() + 0.5f);
+    s32 y = top;
     s32 letter = 0;
     s32 i;
 
@@ -1384,7 +1388,7 @@ static Gfx *coopHudObjectives(Gfx *gdl, s32 below)
     {
         PORT_HUD_ANCHOR(gdl, PORT_HUD_ANCHOR_RIGHT);
     }
-    gdl = coopTextScaleBegin(gdl, (f32) (viGetViewLeft() + viGetViewWidth()), (f32) viGetViewTop());   /* HUD Scale and Text Size */
+    gdl = coopTextScaleBegin(gdl, (f32) (viGetViewLeft() + viGetViewWidth()), (f32) top);   /* HUD Scale and Text Size */
     gdl = microcode_constructor(gdl);
     for (i = 0; i < objectiveGetCount() && i < OBJECTIVES_MAX; i++)
     {
@@ -1640,10 +1644,12 @@ Gfx *coopHudRender(Gfx *gdl)
     }
     if (portObjectivesHudShown() && !g_CurrentPlayer->bonddead && !weapmenuIsOpen())
     {
-        s32 below = partner ? COOP_RADAR_TOP + 0x16 : 0x10;
+        const s32 radar = partner || splitStoryActive();   /* (split: radar.c's own, every player being on it) */
+        s32 below = radar ? (s32) ((f32) (COOP_RADAR_TOP + 0x16) * coopHudScaleNow() / coopTextScaleNow() + 0.999f)
+                          : 0x10;   /* (the radar is laid out at HUD scale, the objectives at text scale) */
         s32 push = coopHudTopMsgPush(below, coopTextScaleNow());
 
-        if (partner)
+        if (radar)
         {   /* and below the radar, wherever it moved */
             const f32 st = coopTextScaleNow();
             s32 r = (s32) ((f32) coopHudTopMsgPush(COOP_RADAR_TOP - 0x11, coopHudScaleNow()) * coopHudScaleNow() / st + 0.999f);
