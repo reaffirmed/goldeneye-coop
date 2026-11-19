@@ -833,7 +833,7 @@ static Gfx *coopHudRadar(Gfx *gdl)
     {
         return gdl;
     }
-    if (hudLayoutWide())
+    if (hudLayoutWide() || (splitStoryActive() && hudAnchorsToEdges()))   /* (split: with the objectives under it) */
     {
         PORT_HUD_ANCHOR(gdl, PORT_HUD_ANCHOR_RIGHT);
     }
@@ -899,7 +899,7 @@ static Gfx *coopHudRadar(Gfx *gdl)
         gdl = microcode_constructor_related_to_menus(gdl, px - 1, py - 1, px + 1, py + 1, colour);
     }
     gdl = portHudScaleEnd(gdl);
-    if (hudLayoutWide())
+    if (hudLayoutWide() || (splitStoryActive() && hudAnchorsToEdges()))   /* (split: with the objectives under it) */
     {
         PORT_HUD_ANCHOR_OFF(gdl);
     }

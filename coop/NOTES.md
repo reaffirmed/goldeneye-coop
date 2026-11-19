@@ -4765,3 +4765,6 @@ puts the list under radar.c's radar, which now draws the co-op radar's dark squa
 texture isn't loaded in a story mission) and skips itself when the co-op radar shows (online).
 Both radars sit at `COOP_RADAR_RIGHT_SPLIT` in split, in line with the list. The list is scaled
 about its own top, so a lower view's list is no longer cut off past the screen's bottom.
+In 3/4-player split the objective list is edge-anchored (`hudAnchorsToEdges`) but both radars
+followed `hudLayoutWide` (off in quadrants by default), so the radar sat left of the list. In
+split they now take the list's anchor, so the radar stacks right-aligned on top of it.

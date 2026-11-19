@@ -111,8 +111,9 @@ Gfx *display_red_blue_on_radar(Gfx *DL)
 #ifndef TARGET_N64
     {   /* HUD Layout Wide: the radar hugs its viewport's right edge (options.c hudLayoutWide) */
         extern s32 hudLayoutWide(void);
+        extern s32 hudAnchorsToEdges(void);
 
-        if (hudLayoutWide())
+        if (hudLayoutWide() || (splitStoryActive() && hudAnchorsToEdges()))   /* (split: with the objectives under it) */
         {
             DL->words.w0 = ((u32) 0x3a << 24) | (0x00FFFFFF & ~(u32) 0x70);   /* PORT_HUD_ANCHOR RIGHT (options.h) */
             DL->words.w1 = 0x20 | portHudAnchorFrac();   /* with the HUD slide */
@@ -277,10 +278,11 @@ Gfx *display_red_blue_on_radar(Gfx *DL)
 #ifndef TARGET_N64
     {
         extern s32 hudLayoutWide(void);
+        extern s32 hudAnchorsToEdges(void);
         extern Gfx *portHudScaleEnd(Gfx *gdl);
 
         DL = portHudScaleEnd(DL);
-        if (hudLayoutWide())
+        if (hudLayoutWide() || (splitStoryActive() && hudAnchorsToEdges()))   /* (split: with the objectives under it) */
         {
             DL->words.w0 = ((u32) 0x3a << 24) | (0x00FFFFFF & ~(u32) 0x70);   /* PORT_HUD_ANCHOR_OFF */
             DL->words.w1 = 0;
