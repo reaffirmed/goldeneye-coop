@@ -7381,6 +7381,15 @@ Gfx *generate_ammo_total_microcode(Gfx *gdl)
                 leftx = 43;
                 rightx = 109;
             }
+            if (splitStoryActive())
+            {   /* Split-screen story: the ammo sits in the view's bottom
+                 * corners, lined up under the objective list and clear of
+                 * the gun (quadrants are edge-anchored below under a wide
+                 * window). Rare's quadrant values left it a third of the
+                 * way in, over the gun hand. */
+                leftx = (getPlayerCount() < 3) ? 35 : 33;
+                rightx = leftx;
+            }
 #else
             else if (get_cur_playernum() & 1)
             {
@@ -7409,13 +7418,13 @@ Gfx *generate_ammo_total_microcode(Gfx *gdl)
 #endif
                     textwidth_r = 5;
 #ifndef TARGET_N64
-                    if (hudLayoutWide())
+                    if (hudLayoutWide() || (splitStoryActive() && hudAnchorsToEdges()))
                     {   /* HUD Centering 16:9: right-hand ammo hugs the window's
                          * right edge. In 3P/4P that applies only with HUD
                          * Layout = Wide, where it keeps Rare's quadrant
                          * position and slides with the quadrant's left edge;
                          * 4:3 keeps it in the band. */
-                        PORT_HUD_ANCHOR(gdl, (getPlayerCount() < 3) ? PORT_HUD_ANCHOR_RIGHT : PORT_HUD_ANCHOR_LEFT);
+                        PORT_HUD_ANCHOR(gdl, (getPlayerCount() < 3 || splitStoryActive()) ? PORT_HUD_ANCHOR_RIGHT : PORT_HUD_ANCHOR_LEFT);
                     }
                     /* HUD Scale: laid out from the view's bottom-right corner */
                     gdl = portHudScaleBegin(gdl, (f32) (viGetViewLeft() + viGetViewWidth()), (f32) (viGetViewTop() + viGetViewHeight()));
@@ -7499,7 +7508,7 @@ Gfx *generate_ammo_total_microcode(Gfx *gdl)
 #endif
                     textwidth_l = 5;
 #ifndef TARGET_N64
-                    if (hudLayoutWide())
+                    if (hudLayoutWide() || (splitStoryActive() && hudAnchorsToEdges()))
                     {   /* HUD Centering 16:9: left-hand (dual-wield) ammo hugs
                          * the window's left edge; 3P/4P only under HUD Layout
                          * Wide, as the right-hand arm. */

@@ -4750,3 +4750,9 @@ Not done / known:
 - Only player 1 can skip the intro on a split-screen PC; a host's watch Abort ends it for all.
 - Local players share one Ready, one vote, and stats are kept for the first player only.
 - Versus stays one player per PC.
+
+Follow-up (2026-11-19): the ammo counter in split was at Rare's multiplayer spots, which in 3/4
+players is a third of the way into the quadrant, over the gun hand. `generate_ammo_total_microcode`
+(gunfire.c) now uses leftx/rightx 35 (2 players) or 33 (quadrants) in split story, so it sits in
+the view's bottom corners under the objective list, and in quadrants it is edge-anchored like the
+two-player HUD under a wide window. Checked with dual ZMGs (3-digit reserve) in 2 and 4 players.
