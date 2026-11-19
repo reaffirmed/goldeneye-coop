@@ -166,7 +166,7 @@ s32 coopVersus(void)
 
 s32 coopVsViewCount(void)
 {
-    return coopVersus() ? 1 : getPlayerCount();
+    return (coopVersus() || splitWatchPlayer() >= 0) ? 1 : getPlayerCount();
 }
 
 s32 coopVsRemote(s32 li)

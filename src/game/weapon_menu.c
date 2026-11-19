@@ -231,7 +231,7 @@ static void wmEquip(const WmEntry *e)
 
 static s32 wmLive(void)
 {
-    return (getPlayerCount() == 1 || coopVersus()) && !g_CurrentPlayer->bonddead
+    return (!isMpMatch() || coopVersus()) && !g_CurrentPlayer->bonddead
         && g_CurrentPlayer->watch_animation_state == 0
         && g_PlayerIsInTank != 1    /* the tank has its own guns */
         && !(coopVersus() && get_scenario() == SCENARIO_TLD && bondinvIsAliveWithFlag());   /* Flag Tag: no switching with the flag, as Rare's cycling */

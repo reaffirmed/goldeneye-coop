@@ -71,7 +71,7 @@ static s32 portAimLockActive(void)
      * user can want aim lock in MP but not in single player */
     /* never during demo playback - it rewrites what the recorded aim
      * stick means and where the recorded shots go, so the demo desyncs */
-    return ((getPlayerCount() >= 2) ? portMpAimLock() : portAimLock()) && g_PlayerIsInTank != 1
+    return ((isMpMatch()) ? portMpAimLock() : portAimLock()) && g_PlayerIsInTank != 1
         && get_is_ramrom_flag() == 0;
 }
 
@@ -409,7 +409,7 @@ void solo_char_load(void)
 
         bondviewDeregisterPlayerRoom(g_CurrentPlayer);
 
-        if (getPlayerCount() == 1)
+        if (!isMpMatch())
         {
             helddst = fileGetBondForCurrentFolder();
             switch (g_CurrentPlayer->bondtype)
@@ -533,7 +533,7 @@ void solo_char_load(void)
          * already-loaded bodyheader, so changing `body` any later has no
          * visible effect. */
         {
-            if (portAdzyMode() && getPlayerCount() == 1)
+            if (portAdzyMode() && !isMpMatch())
             {
                 body = BODY_Siberian_Special_Forces;
             }
@@ -541,10 +541,10 @@ void solo_char_load(void)
 
         /* co-op: our own Bond (intro swirl, cinemas) wears the lobby's pick,
          * as our puppet does on the partners' screens */
-        if (getPlayerCount() == 1 && coopSessionActive())
+        if (!isMpMatch() && coopSessionActive())
         {
             s32 pickhead;
-            s32 pickbody = coopCharacterBody(coopCharacter(), &pickhead);
+            s32 pickbody = coopCharacterBody(coopSelfCharacter(), &pickhead);
 
             if (pickbody >= 0)
             {
@@ -855,7 +855,41 @@ s32 pickDeathCameraAngles(PropRecord *prop1, coord3d *pos, PropRecord *prop2, co
 
 
 // Address 0x7F07A9B8 NTSC.
+#ifndef TARGET_N64
+static void bondviewSetCameraModeOne(s32 arg0);
+
+/* The camera mode is one for every view; split-screen story gives each
+ * player its part of a change (the fade, the gun the FP camera equips, the
+ * swirl's body). */
+s32 g_SplitCamOnePlayer;   /* lv.c: the stage load sets each player up in turn */
+
 void bondviewSetCameraMode(s32 arg0)
+{
+    static s32 looping;
+
+    if (splitStoryActive() && !looping && !g_SplitCamOnePlayer)
+    {
+        const s32 cur = get_cur_playernum();
+        const s32 n = getPlayerCount();
+        s32 i;
+
+        looping = 1;
+        for (i = 0; i < n; i++)
+        {
+            set_cur_player(i);
+            bondviewSetCameraModeOne(arg0);
+        }
+        set_cur_player(cur);
+        looping = 0;
+        return;
+    }
+    bondviewSetCameraModeOne(arg0);
+}
+
+static void bondviewSetCameraModeOne(s32 arg0)
+#else
+void bondviewSetCameraMode(s32 arg0)
+#endif
 {
     s32 padding;
     s32 padding2;
@@ -1941,7 +1975,7 @@ bool currentPlayerGetYAutoAimEnabled(void)
         return FALSE;
     }
 #endif
-    if (getPlayerCount() == 1)
+    if (!isMpMatch())
     {
         return g_CurrentPlayer->autoyaimenabled;
     }
@@ -2013,7 +2047,7 @@ bool currentPlayerGetXAutoAimEnabled(void)
         return FALSE;
     }
 #endif
-    if (getPlayerCount() == 1)
+    if (!isMpMatch())
     {
         return g_CurrentPlayer->autoxaimenabled;
     }
@@ -5660,7 +5694,7 @@ void bondviewMoveAnimationTick(f32 speed, f32 speedforwards, f32 speedsideways)
     // Bug Fix: Invisibility cheat had no effect in multiplayer since there
     // are no guards to hide from - fade Bond's own model out instead, the
     // same way the BondPhase cheat does, so opponents can't see the player.
-    if (getPlayerCount() >= 2 && cheatIsActive(CHEAT_INVISIBILITY))
+    if (isMpMatch() && cheatIsActive(CHEAT_INVISIBILITY))
     {
         g_CurrentPlayer->bondfadetime60 = 0.0f;
         g_CurrentPlayer->bondfadetimemax60 = 1.0f;
@@ -6243,7 +6277,7 @@ static s32 portMouseLookPermitted(void)
     if (g_CurrentPlayer->watch_animation_state != WATCH_ANIMATION_0x0) return 0; /* solo pause = the watch */
     if (g_CurrentPlayer->bonddead != FALSE) return 0;         /* red screen */
     if (!disablePlayerActionsWhenPausedOrInMpMenu()) return 0; /* MP: stop-play / own menu open */
-    if (getPlayerCount() != 1 && (g_stopPlayFlag != 0 || g_gameOverFlag != 0)) return 0;
+    if (isMpMatch() && (g_stopPlayFlag != 0 || g_gameOverFlag != 0)) return 0;
     return 1;
 }
 
@@ -6711,12 +6745,12 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
             portRamromEscapeExit("real input press (watch_objectives bind)");
             objpressed = 0;
         }
-        if (objpressed && getPlayerCount() >= 2)
+        if (objpressed && isMpMatch())
         { /* MP has no solo watch, so give this bind (Xbox layout: Back) the
            * nearest MP meaning: toggle this player's pause menu, as START does. */
             portJoyInjectPressed((s8) get_cur_playernum(), START_BUTTON);
         }
-        if (objpressed && getPlayerCount() == 1)
+        if (objpressed && !isMpMatch())
         {
             if (g_CurrentPlayer->watch_animation_state == WATCH_ANIMATION_0x0
                 && g_CurrentPlayer->bonddead == FALSE
@@ -6774,7 +6808,7 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
                  * recording, so Escape skips the demo like any other key. */
                 portRamromEscapeExit("real input press (Escape key)");
             }
-            else if (getPlayerCount() >= 2)
+            else if (isMpMatch())
             {   /* With the MP menu up, send B to close it, because START there
                  * confirms and could end the match for everyone. Game over
                  * keeps START so player 1 can still end the match. */
@@ -6841,7 +6875,7 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
             (g_CurrentPlayer->watch_animation_state == WATCH_ANIMATION_0x5
                 && g_CurrentPlayer->open_close_solo_watch_menu)
         )
-        && (getPlayerCount() == 1))
+        && (!isMpMatch()))
     {
         trigger_solo_watch_menu(0);
     }
@@ -6849,7 +6883,7 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
     if (g_CurrentPlayer->watch_animation_state == WATCH_ANIMATION_0x0
         && g_CurrentPlayer->bonddead == FALSE
         && (
-            getPlayerCount() == 1
+            !isMpMatch()
             || (
                 g_stopPlayFlag == 0
                 && g_gameOverFlag == 0)))
@@ -7893,7 +7927,7 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         else if (!portInputPadIsN64(pl) && g_portBondFrozenTick != 0 && g_PlayerIsInTank != 1
             && g_CurrentPlayer->watch_animation_state == WATCH_ANIMATION_0x0
             && g_CurrentPlayer->bonddead == FALSE
-            && (getPlayerCount() == 1 || (g_stopPlayFlag == 0 && g_gameOverFlag == 0))
+            && (!isMpMatch() || (g_stopPlayFlag == 0 && g_gameOverFlag == 0))
             && lvlGetControlsLockedFlag() == 0 && disablePlayerActionsWhenPausedOrInMpMenu())
         {   /* CUTSCENE RUN-UP: on 2.x Rare reads the second pad even while the camera is
              * frozen, so holding it through an intro builds speed and the run boost.
@@ -8161,7 +8195,7 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
     }
 #endif
 
-    if (bondviewGetIfCurrentPlayerDamageShowTime() && getPlayerCount() == 1)
+    if (bondviewGetIfCurrentPlayerDamageShowTime() && !isMpMatch())
     {
         moveData.triggerOn = 0;
     }
@@ -9067,7 +9101,7 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
 
     canCycleWeapons = 1;
 
-    if ((getPlayerCount() >= 2) && (get_scenario() == 2) && (bondinvIsAliveWithFlag()))
+    if ((isMpMatch()) && (get_scenario() == 2) && (bondinvIsAliveWithFlag()))
     {
         canCycleWeapons = 0;
     }
@@ -11195,6 +11229,15 @@ void bondviewFrozenMoveBond(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         return;
     }
 
+#ifndef TARGET_N64
+    if (splitStoryActive() && get_cur_playernum() != 0)
+    {   /* split screen: the intro and the ending play once, through player 1's
+         * eyes on the whole screen (splitWatchPlayer); the cameras' clocks are
+         * shared, so the others' ticks would run them at N times the speed */
+        currentPlayerSetCameraMode(1);
+        return;
+    }
+#endif
     bondviewFrozenCameraTick(buttons, oldbuttons, &property_pos, &property_pos2, &property_offset, &room_pointer_tile, &stan_walk_start);
     currentPlayerSetCameraMode(1);
     bondviewSetCurrentPlayerPosition(&property_pos, &property_pos2, &property_offset, room_pointer_tile, &stan_walk_start);
@@ -11604,8 +11647,8 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
 
     gunSetSightVisible(
         GUNSIGHTREASON_1,
-        (getPlayerCount() == 1 && cur_player_get_sight_onscreen_control())
-            || (getPlayerCount() >= 2 && g_playerPerm->sight)
+        (!isMpMatch() && cur_player_get_sight_onscreen_control())
+            || (isMpMatch() && g_playerPerm->sight)
     );
 
 #if defined(VERSION_EU)
@@ -12079,7 +12122,7 @@ Gfx *bondviewRenderWatch(Gfx *gdl)
     {
         static f32 wr_thresh = -1.0f;
         if (wr_thresh < 0.0f) { const char *e = getenv("GE_WATCHREST"); wr_thresh = (e && *e) ? (f32) atoi(e) / 10.0f : 5.0f; }
-        if (getPlayerCount() == 1
+        if (!isMpMatch()
             && (g_CurrentPlayer->step_in_view_watch_animation == 0
                 || (g_CurrentPlayer->step_in_view_watch_animation != 3 && g_CurrentPlayer->pause_animation_counter < wr_thresh)))
         {
@@ -12399,7 +12442,7 @@ s32 portMpSpawnWithWeapon(void)
     s32 amount;
     s32 max;
 
-    if (getPlayerCount() < 2 || !portMpSpawnWeapon() || get_is_ramrom_flag() != 0)
+    if (!isMpMatch() || !portMpSpawnWeapon() || get_is_ramrom_flag() != 0)
     {
         return ITEM_UNARMED;
     }
@@ -12519,8 +12562,9 @@ void coopTeleportPlayerTo(coord3d *pos, StandTile *stan, f32 yaw)
     g_CurrentPlayer->bondshotspeed.x = 0.0f;
     g_CurrentPlayer->bondshotspeed.y = 0.0f;
     g_CurrentPlayer->bondshotspeed.z = 0.0f;
-    if (g_CurrentPlayer->prop->chr != NULL && g_CurrentPlayer->prop->chr->model != NULL)
-    {   /* in a cinema Bond is a chr (solo_char_load): move its body too, as AI_TRYTeleportingChrToPad does */
+    if (g_CurrentPlayer->prop->chr != NULL && g_CurrentPlayer->prop->chr->model != NULL && !splitStoryActive())
+    {   /* in a cinema Bond is a chr (solo_char_load): move its body too, as AI_TRYTeleportingChrToPad does
+         * (split screen: every Bond has its body, which follows the player as in multiplayer) */
         ChrRecord *chr = g_CurrentPlayer->prop->chr;
         coord3d at = *pos;
 
@@ -12597,7 +12641,7 @@ void mp_respawn_handler(void)
     bondviewClearUpperTextDisplayFlag(-1);
 
 
-    if ((getPlayerCount() >= 2) && (startpadcount > 0))
+    if ((isMpMatch()) && (startpadcount > 0))
     {
         var_v1 = bondviewGetRandomSpawnPadIndex();
     }
@@ -12634,7 +12678,7 @@ void mp_respawn_handler(void)
     /* That reset the collision radius to 30, undoing MP Tiny Players' halving
      * (cheat.c, applied once per stage) while this player stays tiny, so halve
      * the radius again to match. */
-    if ((getPlayerCount() >= 2)
+    if ((isMpMatch())
         && (g_playerPerm->player_perspective_height < get_player_mp_char_height(get_cur_playernum())))
     {
         g_CurrentPlayer->field_488.collision_radius /= 2.0f;
@@ -13172,7 +13216,7 @@ Gfx *maybe_mp_interface(Gfx *gdl)
         }
     }
 
-    if (getPlayerCount() == 1)
+    if (!isMpMatch())
     {
         display_objective_status_text_on_status_change();
     }
@@ -13190,7 +13234,7 @@ Gfx *maybe_mp_interface(Gfx *gdl)
             if (doblood)
             {
                 die_blood_image_routine(0);
-                if (getPlayerCount() == 1)
+                if (!isMpMatch())
                 {
 #ifndef TARGET_N64
                     sCoopDeathMusicState = get_mission_state();   /* co-op: back on a revive */
@@ -13265,7 +13309,7 @@ blood_frame_held:;
                 }
                 if (currentPlayerIsFadeComplete())
                 {
-                    if (getPlayerCount() == 1)
+                    if (!isMpMatch())
                     {
 #ifndef TARGET_N64
                         if (!coopDeadTick()) /* co-op: wait to respawn by the partner */
@@ -13514,7 +13558,7 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
         extern s32 portMpColourSide(s32 player);
         s32 victim = get_cur_playernum();
 
-        if (portMpFriendlyFireOff() && getPlayerCount() >= 2
+        if (portMpFriendlyFireOff() && isMpMatch()
             && playerid >= 0 && playerid < MAX_PLAYER_COUNT && playerid != victim
             && portMpColourSide(victim) >= 0 && portMpColourSide(playerid) == portMpColourSide(victim))
         {
@@ -13536,7 +13580,7 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
         hudMakeDamageSegments(g_CurrentPlayer->health_display_values, 0x2E, -1, currentPlayerGetHealth());
     }
 
-    if (getPlayerCount() < 2 || (g_stopPlayFlag == 0 && g_gameOverFlag == 0))
+    if (!isMpMatch() || (g_stopPlayFlag == 0 && g_gameOverFlag == 0))
     {
         if (g_PlayerIsInTank == 1)
         {
@@ -13567,9 +13611,9 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
         /* LTK HEALTH (Multiplayer Options): Licence to Kill's one-hit kills
          * in any scenario (video.c portMpLtkHealthActive) */
         extern s32 portMpLtkHealthActive(void);
-        if (getPlayerCount() >= 2 && (get_scenario() == SCENARIO_LTK || portMpLtkHealthActive()))
+        if (isMpMatch() && (get_scenario() == SCENARIO_LTK || portMpLtkHealthActive()))
 #else
-        if (getPlayerCount() >= 2 && get_scenario() == SCENARIO_LTK)
+        if (isMpMatch() && get_scenario() == SCENARIO_LTK)
 #endif
         {
             // the damage dealt is always equivalent to how much health and armor the player has
@@ -13578,14 +13622,14 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
         }
 
         if (g_CurrentPlayer->cheatBondInvincible == FALSE && g_CurrentPlayer->bonddead == FALSE && g_PlayerInvincible == FALSE &&
-            (g_CurrentPlayer->damageshowtime < 0 || (getPlayerCount() >= 2 && g_CurrentPlayer->damageshowtime == 0)))
+            (g_CurrentPlayer->damageshowtime < 0 || (isMpMatch() && g_CurrentPlayer->damageshowtime == 0)))
         {
             if (g_CurrentPlayer->watch_animation_state != WATCH_ANIMATION_0x5 && g_CurrentPlayer->watch_animation_state != WATCH_ANIMATION_0xc)
             {
                 g_CurrentPlayer->oldhealth = g_CurrentPlayer->bondhealth;
                 g_CurrentPlayer->oldarmour = g_CurrentPlayer->bondarmour;
 
-                if (getPlayerCount() >= 2)
+                if (isMpMatch())
                 {
                     cur_player_num = get_cur_playernum();
                     angle = g_playerPointers[cur_player_num]->vv_theta - (360.0f - ((atan2f(vectorx, vectorz) * 180.0f) / 3.1415927f));
@@ -13610,7 +13654,7 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
                 {
                     g_CurrentPlayer->bondarmour = g_CurrentPlayer->bondarmour - (damage_dealt / g_CurrentPlayer->actual_armor);
 #ifndef TARGET_N64
-                    if (getPlayerCount() >= 2)
+                    if (isMpMatch())
                     {   /* MP stats: the armour that came off (port_mpstats.c) */
                         extern void portMpStatsDamage(s32 victim, s32 attacker, f32 bars);
                         portMpStatsDamage(get_cur_playernum(), playerid, g_CurrentPlayer->oldarmour - g_CurrentPlayer->bondarmour);
@@ -13628,7 +13672,7 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
 
                     g_CurrentPlayer->bondhealth = g_CurrentPlayer->bondhealth - (damage_dealt / g_CurrentPlayer->actual_health);
 #ifndef TARGET_N64
-                    if (getPlayerCount() >= 2)
+                    if (isMpMatch())
                     {   /* MP stats: what came off - the armour that was left plus the health,
                          * never past empty (overkill on the last hit is not damage) */
                         extern void portMpStatsDamage(s32 victim, s32 attacker, f32 bars);
@@ -13639,7 +13683,7 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
 
                     if (g_CurrentPlayer->bondhealth <= 0.0f)
                     {
-                        if (getPlayerCount() >= 2)
+                        if (isMpMatch())
                         {
                             sp2C = get_cur_playernum();
                             sp28 = 0;

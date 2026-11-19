@@ -13,6 +13,7 @@
 int  coopNetInit(void);                 /* 1 if co-op is configured and open */
 int  coopNetStart(const char *spec);    /* open with a GE_COOP-style spec, closing any session first */
 int  coopNetIsOpen(void);
+int  coopNetIsLocalOnly(void);             /* the "local" spec: a split-screen session with no transport */
 int  coopNetIsSteam(void);
 int  coopNetIsHost(void);
 int  coopNetHasPeer(void);              /* host: a client has sent something */

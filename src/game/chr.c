@@ -2425,6 +2425,9 @@ s32 chrTick(PropRecord *prop)
     s32 headSwitchVisible;
     s32 headVisible;
     chranimticks_t tickamount;
+#ifndef TARGET_N64
+    s32 viewonly;   /* split-screen story: a later view's pass, nothing advances */
+#endif
 
     renderdata = D_8002CC6C;
     chr = prop->chr;
@@ -2432,6 +2435,18 @@ s32 chrTick(PropRecord *prop)
     headVisible = 1;
 #ifndef TARGET_N64
     tickamount = portAnimTicks();
+    /* Split-screen story: propsTick runs once per view, and guards have no
+     * multiplayer guard of their own (objTick's isSimOwner), so they moved and
+     * thought once per player. Only the first view's pass ticks them; the
+     * others only place and draw them for their own camera. */
+    {
+        extern s32 get_player_position_in_shuffled(s32 current_player_num);
+        viewonly = splitStoryActive() && get_player_position_in_shuffled(get_cur_playernum()) != 0;
+        if (viewonly)
+        {
+            tickamount = 0;
+        }
+    }
 #else
     tickamount = g_ClockTimer;
 #endif
@@ -2451,11 +2466,18 @@ s32 chrTick(PropRecord *prop)
         else
         {
 #ifndef TARGET_N64
-            if (coopChrTickBegin(chr)) /* co-op client: the host runs guard AI */
+            if (viewonly)
             {
-                chrlvActionTick(chr);
+                /* split-screen story: not this view's pass (above) */
             }
-            coopChrTickEnd();
+            else
+            {
+                if (coopChrTickBegin(chr)) /* co-op client: the host runs guard AI */
+                {
+                    chrlvActionTick(chr);
+                }
+                coopChrTickEnd();
+            }
 #else
             chrlvActionTick(chr);
 #endif

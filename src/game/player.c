@@ -102,6 +102,49 @@ void init_player_data_ptrs_construct_viewports(s32 playercount)
     set_cur_player_viewport_size(viGetViewLeft(), viGetViewTop());
 }
 
+#ifndef TARGET_N64
+s32 g_SplitStory;
+s32 g_SplitStoryLoaded;     /* boss.c: this stage was loaded as a split-screen story mission */
+
+s32 splitStoryActive(void)
+{
+    return g_SplitStoryLoaded && getPlayerCount() >= 2;
+}
+
+/* split-screen story: the player whose watch menu is open takes the whole
+ * screen while it is (the menu is drawn for a full screen; the game is
+ * paused for everyone meanwhile), -1 none */
+s32 splitWatchPlayer(void)
+{
+    s32 i;
+
+    if (!splitStoryActive())
+    {
+        return -1;
+    }
+    switch (g_CameraMode)
+    {   /* the intro's cameras, Bond's swirl and the mission's end play once, full screen */
+    case CAMERAMODE_INTRO:
+    case CAMERAMODE_FADESWIRL:
+    case CAMERAMODE_SWIRL:
+    case CAMERAMODE_POSEND:
+        return 0;
+    default:
+        break;
+    }
+    for (i = 0; i < getPlayerCount(); i++)
+    {
+        if (g_playerPointers[i] != NULL
+            && (g_playerPointers[i]->watch_animation_state == WATCH_ANIMATION_0x5
+                || g_playerPointers[i]->watch_animation_state == WATCH_ANIMATION_0xc))
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+#endif
+
 s32 getPlayerCount(void)
 {
     s32 count = 0;
@@ -666,7 +709,14 @@ void shuffle_player_ids(void) {
     {
         extern s32 coopVersus(void);
 
-        if (coopVersus())
+        if (splitStoryActive())
+        {
+            for (i = 0; i < 4; i++)
+            {
+                array_PLAYER_IDs[i] = i;
+            }
+        }
+        else if (coopVersus())
         {
             for (i = 0; i < 4 && array_PLAYER_IDs[i] != 0; i++)
             {

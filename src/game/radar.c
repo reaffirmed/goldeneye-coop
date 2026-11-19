@@ -6,6 +6,9 @@
 #include "player.h"
 #include "othermodemicrocode.h"
 #include "image_bank.h"
+#ifndef TARGET_N64
+#include "coop.h"   /* coopHudPartner */
+#endif
 
 
 /**
@@ -68,11 +71,30 @@ Gfx *display_red_blue_on_radar(Gfx *DL)
         return DL;
     }
 
+#ifndef TARGET_N64
+    if (splitStoryActive())
+    {   /* Split-screen story: with partners from an online session the co-op
+         * HUD's radar (coop_hud.c) shows everyone, this screen's players too,
+         * in this spot; two radars would stack. */
+        CoopHudPartner any;
+
+        if (coopHudPartner(&any))
+        {
+            return DL;
+        }
+    }
+#endif
+
     start_left = (viGetViewLeft() + viGetViewWidth()) - 0x29;
     start_top = viGetViewTop() + RADAR_TOP_OFFSET;
     
 #ifndef TARGET_N64
-    if (player_count >= 3)
+    if (splitStoryActive())
+    {   /* split story: in line with the objective list's right edge under
+         * it, where the co-op radar sits (coop_hud.c COOP_RADAR_RIGHT_SPLIT) */
+        start_left = (viGetViewLeft() + viGetViewWidth()) - 0x19;
+    }
+    else if (player_count >= 3)
     {   /* Use the same layout in every quadrant: the original nudged the HUD
          * per column to compensate for CRT overscan. With no overscan on PC
          * that just looks misaligned, so every quadrant takes the inner-edge
@@ -89,8 +111,9 @@ Gfx *display_red_blue_on_radar(Gfx *DL)
 #ifndef TARGET_N64
     {   /* HUD Layout Wide: the radar hugs its viewport's right edge (options.c hudLayoutWide) */
         extern s32 hudLayoutWide(void);
+        extern s32 hudAnchorsToEdges(void);
 
-        if (hudLayoutWide())
+        if (hudLayoutWide() || (splitStoryActive() && hudAnchorsToEdges()))   /* (split: with the objectives under it) */
         {
             DL->words.w0 = ((u32) 0x3a << 24) | (0x00FFFFFF & ~(u32) 0x70);   /* PORT_HUD_ANCHOR RIGHT (options.h) */
             DL->words.w1 = 0x20 | portHudAnchorFrac();   /* with the HUD slide */
@@ -103,6 +126,17 @@ Gfx *display_red_blue_on_radar(Gfx *DL)
         DL = portHudScaleBegin(DL, (f32) (viGetViewLeft() + viGetViewWidth()), (f32) viGetViewTop());
     }
 #endif
+#ifndef TARGET_N64
+    if (splitStoryActive())
+    {   /* the disc texture is multiplayer's and is not loaded in a story
+         * mission: the co-op radar's dark square with a pencil edge instead */
+        DL = microcode_constructor(DL);
+        DL = microcode_constructor_related_to_menus(DL, start_left - 0x11, start_top - 0x11, start_left + 0x11, start_top + 0x11, 0xFFFFFF30);
+        DL = microcode_constructor_related_to_menus(DL, start_left - 0x10, start_top - 0x10, start_left + 0x10, start_top + 0x10, 0x00000080);
+    }
+    else
+#endif
+    {
     texSelect(&DL, mpradarimages, 2, 0, 2);
 
     DL = microcode_constructor(DL);
@@ -121,6 +155,7 @@ Gfx *display_red_blue_on_radar(Gfx *DL)
         0x10,
         0x400,
         RADAR_RECT1_D);
+    }
     
     DL = microcode_constructor_related_to_menus(DL, start_left - 2, start_top - 2, start_left + 2, start_top + 2, 0x40);
     
@@ -243,10 +278,11 @@ Gfx *display_red_blue_on_radar(Gfx *DL)
 #ifndef TARGET_N64
     {
         extern s32 hudLayoutWide(void);
+        extern s32 hudAnchorsToEdges(void);
         extern Gfx *portHudScaleEnd(Gfx *gdl);
 
         DL = portHudScaleEnd(DL);
-        if (hudLayoutWide())
+        if (hudLayoutWide() || (splitStoryActive() && hudAnchorsToEdges()))   /* (split: with the objectives under it) */
         {
             DL->words.w0 = ((u32) 0x3a << 24) | (0x00FFFFFF & ~(u32) 0x70);   /* PORT_HUD_ANCHOR_OFF */
             DL->words.w1 = 0;

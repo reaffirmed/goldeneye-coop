@@ -114,7 +114,7 @@ f32 coopToastScale(void)
 /* what coopTextScaleBegin scales by: HUD Scale's half size times Text Size */
 f32 coopTextScaleNow(void)
 {
-    return (portHudScaleOn() ? 0.5f : 1.0f) * coopTextScale();
+    return ((portHudScaleOn() || splitStoryActive()) ? 0.5f : 1.0f) * coopTextScale();   /* (split screen: small views) */
 }
 
 static s32 sTextBracket;    /* coopTextScaleBegin opened a bracket */

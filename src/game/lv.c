@@ -875,7 +875,7 @@ void lvlStageLoad(s32 stage)
             s32 s3;
             player_data = (struct player_data *)&g_playerPlayerData[i];
 
-            if (getPlayerCount() == 1)
+            if (!isMpMatch())
             {
                 // s4 variable
                 player_data->autoaim = 0;
@@ -961,6 +961,13 @@ void lvlStageLoad(s32 stage)
         init_path_table_links();
         init_ejected_cartridges();
 
+#ifndef TARGET_N64
+        {
+            extern s32 g_SplitCamOnePlayer;
+
+            g_SplitCamOnePlayer = 1;    /* each player's own camera mode as it is set up */
+        }
+#endif
         for (s0 = 0; s0 < getPlayerCount(); s0++)
         {
             set_cur_player(s0);
@@ -974,6 +981,13 @@ void lvlStageLoad(s32 stage)
         }
 
         set_cur_player(0);
+#ifndef TARGET_N64
+        {
+            extern s32 g_SplitCamOnePlayer;
+
+            g_SplitCamOnePlayer = 0;
+        }
+#endif
     }
 
     /**
@@ -1174,6 +1188,10 @@ Gfx* lvlRender(Gfx* DL)
             if (coopVsRemote(get_nth_player_from_shuffled(i)))
             {
                 continue;   /* online versus: another PC's player, no view here (coop_versus.c) */
+            }
+            if (splitWatchPlayer() >= 0 && get_nth_player_from_shuffled(i) != splitWatchPlayer())
+            {
+                continue;   /* split-screen story: a watch menu has the whole screen */
             }
 #endif
             set_cur_player(get_nth_player_from_shuffled(i));
@@ -1594,7 +1612,7 @@ void lvlTick(void)
          * solo cheat menu, and solo never reads the sheet. This pass runs even
          * when no solo cheat is on; stage end still clears them all
          * (cheatDisableAllCheats). */
-        if (g_AppendCheatSinglePlayer != 0 || getPlayerCount() >= 2)
+        if (g_AppendCheatSinglePlayer != 0 || isMpMatch())
         {
             extern s32 portMpCheatSetting(s32 which);
             extern s32 portTrueEnemyRocketsEnabled(void);
@@ -1611,7 +1629,7 @@ void lvlTick(void)
                 {
                     on = FALSE;     /* online versus: no cheat menu picks, the host's rules only (coop_versus.c) */
                 }
-                if (getPlayerCount() >= 2)
+                if (isMpMatch())
                 {
                     s32 w;
 
@@ -1628,12 +1646,12 @@ void lvlTick(void)
                 {
                     extern s32 g_PortHudMsgQuiet; /* bondview2.c hudmsgBottomShow */
 
-                    g_PortHudMsgQuiet = getPlayerCount() >= 2;   /* no "PAINTBALL MODE ON" popup at an MP start */
+                    g_PortHudMsgQuiet = isMpMatch();   /* no "PAINTBALL MODE ON" popup at an MP start */
                     cheatButtonTurnOnCheatForPlayers(i);
                     g_PortHudMsgQuiet = 0;
                 }
             }
-            if (getPlayerCount() >= 2)
+            if (isMpMatch())
             {   /* log which are on, once per MP stage, so they show up
                  * in a user's log */
                 extern int printf(const char *, ...);
@@ -1675,7 +1693,7 @@ void lvlTick(void)
 #endif
     }
 
-    if ((getPlayerCount() >= 2) && (g_CurrentStageToLoad != LEVELID_TITLE))
+    if ((isMpMatch()) && (g_CurrentStageToLoad != LEVELID_TITLE))
     {
         if (get_mission_state() == MISSION_STATE_6)
         {

@@ -174,10 +174,15 @@ s32 coopCharacterBody(s32 c, s32 *head)
 
 /* ---- our side: what goes in our STATE ------------------------------------ */
 
-static CoopShot sShots[COOP_SHOTS_KEPT];  /* newest first */
-static u8 sShotSeq;
-static CoopShot sCur;
-static s32 sCurOpen;
+/* each player on our screen's own (split screen), by coopCurLocal */
+static CoopShot sShotsOf[COOP_MAX_LOCAL][COOP_SHOTS_KEPT];  /* newest first */
+static u8 sShotSeqOf[COOP_MAX_LOCAL];
+static CoopShot sCurOf[COOP_MAX_LOCAL];
+static s32 sCurOpenOf[COOP_MAX_LOCAL];
+#define sShots   (sShotsOf[coopCurLocal()])
+#define sShotSeq (sShotSeqOf[coopCurLocal()])
+#define sCur     (sCurOf[coopCurLocal()])
+#define sCurOpen (sCurOpenOf[coopCurLocal()])
 
 void coopLookFill(CoopLook *out)
 {
@@ -204,7 +209,7 @@ void coopLookFill(CoopLook *out)
     out->aimpitch = g_CurrentPlayer->field_2A08;
     out->aimyaw = g_CurrentPlayer->field_2A0C;
     out->headanim = g_CurrentPlayer->headanim != 0;
-    out->character = (u8) coopCharacter();
+    out->character = (u8) coopSelfCharacter();
     out->cue = coopAudioCueByte();      /* drawing and reloading, for the others to hear (coop_audio.c) */
     out->shotseq = sShotSeq;
     memcpy(out->shot, sShots, sizeof(sShots));
