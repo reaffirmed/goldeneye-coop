@@ -4768,3 +4768,10 @@ about its own top, so a lower view's list is no longer cut off past the screen's
 In 3/4-player split the objective list is edge-anchored (`hudAnchorsToEdges`) but both radars
 followed `hudLayoutWide` (off in quadrants by default), so the radar sat left of the list. In
 split they now take the list's anchor, so the radar stacks right-aligned on top of it.
+
+Follow-up (2026-11-19): in roughly 1 run in 4 the sky and most of the scenery drew black in
+every split view, for the whole mission. Game state (rooms drawn, fog, sky rays) was identical in
+good and bad runs; it followed Rare's multiplayer player shuffle (`shuffle_player_ids`, every
+tick), which hands the once-a-frame work to whichever player comes first. `shuffle_player_ids`
+now keeps the identity order in split story, so player 1 goes first as in solo: 16 of 16 runs
+clean in 2, 3 and 4 players (before: 2 of 8 bad on the base build, more on later ones).

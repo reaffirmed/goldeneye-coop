@@ -709,7 +709,14 @@ void shuffle_player_ids(void) {
     {
         extern s32 coopVersus(void);
 
-        if (coopVersus())
+        if (splitStoryActive())
+        {
+            for (i = 0; i < 4; i++)
+            {
+                array_PLAYER_IDs[i] = i;
+            }
+        }
+        else if (coopVersus())
         {
             for (i = 0; i < 4 && array_PLAYER_IDs[i] != 0; i++)
             {
