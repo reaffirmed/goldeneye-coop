@@ -3475,3 +3475,33 @@ msgstr "EL ANFITRIÓN REINICIÓ LA MISIÓN"
 
 msgid "STARTING AGAIN"
 msgstr "EMPEZANDO DE NUEVO"
+
+msgid "Local Players"
+msgstr "Jugadores locales"
+
+msgid "P%d Character"
+msgstr "Agente J%d"
+
+msgid "Play on This Screen"
+msgstr "Jugar en esta pantalla"
+
+msgid "Session Full"
+msgstr "Sesión llena"
+
+msgid "The host's game has no room\nfor all of your players.\nTry fewer Local Players."
+msgstr "La partida del anfitrión no\ntiene sitio para todos tus\njugadores. Prueba con menos."
+
+msgid "Down! A partner can revive you."
+msgstr "¡Caído! Un compañero puede reanimarte."
+
+msgid "Or play split screen here:"
+msgstr "O juega a pantalla dividida aquí:"
+
+msgid "Players on this screen, each with their own controller. Up to four in all."
+msgstr "Jugadores en esta pantalla, cada uno con su mando. Hasta cuatro en total."
+
+msgid "Who this player on your screen plays as; looks only."
+msgstr "Con quién juega este jugador de tu pantalla; solo cambia el aspecto."
+
+msgid "Play the missions in split screen on this PC, nobody online."
+msgstr "Juega las misiones a pantalla dividida en este PC, sin nadie en línea."

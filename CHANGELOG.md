@@ -6,6 +6,8 @@ GoldenEye Coop releases, newest first. Each release's full notes, including whic
 
 | Release | Date | Co-op protocol | Highlights |
 | --- | --- | --- | --- |
+| [v0.9.0](coop/release-notes/v0.9.0.md) | 2026-11-19 | 18 | Everyone must update. Split screen in the story missions: two to four players on one screen, offline or in an online game. |
+| [v0.8.6](coop/release-notes/v0.8.6.md) | 2026-11-11 | 17 | Restart the mission from the watch; a simpler pause watch; fixes from player testing. |
 | [v0.8.5](coop/release-notes/v0.8.5.md) | 2026-11-09 | 17 | Spectate in first person: your partner's gun, shots, reloads, aim and zoom while you watch them. |
 | [v0.8.4](coop/release-notes/v0.8.4.md) | 2026-11-04 | 17 | Co-op polish: name tags dim behind walls, partner hit flash, chat beep with a Chat Sound slider, merged notifications, a give-ammo hint and a timer bar on REVIVE tags. |
 | [v0.8.3](coop/release-notes/v0.8.3.md) | 2026-11-04 | 17 | Objective credit goes to the player who killed or broke the target, grenades and mines included; grenades land where they should. |
