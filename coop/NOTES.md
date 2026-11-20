@@ -4775,3 +4775,28 @@ good and bad runs; it followed Rare's multiplayer player shuffle (`shuffle_playe
 tick), which hands the once-a-frame work to whichever player comes first. `shuffle_player_ids`
 now keeps the identity order in split story, so player 1 goes first as in solo: 16 of 16 runs
 clean in 2, 3 and 4 players (before: 2 of 8 bad on the base build, more on later ones).
+
+## Split screen: one weapon menu per player (2026-11-20, COOP_VERSION stays 18)
+
+Tester report on v0.9.0 (Dam, two players on one screen): "the custom hud ... switches weapons on
+both sides", fine with it off. The "custom HUD" is the port's Weapon Menu (`[display]
+weapon_menu`, on by default; weapon_menu.c). Its open/slot/highlight/idle/swallow state was a
+single set of statics, and split story runs every player's `weapmenuInput`,
+`weapmenuFilterButtons` and `weapmenuRender` through it in turn. So one player's slot key or
+next-weapon press opened the menu in every view (each listing its own player's guns), the other
+player's next shot took the highlighted entry out of their own inventory instead of firing, and
+the first player's confirm then fired instead of picking. The weapon really changed, not just
+the HUD. Offline and online split screen alike; one player per PC never hit it.
+
+The state is now per player (`sWm[get_cur_playernum()]`); the slot lists stay shared scratch,
+rebuilt from the current player before each use. The GE_WEAPMENU_TEST harness runs on player 1
+only, so its timings hold with more players. `coop/ci/weapmenu_split_test.c` (cart-free, in
+main.yml with and without sanitizers) plays the report with two stubbed players: 6 of its 8
+checks fail on v0.9.0's weapon_menu.c and all pass now.
+
+In the game (Linux, Xvfb, US cart, `GE_STAGE=dam GE_SPLIT=2`, with a test-only driver patched into
+weapon_menu.c: player 1 presses slot 1, player 2 taps fire 60 ticks later, player 1 taps fire 60
+after that): on v0.9.0 player 2's view showed player 1's menu, player 2's shot was taken
+("weapmenu: take 1/0") and player 2 went from the PP7 to Unarmed, and player 1's confirm fired the
+gun. With this change only player 1's view had the menu, player 2's shot fired (7 to 6 rounds) and
+player 2 kept the PP7, and player 1's confirm took Unarmed.
