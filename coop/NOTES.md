@@ -4792,4 +4792,11 @@ The state is now per player (`sWm[get_cur_playernum()]`); the slot lists stay sh
 rebuilt from the current player before each use. The GE_WEAPMENU_TEST harness runs on player 1
 only, so its timings hold with more players. `coop/ci/weapmenu_split_test.c` (cart-free, in
 main.yml with and without sanitizers) plays the report with two stubbed players: 6 of its 8
-checks fail on v0.9.0's weapon_menu.c and all pass now. Not run in the game: no cart image here.
+checks fail on v0.9.0's weapon_menu.c and all pass now.
+
+In the game (Linux, Xvfb, US cart, `GE_STAGE=dam GE_SPLIT=2`, with a test-only driver patched into
+weapon_menu.c: player 1 presses slot 1, player 2 taps fire 60 ticks later, player 1 taps fire 60
+after that): on v0.9.0 player 2's view showed player 1's menu, player 2's shot was taken
+("weapmenu: take 1/0") and player 2 went from the PP7 to Unarmed, and player 1's confirm fired the
+gun. With this change only player 1's view had the menu, player 2's shot fired (7 to 6 rounds) and
+player 2 kept the PP7, and player 1's confirm took Unarmed.
