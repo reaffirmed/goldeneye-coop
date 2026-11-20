@@ -11,8 +11,9 @@
  *
  * [display] weapon_menu (default on). Off: the slot keys still work, taking
  * the slot's next weapon straight away, and next / previous weapon cycle as
- * they always have. Solo, co-op and online versus (one player per PC);
- * split-screen multiplayer keeps Rare's cycling.
+ * they always have. Solo, co-op (each player on a split screen story has
+ * their own menu) and online versus; split-screen multiplayer keeps Rare's
+ * cycling.
  */
 #include <ultra64.h>
 #include <string.h>
@@ -52,14 +53,32 @@ typedef struct
     s16 left;   /* ITEM_UNARMED unless a pair */
 } WmEntry;
 
+/* scratch: rebuilt from the current player's inventory (wmCollect) before each use */
 static WmEntry sEnt[WM_SLOTS][WM_PER_SLOT];
 static s32 sNum[WM_SLOTS];
-static s32 sOpen;
-static s32 sSlot;
-static s32 sIdx;
-static s32 sIdle;
-static s32 sSwallow;    /* fire was the confirm: keep it from the gun until released */
+
+/* each player's own menu. Split screen runs every player's input and HUD through
+ * here in turn, so one shared menu opened on both views and a fire press on
+ * either took the highlighted weapon (testers' report, v0.9.0). */
+typedef struct
+{
+    s32 open;
+    s32 slot;
+    s32 idx;
+    s32 idle;
+    s32 swallow;    /* fire was the confirm: keep it from the gun until released */
+} WmState;
+
+static WmState sWm[4];
 static s32 sTestFire;   /* GE_WEAPMENU_TEST: a fire press for weapmenuFilterButtons */
+
+/* this player's menu (get_cur_playernum is set for every player's tick and view) */
+static WmState *wmMe(void)
+{
+    s32 p = get_cur_playernum();
+
+    return &sWm[(p >= 0 && p < 4) ? p : 0];
+}
 
 extern char *getenv(const char *);
 extern void portConLogf(const char *fmt, ...);
@@ -255,22 +274,23 @@ static s32 wmNextInSlot(s32 s)
 /* step through every slot's weapons in order */
 static void wmStepAll(s32 dir)
 {
+    WmState *m = wmMe();
     s32 tries;
 
     for (tries = 0; tries < WM_SLOTS * WM_PER_SLOT; tries++)
     {
-        sIdx += dir;
-        if (sIdx >= sNum[sSlot])
+        m->idx += dir;
+        if (m->idx >= sNum[m->slot])
         {
-            sSlot = (sSlot + 1) % WM_SLOTS;
-            sIdx = 0;
+            m->slot = (m->slot + 1) % WM_SLOTS;
+            m->idx = 0;
         }
-        else if (sIdx < 0)
+        else if (m->idx < 0)
         {
-            sSlot = (sSlot + WM_SLOTS - 1) % WM_SLOTS;
-            sIdx = sNum[sSlot] - 1;
+            m->slot = (m->slot + WM_SLOTS - 1) % WM_SLOTS;
+            m->idx = sNum[m->slot] - 1;
         }
-        if (sIdx >= 0 && sIdx < sNum[sSlot])
+        if (m->idx >= 0 && m->idx < sNum[m->slot])
         {
             return;
         }
@@ -279,22 +299,23 @@ static void wmStepAll(s32 dir)
 
 static void wmOpenOnCurrent(void)
 {
+    WmState *m = wmMe();
     s32 s, i;
 
-    sSlot = 0;
-    sIdx = 0;
+    m->slot = 0;
+    m->idx = 0;
     for (s = 0; s < WM_SLOTS; s++)
     {
         for (i = 0; i < sNum[s]; i++)
         {
             if (wmIsCurrent(&sEnt[s][i]))
             {
-                sSlot = s;
-                sIdx = i;
+                m->slot = s;
+                m->idx = i;
             }
         }
     }
-    sOpen = TRUE;
+    m->open = TRUE;
 }
 
 /**
@@ -304,25 +325,29 @@ static void wmOpenOnCurrent(void)
  */
 s32 weapmenuInput(s32 step)
 {
+    WmState *m = wmMe();
     s32 slot = portJoyPortWeaponSlotPressed();
     const s32 menu = portWeaponMenuOn();
 
     if (!wmLive())
     {
-        sOpen = FALSE;
+        m->open = FALSE;
         return step;
     }
-    wmHarness(&slot, &step);
+    if (get_cur_playernum() == 0)
+    {
+        wmHarness(&slot, &step);   /* player 1's, at one call a tick */
+    }
     if (slot == 0 && (step == 0 || !menu))
     {
-        if (sOpen && ++sIdle > WM_TIMEOUT)
+        if (m->open && ++m->idle > WM_TIMEOUT)
         {
-            sOpen = FALSE;   /* timed out: nothing changes */
+            m->open = FALSE;   /* timed out: nothing changes */
         }
         return step;
     }
     wmCollect();
-    sIdle = 0;
+    m->idle = 0;
     if (slot != 0)
     {
         const s32 s = slot - 1;
@@ -336,20 +361,20 @@ s32 weapmenuInput(s32 step)
             wmEquip(&sEnt[s][wmNextInSlot(s)]);
             return 0;
         }
-        if (sOpen && sSlot == s)
+        if (m->open && m->slot == s)
         {
-            sIdx = (sIdx + 1) % sNum[s];
+            m->idx = (m->idx + 1) % sNum[s];
         }
         else
         {
-            sOpen = TRUE;
-            sSlot = s;
-            sIdx = wmNextInSlot(s);
+            m->open = TRUE;
+            m->slot = s;
+            m->idx = wmNextInSlot(s);
         }
         return 0;
     }
     /* next / previous weapon with the menu on */
-    if (!sOpen)
+    if (!m->open)
     {
         wmOpenOnCurrent();
     }
@@ -364,27 +389,29 @@ s32 weapmenuInput(s32 step)
  */
 u16 weapmenuFilterButtons(u16 buttons, u16 oldbuttons)
 {
-    if (sTestFire)
+    WmState *m = wmMe();
+
+    if (sTestFire && get_cur_playernum() == 0)
     {
         sTestFire = FALSE;
         buttons |= Z_TRIG;
         oldbuttons &= ~Z_TRIG;
     }
-    if (sOpen && wmLive() && (buttons & ~oldbuttons & Z_TRIG))
+    if (m->open && wmLive() && (buttons & ~oldbuttons & Z_TRIG))
     {
         wmCollect();
-        if (sSlot >= 0 && sSlot < WM_SLOTS && sIdx >= 0 && sIdx < sNum[sSlot])
+        if (m->slot >= 0 && m->slot < WM_SLOTS && m->idx >= 0 && m->idx < sNum[m->slot])
         {
-            wmEquip(&sEnt[sSlot][sIdx]);
+            wmEquip(&sEnt[m->slot][m->idx]);
         }
-        sOpen = FALSE;
-        sSwallow = TRUE;
+        m->open = FALSE;
+        m->swallow = TRUE;
     }
-    if (sSwallow)
+    if (m->swallow)
     {
         if (!(buttons & Z_TRIG))
         {
-            sSwallow = FALSE;
+            m->swallow = FALSE;
         }
         return buttons & ~Z_TRIG;
     }
@@ -443,18 +470,19 @@ static Gfx *wmText(Gfx *gdl, s32 x, s32 y, char *text, u32 colour)
 /* along the top: a numbered box per slot, the open one listing its weapons */
 Gfx *weapmenuRender(Gfx *gdl)
 {
+    WmState *m = wmMe();
     s32 x = viGetViewLeft() + 0x24;
     const s32 top = viGetViewTop() + 0x0C;
     s32 s, i;
 
-    if (!sOpen || !wmLive())
+    if (!m->open || !wmLive())
     {
         return gdl;
     }
     wmCollect();
-    if (sIdx >= sNum[sSlot])
+    if (m->idx >= sNum[m->slot])
     {
-        sIdx = sNum[sSlot] - 1;
+        m->idx = sNum[m->slot] - 1;
     }
     if (hudAnchorsToEdges())
     {
@@ -467,7 +495,7 @@ Gfx *weapmenuRender(Gfx *gdl)
         char num[4];
         s32 w = 12;
 
-        if (s == sSlot)
+        if (s == m->slot)
         {   /* the open slot is as wide as its longest name */
             for (i = 0; i < sNum[s]; i++)
             {
@@ -484,14 +512,14 @@ Gfx *weapmenuRender(Gfx *gdl)
         }
         gdl = microcode_constructor_related_to_menus(gdl, x, top, x + w, top + 11, (sNum[s] > 0) ? 0x000000A0 : 0x00000050);
         sprintf(num, "%d\n", (int) s + 1);
-        gdl = wmText(gdl, x + 3, top + 2, num, (s == sSlot) ? 0xFFC040FF : (sNum[s] > 0 ? 0xFFFFFFFF : 0x808080A0));
-        if (s == sSlot)
+        gdl = wmText(gdl, x + 3, top + 2, num, (s == m->slot) ? 0xFFC040FF : (sNum[s] > 0 ? 0xFFFFFFFF : 0x808080A0));
+        if (s == m->slot)
         {
             for (i = 0; i < sNum[s]; i++)
             {
                 char name[40];
                 const s32 y = top + 13 + i * 11;
-                const s32 hot = (i == sIdx);
+                const s32 hot = (i == m->idx);
 
                 wmName(name, sizeof(name), &sEnt[s][i]);
                 gdl = microcode_constructor_related_to_menus(gdl, x, y, x + w, y + 10, hot ? 0xD08000C0 : 0x00000090);
@@ -512,5 +540,7 @@ Gfx *weapmenuRender(Gfx *gdl)
 /* the partner status sits where the menu draws: coop_hud.c skips it while open */
 s32 weapmenuIsOpen(void)
 {
-    return sOpen && wmLive();
+    WmState *m = wmMe();
+
+    return m->open && wmLive();
 }
