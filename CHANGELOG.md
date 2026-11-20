@@ -6,6 +6,7 @@ GoldenEye Coop releases, newest first. Each release's full notes, including whic
 
 | Release | Date | Co-op protocol | Highlights |
 | --- | --- | --- | --- |
+| [v0.9.1](coop/release-notes/v0.9.1.md) | 2026-11-20 | 18 | Plays with v0.9.0. Split screen: each player has their own Weapon Menu, so one player opening it no longer changes another player's weapon. |
 | [v0.9.0](coop/release-notes/v0.9.0.md) | 2026-11-19 | 18 | Everyone must update. Split screen in the story missions: two to four players on one screen, offline or in an online game. |
 | [v0.8.6](coop/release-notes/v0.8.6.md) | 2026-11-11 | 17 | Restart the mission from the watch; a simpler pause watch; fixes from player testing. |
 | [v0.8.5](coop/release-notes/v0.8.5.md) | 2026-11-09 | 17 | Spectate in first person: your partner's gun, shots, reloads, aim and zoom while you watch them. |
