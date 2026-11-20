@@ -2496,7 +2496,7 @@ f32 chrpropScoreAutoAimTarget(PropRecord *targetprop, coord3d *aimpos, f32 *worl
             {
                 horizontal_tolerance = (screen_right_edge[0] - screen_left_edge[0]) * 1.5f;
 
-                if (getPlayerCount() == 1)
+                if (!isMpMatch())
                 {
                     horizontal_tolerance = horizontal_tolerance * difficulty;
                 }
@@ -2738,6 +2738,12 @@ s32 propIsOfCdType(PropRecord* prop, s32 cdtypes) {
         if (!(cdtypes & CDTYPE_PLAYERS)) {
             ret = 0;
         }
+#ifndef TARGET_N64
+        /* split-screen story: a partner down, or overlapping us */
+        if (coopPropIsGhost(prop)) {
+            ret = 0;
+        }
+#endif
     } else if (prop->type == PROP_TYPE_CHR) {
         if (!(cdtypes & CDTYPE_CHRS)) {
             ret = 0;

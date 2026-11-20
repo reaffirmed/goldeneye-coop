@@ -495,6 +495,21 @@ void bossMainloop(void)
                 localSelectedNumPlayers = get_selected_num_players();
             }
         }
+#ifndef TARGET_N64
+        { /* split-screen story (player.h): a solo mission with the co-op
+           * session's local players, viewports as in multiplayer */
+            extern s32 g_SplitStory, g_SplitStoryLoaded;
+            extern s32 coopSplitWanted(void);
+            const s32 want = (g_SplitStory >= 2) ? g_SplitStory : coopSplitWanted();
+
+            g_SplitStoryLoaded = 0;
+            if (g_StageNum != LEVELID_TITLE && localSelectedNumPlayers == 1 && want >= 2)
+            {
+                localSelectedNumPlayers = (want > 4) ? 4 : want;
+                g_SplitStoryLoaded = 1;
+            }
+        }
+#endif
 
 #ifndef TARGET_N64
         { /* Debug breadcrumbs (GE_DUMP_BOND): a crash with a dead stack can't

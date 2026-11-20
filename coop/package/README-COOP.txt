@@ -201,6 +201,23 @@ When someone leaves
   the Bond is removed and "<name> disconnected" shows. They can join again
   like a late joiner.
 
+Split screen
+------------
+Two to four players can share one PC's screen in the story missions. On the
+CO-OP screen set Local Players to 2, 3 or 4 and pick a character for each
+extra player (P2 Character and so on). Each player needs their own
+controller; player 1 can use the keyboard and mouse.
+
+- Play on This Screen starts a split-screen game with nobody online. It
+  works without Steam.
+- In a Steam lobby the same rows count your screen's players in, so a
+  split-screen PC can host or join. Up to four players in all: if the host
+  has no room for all of yours, you see "Session Full".
+- The intro and the ending play full screen. Whoever opens the pause watch
+  gets the whole screen until they close it.
+- Only player 1 can skip the intro. Players on one screen share one Ready
+  and one vote.
+
 Versus (multiplayer)
 --------------------
 The original multiplayer, online: two to four players, each on their own PC
@@ -342,4 +359,6 @@ Known gaps in this build
 - Cutscene cameras follow the host's script; tell me if one looks wrong.
 - With four players the stats page cuts names to about five letters.
 - Three and four players are tested on a fake Steam only so far.
+- Split screen hasn't been tried in a real Steam lobby or with real
+  controllers yet.
 - Everyone needs this build: it cannot play with the earlier co-op builds.

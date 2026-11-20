@@ -18,8 +18,6 @@
 1	src/game/coop.c: implicit declaration of function 'gunRequestHandWeaponChange' [-Wimplicit-function-declaration]
 1	src/game/coop.c: implicit declaration of function 'memset' [-Wimplicit-function-declaration]
 1	src/game/coop.c: implicit declaration of function 'strcat' [-Wimplicit-function-declaration]
-1	src/game/coop.c: implicit declaration of function 'strcmp' [-Wimplicit-function-declaration]
-1	src/game/coop.c: implicit declaration of function 'strncmp' [-Wimplicit-function-declaration]
 1	src/game/coop.c: implicit declaration of function 'strstr' [-Wimplicit-function-declaration]
 2	src/game/coop.c: missing braces around initializer [-Wmissing-braces]
 1	src/game/coop.c: passing argument 2 of 'mtx4RotateVecInPlace' from incompatible pointer type [-Wincompatible-pointer-types]

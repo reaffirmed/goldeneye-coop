@@ -96,6 +96,18 @@ s32 get_nth_player_from_shuffled(PLAYER_ID id);
 void set_cur_player(s32 playernum);
 s32 getPlayerCount(void);
 #ifndef TARGET_N64
+/* Split-screen story (port): 2-4 players on this screen in a solo mission,
+ * the co-op session's local players. getPlayerCount() counts them and the
+ * viewports split as in multiplayer, but the mission plays by solo rules, so
+ * "is this a multiplayer match" is isMpMatch(), not getPlayerCount() >= 2. */
+extern s32 g_SplitStory;        /* local players for the next story mission, 0 or 1 for none (front end) */
+s32 splitStoryActive(void);
+s32 splitWatchPlayer(void);     /* the split-screen player whose watch menu fills the screen, -1 none */     /* this stage is a story mission with more than one local player */
+#define isMpMatch() (getPlayerCount() >= 2 && !splitStoryActive())
+#else
+#define isMpMatch() (getPlayerCount() >= 2)
+#endif
+#ifndef TARGET_N64
 /* the views on this screen: getPlayerCount(), but 1 in an online versus
  * match, where only our own player has a view (coop_versus.c) */
 s32 coopVsViewCount(void);

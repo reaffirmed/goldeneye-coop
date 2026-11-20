@@ -531,6 +531,16 @@ void fogLoadLevelEnvironment(s32 level_id, s32 arg1)
     {
         num_players = 0;
     }
+#ifndef TARGET_N64
+    {   /* split-screen story: the mission's own sky and fog, not the multiplayer ones */
+        extern s32 splitStoryActive(void);
+
+        if (splitStoryActive())
+        {
+            num_players = 0;
+        }
+    }
+#endif
 
     g_ScaledFarFogIntensity = FLT_MAX;
     g_ScaledDifferenceFromFarFogIntensity = 0.0f;

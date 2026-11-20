@@ -3797,7 +3797,7 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
             case ITEM_PITONGUN:
                 if (handptr->field_88C == 0)
                 {
-                    if ((getPlayerCount() == 1) || ((checkGamePaused() == 0) && (g_CurrentPlayer->mpmenuon == 0)))
+                    if ((!isMpMatch()) || ((checkGamePaused() == 0) && (g_CurrentPlayer->mpmenuon == 0)))
                     {
                         handptr->field_87D = 1;
                     }
@@ -3829,7 +3829,7 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
                 {
                     if (((s32) handptr->field_88C % bondwalkItemGetAutomaticFiringRate(var_s1)) == 0)
                     {
-                        if ((getPlayerCount() == 1) || ((checkGamePaused() == 0) && (g_CurrentPlayer->mpmenuon == 0)))
+                        if ((!isMpMatch()) || ((checkGamePaused() == 0) && (g_CurrentPlayer->mpmenuon == 0)))
                         {
                             handptr->field_87D = 1;
                         }
@@ -3947,7 +3947,7 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
                     sp1B4 = 1;
                 }
 
-                if ((getPlayerCount() == 1) || ((checkGamePaused() == 0) && (g_CurrentPlayer->mpmenuon == 0)))
+                if ((!isMpMatch()) || ((checkGamePaused() == 0) && (g_CurrentPlayer->mpmenuon == 0)))
                 {
                     if (sp1B4 != 0)
                     {
@@ -4028,7 +4028,7 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
             handptr->field_890 = 0;
             handptr->field_88C = 0;
 
-            if ((getPlayerCount() == 1)
+            if ((!isMpMatch())
 #if defined(VERSION_JP) || defined(VERSION_EU)
                 || ((checkGamePaused() == 0) && (g_CurrentPlayer->mpmenuon == 0))
 #else
@@ -4260,14 +4260,14 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
     sp188 = WHEN_5_SP188_INIT;
     if (handptr->weapon_action_state == GUN_ANIM_STATE_SWITCH_LOWER)
     {
-        if (getPlayerCount() >= 2)
+        if (isMpMatch())
         {
             sp188 = WHEN_5_SP188_MULTI;
         }
 
         if (handptr->field_88C == 0)
         {
-            if (getPlayerCount() == 1)
+            if (!isMpMatch())
             {
                 handptr->field_8B0 = WHEN_5_FLD8B0_SP;
             }
@@ -4369,7 +4369,7 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
     {
         sp178 = WHEN_8_SP178_INIT;
 
-        if (getPlayerCount() >= 2)
+        if (isMpMatch())
         {
             sp178 = WHEN_8_SP178_MULTI;
         }
@@ -6141,7 +6141,7 @@ void sub_GAME_7F068508(GUNHAND handnum, f32 floor_y_pos)
     cartridge_header = get_ptr_item_statistics(weaponid)->ptr_cartridge_struct;
 
     // Do not create ejected casings in multiplayer.
-    if ((cartridge_header == NULL) || (getPlayerCount() >= 2))
+    if ((cartridge_header == NULL) || (isMpMatch()))
     {
         return;
     }
@@ -6514,7 +6514,7 @@ void sub_GAME_7F068508(GUNHAND handnum, f32 floor_y_pos)
     cartridge_header = get_ptr_item_statistics(weaponid)->ptr_cartridge_struct;
 
     // Do not create ejected casings in multiplayer.
-    if ((cartridge_header == NULL) || (getPlayerCount() >= 2))
+    if ((cartridge_header == NULL) || (isMpMatch()))
     {
         return;
     }
@@ -7264,7 +7264,7 @@ static Gfx *portDrawMpPlayerName(Gfx *gdl)
     s32 x;
     s32 y;
 
-    if (getPlayerCount() < 2 || !portMpShowNames())
+    if (!isMpMatch() || !portMpShowNames())
     {
         return gdl;
     }
@@ -7342,7 +7342,7 @@ s32 portMissionTimerShown(void)
     return portMissionTimer()
         && (g_CurrentPlayer->gunammooff & ~GUNAMMOREASON_OPTION) == 0
         && g_CurrentPlayer->mpmenuon == 0
-        && getPlayerCount() == 1;
+        && !isMpMatch();
 }
 #endif
 
@@ -7381,6 +7381,15 @@ Gfx *generate_ammo_total_microcode(Gfx *gdl)
                 leftx = 43;
                 rightx = 109;
             }
+            if (splitStoryActive())
+            {   /* Split-screen story: the ammo sits in the view's bottom
+                 * corners, lined up under the objective list and clear of
+                 * the gun (quadrants are edge-anchored below under a wide
+                 * window). Rare's quadrant values left it a third of the
+                 * way in, over the gun hand. */
+                leftx = (getPlayerCount() < 3) ? 35 : 33;
+                rightx = leftx;
+            }
 #else
             else if (get_cur_playernum() & 1)
             {
@@ -7409,13 +7418,13 @@ Gfx *generate_ammo_total_microcode(Gfx *gdl)
 #endif
                     textwidth_r = 5;
 #ifndef TARGET_N64
-                    if (hudLayoutWide())
+                    if (hudLayoutWide() || (splitStoryActive() && hudAnchorsToEdges()))
                     {   /* HUD Centering 16:9: right-hand ammo hugs the window's
                          * right edge. In 3P/4P that applies only with HUD
                          * Layout = Wide, where it keeps Rare's quadrant
                          * position and slides with the quadrant's left edge;
                          * 4:3 keeps it in the band. */
-                        PORT_HUD_ANCHOR(gdl, (getPlayerCount() < 3) ? PORT_HUD_ANCHOR_RIGHT : PORT_HUD_ANCHOR_LEFT);
+                        PORT_HUD_ANCHOR(gdl, (getPlayerCount() < 3 || splitStoryActive()) ? PORT_HUD_ANCHOR_RIGHT : PORT_HUD_ANCHOR_LEFT);
                     }
                     /* HUD Scale: laid out from the view's bottom-right corner */
                     gdl = portHudScaleBegin(gdl, (f32) (viGetViewLeft() + viGetViewWidth()), (f32) (viGetViewTop() + viGetViewHeight()));
@@ -7499,7 +7508,7 @@ Gfx *generate_ammo_total_microcode(Gfx *gdl)
 #endif
                     textwidth_l = 5;
 #ifndef TARGET_N64
-                    if (hudLayoutWide())
+                    if (hudLayoutWide() || (splitStoryActive() && hudAnchorsToEdges()))
                     {   /* HUD Centering 16:9: left-hand (dual-wield) ammo hugs
                          * the window's left edge; 3P/4P only under HUD Layout
                          * Wide, as the right-hand arm. */
@@ -8153,7 +8162,7 @@ void increment_num_kills_display_text_in_MP(void)
     g_playerPerm->kill_count += 1;
     g_CurrentPlayer->kills_this_life += 1;
 
-    if (getPlayerCount() < 2) { return; }
+    if (!isMpMatch()) { return; }
 
     mission_time = getMissiontimer();
     sprintf(&buffer, aSD, langGet(getStringID(LGUN, GUN_STR_DA_KILLCOUNT)), g_playerPerm->kill_count); // "kill count"
@@ -8223,7 +8232,7 @@ void increment_num_deaths(void)
 {
 	char buffer[256];
     g_CurrentPlayer->deathcount = (s32) (g_CurrentPlayer->deathcount + 1);
-    if (getPlayerCount() >= 2)
+    if (isMpMatch())
     {
         if (g_CurrentPlayer->deathcount == 1)
         {
@@ -8253,7 +8262,7 @@ void increment_num_suicides_display_MP(void) {
     s32 currentTime;
 
     g_CurrentPlayer->num_suicides += 1;
-    if (getPlayerCount() >= 2) {
+    if (isMpMatch()) {
 
         currentTime = getMissiontimer();
 

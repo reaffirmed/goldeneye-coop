@@ -9076,7 +9076,7 @@ enum { CLROW_TEXT, CLROW_HEAD, CLROW_HOST, CLROW_JOINANY, CLROW_JOINFRIEND, CLRO
        CLROW_HOSTLEAVES, CLROW_VSMODE, CLROW_VSARENA, CLROW_VSSCENARIO, CLROW_VSLENGTH, CLROW_VSWEAPONS, CLROW_VSSTART,
        CLROW_DISCORDYES, CLROW_DISCORDNO, CLROW_PROFILE, CLROW_VOICEMUTE, CLROW_LIVES, CLROW_BLEEDOUT, CLROW_RESPAWN,
        CLROW_UPDATE, CLROW_UPDATECHECK, CLROW_UPDATERESTART, CLROW_ALLOPTIONS, CLROW_VSRADAR, CLROW_VSARMOUR, CLROW_VSNEXT,
-       CLROW_COLOUR };
+       CLROW_COLOUR, CLROW_LOCALS, CLROW_LOCALCHAR, CLROW_LOCALPLAY };
 #define COOP_LOBBY_ROWS     72      /* every tab's rows, chat lines wrapped included, and Classic's headings */
 /* The screen is laid out like Modern Warfare 2's lobbies (coopMw*): the
  * title top left, the tabs under it, the tab's rows down the left with
@@ -9872,6 +9872,34 @@ static void coopLobbyAddUpdate(void)
     }
 }
 
+/* split screen: how many play on this screen, and each one's character
+ * after the first (whose are the Character and Colour rows). Off a session,
+ * Play on This Screen starts one with nobody online (GE_COOP "local"). */
+static void coopLobbyAddLocalRows(s32 insession)
+{
+    char name[48];
+    char label[32];
+    char value[8];
+    s32 j;
+
+    if (insession && COOP_VS_ON())
+    {
+        return;     /* (versus is a player per screen) */
+    }
+    snprintf(value, sizeof(value), "%d\n", (int) g_CoopLocalCount);
+    coopLobbyAdd(CLROW_LOCALS, 0, "Local Players\n", value);
+    for (j = 1; j < g_CoopLocalCount && j < COOP_MAX_LOCAL; j++)
+    {
+        snprintf(label, sizeof(label), portTr("P%d Character\n"), (int) j + 1);
+        coopCharacterName(coopLocalCharacter(j), name, sizeof(name));
+        coopLobbyAdd(CLROW_LOCALCHAR, j, label, portSheetFitText(name, COOP_LOBBY_VALUE_W));
+    }
+    if (!insession && g_CoopLocalCount >= 2)
+    {
+        coopLobbyAdd(CLROW_LOCALPLAY, 0, "Play on This Screen\n", "");
+    }
+}
+
 static void coopLobbyBuildRows(void)
 {
     const s32 state = coopLobbyState();
@@ -9910,6 +9938,8 @@ static void coopLobbyBuildRows(void)
                 coopLobbyAdd(CLROW_TEXT, 0, "then open CO-OP again.\n", "");
                 break;
         }
+        coopLobbyAdd(CLROW_TEXT, 0, "Or play split screen here:\n", "");
+        coopLobbyAddLocalRows(FALSE);   /* split screen needs no Steam */
         return;
     }
     if (state == COOPLOBBY_IDLE)
@@ -9936,6 +9966,7 @@ static void coopLobbyBuildRows(void)
         coopCharacterName(coopCharacter(), name, sizeof(name));
         coopLobbyAdd(CLROW_CHARACTER, 0, "Character\n", portSheetFitText(name, COOP_LOBBY_VALUE_W));
         coopLobbyAdd(CLROW_COLOUR, 0, "Colour\n", coopLobbyColourValue());
+        coopLobbyAddLocalRows(FALSE);
         coop_lobby_build_tab = CLTAB_SETUP;
         coopLobbyAddHostOptions();
         r = coopLobbyAdd(CLROW_TEXT, 0, "Mission rules (lives, guards and\n", "");
@@ -10159,6 +10190,7 @@ static void coopLobbyBuildRows(void)
     coopCharacterName(coopCharacter(), name, sizeof(name));
     coopLobbyAdd(CLROW_CHARACTER, 0, "Character\n", portSheetFitText(name, COOP_LOBBY_VALUE_W));
     coopLobbyAdd(CLROW_COLOUR, 0, "Colour\n", coopLobbyColourValue());
+    coopLobbyAddLocalRows(TRUE);
     for (i = 0; i < COOP_MAX_PLAYERS && (coopLobbyIsHost() || coopLobbyHasPartner()); i++)
     {   /* hearing each partner or not, on this game alone (coop_voice.c); the strip shows who is talking */
         if (!coopLobbyPlayerHere(i) || i == coopLobbySelfPlayer() || coopVoiceMuteRowMask() == 0)
@@ -10450,6 +10482,8 @@ static s32 coopLobbySteps(const struct CoopLobbyRow *r)
     switch (r->kind)
     {
         case CLROW_CHARACTER:
+        case CLROW_LOCALS:
+        case CLROW_LOCALCHAR:
         case CLROW_DOWNRULE:
         case CLROW_DIFFICULTY:
         case CLROW_SCALING:
@@ -10488,6 +10522,12 @@ static void coopLobbyStep(const struct CoopLobbyRow *r, s32 dir)
     {
         case CLROW_CHARACTER:
             coopSetCharacter(coopCharacterStep(coopCharacter(), dir));
+            break;
+        case CLROW_LOCALS:
+            coopSetLocalCount((g_CoopLocalCount - 1 + dir + COOP_MAX_LOCAL) % COOP_MAX_LOCAL + 1);
+            break;
+        case CLROW_LOCALCHAR:
+            coopSetLocalCharacter(r->arg, coopCharacterStep(coopLocalCharacter(r->arg), dir));
             break;
         case CLROW_DOWNRULE:
             coopSetDownRule((coopDownRule() + dir + COOPDOWN_REVIVE + 1) % (COOPDOWN_REVIVE + 1));
@@ -10572,6 +10612,10 @@ static void coopLobbyDo(const struct CoopLobbyRow *r)
         case CLROW_HOST:
             memset(coop_lobby_invited, 0, sizeof(coop_lobby_invited));
             coopLobbyHost();
+            break;
+        case CLROW_LOCALPLAY:
+            coopLobbyLocal();
+            coop_lobby_ok = coopLobbyOpen();
             break;
         case CLROW_JOINANY:
             coopLobbyJoinAny();
@@ -10741,7 +10785,7 @@ void init_menu1D_cooplobby(void)
         const char *e = getenv("GE_COOP_LOBBY");
         const char *v = getenv("GE_COOP_VERSUS");   /* harness: applied once hosting */
 
-        coop_lobby_auto = (e != NULL && strchr("hijwb", e[0]) != NULL && e[0] != '\0') ? e[0] : -1;
+        coop_lobby_auto = (e != NULL && strchr("hijwbl", e[0]) != NULL && e[0] != '\0') ? e[0] : -1;
         coop_vs_harness = (coop_lobby_auto == 'h' || coop_lobby_auto == 'i') ? v : NULL;
     }
     coopLobbyBuild();
@@ -10837,6 +10881,12 @@ static void coopLobbyHarness(void)
     {
         return;
     }
+    if (coop_lobby_auto == 'l' && (state == COOPLOBBY_IDLE || state == COOPLOBBY_OFF))
+    {   /* GE_COOP_LOBBY=local: Play on This Screen, then start as a host would */
+        coopLobbyLocal();
+        coop_lobby_ok = coopLobbyOpen();
+        return;
+    }
     if (state == COOPLOBBY_IDLE && coop_lobby_auto != 'w')
     {
         if (coop_lobby_auto == 'h' || coop_lobby_auto == 'i')
@@ -10875,7 +10925,7 @@ static void coopLobbyHarness(void)
         portConLogf("ge: coop lobby: ready\n");
         coopLobbySetReady(TRUE);
     }
-    if ((coop_lobby_auto == 'h' || coop_lobby_auto == 'i') && state == COOPLOBBY_HOSTING && coopLobbyPartnerReady())
+    if ((((coop_lobby_auto == 'h' || coop_lobby_auto == 'i') && coopLobbyPartnerReady()) || coop_lobby_auto == 'l') && state == COOPLOBBY_HOSTING)
     {
         const char *want = getenv("GE_COOP_LOBBY_PLAYERS");   /* wait for this many players in all */
         s32 k, here = 0;
@@ -12354,6 +12404,9 @@ static const char *coopLobbyHelp(const struct CoopLobbyRow *r)
         case CLROW_LEAVE:       return coopLobbyIsHost() && coopLobbyHasPartner() ? "Leave the lobby. The next player becomes the host.\n"
                                                                                   : "Leave the lobby.\n";
         case CLROW_CHARACTER:   return "Who you play as. Select for the full roster; looks only.\n";
+        case CLROW_LOCALS:      return "Players on this screen, each with their own controller. Up to four in all.\n";
+        case CLROW_LOCALCHAR:   return "Who this player on your screen plays as; looks only.\n";
+        case CLROW_LOCALPLAY:   return "Play the missions in split screen on this PC, nobody online.\n";
         case CLROW_COLOUR:      return "Your colour: your name, chat, radar dot and pings, for everyone. Select to pick it.\n";
         case CLROW_DOWNRULE:    return "When a player goes down: a partner revives them, a timer brings them back, or both.\n";
         case CLROW_DIFFICULTY:  return "Hard and Brutal give guards more health, damage and aim, and add more of them.\n";
@@ -24074,6 +24127,19 @@ static void portDirectLaunchTick(void)
             if (state != 1)
             {
                 printf("ge: GE_STAGE=%s not recognized\n", e);
+            }
+            else if (getenv("GE_SPLIT") != NULL)
+            {   /* GE_SPLIT=<2..4>: the mission as split-screen story (player.h) */
+                extern s32 g_SplitStory;
+                const char *sp = getenv("GE_SPLIT");
+
+                g_SplitStory = (sp[0] >= '2' && sp[0] <= '4') ? sp[0] - '0' : 0;
+                {
+                    extern s32 g_CoopLocalCount;
+
+                    g_CoopLocalCount = (g_SplitStory >= 2) ? g_SplitStory : 1;
+                }
+                printf("ge: GE_SPLIT: %d local players\n", g_SplitStory);
             }
         }
         return;

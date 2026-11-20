@@ -30,9 +30,13 @@ extern s32 portJoyPortUseHeldInPlay(void);
 ITEM_IDS getCurrentPlayerWeaponId(GUNHAND hand);
 void hudmsgBottomShow(char *mess);
 
-static s32 sTarget = -1;    /* the partner we hold Use over, -1 none */
-static s32 sNear = -1;      /* the partner we could revive from here, -1 none */
-static s32 sLastHold;       /* their count last tick, while we held */
+/* per player on this screen (coopCurLocal) */
+static s32 sTargetL[COOP_MAX_LOCAL] = { -1, -1, -1, -1 };  /* the partner we hold Use over, -1 none */
+static s32 sNearL[COOP_MAX_LOCAL] = { -1, -1, -1, -1 };    /* the partner we could revive from here, -1 none */
+static s32 sLastHoldL[COOP_MAX_LOCAL];                     /* their count last tick, while we held */
+#define sTarget   (sTargetL[coopCurLocal()])
+#define sNear     (sNearL[coopCurLocal()])
+#define sLastHold (sLastHoldL[coopCurLocal()])
 static s32 sTestAt = -2;    /* GE_COOP_TESTREVIVE, in mission ticks */
 static s32 sTestHold;
 
@@ -75,6 +79,7 @@ static void coopReviveTestTick(s32 missionticks, PropRecord *bond)
     }
     if (!coopReviveInReach(&p, bond))
     {
+        portConLogf("ge: coop: testrevive: out of reach, us %.0f %.0f %.0f\n", bond->pos.f[0], bond->pos.f[1], bond->pos.f[2]);
         coord3d to = p.pos;
         StandTile *stan;
 
@@ -89,7 +94,7 @@ static void coopReviveTestTick(s32 missionticks, PropRecord *bond)
         if (stan != NULL)
         {
             coopRespawnPlayerAt(&to, stan, 0.0f, getCurrentPlayerWeaponId(GUNRIGHT));
-            portConLogf("ge: coop: testrevive: stepped beside player %d\n", p.player + 1);
+            portConLogf("ge: coop: testrevive: stepped beside player %d (them %.0f %.0f %.0f, us now %.0f %.0f %.0f)\n", p.player + 1, p.pos.f[0], p.pos.f[1], p.pos.f[2], getCurrentPlayerProp()->pos.f[0], getCurrentPlayerProp()->pos.f[1], getCurrentPlayerProp()->pos.f[2]);
         }
         return;
     }

@@ -82,6 +82,9 @@ s32  coopClientForwardShot(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 wea
 s32  coopShotPuppet(ChrRecord *chr, s32 hitpart, coord3d *vector, s32 weaponid, s32 isPlayer);
 
 #define COOP_MAX_PLAYERS 4   /* the host and up to three joiners */
+#define COOP_MAX_LOCAL   4   /* players on one screen (split-screen story, player.h) */
+extern s32 g_CoopLocalCount; /* players on this PC's screen, 1 without split screen (coop.c) */
+s32  coopCurLocal(void);     /* the local player whose turn it is: the current player in a split-screen mission, else 0 */
 
 /* the HUD (coop_hud.c) */
 typedef struct
@@ -564,6 +567,14 @@ s32  coopCharacterCount(void);
 void coopCharacterName(s32 c, char *out, s32 cap);  /* with "\n" */
 s32  coopCharacterBody(s32 c, s32 *head);   /* the body and head, -1 for the mission's Bond */
 s32  coopPlayerCharacter(s32 p);            /* player p's pick, as the lobby knows it */
+s32  coopLocalCharacter(s32 li);            /* split screen: the pick of the player li on our screen (0: coopCharacter) */
+void coopSetLocalCharacter(s32 li, s32 c);
+s32  coopLocalColour(s32 li);               /* and their colour, 0xRRGGBB, -1 their number's */
+void coopSetLocalColour(s32 li, s32 rgb);
+s32  coopSelfCharacter(void);               /* the pick of whichever of our players is current */
+void coopSetLocalCount(s32 n);              /* the lobby's Local Players (g_CoopLocalCount) */
+void coopLobbyLocal(void);                  /* Play on This Screen: a split-screen session with nobody online */
+s32  coopScreenFirst(s32 p);                /* the first player on p's screen (split screen), p alone */
 
 /* the picks as 3D figures for the lobby (coop_charsel.c) */
 void coopFigureBeginFrame(void);
