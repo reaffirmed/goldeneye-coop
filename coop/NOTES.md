@@ -4800,3 +4800,64 @@ after that): on v0.9.0 player 2's view showed player 1's menu, player 2's shot w
 ("weapmenu: take 1/0") and player 2 went from the PP7 to Unarmed, and player 1's confirm fired the
 gun. With this change only player 1's view had the menu, player 2's shot fired (7 to 6 rounds) and
 player 2 kept the PP7, and player 1's confirm took Unarmed.
+
+## Split screen: guards' drops, the Runway tank, Frigate's doors (2026-11-27, COOP_VERSION stays 18)
+
+Tester report on v0.9.1 from local play (split screen on one PC): Facility's scientist "sometimes
+doesn't drop the key card", the Runway tank "is completely broken and does really weird" things,
+and on Frigate "there's only some doors the guards see you through".
+
+- **Facility's key card hung in the air.** objTick moves a projectile (anything falling or thrown)
+  only in its owner's view pass when there is more than one player (`isSimOwner`,
+  propobj.c), and in multiplayer every owner is a player. A guard's drop is owned by the guard,
+  which never gets a pass, so in split screen the scientist's key card (chr 57, Facility's ai
+  list 0x40f/0x410: he drops what he carries when he gives up or runs) stayed where it left him,
+  about 1.1 m up inside his body, and never fell. It could be picked up only from within 1 m on
+  the same floor tile with a clear line, which his own body blocks while he stands there, so
+  whether the mission could go on depended on where he stood. The same held for every guard's
+  dropped gun and a guard's thrown grenade. Things no player on this screen owns now move in the
+  first view's pass, as everything does in solo. Online with one player per PC there is one
+  player, so it never happened there; a split-screen host had it.
+- **The Runway tank put every player in it.** The tank code keeps the solo player's tank state
+  in globals (in the tank or not, which tank, heading, speed, turret, climbing in, the engine
+  sound; bondview.c and bondview2.c), and split screen runs every player's tick through them. One
+  player climbing in put every view "in the tank": the others were pulled into the hatch, their
+  sticks steered it and turned the turret, their cameras spun with the driver's, and their B got
+  the driver out. A player standing on the tank also lost it whenever another player's tick,
+  away from the tank, let go of `g_WorldTankProp`, so climbing in often did nothing at all.
+  split_tank.c keeps a copy per local player, swapped in by `set_cur_player` in split-screen
+  story only, and reset at stage load. Another player on the screen can't climb into a tank
+  someone there drives (`splitTankTakenByOther`); coop_tank.c counts a local driver as a partner
+  driving (body hidden in the hatch, `coopTankDriving`) and, online, sends each local player's
+  tank under their own number (the host relays a joiner's second player as themselves,
+  `coopExtSameScreen`; packets unchanged).
+- **Frigate's doors: not reproduced.** Every Frigate door (29, model 152 and one 325) is solid to
+  guards (no `PROPFLAG_04000000`, the AI see-through flag). A sweep stood a player 1.5 m from each
+  side of every door in turn, facing it, with `GE_COOP_TESTSEEDOOR=1` logging any sight line that
+  passed while a closed door lay across it at the guard's eye height: solo, split screen with
+  player 1 doing it and with player 2 doing it, 58 spots each, none. The only lines that crossed a
+  door on the map crossed doors on the deck above (door 15828 at 809 to 1012 with both on the
+  floor at 404, door 19156 at 418 to 623 with both at 76), which the game rightly ignores. Guards
+  also come through doors when they hear gunfire or another guard calls them, which can look like
+  seeing through a door. Needs the doors the tester means.
+
+Harness (env only): `GE_COOP_TESTDROPLOG=1` logs where each drop starts; `GE_COOP_TESTSEEDOOR=1`
+as above; `GE_COOP_TESTTANK=<s>[:<spin>[:<player>]]` takes the split-screen player who drives
+(and presses B again every 10 ticks for 2 s until it takes, as a player would), and logs every
+player and the tank once a second. Steps: `P<n>` (the steps after it act as local player n), `y`
+(every key: where, the floor under it, who holds it, and each player's key flags), `K` (stand on
+the nearest loose key), `T<cm>` (stand beside the tank), `D` (every door), `Z<n>` (stand by door
+n/2 on side n%2). `coop/ci/split_tank_test.c` (cart-free, in main.yml with and without
+sanitizers) plays one player climbing in and turning while the other walks about: 13 of 13 pass;
+built with `-DSPLIT_TANK_OLD` (no swap, as on v0.9.1) 5 fail.
+
+Not changed: a key one split-screen player picks up is in that player's inventory only, as in
+multiplayer (online, a pickup goes to everyone). A locked door then opens for that player.
+
+Runs on this change (rig, two copies over the mock Steam or one copy with `GE_SPLIT`): the Facility
+key card falls to the floor 4 of 4 in split screen (hangs 4 of 4 before); with player 2 on the
+Runway tank while player 1 drives, player 2 stays on foot 4 of 4 (pulled in 4 of 4 before); 4
+players with player 3 driving, only player 3 is in the tank; mixed online games, a host with 2
+local players whose player 2 drives and a joiner with 2 local players whose player 2 (player 3 of
+the game) drives, the other PC logs that player driving and out again. `rows.py SR1` (online, the
+joiner drives Streets' tank) and `R1` pass.

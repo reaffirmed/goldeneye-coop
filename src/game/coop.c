@@ -13800,6 +13800,14 @@ s32 coopExtSelf(void)
     return (sEnabled > 0) ? coopSelf() : 0;
 }
 
+/* host: player p plays on the same screen as player from (a joiner's split-screen partner) */
+s32 coopExtSameScreen(s32 from, s32 p)
+{
+    const s32 c = coopNetIsHost() ? coopHostChanOf(from) : -1;
+
+    return c >= 0 && coopChanCarries(c, p);
+}
+
 s32 coopExtIsHost(void)
 {
     return sEnabled > 0 && coopNetIsHost();

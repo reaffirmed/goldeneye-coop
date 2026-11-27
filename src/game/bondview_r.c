@@ -154,6 +154,12 @@ void bondviewLoadSetupIntroSection(void)
     g_TankTurretAngle = FLOAT_INIT;
     g_TankTurretTurn = FLOAT_INIT;
     g_ExplodeTankOnDeathFlag = 0;
+#ifndef TARGET_N64
+    {   /* split-screen story: every player starts with this fresh tank state (bondview2.c) */
+        extern void splitTankReset(void);
+        splitTankReset();
+    }
+#endif
     is_timer_active = 1;
     g_PlayerInvincible = FALSE;
     g_CameraMode = 0;

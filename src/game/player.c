@@ -536,6 +536,12 @@ void set_cur_player(s32 playernum)
     assert(players[num]!=NULL); //player.c
 #endif
 
+#ifndef TARGET_N64
+    {   /* split-screen story: each player's own tank state (bondview2.c) */
+        extern void splitTankSwap(s32 to);
+        splitTankSwap(playernum);
+    }
+#endif
     player_num = playernum;
     g_CurrentPlayer = g_playerPointers[playernum];
     g_playerPerm = &g_playerPlayerData[playernum];
