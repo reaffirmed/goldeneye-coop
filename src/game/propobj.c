@@ -5115,6 +5115,18 @@ s32 objTick(struct PropRecord *prop)
 			{
 				isSimOwner = get_player_position_in_shuffled(get_cur_playernum()) == 0;
 			}
+			/* split-screen story: a projectile only moves in its owner's view
+			 * pass, and in multiplayer every owner is a player. A guard's drop
+			 * (a scientist's key card, a dead guard's gun) or a guard's grenade
+			 * is owned by the guard, which never gets a pass, so it hung in the
+			 * air where it left the guard and could not be picked up. Things
+			 * that no player on this screen owns move in the first view's pass,
+			 * as everything does in solo. */
+			if (!isSimOwner && splitStoryActive()
+				&& (projectile->ownerprop == NULL || getPlayerPointerIndex(projectile->ownerprop) < 0))
+			{
+				isSimOwner = get_player_position_in_shuffled(get_cur_playernum()) == 0;
+			}
 #endif
 
 		}
@@ -9069,6 +9081,24 @@ s32 objDrop(PropRecord *prop)
             matrix_4x4_set_position(&root->pos, &spB8);
         }
 
+#ifndef TARGET_N64
+        {   /* GE_COOP_TESTDROPLOG=1: where each drop starts (harness only) */
+            extern void portConLogf(const char *fmt, ...);
+            static s32 droplog = -1;
+            if (droplog == -1)
+            {
+                droplog = getenv("GE_COOP_TESTDROPLOG") != NULL;
+            }
+            if (droplog)
+            {
+                portConLogf("ge: coop: drop: model %d type %d from %s %d, player %d, %s, at %.0f %.0f %.0f, owner at %.0f %.0f %.0f\n",
+                            obj->obj, obj->type, (root->type == PROP_TYPE_CHR) ? "chr" : "prop",
+                            (root->type == PROP_TYPE_CHR) ? root->chr->chrnum : -1, get_cur_playernum() + 1,
+                            (prop->flags & PROPFLAG_ONSCREEN) ? "on screen" : "off screen",
+                            spB8.m[3][0], spB8.m[3][1], spB8.m[3][2], root->pos.f[0], root->pos.f[1], root->pos.f[2]);
+            }
+        }
+#endif
         objDetach(prop);
         chrpropActivate(prop);
         chrpropEnable(prop);

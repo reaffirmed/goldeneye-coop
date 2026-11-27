@@ -8055,6 +8055,7 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
             && g_BondCanEnterTank
 #ifndef TARGET_N64
             && !coopTankTaken(g_PlayerTankProp)     /* a partner is driving it */
+            && !splitTankTakenByOther(g_PlayerTankProp) /* or another player on this screen */
 #endif
             )
         {

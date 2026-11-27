@@ -4187,6 +4187,46 @@ bool chrCanSeeBond(ChrRecord *self)
                 setSeenBondTimeToNow(self);
                 pass = TRUE;
             }
+            {   /* GE_COOP_TESTSEEDOOR=1: a sight line that passed although a closed
+                 * door's panel lies across it at the guard's eye height (harness only) */
+                extern char *getenv(const char *);
+                extern void portConLogf(const char *fmt, ...);
+                extern PropRecord *stanSavedColl_posData;
+                static s32 seedoor = -1;
+                static s32 lastlog[256];
+
+                if (seedoor < 0)
+                {
+                    seedoor = getenv("GE_COOP_TESTSEEDOOR") != NULL;
+                }
+                if (seedoor && pass && (s32) (g_GlobalTimer - lastlog[self->chrnum & 0xFF]) > 60)
+                {
+                    StandTile *st2 = myprop->stan;
+
+                    if (!stanTestLineUnobstructed(&st2, myprop->pos.x, myprop->pos.z, bondprop->pos.x, bondprop->pos.z, CDTYPE_DOORS, 0.0f, 1.0f, 0.0f, 1.0f)
+                        && stanSavedColl_posData != NULL && stanSavedColl_posData->type == PROP_TYPE_DOOR)
+                    {
+                        PropRecord *dp = stanSavedColl_posData;
+                        struct rect4f *poly;
+                        s32 edges;
+                        f32 top, bot;
+                        f32 myfloor = stanGetPositionYValue(myprop->stan, myprop->pos.x, myprop->pos.z);
+
+                        chraiGetCollisionBounds(dp, &poly, &edges, &top, &bot);
+                        if (myfloor + myheight < bot || myfloor + myheight > top)
+                        {   /* a door on another deck, over or under the line: not in the way */
+                            goto seedoor_done;
+                        }
+                        lastlog[self->chrnum & 0xFF] = g_GlobalTimer;
+                        portConLogf("ge: coop: seedoor: chr %d sees player %d past door %d (open %.2f, door y %.0f..%.0f, eye y %.0f, player y %.0f, floors %.0f / %.0f, rooms %d / %d)\n",
+                                    self->chrnum, get_cur_playernum() + 1, (s32) ((u8 *) dp->door - (u8 *) g_CurrentSetup.propDefs),
+                                    dp->door->openPosition, bot, top, myfloor + myheight, bondprop->pos.y, myfloor,
+                                    bondprop->stan != NULL ? stanGetPositionYValue(bondprop->stan, bondprop->pos.x, bondprop->pos.z) : 0.0f,
+                                    myprop->stan != NULL ? (s32) myprop->stan->room : -1, bondprop->stan != NULL ? (s32) bondprop->stan->room : -1);
+                    }
+                }
+            seedoor_done:;
+            }
         }
 #endif
 

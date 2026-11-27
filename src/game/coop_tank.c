@@ -18,8 +18,15 @@
  * leaves guard damage to it, so the host runs the same crush against its
  * copy of a partner's tank (coopTankCrush). A guard looking or shooting at
  * a partner in a tank looks past that tank, as at our own (coopGuardTankFlags).
+ *
+ * Split screen: each player on the screen has their own tank state
+ * (bondview2.c splitTankSwap), so any of them can drive. A player on our
+ * screen who drives counts as a partner driving here (their body is hidden,
+ * the tank can't be entered by another), and online their tank is sent
+ * under their own player number.
  */
 #include <ultra64.h>
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <bondconstants.h>
@@ -65,10 +72,11 @@ typedef struct
 static u32 sNow;
 static s32 sOfs[COOP_MAX_PLAYERS] = { -1, -1, -1, -1 };    /* the tank each player drives, -1 none */
 static u32 sSeen[COOP_MAX_PLAYERS];
-static s32 sMyOfs = -1;     /* the tank we drove, for the packets after we got out */
-static s32 sOutFor;
+static s32 sMyOfs[COOP_MAX_LOCAL] = { -1, -1, -1, -1 };  /* the tank each player on our screen drove, for the packets after they got out */
+static s32 sOutFor[COOP_MAX_LOCAL];
 static s32 sTestAt = -2;    /* GE_COOP_TESTTANK */
 static s32 sTestSpin = 1;
+static s32 sTestWho;        /* GE_COOP_TESTTANK's player on this screen (split screen) */
 static s32 sParkedOfs = -1; /* the last tank anyone drove: the host sends where it stands while nobody does */
 
 s32 coopTankDriving(s32 player)
@@ -145,6 +153,10 @@ void coopTankPacket(const void *raw, s32 len, s32 from)
     }
     memcpy(&p, raw, sizeof(p));
     player = (from == 0) ? p.player : from;     /* the host passes joiners' on */
+    if (from != 0 && p.player != from && coopExtSameScreen(from, p.player))
+    {
+        player = p.player;  /* a joiner's split-screen partner drives */
+    }
     if (player < 0 || player >= COOP_MAX_PLAYERS || player == coopExtSelf() || p.stage != bossGetStageNum()
         || !coopExtSetupRecOk(p.tankofs) || g_CurrentSetup.propDefs == NULL)
     {
@@ -178,9 +190,9 @@ void coopTankPacket(const void *raw, s32 len, s32 from)
     sOfs[player] = p.driving ? p.tankofs : -1;
     sSeen[player] = sNow;
     sParkedOfs = p.tankofs;
-    if (g_PlayerIsInTank == 1 && g_PlayerTankProp == prop)
+    if ((g_PlayerIsInTank == 1 && g_PlayerTankProp == prop) || splitTankTakenByOther(prop))
     {
-        return;     /* we got in at the same moment: ours wins here */
+        return;     /* we (or a player on our screen) got in at the same moment: ours wins here */
     }
     tank = (TankRecord *) obj;
     tank->is_firing_tank = p.firing;
@@ -327,13 +339,26 @@ static void coopTankCrush(s32 player)
     }
 }
 
-/* GE_COOP_TESTTANK=<s>[:<spin>]: <s> seconds into the mission stand on the
- * tank, get in, and turn it for 10 s, or with spin 0 sit still (harness only) */
+/* GE_COOP_TESTTANK=<s>[:<spin>[:<player>]]: <s> seconds into the mission stand
+ * on the tank, get in, turn it for 10 s (or with spin 0 sit still), and get out;
+ * in split screen <player> (0 = player 1) is the one on our screen who does it
+ * (harness only) */
 s32 coopTankTestTap(void)
 {
     const s32 t = (s32) coopExtMissionTicks();
 
-    return sTestAt >= 0 && (t == sTestAt + 30 || t == sTestAt + 30 + 660);
+    if (sTestAt < 0 || (splitStoryActive() && get_cur_playernum() != sTestWho))
+    {
+        return 0;
+    }
+    if (t == sTestAt + 30 || t == sTestAt + 30 + 660)
+    {
+        return 1;
+    }
+    /* B again every 10 ticks for 2 s while it hasn't taken, as a player would */
+    return ((t > sTestAt + 30 && t < sTestAt + 150 && g_PlayerIsInTank != 1)
+            || (t > sTestAt + 30 + 660 && t < sTestAt + 30 + 780 && g_PlayerIsInTank == 1))
+        && (t - sTestAt) % 10 == 0;
 }
 
 static void coopTankTestTick(void)
@@ -349,9 +374,25 @@ static void coopTankTestTick(void)
 
         sTestAt = (e != NULL) ? atoi(e) * 60 : -1;
         sTestSpin = (e != NULL && strchr(e, ':') != NULL) ? atoi(strchr(e, ':') + 1) : 1;
+        if (e != NULL)
+        {
+            int at = 0, spin = 1, who = 0;
+
+            sscanf((const char *) e, "%d:%d:%d", &at, &spin, &who);
+            sTestWho = who;
+        }
     }
     if (sTestAt < 0)
     {
+        return;
+    }
+    if (splitStoryActive() && sTestWho > 0 && sTestWho < getPlayerCount() && get_cur_playernum() != sTestWho)
+    {
+        const s32 cur = get_cur_playernum();
+
+        set_cur_player(sTestWho);
+        coopTankTestTick();
+        set_cur_player(cur);
         return;
     }
     if (t == sTestAt)
@@ -376,6 +417,30 @@ static void coopTankTestTick(void)
         g_WorldTankProp = it;   /* as walking into it does */
         portConLogf("ge: coop: testtank: on the tank at %.0f %.0f %.0f\n", to.f[0], to.f[1], to.f[2]);
     }
+    if (t >= sTestAt && t <= sTestAt + 30 + 900 && (t - sTestAt) % 60 == 0)
+    {   /* once a second: where every player on this screen and the tank are */
+        const s32 cur = get_cur_playernum();
+        s32 li;
+
+        for (li = 0; li < getPlayerCount(); li++)
+        {
+            struct player *pl = g_playerPointers[li];
+
+            set_cur_player(li);
+            portConLogf("ge: coop: testtank: %u s player %d at %.0f %.0f %.0f facing %.0f, %s\n", (u32) (t / 60), li + 1,
+                        pl->prop->pos.f[0], pl->prop->pos.f[1], pl->prop->pos.f[2], pl->vv_theta,
+                        (g_PlayerIsInTank == 1) ? "in the tank" : "on foot");
+        }
+        set_cur_player(cur);
+        for (it = g_ActivePropsHead; it != NULL; it = it->next)
+        {
+            if (it->type == PROP_TYPE_OBJ && it->obj != NULL && it->obj->type == PROPDEF_TANK)
+            {
+                portConLogf("ge: coop: testtank: %u s tank at %.0f %.0f %.0f heading %.2f\n", (u32) (t / 60),
+                            it->pos.f[0], it->pos.f[1], it->pos.f[2], ((TankRecord *) it->obj)->tank_orientation_angle);
+            }
+        }
+    }
     if (sTestSpin && g_PlayerIsInTank == 1 && t > sTestAt + 30 && t < sTestAt + 30 + 600)
     {
         g_TankOrientationAngle += 0.01f;
@@ -386,18 +451,91 @@ static void coopTankTestTick(void)
     }
 }
 
+/* one player on our screen (the current one): in a tank, say so */
+static void coopTankSendOurs(s32 li)
+{
+    if (g_PlayerIsInTank == 1 && g_PlayerTankProp != NULL && g_PlayerTankProp->type == PROP_TYPE_OBJ)
+    {
+        if (sMyOfs[li] < 0)
+        {
+            portConLogf("ge: coop: we are driving tank %d (player %d)\n", coopExtSetupOfs(g_PlayerTankProp->obj), coopExtSelf() + 1);
+        }
+        sMyOfs[li] = coopExtSetupOfs(g_PlayerTankProp->obj);
+        sParkedOfs = sMyOfs[li];
+        sOutFor[li] = 0;
+        if ((sNow & 1) == 0)
+        {
+            coopTankSend(g_PlayerTankProp->obj, 1);
+        }
+    }
+    else if (sMyOfs[li] >= 0)
+    {   /* out: a few to say so, unreliable as they are */
+        if (sOutFor[li]++ % 10 == 0)
+        {
+            coopTankSend((ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + sMyOfs[li]), 0);
+        }
+        if (sOutFor[li] > 60)
+        {
+            sMyOfs[li] = -1;
+        }
+    }
+}
+
+/* split screen: the players on our screen who drive count as partners driving
+ * (coopTankDriving: their body hidden, coopTankTaken, coopTankPropOf) */
+static void coopTankLocals(void)
+{
+    const s32 cur = get_cur_playernum();
+    s32 li;
+
+    for (li = 0; li < getPlayerCount() && li < COOP_MAX_LOCAL; li++)
+    {
+        PropRecord *tank = splitTankOf(li);
+        s32 pl;
+
+        set_cur_player(li);
+        pl = coopExtSelf();
+        set_cur_player(cur);
+        if (pl < 0 || pl >= COOP_MAX_PLAYERS)
+        {
+            continue;
+        }
+        if (tank != NULL && tank->type == PROP_TYPE_OBJ)
+        {
+            if (sOfs[pl] < 0)
+            {
+                portConLogf("ge: coop: player %d is driving tank %d (on this screen)\n", pl + 1, coopExtSetupOfs(tank->obj));
+            }
+            sOfs[pl] = coopExtSetupOfs(tank->obj);
+            sSeen[pl] = sNow;
+            sParkedOfs = sOfs[pl];
+        }
+        else if (sOfs[pl] >= 0)
+        {
+            portConLogf("ge: coop: player %d is out of tank %d (on this screen)\n", pl + 1, sOfs[pl]);
+            sOfs[pl] = -1;
+        }
+    }
+}
+
 void coopTankTick(s32 inmission)
 {
+    s32 li;
+
     sNow++;
     if (!inmission || coopExtMissionTicks() <= 1)
     {
         memset(sOfs, 0xFF, sizeof(sOfs));
-        sMyOfs = -1;
-        sOutFor = 0;
+        memset(sMyOfs, 0xFF, sizeof(sMyOfs));
+        memset(sOutFor, 0, sizeof(sOutFor));
         sParkedOfs = -1;
         return;
     }
     coopTankTestTick();
+    if (splitStoryActive())
+    {
+        coopTankLocals();
+    }
     if (!coopLobbyHasPartner())
     {
         return;
@@ -415,32 +553,30 @@ void coopTankTick(s32 inmission)
             }
         }
     }
-    if (g_PlayerIsInTank == 1 && g_PlayerTankProp != NULL && g_PlayerTankProp->type == PROP_TYPE_OBJ)
     {
-        if (sMyOfs < 0)
+        const s32 cur = get_cur_playernum();
+        const s32 n = splitStoryActive() ? getPlayerCount() : 1;
+        s32 anyone = 0;
+
+        for (li = 0; li < n && li < COOP_MAX_LOCAL; li++)
         {
-            portConLogf("ge: coop: we are driving tank %d\n", coopExtSetupOfs(g_PlayerTankProp->obj));
+            if (n > 1)
+            {
+                set_cur_player(li);
+            }
+            coopTankSendOurs(li);
+            anyone |= (sMyOfs[li] >= 0);
         }
-        sMyOfs = coopExtSetupOfs(g_PlayerTankProp->obj);
-        sParkedOfs = sMyOfs;
-        sOutFor = 0;
-        if ((sNow & 1) == 0)
+        if (n > 1)
         {
-            coopTankSend(g_PlayerTankProp->obj, 1);
+            set_cur_player(cur);
+        }
+        if (anyone)
+        {
+            return;
         }
     }
-    else if (sMyOfs >= 0)
-    {   /* out: a few to say so, unreliable as they are */
-        if (sOutFor++ % 10 == 0)
-        {
-            coopTankSend((ObjectRecord *) ((u8 *) g_CurrentSetup.propDefs + sMyOfs), 0);
-        }
-        if (sOutFor > 60)
-        {
-            sMyOfs = -1;
-        }
-    }
-    else if (coopExtIsHost() && sParkedOfs >= 0 && sNow % 60 == 0 && g_CurrentSetup.propDefs != NULL)
+    if (coopExtIsHost() && sParkedOfs >= 0 && sNow % 60 == 0 && g_CurrentSetup.propDefs != NULL)
     {   /* a tank left where nobody drives it: the vehicles' replication leaves
          * tanks out, and a player who dropped in or came back since had it
          * where the level put it. Once a second, where it stands. */

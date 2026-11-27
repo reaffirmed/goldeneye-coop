@@ -102,6 +102,8 @@ s32 getPlayerCount(void);
  * "is this a multiplayer match" is isMpMatch(), not getPlayerCount() >= 2. */
 extern s32 g_SplitStory;        /* local players for the next story mission, 0 or 1 for none (front end) */
 s32 splitStoryActive(void);
+struct PropRecord *splitTankOf(s32 p);                    /* split story: the tank local player p drives, NULL none (bondview2.c) */
+s32 splitTankTakenByOther(struct PropRecord *prop);       /* split story: another local player drives this tank */
 s32 splitWatchPlayer(void);     /* the split-screen player whose watch menu fills the screen, -1 none */     /* this stage is a story mission with more than one local player */
 #define isMpMatch() (getPlayerCount() >= 2 && !splitStoryActive())
 #else

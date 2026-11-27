@@ -107,6 +107,14 @@ jobs:
             -DNONMATCHING -DAVOID_UB -D_LANGUAGE_C -o weapmenu_split_test coop/ci/weapmenu_split_test.c
           ./weapmenu_split_test
 
+      - name: Split-screen tank, one per player (no cart needed)
+        # split_tank.c with two players on one screen: one player climbing into
+        # the tank never puts the other in it (coop/ci/split_tank_test.c)
+        run: |
+          gcc -m32 -O1 -w -fms-extensions -I. -Iinclude -Iinclude/PR -Iinclude/ultra64 -Iport/include -Isrc -Isrc/game \
+            -DNONMATCHING -DAVOID_UB -D_LANGUAGE_C -o split_tank_test coop/ci/split_tank_test.c
+          ./split_tank_test
+
       - name: Updater pieces (no cart needed)
         # port_update_util.c: SHA-256, the release JSON, versions, the paths an
         # update may never write, and inflate against zips of every kind
@@ -245,6 +253,10 @@ jobs:
           gcc -m32 -O1 -w -fms-extensions $SAN -I. -Iinclude -Iinclude/PR -Iinclude/ultra64 -Iport/include -Isrc -Isrc/game \
             -DNONMATCHING -DAVOID_UB -D_LANGUAGE_C -o weapmenu_split_test coop/ci/weapmenu_split_test.c
           ./weapmenu_split_test
+          # shellcheck disable=SC2086
+          gcc -m32 -O1 -w -fms-extensions $SAN -I. -Iinclude -Iinclude/PR -Iinclude/ultra64 -Iport/include -Isrc -Isrc/game \
+            -DNONMATCHING -DAVOID_UB -D_LANGUAGE_C -o split_tank_test coop/ci/split_tank_test.c
+          ./split_tank_test
           # shellcheck disable=SC2086
           gcc -O1 -Wall $SAN -Iport/include -o update_test coop/ci/update_test.c port/src/port_update_util.c
           mkdir -p ziptest/src/sub && head -c 300000 /dev/urandom > ziptest/src/rand.bin

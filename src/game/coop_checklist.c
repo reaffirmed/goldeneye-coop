@@ -16,6 +16,12 @@
  *       x<tag>   use the gadget in hand on that object (what gunfire.c does when it is aimed at)
  *       l<deg>   look <deg> degrees down (negative up)
  *       e        press Use on the door nearest us (keys and locks apply as in play)
+ *       P<n>     split screen: the steps after this one act as local player <n> (0 = player 1)
+ *       y        log every key object: where it is, the floor under it, who holds it
+ *       K        stand where the nearest key lying loose in the level is (picks it up as in play)
+ *       T<cm>    stand <cm> to the side of the tank (0: on it, as GE_COOP_TESTTANK does)
+ *       D        log every door: number, model, whether guards see through it, where, how open
+ *       Z<n>     stand 1.5 m from door n / 2 (the doors in prop order), on side n % 2, facing it
  *       j<chr>:<list>  host: that chr runs ai list <list> (hex) from its start, e.g.
  *                Bunker 2's Natalya following Bond (j<her chr>:40d); a chr
  *                number of 1024 and up (decimal) is the chr running that list now
@@ -63,8 +69,9 @@ TICKOP propdoorInteract(PropRecord *doorprop);
 extern void portConLogf(const char *fmt, ...);
 void bondviewCallRecordDamageKills(f32 damage, f32 arg1, s32 arg2, s32 arg3);
 void coopLookTestPress(s32 presses);
+bool bondinvCheckHasKeyFlags(u32 wantkeyflags);
 
-#define CL_MAXSTEPS 24
+#define CL_MAXSTEPS 80
 #define CL_MAXWATCH 8
 
 typedef struct
@@ -97,6 +104,7 @@ static s32    sSnapSettleLeft;
 static s32    sLastAlarm = -1, sLastClockRun = -1;
 static s32    sLastFlags;
 static u32    sLastTicks, sLastSec, sDoneAt;
+static s32    sActor;        /* step P: the local player the steps act as */
 static s32    sLinger = 20;  /* GE_COOP_STEPSLINGER=<s>: seconds to watch after the last step */
 
 static void clInit(void)
@@ -262,6 +270,32 @@ static void clNear(ChrRecord *c, s32 weapon)
     }
 }
 
+/* step y: a key object and any keys inside it (a guard's pocket) */
+static void clLogKeys(PropRecord *it)
+{
+    PropRecord *child;
+
+    if (it->type == PROP_TYPE_OBJ && it->obj != NULL && it->obj->type == PROPDEF_KEY)
+    {
+        StandTile *stan = stanFindTileBelowPos(&it->pos, NULL, NULL);
+        PropRecord *root = it;
+
+        while (root->parent != NULL)
+        {
+            root = root->parent;
+        }
+        portConLogf("ge: coop: key: model %d pos %.0f %.0f %.0f floor %s%.0f room %d held by %s%d\n", it->obj->obj,
+                    it->pos.f[0], it->pos.f[1], it->pos.f[2], stan != NULL ? "" : "none ",
+                    stan != NULL ? stanGetPositionYValue(stan, it->pos.f[0], it->pos.f[2]) : 0.0f, clRoom(it),
+                    (root == it) ? "nobody " : (root->type == PROP_TYPE_CHR) ? "chr " : "prop ",
+                    (root != it && root->type == PROP_TYPE_CHR) ? root->chr->chrnum : -1);
+    }
+    for (child = it->child; child != NULL; child = child->prev)
+    {
+        clLogKeys(child);
+    }
+}
+
 static void clStep(ClStep *s)
 {
     s32 weapon = getCurrentPlayerWeaponId(GUNRIGHT);
@@ -395,6 +429,163 @@ static void clStep(ClStep *s)
         case 'a':
             alarmActivate();
             break;
+        case 'P':
+            break;
+        case 'D':
+        {
+            PropRecord *it;
+
+            for (it = g_ActivePropsHead; it != NULL; it = it->next)
+            {
+                if (it->type == PROP_TYPE_DOOR && it->door != NULL)
+                {
+                    portConLogf("ge: coop: door %d model %d flags %08x %s pos %.0f %.0f %.0f room %d open %.2f\n",
+                                (s32) ((u8 *) it->door - (u8 *) g_CurrentSetup.propDefs), it->obj->obj, it->obj->flags,
+                                (it->obj->flags & PROPFLAG_04000000) ? "guards-see-through" : "solid",
+                                it->pos.f[0], it->pos.f[1], it->pos.f[2], clRoom(it), it->door->openPosition);
+                }
+            }
+            break;
+        }
+        case 'Z':
+        {
+            PropRecord *it;
+            s32 k = 0;
+
+            for (it = g_ActivePropsHead; it != NULL; it = it->next)
+            {
+                if (it->type == PROP_TYPE_DOOR && it->door != NULL && k++ == s->arg / 2)
+                {
+                    struct rect4f *poly;
+                    s32 edges, e, best = 0;
+                    f32 top, bot, bestlen = -1.0f;
+
+                    chraiGetCollisionBounds(it, &poly, &edges, &top, &bot);
+                    for (e = 0; e < edges; e++)
+                    {   /* the panel's long side is along the door */
+                        f32 dx = poly->points[(e + 1) % edges].f[0] - poly->points[e].f[0];
+                        f32 dz = poly->points[(e + 1) % edges].f[1] - poly->points[e].f[1];
+
+                        if (dx * dx + dz * dz > bestlen)
+                        {
+                            bestlen = dx * dx + dz * dz;
+                            best = e;
+                        }
+                    }
+                    if (edges >= 2)
+                    {
+                        f32 dx = poly->points[(best + 1) % edges].f[0] - poly->points[best].f[0];
+                        f32 dz = poly->points[(best + 1) % edges].f[1] - poly->points[best].f[1];
+                        f32 len = sqrtf(dx * dx + dz * dz);
+                        f32 side = (s->arg & 1) ? -150.0f : 150.0f;
+                        coord3d to = it->pos;
+                        StandTile *stan;
+
+                        to.f[0] += -dz / len * side;
+                        to.f[2] += dx / len * side;
+                        to.f[1] += 50.0f;
+                        stan = stanFindTileBelowPos(&to, NULL, NULL);
+                        if (stan != NULL)
+                        {
+                            coopRespawnPlayerAt(&to, stan, 0.0f, weapon);
+                            g_CurrentPlayer->vv_theta = atan2f(-(it->pos.f[0] - to.f[0]), it->pos.f[2] - to.f[2]) * 57.29578f;
+                            if (g_CurrentPlayer->vv_theta < 0.0f)
+                            {
+                                g_CurrentPlayer->vv_theta += 360.0f;
+                            }
+                            portConLogf("ge: coop: step Z: door %d side %d, room %d\n", (s32) ((u8 *) it->door - (u8 *) g_CurrentSetup.propDefs), s->arg & 1, (s32) stan->room);
+                        }
+                        else
+                        {
+                            portConLogf("ge: coop: step Z: door %d side %d: no floor\n", (s32) ((u8 *) it->door - (u8 *) g_CurrentSetup.propDefs), s->arg & 1);
+                        }
+                    }
+                    break;
+                }
+            }
+            break;
+        }
+        case 'T':
+        {
+            PropRecord *it;
+
+            for (it = g_ActivePropsHead; it != NULL; it = it->next)
+            {
+                if (it->type == PROP_TYPE_OBJ && it->obj != NULL && it->obj->type == PROPDEF_TANK)
+                {
+                    coord3d to = it->pos;
+                    StandTile *stan;
+
+                    to.f[0] += (f32) s->arg;
+                    to.f[1] += 100.0f;
+                    stan = stanFindTileBelowPos(&to, NULL, NULL);
+                    if (stan == NULL)
+                    {
+                        stan = it->stan;
+                        to = it->pos;
+                    }
+                    coopRespawnPlayerAt(&to, stan, 0.0f, weapon);
+                    break;
+                }
+            }
+            if (it == NULL)
+            {
+                portConLogf("ge: coop: step T: no tank\n");
+            }
+            break;
+        }
+        case 'K':
+        {
+            PropRecord *me = getCurrentPlayerProp();
+            PropRecord *it, *best = NULL;
+            f32 bestd = 1.0e30f;
+
+            for (it = g_ActivePropsHead; me != NULL && it != NULL; it = it->next)
+            {
+                if (it->type == PROP_TYPE_OBJ && it->obj != NULL && it->obj->type == PROPDEF_KEY && it->parent == NULL)
+                {
+                    f32 dx = it->pos.f[0] - me->pos.f[0], dz = it->pos.f[2] - me->pos.f[2];
+
+                    if (dx * dx + dz * dz < bestd)
+                    {
+                        bestd = dx * dx + dz * dz;
+                        best = it;
+                    }
+                }
+            }
+            if (best == NULL)
+            {
+                portConLogf("ge: coop: step K: no loose key\n");
+                break;
+            }
+            clGoTo(&best->pos, best->stan, weapon);
+            break;
+        }
+        case 'y':
+        {
+            PropRecord *it;
+
+            const s32 cur = get_cur_playernum();
+            s32 pl, bit;
+
+            for (it = g_ActivePropsHead; it != NULL; it = it->next)
+            {
+                clLogKeys(it);
+            }
+            for (pl = 0; pl < getPlayerCount(); pl++)
+            {   /* which door key flags each player on this screen holds */
+                u32 has = 0;
+
+                set_cur_player(pl);
+                for (bit = 0; bit < 8; bit++)
+                {
+                    has |= bondinvCheckHasKeyFlags(1u << bit) ? (1u << bit) : 0;
+                }
+                portConLogf("ge: coop: key: player %d holds key flags %x\n", pl + 1, has);
+            }
+            set_cur_player(cur);
+            break;
+        }
         case 'v':
         {
             coord3d to;
@@ -747,7 +938,18 @@ void coopChecklistTick(void)
     }
     while (sNextStep < sNumSteps && t >= (u32) sSteps[sNextStep].at)
     {
+        const s32 cur = get_cur_playernum();
+
+        if (sSteps[sNextStep].kind == 'P')
+        {
+            sActor = sSteps[sNextStep].arg;
+        }
+        if (sActor > 0 && sActor < getPlayerCount())
+        {
+            set_cur_player(sActor);
+        }
         clStep(&sSteps[sNextStep++]);
+        set_cur_player(cur);
         if (sNextStep == sNumSteps)
         {
             sDoneAt = t + 60 * sLinger;
